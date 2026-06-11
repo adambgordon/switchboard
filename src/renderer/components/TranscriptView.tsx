@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react'
 import type { Transcript } from '@shared/types'
 import MessageBlock from './MessageBlock'
 import { buildGroups, type MessageGroup } from '../lib/messageGroups'
@@ -13,6 +13,16 @@ const isHumanGroup = (g: MessageGroup): boolean => g.label === 'You'
 interface TranscriptViewProps {
   transcript: Transcript | null
   loading: boolean
+  /** A focus key: a bump counter that changes when the main pane should take the keyboard for the
+   *  selected conversation (the Formatted-view twin of TerminalView's focusKey). MainPane derives it
+   *  from selectedId — known instantly, before the transcript loads — so the focus lands immediately
+   *  on click rather than after the async read. null when nothing is pending. */
+  focusKey?: number | null
+  /** Dedup store for `focusKey`, owned by MainPane so it survives THIS component unmounting/remounting
+   *  (which happens when you navigate across a live conversation shown in its terminal). If the dedup
+   *  lived here, a remount would reset it and a stale focusKey would re-grab focus on return — e.g.
+   *  arrow away from a selected unlive conversation and back would yank focus into the pane. */
+  lastFocusedKeyRef?: MutableRefObject<number | null>
   /** Find-in-conversation query (already deferred). Empty/whitespace clears the search. */
   searchQuery?: string
   /** Index of the active match, driven by the find bar's next/prev. */
@@ -41,6 +51,8 @@ function LoadingState(): ReactNode {
 export default function TranscriptView({
   transcript,
   loading,
+  focusKey = null,
+  lastFocusedKeyRef,
   searchQuery = '',
   searchActiveIndex = 0,
   onSearchCount = NOOP
@@ -100,6 +112,23 @@ export default function TranscriptView({
       el.scrollTop = el.scrollHeight
     }
   }, [transcript])
+
+  // Focus the scroll container when the main pane should take the keyboard for this conversation —
+  // the Formatted-view counterpart to TerminalView grabbing focus on its focusKey. Clicking a
+  // not-live row routes here (App.clickConversation → requestFocus → MainPane derives focusKey), so
+  // the main pane takes focus and the rail selection quiets, exactly as clicking a live row focuses
+  // its terminal. Runs in a LAYOUT effect (before paint) and fires even while the transcript is
+  // still loading — so the row never paints its loud/lifted selected state mid-load and then snaps
+  // quiet; it lands quiet from the first frame. Dedup on the key so re-renders / arrow-nav back to an
+  // already-focused conversation don't re-grab; preventScroll so it never fights the pin-to-latest.
+  // Dedup against MainPane's ref when provided (survives remounts); fall back to a local ref.
+  const localLastFocused = useRef<number | null>(null)
+  const lastFocused = lastFocusedKeyRef ?? localLastFocused
+  useLayoutEffect(() => {
+    if (focusKey == null || focusKey === lastFocused.current) return
+    lastFocused.current = focusKey
+    scrollElRef.current?.focus({ preventScroll: true })
+  }, [focusKey])
 
   // Coalesce consecutive same-source messages into groups (one header per run). Memoized on the
   // transcript so search-driven re-renders reuse the same group objects and MessageBlock's memo holds.

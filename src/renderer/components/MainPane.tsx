@@ -126,6 +126,16 @@ export default function MainPane(props: Props) {
   const showTerminal = !!selectedId && view === 'terminal' && !!pty
   const showTranscript = !!selectedId && !showTerminal
   const visiblePtyId = showTerminal && pty ? pty.ptyId : null
+  // Formatted-view focus key: bumps when a focus is requested for the selected conversation (a
+  // not-live row click), so TranscriptView takes the keyboard like the terminal does on a live
+  // click. Derived from selectedId — known instantly — so focus lands during the async transcript
+  // load, not after (which would leave the row in its loud/lifted state mid-load, then snap quiet).
+  const transcriptFocusKey = focusReq && focusReq.sessionId === selectedId ? focusReq.n : null
+  // Dedup store for the transcript focus, kept HERE so it survives TranscriptView unmounting/remounting
+  // (navigating across a live conversation shown in its terminal unmounts it). Otherwise a remount
+  // resets the dedup and a stale focusReq re-grabs focus on return — arrow away from a selected unlive
+  // conversation and back would yank focus into the pane instead of staying on the sidebar.
+  const transcriptFocusKeyRef = useRef<number | null>(null)
 
   // --- find in conversation (the main-pane search; distinct from the rail's cross-conversation
   // search). Query state is local so keystrokes re-render only the pane, not App / the rail. ---
@@ -184,7 +194,7 @@ export default function MainPane(props: Props) {
   }, [onEngage])
 
   return (
-    <main className="sb-pane" ref={paneRef}>
+    <main className="sb-pane" ref={paneRef} tabIndex={-1}>
       {selectedId && (
         <PaneHeader
           title={title}
@@ -220,6 +230,8 @@ export default function MainPane(props: Props) {
               <TranscriptView
                 transcript={transcript}
                 loading={transcriptLoading}
+                focusKey={transcriptFocusKey}
+                lastFocusedKeyRef={transcriptFocusKeyRef}
                 searchQuery={deferredQuery}
                 searchActiveIndex={activeIndex}
                 onSearchCount={setMatchCount}

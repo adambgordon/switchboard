@@ -8,6 +8,13 @@
   background: var(--paper-pane);
   position: relative;
 }
+/* The pane is programmatically focusable (tabIndex -1) so a conversation click can hand it the
+   keyboard immediately — quiet selection + ⌘F routing — before the transcript mounts/loads. No
+   ring: the global cobalt :focus-visible is reserved for liveness (cf. the rail / transcript-scroll). */
+.sb-pane:focus,
+.sb-pane:focus-visible {
+  outline: none;
+}
 
 .sb-pane-header {
   display: flex;

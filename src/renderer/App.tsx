@@ -131,6 +131,11 @@ export default function App() {
   // in the main pane, Esc closes it; the query + match state live in MainPane. `paneRef` lets the
   // ⌘F handler tell whether focus is physically inside the main pane vs the rail/list.
   const paneRef = useRef<HTMLElement>(null)
+  // Snapshot — taken on mousedown, BEFORE the browser moves focus — of whether focus was inside the
+  // main pane. Row clicks read it to toggle focus on the already-open conversation: if focus was in
+  // the pane the click releases to the list (the mousedown already did so); if it was on the list the
+  // click pulls focus back into the pane. So repeated clicks on the same row flip focus back and forth.
+  const focusInPaneAtDownRef = useRef(false)
   const [findOpen, setFindOpen] = useState(false)
   // Bumped on every ⌘F while focus is in the main pane, so pressing ⌘F again (after clicking into
   // the transcript) re-focuses the find input even when the bar is already open. Threaded down to
@@ -143,6 +148,17 @@ export default function App() {
   // Begin buffering PTY output immediately, before any session is spawned.
   useEffect(() => {
     initPtyStream()
+  }, [])
+
+  // Capture, on every mousedown's *capture* phase (before the click moves focus), whether focus was
+  // inside the main pane — read by the row-click handlers to toggle pane/list focus on a repeat click
+  // of the already-open conversation. Capture-phase + window so it beats xterm's own mousedown handling.
+  useEffect(() => {
+    const onDown = (): void => {
+      focusInPaneAtDownRef.current = !!paneRef.current && paneRef.current.contains(document.activeElement)
+    }
+    window.addEventListener('mousedown', onDown, true)
+    return () => window.removeEventListener('mousedown', onDown, true)
   }, [])
 
   // Keep the main-process LRU cap in lockstep with the persisted preference — on mount and on each
@@ -382,15 +398,39 @@ export default function App() {
     setSessionView(target, 'terminal')
     requestFocus(target)
   }, [selectedId, open, setSessionView, requestFocus])
-  // A live-row CLICK (not ⏎/→): clicking a *different* live row jumps in + focuses its terminal;
-  // clicking the row you're already on ALWAYS releases the keyboard to the list (the click's own
-  // blur moves focus off the terminal, and we never re-grab), so ↑/↓ resume. Re-enter the terminal
-  // with ⏎ / → / a click inside it.
+  // A live-row CLICK (not ⏎/→): a *different* live row jumps in + focuses its terminal. The row
+  // you're already on TOGGLES: enter the terminal only if focus was on the list at mousedown; if it
+  // was already in the pane, do nothing and let the click's own blur release focus to the list. So
+  // repeated clicks on the same row flip focus list↔terminal. (⏎ / → still always enter.)
   const clickLive = useCallback(
     (id: string) => {
-      if (id !== selectedId) enterLive(id)
+      if (id !== selectedId || !focusInPaneAtDownRef.current) enterLive(id)
     },
     [selectedId, enterLive]
+  )
+  // A not-live row CLICK: hand the keyboard to the Formatted view, parallel to clickLive focusing a
+  // live row's terminal. A *different* row → open it + focus the pane. The row you're already on
+  // TOGGLES: pull focus back into the pane only if it was on the list at mousedown; if it was already
+  // in the pane, do nothing and let the click's blur release to the list. Repeated clicks flip focus.
+  const clickConversation = useCallback(
+    (id: string) => {
+      // Focus the pane synchronously so the row lands in its quiet (pane-focused) selected state from
+      // the first frame, independent of when the transcript mounts/loads (TranscriptView refines focus
+      // onto its scroll container once mounted). Without this, the first not-live click after a live
+      // one — where TranscriptView was unmounted — leaves a frame on the loading / no-history state
+      // with focus still on the rail, so the row briefly paints loud.
+      const focusFormatted = (): void => {
+        requestFocus(id)
+        paneRef.current?.focus({ preventScroll: true })
+      }
+      if (id !== selectedId) {
+        open(id)
+        focusFormatted()
+      } else if (!focusInPaneAtDownRef.current) {
+        focusFormatted()
+      }
+    },
+    [selectedId, open, requestFocus]
   )
   const showHistory = useCallback(() => {
     if (selectedId) setSessionView(selectedId, 'transcript')
@@ -639,7 +679,7 @@ export default function App() {
             loading={loading}
             selectedSessionId={selectedId}
             onJump={clickLive}
-            onSelect={open}
+            onSelect={clickConversation}
             onTogglePin={togglePin}
             query={query}
             onQueryChange={setQuery}
