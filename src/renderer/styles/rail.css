@@ -193,9 +193,7 @@
 .sb-rail-body .sb-row.card:hover {
   background: var(--paper-raised);
   border-color: var(--ink-ghost);
-  box-shadow:
-    0 4px 13px -9px rgba(var(--shadow-color), 0.3),
-    0 1px 8px -2px rgba(var(--shadow-color), 0.26);
+  box-shadow: var(--shadow-sel-hover);
 }
 /* Lift the selected row above its siblings so its drop shadow paints ON TOP of adjacent rows —
    otherwise a neighbouring live card (opaque --paper-raised background, later in DOM) occludes the
@@ -215,15 +213,13 @@
   border-color: var(--ink-ghost);
   box-shadow:
     0 0 0 1px var(--ink-ghost),
-    0 6px 18px -11px rgba(var(--shadow-color), 0.58),
-    0 1px 10px -3px rgba(var(--shadow-color), 0.52);
+    var(--shadow-sel);
 }
 .sb-rail-body .sb-row.card.live.selected {
   border-color: var(--live);
   box-shadow:
     0 0 0 1px var(--live),
-    0 6px 18px -11px rgba(var(--shadow-color), 0.58),
-    0 1px 10px -3px rgba(var(--shadow-color), 0.52);
+    var(--shadow-sel);
 }
 /* Recent rows are flat (variant 'row', no card chrome), so mirror the loud pinned-card selection:
    stacked 1px --ink-ghost + 1px --rule-strong rings (no real border = no layout shift) + the pane lift.
@@ -231,8 +227,7 @@
 .sb-rail-body .sb-row.selected:not(.card) {
   box-shadow:
     0 0 0 1px var(--ink-ghost),
-    0 6px 18px -11px rgba(var(--shadow-color), 0.58),
-    0 1px 10px -3px rgba(var(--shadow-color), 0.52);
+    var(--shadow-sel);
 }
 /* Focus-tiered selection — when the MAIN PANE (terminal / Formatted) holds the keyboard, the rail's
    selected row QUIETS: it keeps its colour (cobalt = live, ink = the rest) but drops to a single 1px
