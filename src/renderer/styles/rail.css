@@ -123,6 +123,11 @@
 .sb-rail-body {
   flex: 1;
   overflow-y: auto;
+  /* overflow-y:auto also clips overflow-x, so a selected row's shadow is clipped at the scrollport
+     edge. Rather than widen the padding (which narrows the rows), the loud shadows below are kept
+     SMALL — ~6px horizontal reach (negative spread) — so they fade well short of the edge / scrollbar
+     gutter and never hard-cut; their *strength* comes from opacity, not size. The scrollbar thumb is a
+     pseudo-element painted above content, so it always sits on top of whatever shadow does reach it. */
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -188,33 +193,64 @@
 .sb-rail-body .sb-row.card:hover {
   background: var(--paper-raised);
   border-color: var(--ink-ghost);
-  box-shadow: var(--shadow-pane);
+  box-shadow:
+    0 4px 13px -9px rgba(var(--shadow-color), 0.3),
+    0 1px 8px -2px rgba(var(--shadow-color), 0.26);
 }
-/* selection: neutral ink by default; cobalt only when the row is alive */
+/* Lift the selected row above its siblings so its drop shadow paints ON TOP of adjacent rows —
+   otherwise a neighbouring live card (opaque --paper-raised background, later in DOM) occludes the
+   shadow where they overlap. Rows are already position:relative (sidebar.css), so z-index alone does
+   it. Hover gets the same lift so a hovered card's shadow isn't occluded by the next card either. */
+.sb-rail-body .sb-row.selected,
+.sb-rail-body .sb-row.card:hover {
+  z-index: 1;
+}
+/* selection — BASE / LOUD look, shown when the LEFT PANE (the list) holds focus (⌘G / a row click /
+   arrow-nav), or nothing does yet: the selected row stands out in its colour (cobalt = live, ink = the
+   rest; cobalt stays liveness-only) as a ring + glow (live) / lift (others). This is the active-list
+   treatment — the keyboard is on the list, so its selection reads loud. When focus moves into the main
+   pane the row quiets (block just below). These match the app's original selection look. */
 .sb-rail-body .sb-row.card.selected {
   background: var(--paper-raised);
   border-color: var(--ink-ghost);
   box-shadow:
-    0 0 0 1px var(--rule-strong),
-    var(--shadow-pane);
+    0 0 0 1px var(--ink-ghost),
+    0 6px 18px -11px rgba(var(--shadow-color), 0.58),
+    0 1px 10px -3px rgba(var(--shadow-color), 0.52);
 }
 .sb-rail-body .sb-row.card.live.selected {
   border-color: var(--live);
   box-shadow:
     0 0 0 1px var(--live),
-    0 2px 12px var(--live-glow);
+    0 6px 18px -11px rgba(var(--shadow-color), 0.58),
+    0 1px 10px -3px rgba(var(--shadow-color), 0.52);
 }
-/* Recent rows are flat (variant 'row', no card chrome), so a selected one would
-   otherwise show only a faint fill. Mirror the selected pinned-non-live card above
-   exactly: that card shows two stacked hairlines — its own 1px --ink-ghost border
-   plus a 1px --rule-strong shadow ring just outside it — so we reproduce both as
-   stacked box-shadow rings (no real border = no layout shift), then the same pane
-   lift. The inner ring is listed first so it paints over the outer ring's inner px. */
+/* Recent rows are flat (variant 'row', no card chrome), so mirror the loud pinned-card selection:
+   stacked 1px --ink-ghost + 1px --rule-strong rings (no real border = no layout shift) + the pane lift.
+   The inner ring is listed first so it paints over the outer ring's inner px. */
 .sb-rail-body .sb-row.selected:not(.card) {
   box-shadow:
     0 0 0 1px var(--ink-ghost),
-    0 0 0 2px var(--rule-strong),
-    var(--shadow-pane);
+    0 6px 18px -11px rgba(var(--shadow-color), 0.58),
+    0 1px 10px -3px rgba(var(--shadow-color), 0.52);
+}
+/* Focus-tiered selection — when the MAIN PANE (terminal / Formatted) holds the keyboard, the rail's
+   selected row QUIETS: it keeps its colour (cobalt = live, ink = the rest) but drops to a single 1px
+   ring — no glow, no lift — so while you work in the pane the list selection recedes; the loud look
+   above returns the moment focus is back on the list (⌘G / click a row). The macOS list-pane
+   convention: the pane that owns the keyboard shows the strong selection, the other recedes. Gated
+   POSITIVELY on :has(.sb-pane:focus-within) on the shared .sb-body parent — pure CSS, no React state /
+   re-render. (Positive :has(), NOT :not(:has()): the nested-negation form proved unreliable — when it
+   dropped, the loud look applied in both states.) border-color is unchanged across tiers (only
+   box-shadow shrinks), so the flip snaps instantly with no go-live-ease tail. */
+.sb-body:has(.sb-pane:focus-within) .sb-rail-body .sb-row.card.selected {
+  box-shadow: 0 0 0 1px var(--rule-strong);
+}
+.sb-body:has(.sb-pane:focus-within) .sb-rail-body .sb-row.card.live.selected {
+  box-shadow: 0 0 0 1px var(--live);
+}
+.sb-body:has(.sb-pane:focus-within) .sb-rail-body .sb-row.selected:not(.card) {
+  box-shadow: 0 0 0 1px var(--ink-ghost);
 }
 
 .sb-rail-foot {
