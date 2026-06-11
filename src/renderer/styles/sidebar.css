@@ -1,0 +1,164 @@
+/* Shared primitive: the conversation row (used by the pane). */
+
+/* ---- rows ---- */
+.sb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  position: relative;
+  transition: background var(--dur-fast);
+}
+.sb-row:hover {
+  background: var(--paper-hover);
+}
+.sb-row.selected {
+  background: var(--paper-raised);
+  box-shadow: 0 1px 2px rgba(var(--shadow-color), 0.05);
+}
+/* Rows are clicked, not tabbed (tabIndex -1), and selection is shown by .selected
+   above — so suppress the global cobalt :focus-visible ring, which otherwise flashes
+   around the focused row when a modifier like Shift is pressed (cobalt is reserved
+   for liveness). Arrow-key nav drives selection via state, not DOM focus, so nothing
+   here relies on the ring. */
+.sb-row:focus-visible {
+  outline: none;
+}
+/* right-hand gutter: the liveness dot at rest, the pin toggle on hover — the two
+   share one slot (the pin overlays the dot, which fades out on hover) */
+.sb-row-gutter {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex-shrink: 0;
+}
+.sb-row .sb-dot {
+  transition: opacity var(--dur-fast);
+}
+/* The dot exists only on live rows. Fade it (revealing the pin beneath) only when the gutter
+   itself is hovered — not the whole row — so a live row's cobalt dot holds steady unless you
+   reach for its pin slot. */
+.sb-row-gutter:hover .sb-dot {
+  opacity: 0;
+}
+.sb-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sb-row-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.35;
+}
+.sb-row-preview {
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  line-height: 1.3;
+}
+/* placeholder shown when a row has no preview yet (a just-spawned session) — lighter and
+   italic so it reads as absent-content, not a real message, while holding the row height */
+.sb-row-preview-empty {
+  color: var(--ink-ghost);
+  font-style: italic;
+}
+.sb-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-2xs);
+  color: var(--ink-ghost);
+  margin-top: 1px;
+}
+.sb-row-cwd {
+  color: var(--ink-faint);
+  background: var(--paper-active);
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  max-width: 130px;
+}
+/* the pin toggle: hidden at rest (even when pinned); revealed on hover — across the whole row
+   when it's not live, but only over the gutter when it IS live (so hovering a live row's body
+   never disturbs its liveness dot). filled glyph = pinned, outline = unpinned. absolutely
+   placed so it overlays the gutter's dot rather than taking its own column. */
+.sb-row-pin {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  color: var(--ink-ghost);
+  border-radius: var(--r-sm);
+  transition:
+    opacity var(--dur-fast),
+    color var(--dur-fast),
+    background var(--dur-fast);
+}
+.sb-row:not(.live):hover .sb-row-pin,
+.sb-row.live .sb-row-gutter:hover .sb-row-pin {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* While a row slides to a new position (useRailFlip sets .sb-flipping for the slide's duration),
+   keep its pin toggle hidden. The pin is hover-revealed, but a compositor transform doesn't re-run
+   :hover, so the row begins the slide under the cursor and the pin would otherwise hang visible the
+   whole glide, fading only on arrival. !important to beat the hover reveals above. */
+.sb-row.sb-flipping .sb-row-pin {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+/* Same stuck-:hover problem, for the row body: a compositor transform doesn't re-run :hover, so a
+   row that begins its slide under the cursor would carry its hovered look (flat: the darker
+   background; card: the border/shadow lift) the whole glide and only shed it on arrival. Revert
+   both to the resting look while .sb-flipping. Selected rows are skipped — their selected styling
+   already wins over :hover, so nothing is stuck to revert. */
+.sb-row.sb-flipping:not(.selected):not(.card) {
+  background: transparent;
+}
+.sb-rail-body .sb-row.sb-flipping.card:not(.selected) {
+  border-color: var(--rule);
+  box-shadow: none;
+}
+.sb-row-pin:hover {
+  color: var(--ink);
+  background: var(--paper-active);
+}
+/* a pinned row's toggle reads slightly stronger (still hover-only) */
+.sb-row-pin.pinned {
+  color: var(--ink-soft);
+}
+.sb-row-pin.pinned:hover {
+  color: var(--ink);
+}
+
+/* ---- gesture affordances (useRowReorder) ---- */
+/* Drag-to-reorder (pinned rows): the moving card is a `position:fixed` CLONE on <body> (useRowReorder)
+   so it escapes the rail body's overflow clip and floats over the live-sessions head; this `.dragging`
+   look (white + hairline ring + shadow, via box-shadow so no border reflow) styles that clone. The
+   real row is hidden in place as the gap; siblings glide as the gap relocates; commits on drop. */
+.sb-row.dragging {
+  cursor: grabbing;
+  background: var(--paper-raised) !important;
+  box-shadow:
+    0 0 0 1px var(--rule-strong),
+    var(--shadow-pane) !important;
+}
+body.sb-dragging-row {
+  cursor: grabbing;
+  user-select: none;
+}
+/* Siblings glide as the gap relocates. */
+body.sb-dragging-row .sb-rail-body .sb-row:not(.dragging) {
+  transition: transform 0.18s var(--ease);
+}

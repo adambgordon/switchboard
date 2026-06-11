@@ -1,0 +1,4 @@
+# Code owners for switchboard.
+# Every path is owned by @adambgordon, so a required Code Owner review
+# is satisfied only by Adam's approval — no one else's review counts.
+* @adambgordon

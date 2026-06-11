@@ -1,0 +1,257 @@
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ComponentPropsWithoutRef, ReactNode } from 'react'
+import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import type { TranscriptBlock } from '@shared/types'
+import type { MessageGroup } from '../lib/messageGroups'
+import { clockTime, fullDateTime } from '../lib/format'
+
+/* ------------------------------------------------------------------ *
+ * Markdown overrides — every element is styled via a `md-*` class so
+ * the look lives entirely in transcript.css. Links never navigate;
+ * they hand off to the OS browser via window.api.openExternal.
+ * ------------------------------------------------------------------ */
+const markdownComponents: Components = {
+  p: ({ children }) => <p className="md-p">{children}</p>,
+  a: ({ href, children }) => (
+    <a
+      className="md-a"
+      href={href}
+      onClick={(e) => {
+        e.preventDefault()
+        if (href) window.api.openExternal(href)
+      }}
+    >
+      {children}
+    </a>
+  ),
+  // Inline code is a bare <code>; fenced blocks render inside <pre>.
+  // CSS distinguishes the two via `.md-code` vs `pre.md-pre .md-code`.
+  code: ({ children, ...rest }: ComponentPropsWithoutRef<'code'>) => (
+    <code className="md-code" {...rest}>
+      {children}
+    </code>
+  ),
+  pre: ({ children }) => <pre className="md-pre">{children}</pre>,
+  ul: ({ children }) => <ul className="md-ul">{children}</ul>,
+  ol: ({ children }) => <ol className="md-ol">{children}</ol>,
+  li: ({ children }) => <li className="md-li">{children}</li>,
+  h1: ({ children }) => <h1 className="md-h md-h1">{children}</h1>,
+  h2: ({ children }) => <h2 className="md-h md-h2">{children}</h2>,
+  h3: ({ children }) => <h3 className="md-h md-h3">{children}</h3>,
+  h4: ({ children }) => <h4 className="md-h md-h4">{children}</h4>,
+  h5: ({ children }) => <h5 className="md-h md-h5">{children}</h5>,
+  h6: ({ children }) => <h6 className="md-h md-h6">{children}</h6>,
+  blockquote: ({ children }) => <blockquote className="md-quote">{children}</blockquote>,
+  table: ({ children }) => (
+    <div className="md-table-wrap">
+      <table className="md-table">{children}</table>
+    </div>
+  ),
+  th: ({ children, style }) => (
+    <th className="md-th" style={style}>
+      {children}
+    </th>
+  ),
+  td: ({ children, style }) => (
+    <td className="md-td" style={style}>
+      {children}
+    </td>
+  ),
+  hr: () => <hr className="md-hr" />,
+  strong: ({ children }) => <strong className="md-strong">{children}</strong>,
+  em: ({ children }) => <em className="md-em">{children}</em>,
+  img: ({ alt }) => (
+    <span className="block-chip">
+      <span aria-hidden="true">🖼</span>
+      <span>{alt && alt.trim() ? alt : 'image'}</span>
+    </span>
+  )
+}
+
+function AssistantMarkdown({ text }: { text: string }): ReactNode {
+  return (
+    <div className="md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ * Tool use — compact secondary card; input is collapsed pretty JSON.
+ * ------------------------------------------------------------------ */
+function safeStringify(input: unknown): string {
+  try {
+    return JSON.stringify(input, null, 2)
+  } catch {
+    return String(input)
+  }
+}
+
+function ToolUseBlock({ name, input }: { name: string; input: unknown }): ReactNode {
+  const hasInput = input !== undefined && input !== null
+  // No input → a static "⚙ Name" label. With input → the whole "⚙ Name" row IS the disclosure
+  // toggle (a rotating chevron via CSS); clicking it expands the JSON. No separate "Input" row.
+  if (!hasInput) {
+    return (
+      <div className="tool-card">
+        <div className="tool-head mono">
+          <span aria-hidden="true">⚙</span>
+          <span className="tool-name">{name}</span>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <details className="tool-card">
+      <summary className="tool-head tool-toggle mono">
+        <span aria-hidden="true">⚙</span>
+        <span className="tool-name">{name}</span>
+      </summary>
+      <pre className="tool-json">{safeStringify(input)}</pre>
+    </details>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ * Tool result — neutral card; danger red (border + wash) when isError.
+ * The Result/Error attribution lives in the message header now, so the
+ * card carries no internal label.
+ * ------------------------------------------------------------------ */
+function ToolResultBlock({ text, isError }: { text: string; isError: boolean }): ReactNode {
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+  const clipRef = useRef<HTMLDivElement>(null)
+  const textRef = useRef<HTMLPreElement>(null)
+  // Show the toggle only when the clamp actually hides content: scrollHeight (full text) beats the
+  // clip's clamped clientHeight. A single mount-time read raced the layout (clamp height not settled
+  // → looked like "fits" → no button), so re-measure via a ResizeObserver on the text — it fires once
+  // the text lays out, on font load, and on re-wrap. Collapsed only; expanded keeps the flag so
+  // "Show less" stays.
+  useLayoutEffect(() => {
+    if (expanded) return
+    const clip = clipRef.current
+    const txt = textRef.current
+    if (!clip || !txt) return
+    const measure = (): void => setOverflowing(clip.scrollHeight - clip.clientHeight > 1)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(txt)
+    return () => ro.disconnect()
+  }, [text, expanded])
+  // Find-in-conversation reveals a match hidden in the clamped tail by dispatching `sb-reveal` on
+  // the clip — expand so the active highlight becomes visible (see useTranscriptSearch).
+  useEffect(() => {
+    const clip = clipRef.current
+    if (!clip) return
+    const onReveal = (): void => setExpanded(true)
+    clip.addEventListener('sb-reveal', onReveal)
+    return () => clip.removeEventListener('sb-reveal', onReveal)
+  }, [])
+  return (
+    <div className={isError ? 'tool-card result-card is-error' : 'tool-card result-card'}>
+      <div className="tool-result-body">
+        <div ref={clipRef} className={expanded ? 'tool-result-clip' : 'tool-result-clip is-clamped'}>
+          <pre ref={textRef} className="tool-result-text">
+            {text}
+          </pre>
+        </div>
+      </div>
+      {overflowing ? (
+        <button
+          type="button"
+          className="show-more label-caps"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function ImageBlock({ alt }: { alt: string }): ReactNode {
+  return (
+    <span className="block-chip">
+      <span aria-hidden="true">🖼</span>
+      <span>{alt && alt.trim() ? alt : 'image'}</span>
+    </span>
+  )
+}
+
+function renderBlock(block: TranscriptBlock, role: 'user' | 'assistant', key: string): ReactNode {
+  switch (block.kind) {
+    case 'text':
+      if (role === 'assistant') {
+        return <AssistantMarkdown key={key} text={block.text} />
+      }
+      return (
+        <pre key={key} className="user-text">
+          {block.text}
+        </pre>
+      )
+    case 'tool_use':
+      return <ToolUseBlock key={key} name={block.name} input={block.input} />
+    case 'tool_result':
+      return <ToolResultBlock key={key} text={block.text} isError={block.isError} />
+    case 'image':
+      return <ImageBlock key={key} alt={block.alt} />
+    default:
+      return null
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * One coalesced group: a run of consecutive same-source messages shown
+ * under a single header (Claude / You / Result / Error). The interrupt
+ * sentinel renders as a standalone muted divider instead. (The component
+ * keeps the name MessageBlock — it's the unit the transcript maps over.)
+ * ------------------------------------------------------------------ */
+function MessageBlock({
+  group,
+  dividerBefore
+}: {
+  group: MessageGroup
+  dividerBefore: boolean
+}): ReactNode {
+  if (group.interrupted) {
+    return (
+      <div className="message message-interrupt">
+        <span className="interrupt-note label-caps">Interrupted</span>
+      </div>
+    )
+  }
+
+  // A hairline above this group when it crosses the You↔non-You boundary (computed in TranscriptView).
+  const classes = `message${group.isSidechain ? ' is-sidechain' : ''}${
+    dividerBefore ? ' has-divider' : ''
+  }`
+  const ts = group.messages[0]?.timestamp ?? null
+  const time = clockTime(ts)
+
+  return (
+    <article className={classes}>
+      <header className="message-meta">
+        <span className={group.isError ? 'role-label label-caps is-error' : 'role-label label-caps'}>
+          {group.label}
+        </span>
+        {group.isSidechain ? <span className="sidechain-tag label-caps">Sub-agent</span> : null}
+        {time ? (
+          <span className="message-time mono" data-tip={fullDateTime(ts)}>
+            {time}
+          </span>
+        ) : null}
+      </header>
+      <div className="message-body">
+        {group.messages.flatMap((m) =>
+          m.blocks.map((block, bi) => renderBlock(block, m.role, `${m.uuid}:${bi}`))
+        )}
+      </div>
+    </article>
+  )
+}
+
+export default memo(MessageBlock)

@@ -1,0 +1,270 @@
+/* Reset + base + shared primitives for Switchboard. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'ss01', 'cv11';
+  overflow: hidden; /* the shell owns scrolling */
+  cursor: default;
+  user-select: none;
+}
+
+#root {
+  /* faint paper grain — atmosphere without clutter */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+  background-blend-mode: multiply;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  outline: none;
+}
+
+input::placeholder {
+  color: var(--ink-ghost);
+}
+
+::selection {
+  background: var(--live-glow);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* ---- scrollbars: thin, quiet, paper-toned ---- */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-ghost);
+  background-clip: padding-box;
+}
+
+/* ---- shared auto-hiding scrollbar (see attachAutoHide / useAutoHideScrollbar) ----
+   Hidden at rest; revealed while the element scrolls (JS toggles .is-scrolling) and on hover so it
+   can be grabbed, then disappears a beat after scrolling stops. ONE mechanic for the rail, the
+   New-conversation menu, and the transcript. (No opacity fade — Chromium doesn't animate scrollbar
+   pseudo-elements, so a transition would just snap; the show/hide is intentionally instant.) */
+.sb-autoscroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.sb-autoscroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sb-autoscroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--r-pill);
+}
+.sb-autoscroll.is-scrolling::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+}
+.sb-autoscroll::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-ghost);
+}
+
+/* ---- shared text primitives ---- */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+
+.label-caps {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- tooltips: one fixed-positioned label (rendered by TooltipLayer) for all `data-tip` hosts.
+   Replaces native `title` (slow, resets on pointer move). Ink-on-paper — never an accent. The
+   element is positioned in JS (centered on the host, flipped above near the bottom edge); these
+   rules are just its look + which side of the anchor point it grows from. */
+.sb-tip {
+  position: fixed;
+  z-index: 1100;
+  pointer-events: none;
+  max-width: 360px;
+  padding: 4px 8px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  line-height: 1.35;
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-pop);
+  /* Never wrap: TooltipLayer shifts the centered label left to fit near the right edge (e.g. the
+     title-bar gear in the top-right corner) — without this it wrapped per-character into a narrow
+     column before the JS clamp could measure + reposition it. */
+  white-space: nowrap;
+  animation: sb-fade-in var(--dur-fast) var(--ease);
+}
+.sb-tip-bottom {
+  transform: translate(-50%, 0);
+}
+.sb-tip-top {
+  transform: translate(-50%, -100%);
+}
+/* Wide variant (data-tip-wide): wraps to a readable column for paragraph-length copy — e.g. the
+   live-sessions info tooltip. Overrides the nowrap default; the JS clamp still keeps it on-screen. */
+.sb-tip-wide {
+  white-space: normal;
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 10px;
+  line-height: 1.45;
+}
+
+/* ---- the live breath: a working session swells and contracts, in place ---- */
+/* ONE animation drives the unit: the dot scales, and the halo (its child
+   pseudo-element) inherits that transform — so the halo holds a constant
+   proportion to the dot and the two breathe as one. per-keyframe easing settles
+   gently at full expansion, then rounds smoothly through the contracted point
+   (a touch of ease, but no dead pause at the small end). */
+@keyframes sb-breathe-dot {
+  0% {
+    transform: scale(0.7);
+    animation-timing-function: cubic-bezier(0.33, 0.15, 0.6, 0.72);
+  }
+  50% {
+    transform: scale(1.2);
+    animation-timing-function: cubic-bezier(0.3, 0.21, 0.67, 0.85);
+  }
+  100% {
+    transform: scale(0.7);
+  }
+}
+
+/* ripple — the "asking" dot's pebble-in-a-puddle pulse: one impact sends out TWO concentric
+   cobalt rings (::before/::after) that expand at the same speed and fade, with only a short
+   rest before the next pulse. Ease-out (fast leading edge, decelerating) — more urgent than the
+   calm breathing of the working dot, but still cobalt, so the "cobalt = alive" invariant holds.
+   The wave fills most of the cycle (rest-start at 55%) to keep the gap between pulses short. */
+@keyframes sb-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+    animation-timing-function: cubic-bezier(0.2, 0.6, 0.35, 1);
+  }
+  50% {
+    opacity: 0;
+  }
+  55%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+/* the dot swells outward as the pulse fires (no dip): it starts at its default size, expands,
+   then settles back before the next cycle */
+@keyframes sb-ripple-core {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  15% {
+    transform: scale(1.3);
+  }
+  52% {
+    transform: scale(1);
+  }
+}
+
+@keyframes sb-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sb-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  /* motion off: pin the breathing marks at natural size (their animation would otherwise
+     freeze small on the last frame). the dot's halo is already static, so it stays steady. */
+  .sb-dot.busy,
+  .sb-empty-mark {
+    transform: none;
+  }
+  /* asking: motion off — freeze as a static detached cobalt ring (a stilled ripple) so it
+     stays distinct from solid `awaiting` and hollow `quiet` without animating. */
+  .sb-dot.asking {
+    box-shadow: 0 0 0 1.5px var(--paper), 0 0 0 3px var(--live);
+  }
+}

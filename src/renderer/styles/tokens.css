@@ -1,0 +1,145 @@
+/*
+ * Switchboard design tokens — "editorial engineering instrument".
+ * Paper + graphite ink + hairline rules. Two accents, each with one job:
+ * electric cobalt (--live) = this session is ALIVE; a warm red (--danger) =
+ * negative / destructive (End, Stop, errors). Everything else is ink/graphite.
+ */
+:root {
+  /* ---- paper & ink (neutral grayscale — no warm tint) ---- */
+  --paper: #fafafa; /* app field */
+  --paper-raised: #ffffff; /* raised tiles: live cards, modals, menus, popovers */
+  --paper-pane: #ffffff; /* main content surface: pane + Formatted + terminal (= raised in light) */
+  --paper-sunken: #f4f4f4; /* sidebar / rail */
+  --paper-hover: #ededed;
+  --paper-active: #e6e6e6;
+
+  --ink: #1a1a1a; /* primary text — near-black, not pure */
+  --ink-soft: #454545; /* secondary */
+  --ink-faint: #8a8a8a; /* metadata, annotations */
+  --ink-ghost: #b8b8b8; /* disabled, placeholders */
+
+  --rule: #e6e6e6; /* hairline */
+  --rule-soft: #efefef;
+  --rule-strong: #d6d6d6;
+
+  /* ---- accent 1: electric cobalt = alive ---- */
+  --live: #1f5ae6;
+  --live-ink: #1741b8; /* text-on-paper variant for contrast */
+  --live-soft: #d7e1fb; /* tinted fill */
+  --live-wash: #eef3fe; /* faintest wash */
+  --live-glow: rgba(31, 90, 230, 0.22);
+
+  /* ---- accent 2: warm red = negative / destructive (End, Stop, errors) ---- */
+  --danger: #d8392c;
+  --danger-ink: #b32a1d; /* text-on-paper variant for contrast */
+  --danger-soft: #f6d3cd; /* tinted fill */
+  --danger-wash: #fceeeb; /* faintest wash */
+  --danger-glow: rgba(216, 57, 44, 0.22);
+
+  /* ---- type ---- */
+  /* single-family: display moments are heavy-weight Hanken with tight tracking */
+  --font-display: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-ui: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* keyboard-shortcut glyphs (⌘ ⇧ ⌥ ⌃ ⏎ ↑ ↓ ⎋) — the macOS system font renders these at
+     consistent size/baseline; Hanken & Plex lack several and fall back per-glyph (small,
+     off-baseline). macOS-only app, so the system face is always SF. */
+  --font-keys: -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --text-2xs: 10.5px;
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-base: 13.5px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 23px;
+  --text-display: 60px;
+
+  --tracking-tight: -0.01em;
+  --tracking-wide: 0.02em;
+  --tracking-caps: 0.14em; /* for mono uppercase labels */
+
+  /* ---- spacing ---- */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 22px;
+  --s6: 32px;
+  --s7: 48px;
+
+  /* ---- radii ---- */
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 13px;
+  --r-pill: 999px;
+
+  /* ---- motion ---- */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1); /* expo-out: confident settle */
+  --ease-io: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur: 220ms;
+  --dur-slow: 420ms;
+
+  /* ---- layout ---- */
+  --pane-w: 320px;
+  --titlebar-h: 44px;
+
+  /* ---- elevation (used sparingly; depth is mostly hairlines) ---- */
+  --shadow-pane: 0 1px 1px rgba(26, 26, 26, 0.03), 0 10px 30px rgba(26, 26, 26, 0.06);
+  --shadow-pop: 0 2px 6px rgba(26, 26, 26, 0.08), 0 16px 44px rgba(26, 26, 26, 0.14);
+  /* Neutral-ink RGB channels for ad-hoc one-off shadows (rgba(var(--shadow-color), α)); dark flips
+     it to pure black so a near-black shadow doesn't vanish into a dark surface. */
+  --shadow-color: 26, 26, 26;
+  /* modal/overlay dim */
+  --scrim: rgba(26, 26, 26, 0.28);
+}
+
+/*
+ * Dark mode — neutral, with an INVERTED elevation (experiment): unlike light mode and the usual
+ * dark convention, the left pane / rail is the LIGHTER chrome and the main content (pane /
+ * Formatted / terminal) is the DARK canvas. So --paper-sunken (rail) sits ABOVE --paper-pane
+ * (content) in lightness here — the token names keep their light-mode meaning while the dark values
+ * deliberately invert it. The two accents keep their one job (cobalt = alive, red = destructive),
+ * brightened for the dark; their soft/wash tints are dark-tinted. data-theme is JS-resolved
+ * (System/Light/Dark) on <html>, so explicit Light/Dark beat the OS. Only color + shadow tokens are
+ * redeclared here; type / spacing / radii / motion / layout are shared.
+ */
+:root[data-theme='dark'] {
+  /* ---- paper & ink (neutral; INVERTED elevation — rail/chrome lighter, content the dark canvas) ---- */
+  --paper: #161616; /* app shell / titlebar — the lighter chrome */
+  --paper-raised: #242424; /* raised tiles: live cards, modals, menus — lighter still, so they pop on the rail */
+  --paper-pane: #0f0f0f; /* main content (pane / Formatted / terminal) — the DARK canvas */
+  --paper-sunken: #161616; /* left pane / rail + recessed bits — lighter chrome (sits ABOVE --paper-pane here) */
+  --paper-hover: #2c2c2c;
+  --paper-active: #343434;
+
+  --ink: #f2f2f2; /* primary text — soft off-white, not pure */
+  --ink-soft: #c0c0c0; /* secondary */
+  --ink-faint: #8e8e8e; /* metadata, annotations */
+  --ink-ghost: #626262; /* disabled, placeholders */
+
+  --rule: #2b2b2b; /* hairline */
+  --rule-soft: #1f1f1f; /* softer = closer to the surface */
+  --rule-strong: #3f3f3f; /* stronger = more contrast */
+
+  /* ---- accent 1: electric cobalt = alive (brightened for dark; tints flip to dark) ---- */
+  --live: #3b6cf0;
+  --live-ink: #84a7ff; /* text-on-paper variant — light enough to read on dark */
+  --live-soft: #20304f; /* tinted fill */
+  --live-wash: #18202f; /* faintest wash */
+  --live-glow: rgba(59, 108, 240, 0.3);
+
+  /* ---- accent 2: warm red = negative / destructive ---- */
+  --danger: #ef5a4d;
+  --danger-ink: #ff8a7e; /* text-on-paper variant */
+  --danger-soft: #3c211d; /* tinted fill */
+  --danger-wash: #2a1814; /* faintest wash */
+  --danger-glow: rgba(239, 90, 77, 0.3);
+
+  /* ---- elevation: true-black shadows, deeper on dark (borders still carry most depth) ---- */
+  --shadow-pane: 0 1px 1px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.4), 0 16px 44px rgba(0, 0, 0, 0.55);
+  --shadow-color: 0, 0, 0;
+  --scrim: rgba(0, 0, 0, 0.6);
+}

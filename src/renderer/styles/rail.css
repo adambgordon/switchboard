@@ -1,0 +1,318 @@
+/* The Tally Rail — cobalt marks what's alive. Row controls (the hover pin) are the
+   shared .sb-row primitives in sidebar.css; ending a session lives in the pane header. */
+
+.sb-rail {
+  width: var(--pane-w);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-sunken);
+  min-height: 0;
+}
+/* The rail is focusable (tabIndex -1) so ⌘G can hand it the keyboard, but it shows no focus ring —
+   feedback is the selected row's highlight, and cobalt is reserved for liveness (cf. .sb-row above). */
+.sb-rail:focus,
+.sb-rail:focus-visible {
+  outline: none;
+}
+
+.sb-rail-head {
+  padding: 18px 18px 0;
+  flex-shrink: 0;
+}
+/* top row of the head: the live-count on the left, the New "+" on the right — directly above the
+   search magnifier in the row below, so the two read as a vertical control pair at the right gutter. */
+.sb-rail-head-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+.sb-rail-sub-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: 5px;
+}
+.sb-rail-search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  flex-shrink: 0;
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-rail-search-btn:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
+}
+.sb-rail-search-btn.active {
+  color: var(--ink-soft);
+}
+/* the New "+" — same icon-button treatment as the search magnifier, so they pair up vertically */
+.sb-rail-new-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  flex-shrink: 0;
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-rail-new-btn:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
+}
+.sb-rail-new-btn.open {
+  color: var(--ink);
+  background: var(--paper-active);
+}
+/* In the rail, the New popover drops under the "+" and spans the head's content width (between the
+   18px gutters) — overriding the title-bar anchoring (right:0; width:330px) defined in app.css. */
+.sb-rail-newwrap .sb-newmenu {
+  right: 0;
+  left: auto;
+  width: calc(var(--pane-w) - 36px);
+  top: calc(100% + 8px);
+}
+.sb-rail-search-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+.sb-rail-search-input::placeholder {
+  color: var(--ink-ghost);
+}
+.sb-rail-search-input:focus {
+  outline: none;
+}
+.sb-rail-count-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+.sb-rail-count {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 0.85;
+  color: var(--ink-ghost);
+  transition: color var(--dur-slow) var(--ease);
+  font-feature-settings: 'tnum';
+  letter-spacing: -0.03em;
+}
+.sb-rail-count.on {
+  color: var(--live);
+}
+.sb-rail-count-label {
+  padding-bottom: 7px;
+}
+.sb-rail-sub {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+
+.sb-rail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+/* The rail body's auto-hiding scrollbar comes from the shared .sb-autoscroll rules (global.css). */
+
+.sb-rail-empty {
+  margin-top: 44px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  padding: 0 18px;
+  color: var(--ink-ghost);
+}
+.sb-rail-empty-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px dashed var(--rule-strong);
+}
+.sb-rail-empty-hint {
+  font-size: var(--text-xs);
+  color: var(--ink-ghost);
+  line-height: 1.45;
+}
+
+/* Rail rows transition only border-color across the go-live morph — NOT background or padding.
+   background-color is deliberately off: the selection fill (.sb-row.selected → white) and the hover
+   fill must SNAP, or every arrow-key / click eases that white in on the new row and out on the old
+   one — a perceptible selection lag. padding is off too: it's a LAYOUT property, so animating the
+   8→10px card growth reflows every frame and the row's text visibly slides/chops; snapping it lets
+   the text settle in one step while the card's *paint* (background, border, shadow) eases in. The
+   go-live *entry* eases that paint via the .card rule below; box-shadow is off here so a flat row's
+   selection ring snaps. */
+.sb-rail-body .sb-row {
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+/* ---- Card chrome = LIVE rows only (a white card === a live session, whether it sits in
+   Pinned or Live). Gated on liveness in TallyRail, so a non-live pinned row drops the .card
+   class and falls back to the flat Recent look (incl. its .selected:not(.card) styling below).
+   Scoped under .sb-rail-body so these win over the bare .sb-row rules without touching the
+   sidebar, and never leak onto the rail's flat (non-live) rows. ---- */
+.sb-rail-body .sb-row.card {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  padding: 10px;
+  /* Only background-color eases. border-color and box-shadow are deliberately NOT transitioned so
+     the cobalt selection (.card.live.selected — border + ring + glow) SNAPS on select AND deselect,
+     matching the flat-row rule below and the app-wide "selection is instant" principle. Transitioning
+     them made the blue linger ~120ms (an expo-out tail) when you selected a different conversation —
+     the new selection appeared instantly while the old live row's cobalt faded, a "weird delay". This
+     also snaps the card's hover lift, consistent with the rail's flat rows (which never eased hover).
+     The go-live morph keeps the background fill ease (no sb-patch-in keyframe, so no collapse/re-expand);
+     padding is off too — animating the 8→10px growth reflows per frame and the text slid choppily, so
+     it snaps. Section moves are animated by useRailFlip. */
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.sb-rail-body .sb-row.card:hover {
+  background: var(--paper-raised);
+  border-color: var(--ink-ghost);
+  box-shadow: var(--shadow-pane);
+}
+/* selection: neutral ink by default; cobalt only when the row is alive */
+.sb-rail-body .sb-row.card.selected {
+  background: var(--paper-raised);
+  border-color: var(--ink-ghost);
+  box-shadow:
+    0 0 0 1px var(--rule-strong),
+    var(--shadow-pane);
+}
+.sb-rail-body .sb-row.card.live.selected {
+  border-color: var(--live);
+  box-shadow:
+    0 0 0 1px var(--live),
+    0 2px 12px var(--live-glow);
+}
+/* Recent rows are flat (variant 'row', no card chrome), so a selected one would
+   otherwise show only a faint fill. Mirror the selected pinned-non-live card above
+   exactly: that card shows two stacked hairlines — its own 1px --ink-ghost border
+   plus a 1px --rule-strong shadow ring just outside it — so we reproduce both as
+   stacked box-shadow rings (no real border = no layout shift), then the same pane
+   lift. The inner ring is listed first so it paints over the outer ring's inner px. */
+.sb-rail-body .sb-row.selected:not(.card) {
+  box-shadow:
+    0 0 0 1px var(--ink-ghost),
+    0 0 0 2px var(--rule-strong),
+    var(--shadow-pane);
+}
+
+.sb-rail-foot {
+  padding: 12px 18px;
+  border-top: 1px solid var(--rule);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sb-rail-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin-right: -4px; /* pull the glyph flush with the 18px gutter, matching the wordmark */
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-rail-help-btn:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
+}
+.sb-rail-wordmark {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-ghost);
+  letter-spacing: 0.01em;
+}
+.sb-rail-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* ---- section headers (Pinned / Live / Recent): a collapsible toggle on the
+   left, with the Recent scope segmented control on the right ---- */
+.sb-rail-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: 12px 4px 4px;
+}
+.sb-rail-section:first-child {
+  padding-top: 2px;
+}
+.sb-rail-section-head {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.sb-rail-section-head:hover .sb-rail-section-label {
+  color: var(--ink);
+}
+.sb-rail-chevron {
+  color: var(--ink-faint);
+  transition: transform var(--dur-fast) var(--ease);
+  flex-shrink: 0;
+}
+.sb-rail-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+.sb-rail-section-label {
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+/* Leader rule: a hairline filling the gap between the section label and its count, so each
+   header doubles as a thin divider marking the break between sections (Pinned / Live / Recent).
+   height:0 + border-top renders as a single centered line (the head is align-items:center). */
+.sb-rail-section-rule {
+  flex: 1;
+  height: 0;
+  border-top: 1px solid var(--rule);
+}
+.sb-rail-section-count {
+  font-size: var(--text-2xs);
+  color: var(--ink-ghost);
+}
+
+/* "Show N more" — reveals the rest of a capped section (the Recent history) */
+.sb-rail-more {
+  align-self: stretch;
+  text-align: left;
+  padding: 6px 4px 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-faint);
+  transition: color var(--dur-fast) var(--ease);
+}
+.sb-rail-more:hover {
+  color: var(--ink);
+}

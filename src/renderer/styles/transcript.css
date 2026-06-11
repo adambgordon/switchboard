@@ -1,0 +1,526 @@
+/*
+ * Transcript renderer — read-only conversation stream.
+ * A well-set technical journal: paper, graphite ink, hairline rules.
+ * Color appears in exactly ONE concept: the danger red on a tool_result error —
+ * the message's "Error" header label plus the card's border/wash. Everything else
+ * is strictly ink / paper / rule grayscale.
+ */
+
+/* ---- scroll container & centered column ---- */
+.transcript-scroll {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--paper-pane);
+  /* reading text must be selectable even though body disables selection */
+  user-select: text;
+}
+
+/* The transcript is click-focusable (tabIndex -1) so clicking it gives the main pane focus —
+   that's what routes ⌘F to find-in-conversation. It's not keyboard-tabbable and never needs a
+   ring (the global cobalt :focus-visible would also break the cobalt-is-liveness invariant). */
+.transcript-scroll:focus,
+.transcript-scroll:focus-visible {
+  outline: none;
+}
+
+/* ---- find-in-conversation highlights (CSS Custom Highlight API; painted by useTranscriptSearch) ----
+   Ink/graphite only — cobalt stays reserved for liveness, red for destructive. Every match gets a
+   quiet graphite band; the active match inverts to a dark graphite chip so it reads as "the one". */
+::highlight(sb-find) {
+  background-color: var(--rule-strong);
+  color: var(--ink);
+}
+::highlight(sb-find-current) {
+  background-color: var(--ink-soft);
+  color: var(--paper);
+}
+
+.transcript-content {
+  /* fill the pane width with comfortable side padding (no centered max-width cap) */
+  padding: var(--s6) var(--s7) var(--s7);
+}
+
+/* ---- message rhythm ---- */
+.message {
+  padding: var(--s4) 0;
+  animation: sb-fade-up var(--dur) var(--ease) both;
+}
+
+.message:first-child {
+  padding-top: 0;
+}
+
+/* You↔non-You section break: a single hairline marks where a human turn begins or ends,
+   separating it from the surrounding Claude / tool machinery. ONLY at that boundary — turns
+   on the same side aren't ruled (the flag is computed in TranscriptView). The article's own
+   `padding: var(--s4) 0` gives a symmetric gap around the line. */
+.message.has-divider {
+  border-top: 1px solid var(--rule);
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+
+.role-label {
+  color: var(--ink-faint);
+}
+
+/* a tool_result error turn: the header label goes danger-red (the one place color appears) */
+.role-label.is-error {
+  color: var(--danger-ink);
+}
+
+.sidechain-tag {
+  color: var(--ink-ghost);
+  padding: 1px var(--s2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-pill);
+}
+
+/* per-group timestamp, pushed to the right of the header — tasteful + quiet */
+.message-time {
+  margin-left: auto;
+  color: var(--ink-ghost);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-wide);
+}
+
+.message-body {
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+/* a comfortable gap between stacked blocks inside one turn */
+.message-body > * + * {
+  margin-top: var(--s5);
+}
+
+/* ---- sub-agent (sidechain) de-emphasis ---- */
+.message.is-sidechain {
+  margin-left: var(--s6);
+  padding-left: var(--s4);
+  border-left: 1px solid var(--rule);
+}
+
+.message.is-sidechain .message-body {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+
+/* ---- user message: plain prose, no box. Reads like Claude's text (same font / size /
+   color), distinguished only by the "You" header and the section divider above it. We do NOT
+   markdown-parse a human prompt, so white-space:pre-wrap preserves its typed line breaks. ---- */
+.user-text {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ---- interrupt sentinel: a quiet centered divider, not a turn ---- */
+.message-interrupt {
+  display: flex;
+  justify-content: center;
+}
+
+.interrupt-note {
+  color: var(--ink-ghost);
+}
+
+/* ============================================================ *
+ * Assistant markdown
+ * ============================================================ */
+.md {
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.md-p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.md-a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--rule-strong);
+  cursor: pointer;
+  transition: text-decoration-color var(--dur-fast) var(--ease);
+}
+
+.md-a:hover {
+  text-decoration-color: var(--ink);
+}
+
+/* inline code: subtle sunken pill */
+.md-code {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--text-xs);
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  padding: 0.05em 0.4em;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* block code fence */
+.md-pre {
+  margin: 0;
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  padding: var(--s3) var(--s4);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+/* inside a <pre>, code is plain block text — undo the inline pill */
+.md-pre .md-code {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+  color: var(--ink);
+  white-space: pre;
+}
+
+.md-ul,
+.md-ol {
+  margin: 0;
+  padding-left: var(--s5);
+}
+
+.md-ul {
+  list-style: square;
+}
+
+.md-li {
+  margin: var(--s1) 0;
+}
+
+.md-li::marker {
+  color: var(--ink-faint);
+}
+
+.md-li > .md-ul,
+.md-li > .md-ol {
+  margin-top: var(--s1);
+}
+
+.md-h {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: var(--tracking-tight);
+  color: var(--ink);
+}
+
+.md-h1 {
+  font-size: var(--text-lg);
+}
+
+.md-h2 {
+  font-size: var(--text-md);
+}
+
+.md-h3,
+.md-h4,
+.md-h5,
+.md-h6 {
+  font-size: var(--text-base);
+}
+
+.md-h4,
+.md-h5,
+.md-h6 {
+  color: var(--ink-soft);
+}
+
+.md-quote {
+  margin: 0;
+  padding-left: var(--s4);
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.md-quote > * + * {
+  margin-top: var(--s3);
+}
+
+.md-table-wrap {
+  overflow-x: auto;
+}
+
+.md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--text-sm);
+}
+
+.md-th,
+.md-td {
+  border: 1px solid var(--rule);
+  padding: var(--s2) var(--s3);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-th {
+  background: var(--paper-sunken);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.md-td {
+  color: var(--ink);
+}
+
+.md-hr {
+  border: none;
+  border-top: 1px solid var(--rule);
+  height: 0;
+}
+
+.md-strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.md-em {
+  font-style: italic;
+}
+
+/* Block-rhythm owl — MUST stay after the per-element rules above, so its margin-top wins the
+   specificity tie against their `margin: 0` resets (equal specificity ⇒ later source order wins).
+   This is what puts air between paragraph text and adjacent code blocks / tables / headings.
+   Consecutive paragraphs use the tighter --s4 (two classes → higher specificity, order-independent). */
+.md > * + * {
+  margin-top: var(--s5);
+}
+
+.md-p + .md-p {
+  margin-top: var(--s4);
+}
+
+/* ============================================================ *
+ * Tool cards — quiet, secondary
+ * ============================================================ */
+/* Boxless: the tool head + the sunken JSON/result block carry the structure themselves. The one
+   exception is an error result, which keeps its red box (see .result-card.is-error below). */
+.tool-card {
+  /* intentionally no border / background / padding */
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+  /* the tool name is a click target (toggle) — never let repeated clicks select its text */
+  user-select: none;
+}
+
+.tool-name {
+  color: var(--ink);
+}
+
+/* The tool head IS the disclosure toggle (no separate "Input" row, no chevron — just the gear):
+   the whole "⚙ Name" row is clickable, and the gear + the name both lighten on hover. */
+.tool-toggle {
+  cursor: pointer;
+  list-style: none;
+}
+
+.tool-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.tool-toggle span {
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.tool-toggle:hover {
+  color: var(--ink-faint);
+}
+
+.tool-toggle:hover .tool-name {
+  color: var(--ink-soft);
+}
+
+.tool-json,
+.tool-result-body {
+  margin: var(--s2) 0 0;
+  padding: var(--s3);
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--ink-soft);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* the result body sits alone now (the Result/Error label moved to the header). A slightly smaller
+   bottom padding than the rest splits the difference between flush (too tight under the clamp cut)
+   and full padding (too airy) — it's the gap below the 12th line when truncated. */
+.tool-result-body {
+  margin-top: 0;
+  padding-bottom: 6px;
+}
+
+/* Clamp the collapsed result to 12 RENDERED (wrapped) lines. content-box so max-height bounds the
+   CONTENT at 12 line-heights (1.55em each — matches the line-height above); overflow:hidden clips
+   the rest. (line-clamp was dropped: with white-space:pre-wrap it cut mid-line AND made scrollHeight
+   report the clamped height, which broke the overflow check that gates "Show more".) */
+/* The collapsed result is clamped to 12 RENDERED (wrapped) lines by an inner clip element that has
+   NO padding of its own — so the cut lands exactly on the 12th line boundary, and the panel's own
+   bottom padding sits below it as breathing room. (line-clamp was dropped: with pre-wrap it cut
+   mid-line AND broke the scrollHeight check that gates "Show more".) */
+.tool-result-clip.is-clamped {
+  max-height: calc(12 * 1.55em);
+  overflow: hidden;
+}
+
+.tool-result-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.show-more {
+  display: inline-block;
+  margin-top: var(--s2);
+  padding: var(--s1) var(--s2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-pill);
+  color: var(--ink-faint);
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.show-more:hover {
+  color: var(--ink-soft);
+  border-color: var(--rule-strong);
+}
+
+/* ---- the one boxed exception: a tool_result error keeps its red box (border + wash + padding) ---- */
+.result-card.is-error {
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  background: var(--danger-wash);
+  padding: var(--s3);
+}
+
+/* ============================================================ *
+ * Inline chip — images & other compact references
+ * ============================================================ */
+.block-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-pill);
+  background: var(--paper-sunken);
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+
+/* ============================================================ *
+ * Loading & footer
+ * ============================================================ */
+.transcript-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.transcript-loading-label {
+  color: var(--ink-faint);
+}
+
+.transcript-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.skeleton-line {
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    90deg,
+    var(--paper-sunken) 0%,
+    var(--paper-hover) 50%,
+    var(--paper-sunken) 100%
+  );
+  background-size: 200% 100%;
+  animation: sb-skeleton 1.4s var(--ease-io) infinite;
+}
+
+.skeleton-w-40 {
+  width: 40%;
+}
+.skeleton-w-60 {
+  width: 60%;
+}
+.skeleton-w-75 {
+  width: 75%;
+}
+.skeleton-w-90 {
+  width: 90%;
+}
+
+@keyframes sb-skeleton {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.transcript-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s4);
+  margin-top: var(--s6);
+  padding-top: var(--s5);
+}
+
+.transcript-foot-rule {
+  width: 100%;
+  height: 1px;
+  background: var(--rule);
+}
+
+.transcript-foot-label {
+  color: var(--ink-ghost);
+}

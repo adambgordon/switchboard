@@ -1,0 +1,28 @@
+/* Live terminal deck. xterm paints its own glyphs; we own the chrome. */
+
+.sb-term-deck {
+  position: absolute;
+  inset: 0;
+  background: var(--paper-pane);
+}
+.sb-term-host {
+  position: absolute;
+  inset: 0;
+  padding: 12px 14px 8px;
+}
+.sb-term {
+  width: 100%;
+  height: 100%;
+}
+
+/* let the paper show through xterm's layers; theme handles glyph colors */
+.sb-term .xterm,
+.sb-term .xterm-viewport {
+  background: transparent !important;
+}
+/* No scrollbar in the terminal — scrapped for a cleaner live surface. xterm still scrolls via
+   wheel / keys, and claude (the live TUI) manages its own viewport. */
+.sb-term .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}

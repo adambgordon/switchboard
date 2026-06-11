@@ -1,0 +1,853 @@
+/* Shell layout, title bar, new-conversation menu, buttons, shared primitives. */
+
+.sb-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--paper);
+}
+
+.sb-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ---- title bar (custom, draggable, traffic-light inset) ---- */
+.sb-titlebar {
+  height: var(--titlebar-h);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding-left: 104px; /* clear macOS traffic lights, with breathing room past them */
+  padding-right: var(--s4);
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper-sunken); /* unify the title bar with the left pane/rail (chrome), not the field */
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 50;
+}
+.sb-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  -webkit-app-region: no-drag;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+/* clickable lockup: returns to the welcome screen (deselect) — dim slightly on hover */
+.sb-brand:hover {
+  opacity: 0.7;
+}
+.sb-brand-mark {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 0 3px var(--live-glow);
+}
+.sb-brand-name {
+  font-family: var(--font-display);
+  font-size: 16.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+.sb-titlebar-spacer {
+  flex: 1;
+}
+/* Dev-only tag left of the gear (SWITCHBOARD_DEV_LABEL).
+   Ink/graphite pill only — never an accent, per the two-color invariant. Distinguishes parallel
+   `npm run dev` windows; absent in normal/packaged runs. Non-interactive, so it stays in the
+   title bar's drag region. */
+.sb-titlebar-devlabel {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-ghost);
+  padding: 1px 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* .sb-newwrap is the positioned anchor for the New popover. The "+" trigger now lives in the
+   rail head (see rail.css `.sb-rail-new-btn` / `.sb-rail-newwrap`); the old title-bar pill is gone. */
+.sb-newwrap {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+/* ---- new-conversation popover ---- */
+/* Dismiss backdrop (see NewConversationMenu): transparent, full-window, and no-drag so it
+   catches the click-away even over the draggable title bar — which swallows DOM mouse events.
+   z-index sits just below the menu (100) and above the title bar's own context (50). */
+.sb-newmenu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  -webkit-app-region: no-drag;
+}
+.sb-newmenu {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  width: 330px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  padding: 8px;
+  z-index: 100;
+  transform-origin: top right;
+  animation: sb-fade-up var(--dur) var(--ease);
+}
+.sb-newmenu-head {
+  padding: 6px 8px 9px;
+}
+.sb-newmenu-list {
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* The New-menu list's auto-hiding scrollbar comes from the shared .sb-autoscroll rules (global.css). */
+.sb-newmenu-empty {
+  padding: 8px;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}
+.sb-newmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  width: 100%;
+  transition: background var(--dur-fast);
+}
+.sb-newmenu-item:hover {
+  background: var(--paper-hover);
+}
+.sb-newmenu-folder {
+  color: var(--ink-faint);
+  flex-shrink: 0;
+}
+.sb-newmenu-name {
+  font-weight: 600;
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+  max-width: 130px;
+}
+.sb-newmenu-path {
+  color: var(--ink-ghost);
+  font-size: var(--text-xs);
+  flex: 1;
+  text-align: right;
+}
+.sb-newmenu-other {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 8px;
+  margin-top: 6px;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-size: var(--text-sm);
+}
+.sb-newmenu-other:hover {
+  color: var(--ink);
+}
+/* keyboard focus (⌘N / arrow nav) highlights the item neutrally — suppress the global
+   cobalt :focus-visible ring so a focused menu item never reads as "alive" */
+.sb-newmenu-item:focus-visible,
+.sb-newmenu-other:focus-visible {
+  outline: none;
+  color: var(--ink);
+  background: var(--paper-hover);
+}
+
+/* ---- buttons ---- */
+.sb-btn-resume {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 15px;
+  border-radius: var(--r-pill);
+  background: var(--live);
+  color: #fff;
+  font-weight: 600;
+  font-size: var(--text-sm);
+  box-shadow: 0 1px 2px var(--live-glow);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-btn-resume:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 5px 16px var(--live-glow);
+}
+
+.sb-seg {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-pill);
+  gap: 2px;
+}
+.sb-seg-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 13px;
+  border-radius: var(--r-pill);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-faint);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-seg-btn:hover {
+  color: var(--ink-soft);
+}
+.sb-seg-btn.active {
+  background: var(--paper-raised);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(var(--shadow-color), 0.07);
+}
+
+.sb-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: var(--r-pill);
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border: 1px solid transparent;
+  transition: all var(--dur-fast);
+}
+.sb-btn-ghost:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
+}
+.sb-btn-ghost.danger:hover {
+  color: var(--danger-ink);
+  background: var(--danger-wash);
+}
+
+/* ---- shared primitives ---- */
+.sb-dot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--live);
+  display: inline-block;
+  flex-shrink: 0;
+}
+/* working: the live dot breathes (scales); the halo is a fixed-proportion aura that
+   rides the dot's transform, so the two move as one (idle = steady) */
+.sb-dot.busy {
+  animation: sb-breathe-dot 2.5s linear infinite;
+}
+.sb-dot.busy::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--live);
+  opacity: 0.22;
+  transform: scale(1.7);
+}
+/* finished, not yet seen: a steady filled cobalt dot (same as the .sb-dot base; explicit for clarity) */
+.sb-dot.awaiting {
+  background: var(--live);
+}
+/* finished and seen: a hollow cobalt ring — alive, but nothing new to look at */
+.sb-dot.quiet {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--live);
+}
+/* "asking": blocked on the user's reply (AskUserQuestion / ExitPlanMode). A cobalt ripple —
+   one pebble-in-a-puddle pulse throwing two concentric rings — reads as "needs you" while
+   staying alive-cobalt: it's the MOTION that sets it apart from breathing `working`, solid
+   `awaiting`, and hollow `quiet`. The dot stays solid and swells with the pulse; ::before and
+   ::after are the two rings. */
+.sb-dot.asking {
+  background: var(--live);
+  animation: sb-ripple-core 1.4s ease-out infinite;
+}
+.sb-dot.asking::before,
+.sb-dot.asking::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: none;
+  opacity: 0; /* hidden until its ring fires; the animation then drives opacity */
+  box-shadow: 0 0 0 1.5px var(--live);
+  pointer-events: none;
+  animation: sb-ripple 1.4s infinite;
+}
+/* the second ring trails the first by a beat → a two-ring ripple */
+.sb-dot.asking::after {
+  animation-delay: 0.15s;
+}
+.sb-sep {
+  color: var(--ink-ghost);
+}
+
+/* ---- resizable pane dividers ---- */
+/* The divider IS a flush 1px rule: the element is 1px wide and carries the line as
+   its own background, so the rail (left) and main pane (right) — and their horizontal
+   hairlines — meet it with no gap. (Previously a 5px-wide handle floated a centered
+   1px line, leaving 2px of --paper on each side that broke the connection.) The grab
+   target is a transparent overlay spilling onto both panes, taking no layout width. */
+.sb-resize-handle {
+  flex: 0 0 1px;
+  align-self: stretch;
+  position: relative;
+  background: var(--rule);
+  cursor: col-resize;
+  transition: background var(--dur-fast) var(--ease);
+}
+.sb-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+}
+/* hover: darken, and thicken to ~2px via a centered overlay so the line stays flush */
+.sb-resize-handle:hover {
+  background: var(--ink-ghost);
+}
+.sb-resize-handle:hover::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--ink-ghost);
+}
+body.sb-resizing,
+body.sb-resizing * {
+  cursor: col-resize !important;
+}
+/* keep the terminal/transcript from swallowing pointer moves mid-drag */
+body.sb-resizing .sb-pane {
+  pointer-events: none;
+}
+
+/* ---- title-bar panel toggles ---- */
+.sb-panel-toggle {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-panel-toggle:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
+}
+.sb-panel-toggle.active {
+  color: var(--ink-soft);
+}
+
+/* ---- keyboard-shortcuts modal ---- */
+.sb-modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s6);
+  background: var(--scrim);
+  -webkit-app-region: no-drag; /* clicking the scrim dismisses; never drags the window */
+  animation: sb-fade-in var(--dur-fast) var(--ease);
+}
+/* Center-TOP variant (the capacity modal): pin the card near the top instead of mid-screen;
+   padding-top clears the hidden-inset title bar / traffic lights. */
+.sb-modal-scrim.top {
+  align-items: flex-start;
+  padding-top: 72px;
+}
+/* Capacity modal (CapWarningModal): a compact center-top dialog reusing .sb-modal's card. The body
+   override is scoped under .sb-modal-cap so it beats the base .sb-modal-body padding regardless of
+   source order. Ink/graphite only — the cap is informational, not destructive (two-accent rule). */
+.sb-modal-cap {
+  width: 420px;
+}
+.sb-modal-cap .sb-cap-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 18px 18px;
+}
+.sb-cap-modal-text {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+.sb-cap-modal-btn {
+  align-self: flex-end;
+  padding: 6px 16px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-cap-modal-btn:hover {
+  background: var(--paper-hover);
+}
+.sb-modal {
+  width: 440px;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: sb-fade-up var(--dur) var(--ease);
+}
+.sb-modal:focus {
+  outline: none;
+}
+.sb-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+.sb-modal-title {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.sb-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  margin-right: -5px;
+  border-radius: var(--r-sm);
+  color: var(--ink-faint);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-modal-close:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
+}
+.sb-modal-body {
+  padding: 6px 18px 16px;
+  overflow-y: auto;
+}
+.sb-modal-group {
+  margin-top: 12px;
+}
+.sb-modal-group:first-child {
+  margin-top: 0;
+}
+.sb-modal-group-label {
+  padding: 6px 0;
+}
+.sb-shortcuts {
+  display: flex;
+  flex-direction: column;
+}
+.sb-shortcut {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.sb-shortcut:last-child {
+  border-bottom: none;
+}
+.sb-shortcut-keys {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+  width: 76px;
+}
+.sb-shortcut-desc {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+.sb-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  font-family: var(--font-keys);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  box-shadow: 0 1px 0 var(--rule-strong);
+}
+/* ⌘0: a bare zero in --font-keys (SF Pro) is nearly an "O". Render just the digit in IBM Plex Mono
+   (--font-mono, already loaded for the terminal), whose zero is disambiguated by design — a real
+   glyph, so it stays centered at any zoom (unlike a CSS overlay, which subpixel-drifts). */
+.sb-kbd-zero {
+  font-family: var(--font-mono);
+  /* Plex Mono's digit renders a touch smaller than the SF keycap text at the same px — nudge it up
+     so the zero matches the rest of the cap. */
+  font-size: 1.12em;
+}
+
+/* ---- settings modal: left nav + page (selection is INK, never cobalt — two-accent invariant) ---- */
+.sb-modal-settings {
+  width: 690px;
+}
+/* Mirror the main app's three surfaces so the modal reads as a little Switchboard: the head takes
+   the title-bar's slightly-off-white (--paper), the nav takes the rail's sunken grey
+   (--paper-sunken, below), and the page stays the main pane's white (--paper-raised, inherited from
+   .sb-modal). */
+.sb-modal-settings .sb-modal-head {
+  background: var(--paper-sunken);
+}
+/* Fixed height, sized to the taller Shortcuts page, so the modal keeps one size + shape across both
+   pages (no resize when switching App ↔ Shortcuts). Sized so the full Shortcuts list (3 groups)
+   fits without scrolling; the App page top-aligns its settings in the extra room. The viewport cap
+   lets the page scroll on short windows (or if the shortcut list ever grows past this height). */
+.sb-settings-body {
+  display: flex;
+  height: 680px;
+  max-height: calc(100vh - 128px);
+}
+.sb-settings-nav {
+  flex-shrink: 0;
+  width: 152px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--rule);
+  background: var(--paper-sunken);
+  overflow-y: auto;
+}
+.sb-settings-nav-item {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-faint);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-settings-nav-item:hover {
+  color: var(--ink-soft);
+  background: var(--paper-hover);
+}
+.sb-settings-nav-item.active {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--paper-active);
+}
+.sb-settings-page {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 20px 18px;
+  overflow-y: auto;
+  background: var(--paper-pane);
+}
+
+/* ---- App page: the default-folder setting (toggle on-state is INK, never cobalt — cobalt is
+   liveness-only, the two-accent invariant) ---- */
+.sb-setting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.sb-setting-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+}
+.sb-setting-text {
+  min-width: 0;
+}
+.sb-setting-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 3px;
+}
+.sb-setting-desc {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+.sb-setting-desc strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+/* shrink the inline ⌘N glyph from its full key-cap size so it sits in the sentence */
+.sb-setting-desc .sb-kbd {
+  min-width: 0;
+  height: 18px;
+  padding: 0 4px;
+  vertical-align: baseline;
+}
+
+/* the on/off switch */
+.sb-toggle {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 18px;
+  margin-top: 4px;
+  border-radius: var(--r-pill);
+  background: var(--rule-strong);
+  transition: background var(--dur-fast) var(--ease);
+}
+.sb-toggle.on {
+  background: var(--ink);
+}
+.sb-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.sb-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--paper-raised);
+  box-shadow: 0 1px 2px rgba(var(--shadow-color), 0.25);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.sb-toggle.on .sb-toggle-knob {
+  transform: translateX(18px);
+}
+
+/* the chosen-folder row */
+.sb-setting-folder {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--paper-sunken);
+}
+.sb-setting-folder-icon {
+  flex-shrink: 0;
+  color: var(--ink-faint);
+}
+.sb-setting-folder-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.sb-setting-folder-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+.sb-setting-folder-path {
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+.sb-setting-folder-empty {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+.sb-setting-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.sb-setting-btn {
+  padding: 5px 10px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-setting-btn:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
+  border-color: var(--ink-ghost);
+}
+
+/* info affordance beside a setting title — opens a wide explanatory tooltip (data-tip-wide) */
+.sb-info {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 5px;
+  color: var(--ink-ghost);
+  transition: color var(--dur-fast) var(--ease);
+}
+.sb-info:hover {
+  color: var(--ink-soft);
+}
+
+/* numeric stepper (− value +) — the live-sessions cap. Neutral ink only (two-accent invariant). */
+.sb-stepper {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+}
+.sb-stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-stepper-btn:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--paper-hover);
+  border-color: var(--ink-ghost);
+}
+.sb-stepper-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.sb-stepper-value {
+  min-width: 30px;
+  text-align: center;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+/* Wraps the reset icon + the stepper on one row, flush right in the setting. */
+.sb-stepper-control {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+}
+/* Reset-to-default: a ghost rewind-arrow icon button (greyed when already at default). */
+.sb-stepper-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-stepper-reset:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--paper-hover);
+}
+.sb-stepper-reset:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ---- row context menu (right-click / two-finger → mark read/unread) ---- */
+.sb-ctxmenu {
+  position: fixed;
+  z-index: 200;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  animation: sb-fade-in var(--dur-fast) var(--ease);
+}
+.sb-ctxmenu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  text-align: left;
+  transition: background var(--dur-fast);
+}
+.sb-ctxmenu-item:hover {
+  background: var(--paper-hover);
+  color: var(--ink);
+}
+/* faint keyboard-shortcut hint, pushed to the right edge of the item */
+.sb-ctxmenu-hint {
+  margin-left: auto;
+  padding-left: 20px;
+  font-family: var(--font-keys);
+  font-size: var(--text-xs);
+  color: var(--ink-ghost);
+}
+/* copy-confirmation checkmark, just left of the "Copied" label. Ink, not green — the two-accent
+   invariant reserves color for liveness (cobalt) and danger (red). Appears instantly with the label. */
+.sb-ctxmenu-check {
+  display: inline-flex;
+  margin-right: 7px;
+  color: var(--ink);
+}
+/* destructive item (Stop session): neutral at rest, warm red on hover — mirrors the pane-header
+   Stop button (.sb-btn-ghost.danger), so color signals intent rather than shouting at rest (the
+   two-accent invariant: cobalt = alive, red = destructive). */
+.sb-ctxmenu-item.danger:hover {
+  color: var(--danger-ink);
+  background: var(--danger-wash);
+}
+/* affirmative item (Resume): neutral at rest, cobalt on hover — the live-accent counterpart to the
+   destructive .danger above. Cobalt because Resume brings a conversation back to life (two-accent
+   invariant: cobalt = alive), mirroring the pane-header Resume button. */
+.sb-ctxmenu-item.live:hover {
+  color: var(--live-ink);
+  background: var(--live-wash);
+}
+/* hairline setting the destructive Stop session apart from the benign items above it */
+.sb-ctxmenu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--rule);
+}
