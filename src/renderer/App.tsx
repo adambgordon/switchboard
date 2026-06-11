@@ -533,6 +533,11 @@ export default function App() {
       // (find-in-conversation vs search-conversations) and keeps the main pane owning the keyboard —
       // so arrows/Enter don't drive list-nav while you're reading the transcript or in the terminal.
       const inMain = !!paneRef.current && paneRef.current.contains(document.activeElement)
+      // Focus on the read-only Formatted transcript specifically (its scroll container) — not a
+      // pane-header button, not the live terminal. Gates Enter-to-resume from the transcript.
+      const inTranscript =
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement.classList.contains('transcript-scroll')
       // While the Preferences modal is open it owns the keyboard: Esc closes it; ⌘, and ⌘?
       // toggle between (or out of) the App / Shortcuts pages; everything else is
       // inert (no list-nav behind the scrim).
@@ -609,14 +614,16 @@ export default function App() {
         else if (query) setQuery('')
         else setSearchOpen(false)
         setMenuOpen(false)
-      } else if (e.key === 'Enter' && !inInput && !inMain && selectedId) {
-        // Enter "opens" the selection: a live conversation focuses into its terminal (the only
-        // way arrow-nav hands the keyboard to claude), a not-live one resumes. Both record a
-        // history stop. Once the terminal has focus, xterm consumes Enter before it reaches
-        // here, so this only ever fires from the list.
+      } else if (e.key === 'Enter' && !inInput && selectedId && (!inMain || inTranscript)) {
+        // Enter "opens" the selection. From the LIST: a live conversation focuses into its terminal,
+        // a not-live one resumes. From the read-only Formatted TRANSCRIPT: a not-live conversation
+        // resumes — so you can read history and hit Enter to bring it live without going back to the
+        // list. xterm consumes Enter inside a live terminal (never reaches here), and the inTranscript
+        // gate excludes pane-header buttons, so typing / button activation is never hijacked.
         e.preventDefault()
-        if (selectedPty) enterLive()
-        else if (selectedMeta) void resume(selectedMeta)
+        if (selectedPty) {
+          if (!inMain) enterLive()
+        } else if (selectedMeta) void resume(selectedMeta)
       } else if (e.key === 'ArrowRight' && !inInput && !inMain && selectedId && selectedPty) {
         // Right arrow enters a *live* conversation — idempotent to Enter on a live row. The
         // condition requires a live pty, so it's a no-op on a not-live row (those still need
