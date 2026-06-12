@@ -114,14 +114,13 @@ export default function TranscriptView({
   }, [transcript])
 
   // Focus the scroll container when the main pane should take the keyboard for this conversation —
-  // the Formatted-view counterpart to TerminalView grabbing focus on its focusKey. Clicking a
-  // not-live row routes here (App.clickConversation → requestFocus → MainPane derives focusKey), so
-  // the main pane takes focus and the rail selection quiets, exactly as clicking a live row focuses
-  // its terminal. Runs in a LAYOUT effect (before paint) and fires even while the transcript is
-  // still loading — so the row never paints its loud/lifted selected state mid-load and then snaps
-  // quiet; it lands quiet from the first frame. Dedup on the key so re-renders / arrow-nav back to an
-  // already-focused conversation don't re-grab; preventScroll so it never fights the pin-to-latest.
-  // Dedup against MainPane's ref when provided (survives remounts); fall back to a local ref.
+  // the Formatted-view counterpart to TerminalView grabbing focus on its focusKey. Selecting a
+  // not-live conversation routes here (App.clickConversation / ⌥⌘↑/↓ switch → requestFocus → MainPane
+  // derives focusKey), so the main pane takes focus, exactly as a live one focuses its terminal. Runs
+  // in a LAYOUT effect (before paint) and fires even while the transcript is still loading, so focus
+  // lands from the first frame. Dedup on the key so re-renders / switching back to an already-focused
+  // conversation don't re-grab; preventScroll so it never fights the pin-to-latest. Dedup against
+  // MainPane's ref when provided (survives remounts); fall back to a local ref.
   const localLastFocused = useRef<number | null>(null)
   const lastFocused = lastFocusedKeyRef ?? localLastFocused
   useLayoutEffect(() => {

@@ -31,14 +31,6 @@ describe('navReducer', () => {
     expect(s).toEqual({ selectedId: 'a', stack: ['a'], cursor: 0 })
   })
 
-  it('preview moves selection without recording a stop', () => {
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'preview', id: 'b' }
-    ])
-    expect(s).toEqual({ selectedId: 'b', stack: ['a'], cursor: 0 })
-  })
-
   it('back/forward walk the recorded stops', () => {
     const opened = run([
       { type: 'open', id: 'a' },
@@ -70,26 +62,12 @@ describe('navReducer', () => {
     expect(s).toEqual({ selectedId: 'd', stack: ['a', 'b', 'd'], cursor: 2 })
   })
 
-  it('first back after an arrow-preview drift re-centers on the current stop', () => {
-    const drifted = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' }, // cursor 1, stop = b
-      { type: 'preview', id: 'x' } // drifted: selectedId x, cursor still 1
-    ])
-    // First back snaps back to the stop (b) without moving the cursor...
-    const recentered = navReducer(drifted, { type: 'back' })
-    expect(recentered).toEqual({ selectedId: 'b', stack: ['a', 'b'], cursor: 1 })
-    // ...and the next back then walks to the previous stop (a).
-    const back2 = navReducer(recentered, { type: 'back' })
-    expect(back2).toMatchObject({ selectedId: 'a', cursor: 0 })
-  })
-
-  it('forward is inert while drifted', () => {
+  it('forward is inert while drifted (after home)', () => {
     const drifted = run([
       { type: 'open', id: 'a' },
       { type: 'open', id: 'b' },
       { type: 'back' }, // -> a (cursor 0), b ahead
-      { type: 'preview', id: 'x' } // drift off stop a
+      { type: 'home' } // drift off stop a (selectedId null)
     ])
     expect(navReducer(drifted, { type: 'forward' })).toBe(drifted)
   })

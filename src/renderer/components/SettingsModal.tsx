@@ -32,10 +32,8 @@ const GROUPS: Group[] = [
     title: 'Navigation',
     items: [
       { keys: ['⌘[', '⌘]'], desc: 'Back / forward' },
-      { keys: ['↑', '↓'], desc: 'Navigate the selected conversation' },
-      { keys: ['⏎'], desc: 'Open and resume the selected conversation' },
-      { keys: ['→'], desc: 'Focus the selected conversation if it is live' },
-      { keys: ['⌘G'], desc: 'Focus the conversation list' }
+      { keys: ['⌥⌘↑', '⌥⌘↓'], desc: 'Previous / next conversation' },
+      { keys: ['⏎'], desc: 'Resume conversation' }
     ]
   },
   {
