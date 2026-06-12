@@ -404,6 +404,15 @@
   overflow: hidden;
 }
 
+/* Tasteful fade: when a clamped result actually overflows, the last ~1.5 lines dissolve into the card
+   so the 12-line cut reads soft instead of a hard edge. The mask fades the content to transparent
+   (theme-agnostic — the sunken card shows through). Gated on `is-faded` (set only when overflowing),
+   so a short result that happens to fit never gets a spurious fade, and the expanded view is full. */
+.tool-result-clip.is-faded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5em), transparent);
+}
+
 .tool-result-text {
   margin: 0;
   white-space: pre-wrap;
@@ -511,8 +520,7 @@
   flex-direction: column;
   align-items: center;
   gap: var(--s4);
-  margin-top: var(--s6);
-  padding-top: var(--s5);
+  margin-top: var(--s4);
 }
 
 .transcript-foot-rule {
