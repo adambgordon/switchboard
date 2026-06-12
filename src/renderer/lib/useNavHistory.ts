@@ -3,18 +3,15 @@ import { useCallback, useReducer } from 'react'
 /**
  * Browser-style back/forward navigation over conversation selection.
  *
- * Three kinds of move:
- *  - `open(id)`    — a *deliberate* open (click / Enter / resume / new / jump-to-live). Records
- *                    a history stop: truncates any forward entries, pushes, advances the cursor.
- *  - `preview(id)` — a transient selection (arrow keys). Moves the selection only; never touches
- *                    history. Selection can therefore *drift* off the current stop.
- *  - `home()`      — deselect entirely (back to the welcome screen). Like a preview-drift to
- *                    "nothing": history is left intact, so the next `back()` re-centers on the
- *                    last opened conversation.
+ * Two kinds of move:
+ *  - `open(id)` — a deliberate open (click / ⌥⌘↑/↓ switch / Enter / resume / new). Records a
+ *                 history stop: truncates any forward entries, pushes, advances the cursor.
+ *  - `home()`   — deselect entirely (back to the welcome screen). A drift to "nothing": history is
+ *                 left intact, so the next `back()` re-centers on the last opened conversation.
  *
- * `back()` / `forward()` walk the recorded stops. If the selection has drifted (an arrow preview
- * moved it off the current stop), the first `back()` re-centers on that stop rather than skipping
- * past it; `forward()` is inert while drifted (nothing is recorded ahead of a drift).
+ * `back()` / `forward()` walk the recorded stops. If the selection has drifted off the current
+ * stop — only `home()` does that now, by nulling the selection — the first `back()` re-centers on
+ * that stop rather than skipping past it; `forward()` is inert while drifted.
  *
  * History is ephemeral session state — not persisted (like the Recent "Show more" reveal), so it
  * resets on reload, matching browser-session semantics.
@@ -29,7 +26,6 @@ export interface NavState {
 
 export type NavAction =
   | { type: 'open'; id: string }
-  | { type: 'preview'; id: string }
   | { type: 'home' }
   | { type: 'back' }
   | { type: 'forward' }
@@ -39,8 +35,6 @@ const INITIAL: NavState = { selectedId: null, stack: [], cursor: -1 }
 /** Pure transition function — exported for unit testing (the hook itself isn't unit-tested). */
 export function navReducer(state: NavState, action: NavAction): NavState {
   switch (action.type) {
-    case 'preview':
-      return state.selectedId === action.id ? state : { ...state, selectedId: action.id }
     case 'home':
       // Deselect → the welcome screen. History is untouched (a drift to "nothing"), so the
       // next `back()` re-centers on the last opened conversation rather than skipping it.
@@ -57,7 +51,7 @@ export function navReducer(state: NavState, action: NavAction): NavState {
     }
     case 'back': {
       if (state.cursor < 0) return state
-      // Drifted off the stop via an arrow preview → snap back to the stop first.
+      // Drifted off the stop (via home → null) → snap back to the stop first.
       if (state.selectedId !== state.stack[state.cursor]) {
         return { ...state, selectedId: state.stack[state.cursor] }
       }
@@ -79,9 +73,8 @@ export function navReducer(state: NavState, action: NavAction): NavState {
 export function useNavHistory() {
   const [state, dispatch] = useReducer(navReducer, INITIAL)
   const open = useCallback((id: string) => dispatch({ type: 'open', id }), [])
-  const preview = useCallback((id: string) => dispatch({ type: 'preview', id }), [])
   const home = useCallback(() => dispatch({ type: 'home' }), [])
   const back = useCallback(() => dispatch({ type: 'back' }), [])
   const forward = useCallback(() => dispatch({ type: 'forward' }), [])
-  return { selectedId: state.selectedId, open, preview, home, back, forward }
+  return { selectedId: state.selectedId, open, home, back, forward }
 }

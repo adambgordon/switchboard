@@ -63,7 +63,7 @@ Because you built it locally, macOS doesn't quarantine it — it opens without t
 - **Pin & organize** — the left pane has three collapsible sections: **Pinned**, **Live** (running now), and **Recent**. Pins persist across restarts; live and pinned rows drag to reorder; a cobalt dot tracks each live conversation's turn-state — working, waiting on your reply, finished-unread, or seen.
 - **Right-click any row** — a quick menu to copy the session ID, resume or stop a session, and mark it read or unread. **⌥-click** a live row (or its terminal) to mark it unread directly.
 - **Search, two kinds** — fuzzy search *across* conversations (titles, previews, directories), and find-in-conversation (`⌘F`) that highlights every match in the Formatted transcript, including inside collapsed tool calls and clamped results.
-- **Navigate by keyboard** — arrow-key preview, `⏎` to open, browser-style back/forward, and more (see below).
+- **Navigate by keyboard** — switch conversations with `⌥⌘↑` / `⌥⌘↓` (the main pane stays focused, so you can type or hit `⏎` to resume), browser-style back/forward, and more (see below).
 - **Default start folder** — set a default directory in Preferences so **New** (`⌘N`) skips the folder picker and starts there.
 - **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences.
 
@@ -76,14 +76,12 @@ _For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUD
 | `⌘N` | New conversation (directory picker, or your default directory if one is set) |
 | `⌘F` | Find in the conversation (main pane focused) — or search the list (otherwise) |
 | `⏎` / `⇧⏎` | In the find bar: next / previous match |
-| `⏎` | Open the selection — resume it, or (if already live) focus into its terminal |
-| `→` | Focus the selection if it's already live — same as `⏎` on a live row; does nothing if not live |
+| `⌥⌘↑` / `⌥⌘↓` | Previous / next conversation — lands focused in the main pane (type right away, or `⏎` to resume) |
+| `⏎` | Resume the selected conversation from its transcript — or, if it's already live, focus into its terminal |
 | `⇧⌘U` | Mark the selected conversation read / unread |
 | `⌥-click` | Mark a conversation unread — a live row in the list, or its terminal |
-| `↑` / `↓` | Move the selection (preview only — never focuses a live terminal) |
 | `⌘[` / `⌘]` | Back / forward through the conversations you've opened |
 | `⌘B` | Toggle the pane |
-| `⌘G` | Focus the conversation list — returns the keyboard to list-nav from the main pane / terminal |
 | `⌘,` | Open Preferences (the title-bar gear opens the same dialog) |
 | `⌘?` | Open Preferences to the Shortcuts page (the footer `?` button does the same) |
 | `Esc` | Close the find bar / clear the query and close search / close menu / close Preferences |
