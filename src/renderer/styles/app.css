@@ -190,7 +190,7 @@
 }
 .sb-btn-resume:hover {
   filter: brightness(1.06);
-  box-shadow: 0 5px 16px var(--live-glow);
+  box-shadow: var(--shadow-sel-hover);
 }
 
 .sb-seg {
