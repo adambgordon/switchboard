@@ -1,11 +1,98 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ComponentPropsWithoutRef, ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentPropsWithoutRef, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { TranscriptBlock } from '@shared/types'
 import type { MessageGroup } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
+import { rowsToMarkdownTable, turnMarkdown } from '../lib/clipboard'
+import { Check, Copy } from './icons'
+
+/* ------------------------------------------------------------------ *
+ * Copy affordance — a hover-revealed icon button that flashes a check
+ * for ~700ms on click (the TallyRail.copySessionId pattern). Neutral
+ * ink only (copy isn't an accent action). `getText` is read lazily on
+ * click, so callers pull from a ref / the DOM / props at that moment.
+ * ------------------------------------------------------------------ */
+function CopyButton({
+  getText,
+  className,
+  tip = 'Copy'
+}: {
+  getText: () => string
+  className?: string
+  tip?: string
+}): ReactNode {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const onClick = (e: ReactMouseEvent): void => {
+    // Never toggle a surrounding <details>, start a text selection, or bubble to the pane.
+    e.preventDefault()
+    e.stopPropagation()
+    const text = getText()
+    if (!text) return
+    void navigator.clipboard.writeText(text).catch(() => {})
+    setCopied(true)
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setCopied(false), 700)
+  }
+  return (
+    <button
+      type="button"
+      className={`copy-btn${className ? ' ' + className : ''}${copied ? ' copied' : ''}`}
+      onClick={onClick}
+      aria-label={tip}
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </button>
+  )
+}
+
+/** Read a rendered markdown table's cells into rows (row 0 = header). Shared by the table copy button
+ *  and the turn copy. */
+function tableRows(table: HTMLTableElement | null): string[][] {
+  if (!table) return []
+  return Array.from(table.rows).map((row) => Array.from(row.cells).map((c) => c.textContent ?? ''))
+}
+
+/* A fenced code block + a markdown table each get a corner copy button. The button lives on a
+ * non-scrolling `position:relative` wrapper so it stays put while the inner block scrolls sideways. */
+function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
+  const ref = useRef<HTMLPreElement>(null)
+  return (
+    <div className="md-pre-wrap">
+      <pre className="md-pre" ref={ref}>
+        {children}
+      </pre>
+      <CopyButton className="copy-block" tip="Copy code" getText={() => ref.current?.textContent ?? ''} />
+    </div>
+  )
+}
+
+function TableBlock({
+  children,
+  sourceMarkdown
+}: {
+  children?: ReactNode
+  /** The table's exact markdown source (sliced via the hast node's position). Preferred over the DOM
+   *  reconstruction because it preserves cell formatting / alignment that the rendered cells drop. */
+  sourceMarkdown?: string
+}): ReactNode {
+  const ref = useRef<HTMLTableElement>(null)
+  const getText = (): string => sourceMarkdown?.trim() || rowsToMarkdownTable(tableRows(ref.current))
+  return (
+    <div className="md-table-outer">
+      <div className="md-table-wrap">
+        <table className="md-table" ref={ref}>
+          {children}
+        </table>
+      </div>
+      <CopyButton className="copy-block" tip="Copy table" getText={getText} />
+    </div>
+  )
+}
 
 /* ------------------------------------------------------------------ *
  * Markdown overrides — every element is styled via a `md-*` class so
@@ -33,7 +120,7 @@ const markdownComponents: Components = {
       {children}
     </code>
   ),
-  pre: ({ children }) => <pre className="md-pre">{children}</pre>,
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   ul: ({ children }) => <ul className="md-ul">{children}</ul>,
   ol: ({ children }) => <ol className="md-ol">{children}</ol>,
   li: ({ children }) => <li className="md-li">{children}</li>,
@@ -44,11 +131,6 @@ const markdownComponents: Components = {
   h5: ({ children }) => <h5 className="md-h md-h5">{children}</h5>,
   h6: ({ children }) => <h6 className="md-h md-h6">{children}</h6>,
   blockquote: ({ children }) => <blockquote className="md-quote">{children}</blockquote>,
-  table: ({ children }) => (
-    <div className="md-table-wrap">
-      <table className="md-table">{children}</table>
-    </div>
-  ),
   th: ({ children, style }) => (
     <th className="md-th" style={style}>
       {children}
@@ -70,10 +152,33 @@ const markdownComponents: Components = {
   )
 }
 
+/** Slice an element's exact markdown source from the original `text` via its hast node position.
+ *  Returns '' when offsets are unavailable (callers fall back to a DOM-based reconstruction). */
+function sliceSource(text: string, node: unknown): string {
+  const pos = (
+    node as { position?: { start?: { offset?: number }; end?: { offset?: number } } } | undefined
+  )?.position
+  const start = pos?.start?.offset
+  const end = pos?.end?.offset
+  return typeof start === 'number' && typeof end === 'number' ? text.slice(start, end) : ''
+}
+
 function AssistantMarkdown({ text }: { text: string }): ReactNode {
+  // Override `table` with a closure over the source so its copy button yields the exact markdown
+  // (cell formatting / alignment preserved) sliced via the node's position offsets — the same source
+  // the turn copy uses. Everything else stays the shared module-level components.
+  const components = useMemo<Components>(
+    () => ({
+      ...markdownComponents,
+      table: ({ node, children }) => (
+        <TableBlock sourceMarkdown={sliceSource(text, node)}>{children}</TableBlock>
+      )
+    }),
+    [text]
+  )
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {text}
       </ReactMarkdown>
     </div>
@@ -111,7 +216,10 @@ function ToolUseBlock({ name, input }: { name: string; input: unknown }): ReactN
         <span aria-hidden="true">⚙</span>
         <span className="tool-name">{name}</span>
       </summary>
-      <pre className="tool-json">{safeStringify(input)}</pre>
+      <div className="tool-json-wrap">
+        <pre className="tool-json">{safeStringify(input)}</pre>
+        <CopyButton className="copy-block" tip="Copy JSON" getText={() => safeStringify(input)} />
+      </div>
     </details>
   )
 }
@@ -153,8 +261,12 @@ function ToolResultBlock({ text, isError }: { text: string; isError: boolean }):
   }, [])
   return (
     <div className={isError ? 'tool-card result-card is-error' : 'tool-card result-card'}>
+      <CopyButton className="copy-block" tip="Copy result" getText={() => text} />
       <div className="tool-result-body">
-        <div ref={clipRef} className={expanded ? 'tool-result-clip' : 'tool-result-clip is-clamped'}>
+        <div
+          ref={clipRef}
+          className={`tool-result-clip${expanded ? '' : ' is-clamped'}${!expanded && overflowing ? ' is-faded' : ''}`}
+        >
           <pre ref={textRef} className="tool-result-text">
             {text}
           </pre>
@@ -231,6 +343,12 @@ function MessageBlock({
   }`
   const ts = group.messages[0]?.timestamp ?? null
   const time = clockTime(ts)
+  // The turn-copy icon is for narrative turns only: You / Claude groups that actually carry prose
+  // (a text block). Result / Error / Interrupted and pure-tool-call turns have no prose — their
+  // content is reachable via the per-block copy buttons instead.
+  const isProseTurn =
+    (group.label === 'You' || group.label === 'Claude') &&
+    group.messages.some((m) => m.blocks.some((b) => b.kind === 'text'))
 
   return (
     <article className={classes}>
@@ -239,6 +357,13 @@ function MessageBlock({
           {group.label}
         </span>
         {group.isSidechain ? <span className="sidechain-tag label-caps">Sub-agent</span> : null}
+        {isProseTurn ? (
+          <CopyButton
+            className="copy-turn"
+            tip="Copy turn"
+            getText={() => turnMarkdown(group.messages)}
+          />
+        ) : null}
         {time ? (
           <span className="message-time mono" data-tip={fullDateTime(ts)}>
             {time}

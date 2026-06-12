@@ -91,12 +91,11 @@
   /* Neutral-ink RGB channels for ad-hoc one-off shadows (rgba(var(--shadow-color), α)); dark flips
      it to pure black so a near-black shadow doesn't vanish into a dark surface. */
   --shadow-color: 26, 26, 26;
-  /* Row-selection shadows (focus-tiered LOUD state + card hover) — narrow + downward-biased (negative
-     spread, ~7px reach) so they fade within the rail's 10px padding and never hard-cut at the overflow
-     clip / scrollbar gutter; strength is opacity. Theme-aware: the dark block boosts the alphas because
-     a black shadow under-reads on the near-black rail. */
-  --shadow-sel: 0 6px 18px -11px rgba(var(--shadow-color), 0.58), 0 1px 10px -3px rgba(var(--shadow-color), 0.52);
-  --shadow-sel-hover: 0 4px 13px -9px rgba(var(--shadow-color), 0.3), 0 1px 8px -2px rgba(var(--shadow-color), 0.26);
+  /* Card hover-lift shadow — narrow + downward-biased (negative spread, ~7px reach) so it fades within
+     the rail's 10px padding and never hard-cuts at the overflow clip / scrollbar gutter; strength is
+     opacity. Theme-aware (the dark block boosts the alpha — a black shadow under-reads on the near-black
+     rail, so dark uses a light glow). Selection itself is shadowless (a single 1px ring — see rail.css). */
+  --shadow-sel-hover: 0 4px 16px -6px rgba(var(--shadow-color), 0.3), 0 2px 10px -3px rgba(var(--shadow-color), 0.26);
   /* modal/overlay dim */
   --scrim: rgba(26, 26, 26, 0.28);
 }
@@ -147,11 +146,10 @@
   --shadow-pane: 0 1px 1px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.45);
   --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.4), 0 16px 44px rgba(0, 0, 0, 0.55);
   --shadow-color: 0, 0, 0;
-  /* Selection/hover shadows — a BLACK drop shadow is invisible on the near-black rail (almost no
+  /* Card hover-lift shadow — a BLACK drop shadow is invisible on the near-black rail (almost no
      perceptual contrast at the dark end), so dark uses a neutral LIGHT glow instead (still grey, not
      cobalt — it's the dark counterpart of the light drop shadow). Reach kept ≤~7px so the glow (now
      light, so a cut WOULD show) never hard-cuts at the scrollbar / clip edge. */
-  --shadow-sel: 0 3px 14px -7px rgba(255, 255, 255, 0.42), 0 1px 9px -3px rgba(255, 255, 255, 0.32);
-  --shadow-sel-hover: 0 2px 11px -7px rgba(255, 255, 255, 0.25), 0 1px 7px -3px rgba(255, 255, 255, 0.18);
+  --shadow-sel-hover: 0 4px 16px -6px rgba(0, 0, 0, 1), 0 2px 10px -3px rgba(0, 0, 0, 0.85);
   --scrim: rgba(0, 0, 0, 0.6);
 }

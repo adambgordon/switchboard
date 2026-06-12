@@ -191,12 +191,13 @@ export const CONFIG = {
    */
   maxLivePtys: 8,
   /**
-   * Bounds for the user-configurable cap (the Preferences stepper clamps to these; the
-   * PtyManager re-clamps defensively). The ceiling tracks Chromium's ~16 WebGL-context limit —
-   * past it, live terminals fall back to the canvas renderer (see TerminalView's onContextLoss).
+   * Bounds for the user-configurable cap (the Preferences slider clamps to these; the
+   * PtyManager re-clamps defensively). 2–14 centers the default (8) on the slider, and the ceiling
+   * stays under Chromium's ~16 WebGL-context limit — past which live terminals fall back to the
+   * canvas renderer (see TerminalView's onContextLoss).
    */
   liveSessionsMin: 2,
-  liveSessionsMax: 16,
+  liveSessionsMax: 14,
   /** ms of output silence after which a live session is considered idle (not busy). */
   busyWindowMs: 800
 } as const

@@ -103,8 +103,6 @@ interface Props {
   liveOrder: string[]
   /** Bumped on each drag-reorder commit; folded into controlSig so that commit settles instantly. */
   reorderTick: number
-  /** The rail root — ⌘G focuses it (tabIndex -1) to return the keyboard to list-nav. */
-  railRef: RefObject<HTMLElement>
 }
 
 /**
@@ -150,8 +148,7 @@ export default function TallyRail({
   pinnedOrder,
   onReorderLive,
   liveOrder,
-  reorderTick,
-  railRef
+  reorderTick
 }: Props) {
   const { count, working, asking, waiting, idle } = live
   const empty = sections.length === 0
@@ -260,7 +257,7 @@ export default function TallyRail({
   }, [ctxMenu])
 
   return (
-    <aside className="sb-rail" ref={railRef} tabIndex={-1}>
+    <aside className="sb-rail">
       <div className="sb-rail-head">
         <div className="sb-rail-head-top">
           <div className="sb-rail-count-wrap">

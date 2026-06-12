@@ -404,6 +404,15 @@
   overflow: hidden;
 }
 
+/* Tasteful fade: when a clamped result actually overflows, the last ~1.5 lines dissolve into the card
+   so the 12-line cut reads soft instead of a hard edge. The mask fades the content to transparent
+   (theme-agnostic — the sunken card shows through). Gated on `is-faded` (set only when overflowing),
+   so a short result that happens to fit never gets a spurious fade, and the expanded view is full. */
+.tool-result-clip.is-faded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5em), transparent);
+}
+
 .tool-result-text {
   margin: 0;
   white-space: pre-wrap;
@@ -511,8 +520,7 @@
   flex-direction: column;
   align-items: center;
   gap: var(--s4);
-  margin-top: var(--s6);
-  padding-top: var(--s5);
+  margin-top: var(--s4);
 }
 
 .transcript-foot-rule {
@@ -523,4 +531,70 @@
 
 .transcript-foot-label {
   color: var(--ink-ghost);
+}
+
+/* ---- copy affordances — hover-revealed icon buttons that flash a check on click (the
+   TallyRail.copySessionId pattern). Neutral ink only (two-accent invariant). Absent at rest; the
+   `.copied` flag keeps the check visible even if the pointer leaves mid-flash. ---- */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  opacity: 0;
+  /* opacity does NOT ease here — the fade-IN transition lives on the reveal rules below, so leaving
+     the revealed state HIDES INSTANTLY. That kills the post-click flicker: when the 700ms check ends
+     with the pointer already gone, the button is hidden in the same frame the glyph reverts to copy,
+     so the copy icon never paints (check → gone, no copy flash). */
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.copy-btn:hover {
+  color: var(--ink);
+}
+.copy-btn.copied {
+  color: var(--ink-soft);
+}
+
+/* whole-turn copy — inline, immediately to the LEFT of the timestamp. The copy icon grabs the
+   header's free space (margin-left:auto); the timestamp then sits right after it, so we cancel the
+   timestamp's own margin-left:auto in that case (otherwise two auto margins split the gap and the
+   icon lands dead-center). A turn with no copy icon keeps the timestamp's auto and stays flush-right. */
+.copy-turn {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.copy-turn + .message-time {
+  margin-left: 0;
+}
+
+/* per-block copy — a small raised chip in the block's upper-right corner. The wrappers are
+   position:relative + non-scrolling, so the chip stays put while the inner block scrolls sideways. */
+.md-pre-wrap,
+.md-table-outer,
+.tool-json-wrap,
+.tool-card {
+  position: relative;
+}
+.copy-block {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+}
+
+/* reveal — fade IN on hover; the opacity transition lives here (not on the base), so hide is instant.
+   .copied keeps the button shown through the check-flash even once the pointer leaves. */
+.message:hover .copy-turn,
+.md-pre-wrap:hover .copy-block,
+.md-table-outer:hover .copy-block,
+.tool-card:hover .copy-block,
+.copy-btn.copied {
+  opacity: 1;
+  transition: opacity var(--dur-fast) var(--ease);
 }

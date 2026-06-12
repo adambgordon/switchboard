@@ -8,7 +8,7 @@ import { CONFIG } from '@shared/types'
  * [liveSessionsMin, liveSessionsMax] bounds — the ceiling tracks Chromium's WebGL-context limit,
  * past which live terminals fall back to the canvas renderer.
  *
- * Owned once in App (mirrors useNewConvoDefault / useLayout): both the stepper handlers and the IPC
+ * Owned once in App (mirrors useNewConvoDefault / useLayout): both the slider handler and the IPC
  * push read this one copy, so a second useState(load) elsewhere can't desync from its writes.
  */
 const KEY = 'switchboard.maxLiveSessions'
@@ -31,13 +31,13 @@ function load(): number {
 export interface MaxLiveSessions {
   /** Current cap. */
   value: number
-  /** Inclusive bounds (the stepper disables its buttons at these). */
+  /** Inclusive bounds (the slider's min / max). */
   min: number
   max: number
   /** The default the Reset control restores to (CONFIG.maxLivePtys). */
   defaultValue: number
-  inc: () => void
-  dec: () => void
+  /** Set the cap to an explicit value (clamped) — the slider's onChange. */
+  set: (n: number) => void
   reset: () => void
 }
 
@@ -53,8 +53,9 @@ export function useMaxLiveSessions(): MaxLiveSessions {
     }
   }, [value])
 
-  const inc = useCallback(() => setValue((v) => clamp(v + 1)), [])
-  const dec = useCallback(() => setValue((v) => clamp(v - 1)), [])
+  // setValue bails when the clamped value is unchanged (React's primitive Object.is check), so a
+  // slider drag only re-renders / pushes IPC when it crosses an integer step.
+  const set = useCallback((n: number) => setValue(clamp(n)), [])
   const reset = useCallback(() => setValue(CONFIG.maxLivePtys), [])
 
   return {
@@ -62,8 +63,7 @@ export function useMaxLiveSessions(): MaxLiveSessions {
     min: CONFIG.liveSessionsMin,
     max: CONFIG.liveSessionsMax,
     defaultValue: CONFIG.maxLivePtys,
-    inc,
-    dec,
+    set,
     reset
   }
 }
