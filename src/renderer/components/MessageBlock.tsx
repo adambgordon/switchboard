@@ -263,7 +263,10 @@ function ToolResultBlock({ text, isError }: { text: string; isError: boolean }):
     <div className={isError ? 'tool-card result-card is-error' : 'tool-card result-card'}>
       <CopyButton className="copy-block" tip="Copy result" getText={() => text} />
       <div className="tool-result-body">
-        <div ref={clipRef} className={expanded ? 'tool-result-clip' : 'tool-result-clip is-clamped'}>
+        <div
+          ref={clipRef}
+          className={`tool-result-clip${expanded ? '' : ' is-clamped'}${!expanded && overflowing ? ' is-faded' : ''}`}
+        >
           <pre ref={textRef} className="tool-result-text">
             {text}
           </pre>
