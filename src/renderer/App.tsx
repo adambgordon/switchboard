@@ -86,8 +86,7 @@ export default function App() {
     min: maxLiveMin,
     max: maxLiveMax,
     defaultValue: maxLiveDefault,
-    inc: incMaxLive,
-    dec: decMaxLive,
+    set: setMaxLive,
     reset: resetMaxLive
   } = useMaxLiveSessions()
   const { mode: themeMode, resolved: themeResolved, setMode: setThemeMode, toggle: toggleTheme } = useTheme()
@@ -742,8 +741,7 @@ export default function App() {
         maxLiveMin={maxLiveMin}
         maxLiveMax={maxLiveMax}
         maxLiveDefault={maxLiveDefault}
-        onIncMaxLive={incMaxLive}
-        onDecMaxLive={decMaxLive}
+        onSetMaxLive={setMaxLive}
         onResetMaxLive={resetMaxLive}
       />
       <CapWarningModal capWarning={capWarning} onDismiss={() => setCapWarnDismissed(true)} />

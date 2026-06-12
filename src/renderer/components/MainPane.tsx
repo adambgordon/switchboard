@@ -65,7 +65,7 @@ function EmptyState() {
           <kbd>⌘N</kbd> new
         </span>
         <span>
-          <kbd>⌥⌘↑</kbd> <kbd>⌥⌘↓</kbd> switch
+          <kbd>⌘[</kbd> <kbd>⌘]</kbd> back / forward
         </span>
         <span>
           <kbd>⌘?</kbd> shortcuts
