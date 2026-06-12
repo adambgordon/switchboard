@@ -60,10 +60,11 @@ Because you built it locally, macOS doesn't quarantine it — it opens without t
 - **Preview without disturbing** — click any conversation to render its transcript instantly from disk. **No `claude` process is started**, so you can click through dozens to find the one you want.
 - **Resume / start, explicitly** — the only way to spawn a live process is **Resume** (`claude --resume`) or **New** (`claude --session-id`), each dropping you into a real terminal.
 - **Formatted ⇄ Terminal** — for a live conversation, toggle between the raw **Terminal** (where you type) and a **Formatted** view that re-renders the transcript as a clean log and stays pinned to the latest message. The choice sticks per conversation.
+- **Copy from the transcript** — in the **Formatted** view, hover a turn (beside its timestamp), a code block, a table, or a tool call/result for a copy button: a turn copies as markdown (tool I/O excluded); code and tables copy their raw source. Each flashes a check when copied.
 - **Pin & organize** — the left pane has three collapsible sections: **Pinned**, **Live** (running now), and **Recent**. Pins persist across restarts; live and pinned rows drag to reorder; a cobalt dot tracks each live conversation's turn-state — working, waiting on your reply, finished-unread, or seen.
 - **Right-click any row** — a quick menu to copy the session ID, resume or stop a session, and mark it read or unread. **⌥-click** a live row (or its terminal) to mark it unread directly.
 - **Search, two kinds** — fuzzy search *across* conversations (titles, previews, directories), and find-in-conversation (`⌘F`) that highlights every match in the Formatted transcript, including inside collapsed tool calls and clamped results.
-- **Navigate by keyboard** — arrow-key preview, `⏎` to open, browser-style back/forward, and more (see below).
+- **Navigate by keyboard** — switch conversations with `⌥⌘↑` / `⌥⌘↓` (the main pane stays focused, so you can type or hit `⏎` to resume), browser-style back/forward, and more (see below).
 - **Default start folder** — set a default directory in Preferences so **New** (`⌘N`) skips the folder picker and starts there.
 - **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences.
 
@@ -76,14 +77,12 @@ _For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUD
 | `⌘N` | New conversation (directory picker, or your default directory if one is set) |
 | `⌘F` | Find in the conversation (main pane focused) — or search the list (otherwise) |
 | `⏎` / `⇧⏎` | In the find bar: next / previous match |
-| `⏎` | Open the selection — resume it, or (if already live) focus into its terminal |
-| `→` | Focus the selection if it's already live — same as `⏎` on a live row; does nothing if not live |
+| `⌥⌘↑` / `⌥⌘↓` | Previous / next conversation — lands focused in the main pane (type right away, or `⏎` to resume) |
+| `⏎` | Resume the selected conversation from its transcript — or, if it's already live, focus into its terminal |
 | `⇧⌘U` | Mark the selected conversation read / unread |
 | `⌥-click` | Mark a conversation unread — a live row in the list, or its terminal |
-| `↑` / `↓` | Move the selection (preview only — never focuses a live terminal) |
 | `⌘[` / `⌘]` | Back / forward through the conversations you've opened |
 | `⌘B` | Toggle the pane |
-| `⌘G` | Focus the conversation list — returns the keyboard to list-nav from the main pane / terminal |
 | `⌘,` | Open Preferences (the title-bar gear opens the same dialog) |
 | `⌘?` | Open Preferences to the Shortcuts page (the footer `?` button does the same) |
 | `Esc` | Close the find bar / clear the query and close search / close menu / close Preferences |

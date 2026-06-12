@@ -190,7 +190,7 @@
 }
 .sb-btn-resume:hover {
   filter: brightness(1.06);
-  box-shadow: 0 5px 16px var(--live-glow);
+  box-shadow: var(--shadow-sel-hover);
 }
 
 .sb-seg {
@@ -725,53 +725,25 @@ body.sb-resizing .sb-pane {
   color: var(--ink-soft);
 }
 
-/* numeric stepper (− value +) — the live-sessions cap. Neutral ink only (two-accent invariant). */
-.sb-stepper {
+/* live-sessions cap — a compact slider sitting flush-right in the setting head (where the stepper
+   was): slider · value · reset. Neutral INK fill + thumb only (never cobalt — the two-accent
+   invariant; matches the ink toggle). */
+.sb-slider-control {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  gap: 2px;
+  gap: 6px;
 }
-.sb-stepper-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--ink-soft);
-  background: var(--paper-raised);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  transition: all var(--dur-fast) var(--ease);
-}
-.sb-stepper-btn:hover:not(:disabled) {
-  color: var(--ink);
-  background: var(--paper-hover);
-  border-color: var(--ink-ghost);
-}
-.sb-stepper-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.sb-stepper-value {
-  min-width: 30px;
-  text-align: center;
+.sb-slider-value {
+  min-width: 16px;
+  text-align: right;
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
-/* Wraps the reset icon + the stepper on one row, flush right in the setting. */
-.sb-stepper-control {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 8px;
-}
 /* Reset-to-default: a ghost rewind-arrow icon button (greyed when already at default). */
-.sb-stepper-reset {
+.sb-slider-reset {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -780,13 +752,49 @@ body.sb-resizing .sb-pane {
   color: var(--ink-ghost);
   transition: all var(--dur-fast) var(--ease);
 }
-.sb-stepper-reset:hover:not(:disabled) {
+.sb-slider-reset:hover:not(:disabled) {
   color: var(--ink);
   background: var(--paper-hover);
 }
-.sb-stepper-reset:disabled {
+.sb-slider-reset:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+.sb-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 88px; /* compact — sits inline in the setting head, not a full-width row */
+  height: 16px; /* room for the thumb; the visible 4px track is the pseudo-element below */
+  background: transparent;
+  cursor: pointer;
+}
+/* filled portion = ink up to --pct (set inline from the value), the rest = track grey */
+.sb-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    to right,
+    var(--ink) 0 var(--pct, 0%),
+    var(--rule-strong) var(--pct, 0%) 100%
+  );
+}
+.sb-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -6px; /* center the 16px thumb on the 4px track: (4 - 16) / 2 */
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 2px solid var(--paper-raised);
+  box-shadow: 0 1px 3px rgba(var(--shadow-color), 0.3);
+  cursor: pointer;
+}
+.sb-slider:focus-visible {
+  outline: none;
+}
+.sb-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--rule-strong);
 }
 
 /* ---- row context menu (right-click / two-finger → mark read/unread) ---- */

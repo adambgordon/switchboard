@@ -86,8 +86,7 @@ export default function App() {
     min: maxLiveMin,
     max: maxLiveMax,
     defaultValue: maxLiveDefault,
-    inc: incMaxLive,
-    dec: decMaxLive,
+    set: setMaxLive,
     reset: resetMaxLive
   } = useMaxLiveSessions()
   const { mode: themeMode, resolved: themeResolved, setMode: setThemeMode, toggle: toggleTheme } = useTheme()
@@ -103,11 +102,11 @@ export default function App() {
   } = useLayout()
   const dragStartRef = useRef(0)
 
-  const { selectedId, open, preview, home, back, forward } = useNavHistory()
-  // Session-targeted focus request, bumped only on a *deliberate* focus (click / Enter / Right
-  // arrow on a live row / resume / new / go-live) — never on ↑/↓ preview or back/forward.
-  // Previewing a live row therefore shows its terminal without stealing the keyboard, so arrow
-  // nav doesn't get trapped on it.
+  const { selectedId, open, home, back, forward } = useNavHistory()
+  // Session-targeted focus request, bumped whenever you land on a conversation (a click, ⌥⌘↑/↓
+  // switch, Enter, resume, new, go-live) — the main pane always takes the keyboard. A per-session
+  // focusReq lets MainPane route focus to the right surface (a live terminal, else the Formatted
+  // transcript) only for the selected conversation.
   const [focusReq, setFocusReq] = useState<{ sessionId: string; n: number } | null>(null)
   const requestFocus = useCallback(
     (sessionId: string) => setFocusReq((r) => ({ sessionId, n: (r?.n ?? 0) + 1 })),
@@ -123,19 +122,10 @@ export default function App() {
   // Section keys revealed past their cap via "Show more" (ephemeral — resets on reload).
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
   const searchRef = useRef<HTMLInputElement>(null)
-  // The rail (left pane) root — ⌘G focuses it so the keyboard returns to list-nav from the main
-  // pane / terminal. It's tabIndex={-1} (focusable only programmatically); feedback is the selected
-  // row, not a focus ring.
-  const railRef = useRef<HTMLElement>(null)
   // Find-in-conversation (main pane). App owns the open/close toggle — ⌘F opens it when focus is
   // in the main pane, Esc closes it; the query + match state live in MainPane. `paneRef` lets the
-  // ⌘F handler tell whether focus is physically inside the main pane vs the rail/list.
+  // ⌘F handler tell whether focus is physically inside the main pane vs the rail.
   const paneRef = useRef<HTMLElement>(null)
-  // Snapshot — taken on mousedown, BEFORE the browser moves focus — of whether focus was inside the
-  // main pane. Row clicks read it to toggle focus on the already-open conversation: if focus was in
-  // the pane the click releases to the list (the mousedown already did so); if it was on the list the
-  // click pulls focus back into the pane. So repeated clicks on the same row flip focus back and forth.
-  const focusInPaneAtDownRef = useRef(false)
   const [findOpen, setFindOpen] = useState(false)
   // Bumped on every ⌘F while focus is in the main pane, so pressing ⌘F again (after clicking into
   // the transcript) re-focuses the find input even when the bar is already open. Threaded down to
@@ -150,16 +140,14 @@ export default function App() {
     initPtyStream()
   }, [])
 
-  // Capture, on every mousedown's *capture* phase (before the click moves focus), whether focus was
-  // inside the main pane — read by the row-click handlers to toggle pane/list focus on a repeat click
-  // of the already-open conversation. Capture-phase + window so it beats xterm's own mousedown handling.
+  // The main pane always owns the keyboard. Whenever the selected conversation changes to a real
+  // one — including via ⌘[ / ⌘] back/forward, which don't request focus themselves — focus its
+  // surface so you can type (live) or hit Enter to resume (not-live). The explicit requestFocus in
+  // the action handlers (click / switch / resume / go-live) still covers re-selecting the SAME
+  // conversation, where this effect (keyed on selectedId) wouldn't fire.
   useEffect(() => {
-    const onDown = (): void => {
-      focusInPaneAtDownRef.current = !!paneRef.current && paneRef.current.contains(document.activeElement)
-    }
-    window.addEventListener('mousedown', onDown, true)
-    return () => window.removeEventListener('mousedown', onDown, true)
-  }, [])
+    if (selectedId) requestFocus(selectedId)
+  }, [selectedId, requestFocus])
 
   // Keep the main-process LRU cap in lockstep with the persisted preference — on mount and on each
   // change. Fire-and-forget, and runs after commit, so it never touches the render/paint path.
@@ -326,8 +314,8 @@ export default function App() {
     setViewBySession((prev) => (prev[id] === v ? prev : { ...prev, [id]: v }))
   }, [])
 
-  // Arrow keys preview (transient selection, no history); deliberate opens (click / Enter /
-  // resume / new / jump) go through useNavHistory's `open`, which records a back/forward stop.
+  // Every landing on a conversation (click / ⌥⌘↑/↓ switch / Enter / resume / new) goes through
+  // useNavHistory's `open`, which records a back/forward stop.
   const resume = useCallback(async (meta: ConversationMeta) => {
     open(meta.sessionId)
     setSessionView(meta.sessionId, 'terminal')
@@ -386,11 +374,10 @@ export default function App() {
     }
   }, [selectedId, requestFocus, setSessionView])
   // Enter/focus a live conversation's terminal: record a history stop, switch to the Terminal
-  // view, and hand it the keyboard so you can type immediately. The optional `id` lets a click
-  // target a row that isn't selected yet; with no arg it acts on `selectedId`. Shared by Enter,
-  // the Right arrow, AND a live-row click (every call site guards on a live pty, so a not-live
-  // selection never lands here). A click thus behaves exactly like ⏎ / → — it focuses the
-  // terminal — while arrow ↑/↓ still only *preview* (no focus), so list-nav is unaffected.
+  // view, and hand it the keyboard so you can type immediately. The optional `id` lets a switch /
+  // click target a row that isn't selected yet; with no arg it acts on `selectedId`. Shared by
+  // ⏎ (from Formatted), a live-row click, and the ⌥⌘↑/↓ switch (every call site guards on a live
+  // pty, so a not-live selection never lands here).
   const enterLive = useCallback((id?: string) => {
     const target = id ?? selectedId
     if (!target) return
@@ -398,39 +385,26 @@ export default function App() {
     setSessionView(target, 'terminal')
     requestFocus(target)
   }, [selectedId, open, setSessionView, requestFocus])
-  // A live-row CLICK (not ⏎/→): a *different* live row jumps in + focuses its terminal. The row
-  // you're already on TOGGLES: enter the terminal only if focus was on the list at mousedown; if it
-  // was already in the pane, do nothing and let the click's own blur release focus to the list. So
-  // repeated clicks on the same row flip focus list↔terminal. (⏎ / → still always enter.)
-  const clickLive = useCallback(
-    (id: string) => {
-      if (id !== selectedId || !focusInPaneAtDownRef.current) enterLive(id)
-    },
-    [selectedId, enterLive]
-  )
-  // A not-live row CLICK: hand the keyboard to the Formatted view, parallel to clickLive focusing a
-  // live row's terminal. A *different* row → open it + focus the pane. The row you're already on
-  // TOGGLES: pull focus back into the pane only if it was on the list at mousedown; if it was already
-  // in the pane, do nothing and let the click's blur release to the list. Repeated clicks flip focus.
+  // A live-row CLICK (and the ⌥⌘↑/↓ switch target): open it, switch to its Terminal view, and focus
+  // the terminal so you can type immediately. No focus toggle — the main pane always owns the keyboard.
+  const clickLive = useCallback((id: string) => enterLive(id), [enterLive])
+  // A not-live row CLICK (and the ⌥⌘↑/↓ switch target): open it and hand the keyboard to the
+  // Formatted view — parallel to clickLive focusing a live row's terminal. No focus toggle. The
+  // synchronous paneRef.focus() lands focus in the pane immediately even before TranscriptView
+  // mounts (it then refines focus onto its scroll container) and covers the no-transcript case.
   const clickConversation = useCallback(
     (id: string) => {
-      // Focus the pane synchronously so the row lands in its quiet (pane-focused) selected state from
-      // the first frame, independent of when the transcript mounts/loads (TranscriptView refines focus
-      // onto its scroll container once mounted). Without this, the first not-live click after a live
-      // one — where TranscriptView was unmounted — leaves a frame on the loading / no-history state
-      // with focus still on the rail, so the row briefly paints loud.
-      const focusFormatted = (): void => {
-        requestFocus(id)
-        paneRef.current?.focus({ preventScroll: true })
-      }
-      if (id !== selectedId) {
-        open(id)
-        focusFormatted()
-      } else if (!focusInPaneAtDownRef.current) {
-        focusFormatted()
-      }
+      open(id)
+      requestFocus(id)
+      paneRef.current?.focus({ preventScroll: true })
     },
-    [selectedId, open, requestFocus]
+    [open, requestFocus]
+  )
+  // ⌥⌘↑/↓ lands on a conversation exactly like a click: a live one drops into its terminal, a
+  // not-live one into its Formatted transcript.
+  const switchTo = useCallback(
+    (id: string) => (ptys.bySession.has(id) ? enterLive(id) : clickConversation(id)),
+    [ptys.bySession, enterLive, clickConversation]
   )
   const showHistory = useCallback(() => {
     if (selectedId) setSessionView(selectedId, 'transcript')
@@ -583,12 +557,20 @@ export default function App() {
       } else if (mod && e.code === 'KeyB') {
         e.preventDefault()
         togglePane()
-      } else if (mod && e.code === 'KeyG') {
-        // ⌘G — focus the conversation list (rail) so ↑/↓/⏎ drive list-nav again; pulls the keyboard
-        // out of the main pane / terminal. Seed the first visible row if nothing's selected yet.
+      } else if (mod && e.altKey && (e.code === 'ArrowDown' || e.code === 'ArrowUp')) {
+        // ⌥⌘↓ / ⌥⌘↑ — switch to the next / previous conversation (Chrome-tab style) and focus the
+        // main pane on it: a live one drops into its terminal (type immediately), a not-live one
+        // into its Formatted transcript (⏎ resumes). e.code (not e.key) per the ⌘⌥ Option-key
+        // gotcha. Works from inside a live terminal too — Cmd-combos bubble past xterm. Clamps at
+        // the ends; from "nothing selected" both directions seed the first row.
         e.preventDefault()
-        railRef.current?.focus()
-        if (!selectedId && orderedIds.length > 0) preview(orderedIds[0])
+        if (orderedIds.length > 0) {
+          const idx = selectedId ? orderedIds.indexOf(selectedId) : -1
+          const delta = e.code === 'ArrowDown' ? 1 : -1
+          const next = idx < 0 ? 0 : Math.min(orderedIds.length - 1, Math.max(0, idx + delta))
+          const nid = orderedIds[next]
+          if (nid) switchTo(nid)
+        }
       } else if (mod && e.shiftKey && e.code === 'KeyU') {
         // ⇧⌘U — toggle read/unread on the selected conversation (macOS Mail's shortcut).
         e.preventDefault()
@@ -614,33 +596,14 @@ export default function App() {
         else if (query) setQuery('')
         else setSearchOpen(false)
         setMenuOpen(false)
-      } else if (e.key === 'Enter' && !inInput && selectedId && (!inMain || inTranscript)) {
-        // Enter "opens" the selection. From the LIST: a live conversation focuses into its terminal,
-        // a not-live one resumes. From the read-only Formatted TRANSCRIPT: a not-live conversation
-        // resumes — so you can read history and hit Enter to bring it live without going back to the
-        // list. xterm consumes Enter inside a live terminal (never reaches here), and the inTranscript
-        // gate excludes pane-header buttons, so typing / button activation is never hijacked.
+      } else if (e.key === 'Enter' && !inInput && selectedId && inTranscript) {
+        // ⏎ from the read-only Formatted transcript: a not-live conversation resumes; a live one
+        // (shown in Formatted) jumps into its terminal — so you can read history and hit Enter to
+        // bring it live. Gated to the transcript scroll container (inTranscript), so pane-header
+        // buttons and the live terminal (where xterm consumes Enter) are never hijacked.
         e.preventDefault()
-        if (selectedPty) {
-          if (!inMain) enterLive()
-        } else if (selectedMeta) void resume(selectedMeta)
-      } else if (e.key === 'ArrowRight' && !inInput && !inMain && selectedId && selectedPty) {
-        // Right arrow enters a *live* conversation — idempotent to Enter on a live row. The
-        // condition requires a live pty, so it's a no-op on a not-live row (those still need
-        // Enter / Resume). Like Enter, once focus is inside the terminal xterm consumes arrows
-        // before they reach here, so this only fires from the list.
-        e.preventDefault()
-        enterLive()
-      } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !inInput && !inMain && orderedIds.length > 0) {
-        // Arrow keys preview only — they never focus a live terminal or record history.
-        e.preventDefault()
-        const idx = selectedId ? orderedIds.indexOf(selectedId) : -1
-        const next =
-          e.key === 'ArrowDown'
-            ? Math.min(orderedIds.length - 1, idx + 1)
-            : Math.max(0, idx - 1)
-        const nid = orderedIds[next < 0 ? 0 : next]
-        if (nid) preview(nid)
+        if (selectedPty) enterLive()
+        else if (selectedMeta) void resume(selectedMeta)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -657,7 +620,7 @@ export default function App() {
     orderedIds,
     resume,
     enterLive,
-    preview,
+    switchTo,
     back,
     forward,
     togglePane,
@@ -717,7 +680,6 @@ export default function App() {
             onReorderLive={commitLiveReorder}
             liveOrder={liveOrder}
             reorderTick={reorderTick}
-            railRef={railRef}
           />
         )}
         {!paneCollapsed && (
@@ -779,8 +741,7 @@ export default function App() {
         maxLiveMin={maxLiveMin}
         maxLiveMax={maxLiveMax}
         maxLiveDefault={maxLiveDefault}
-        onIncMaxLive={incMaxLive}
-        onDecMaxLive={decMaxLive}
+        onSetMaxLive={setMaxLive}
         onResetMaxLive={resetMaxLive}
       />
       <CapWarningModal capWarning={capWarning} onDismiss={() => setCapWarnDismissed(true)} />

@@ -127,14 +127,14 @@ export default function MainPane(props: Props) {
   const showTranscript = !!selectedId && !showTerminal
   const visiblePtyId = showTerminal && pty ? pty.ptyId : null
   // Formatted-view focus key: bumps when a focus is requested for the selected conversation (a
-  // not-live row click), so TranscriptView takes the keyboard like the terminal does on a live
-  // click. Derived from selectedId — known instantly — so focus lands during the async transcript
-  // load, not after (which would leave the row in its loud/lifted state mid-load, then snap quiet).
+  // not-live row click or ⌥⌘↑/↓ switch), so TranscriptView takes the keyboard like the terminal does
+  // on a live one. Derived from selectedId — known instantly — so focus lands during the async
+  // transcript load, not after.
   const transcriptFocusKey = focusReq && focusReq.sessionId === selectedId ? focusReq.n : null
   // Dedup store for the transcript focus, kept HERE so it survives TranscriptView unmounting/remounting
-  // (navigating across a live conversation shown in its terminal unmounts it). Otherwise a remount
-  // resets the dedup and a stale focusReq re-grabs focus on return — arrow away from a selected unlive
-  // conversation and back would yank focus into the pane instead of staying on the sidebar.
+  // (switching across a live conversation shown in its terminal unmounts it). Otherwise a remount resets
+  // the dedup and a stale focusReq re-grabs focus on return — switching back to a previously-focused
+  // not-live conversation would re-pull focus on each remount.
   const transcriptFocusKeyRef = useRef<number | null>(null)
 
   // --- find in conversation (the main-pane search; distinct from the rail's cross-conversation

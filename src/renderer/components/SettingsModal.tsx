@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Close, Folder, Info, Reset } from './icons'
 import { basename } from '../lib/format'
 import type { ThemeMode } from '../lib/theme'
@@ -32,10 +32,8 @@ const GROUPS: Group[] = [
     title: 'Navigation',
     items: [
       { keys: ['⌘[', '⌘]'], desc: 'Back / forward' },
-      { keys: ['↑', '↓'], desc: 'Navigate the selected conversation' },
-      { keys: ['⏎'], desc: 'Open and resume the selected conversation' },
-      { keys: ['→'], desc: 'Focus the selected conversation if it is live' },
-      { keys: ['⌘G'], desc: 'Focus the conversation list' }
+      { keys: ['⌥⌘↑', '⌥⌘↓'], desc: 'Previous / next conversation' },
+      { keys: ['⏎'], desc: 'Resume conversation' }
     ]
   },
   {
@@ -99,12 +97,11 @@ interface Props {
   // --- App page: live-session cap ---
   /** Current max live sessions (the LRU cap). */
   maxLiveSessions: number
-  /** Inclusive bounds — the stepper disables its buttons at these. */
+  /** Inclusive bounds — the slider's min / max. */
   maxLiveMin: number
   maxLiveMax: number
-  /** Step the cap up / down by one (clamped in the hook). */
-  onIncMaxLive: () => void
-  onDecMaxLive: () => void
+  /** Set the cap to an explicit value (the slider's onChange; clamped in the hook). */
+  onSetMaxLive: (n: number) => void
   /** The default value; the Reset button is disabled when the cap already equals it. */
   maxLiveDefault: number
   /** Restore the cap to its default. */
@@ -133,8 +130,7 @@ export default function SettingsModal({
   maxLiveMin,
   maxLiveMax,
   maxLiveDefault,
-  onIncMaxLive,
-  onDecMaxLive,
+  onSetMaxLive,
   onResetMaxLive
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -191,7 +187,7 @@ export default function SettingsModal({
                       <div className="sb-setting-text">
                         <div className="sb-setting-title">Theme</div>
                         <div className="sb-setting-desc">
-                          Follow the system appearance, or force light or dark.
+                          Follow the system theme, or force light or dark.
                         </div>
                       </div>
                       <div className="sb-seg" role="radiogroup" aria-label="Theme">
@@ -233,10 +229,26 @@ export default function SettingsModal({
                         longest-idle one to make room.
                       </div>
                     </div>
-                    <div className="sb-stepper-control">
+                    <div className="sb-slider-control">
+                      <input
+                        type="range"
+                        className="sb-slider"
+                        min={maxLiveMin}
+                        max={maxLiveMax}
+                        step={1}
+                        value={maxLiveSessions}
+                        onChange={(e) => onSetMaxLive(parseInt(e.target.value, 10))}
+                        aria-label="Maximum live sessions"
+                        style={
+                          {
+                            '--pct': `${((maxLiveSessions - maxLiveMin) / (maxLiveMax - maxLiveMin)) * 100}%`
+                          } as CSSProperties
+                        }
+                      />
+                      <span className="sb-slider-value mono">{maxLiveSessions}</span>
                       <button
                         type="button"
-                        className="sb-stepper-reset"
+                        className="sb-slider-reset"
                         onClick={onResetMaxLive}
                         disabled={maxLiveSessions === maxLiveDefault}
                         data-tip={`Reset to default (${maxLiveDefault})`}
@@ -244,27 +256,6 @@ export default function SettingsModal({
                       >
                         <Reset size={14} />
                       </button>
-                      <div className="sb-stepper">
-                        <button
-                          type="button"
-                          className="sb-stepper-btn"
-                          onClick={onDecMaxLive}
-                          disabled={maxLiveSessions <= maxLiveMin}
-                          aria-label="Fewer live sessions"
-                        >
-                          −
-                        </button>
-                        <span className="sb-stepper-value mono">{maxLiveSessions}</span>
-                        <button
-                          type="button"
-                          className="sb-stepper-btn"
-                          onClick={onIncMaxLive}
-                          disabled={maxLiveSessions >= maxLiveMax}
-                          aria-label="More live sessions"
-                        >
-                          +
-                        </button>
-                      </div>
                     </div>
                   </div>
                 </div>
