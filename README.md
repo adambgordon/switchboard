@@ -46,6 +46,17 @@ Switchboard is a plain `.app` — no separate installer.
 
 Because you built it locally, macOS doesn't quarantine it — it opens without the "unidentified developer" warning a downloaded app would trigger.
 
+## Updates
+
+To get the latest updates, run:
+
+```bash
+git pull
+npm run setup
+```
+
+Then quit (⌘Q) (if already running) and reopen the app.
+
 ## Requirements
 
 - **macOS** on **Apple Silicon** — built and validated there; Intel is untested.
