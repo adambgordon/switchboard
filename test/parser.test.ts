@@ -826,3 +826,73 @@ describe('extractTurnState', () => {
     expect(r.turnState).toBeUndefined()
   })
 })
+
+describe('extractMeta — size / model / tokens / first-activity', () => {
+  it('captures model, sums token usage (input + cache), sizes the file, stamps first activity', async () => {
+    const fp = path.join(tmpDir, `${randomUUID()}.jsonl`)
+    await writeFile(
+      fp,
+      jsonl([
+        {
+          type: 'user',
+          uuid: 'u1',
+          isSidechain: false,
+          timestamp: '2026-06-12T10:00:00.000Z',
+          cwd: CWD,
+          message: { role: 'user', content: 'hello' }
+        },
+        {
+          type: 'assistant',
+          uuid: 'a1',
+          isSidechain: false,
+          timestamp: '2026-06-12T10:01:00.000Z',
+          message: {
+            role: 'assistant',
+            model: 'claude-opus-4-8',
+            content: [{ type: 'text', text: 'hi' }],
+            usage: { input_tokens: 10, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000, output_tokens: 5 }
+          }
+        },
+        {
+          type: 'assistant',
+          uuid: 'a2',
+          isSidechain: false,
+          timestamp: '2026-06-12T11:30:00.000Z',
+          message: {
+            role: 'assistant',
+            model: 'claude-opus-4-8',
+            content: [{ type: 'text', text: 'more' }],
+            usage: { input_tokens: 2, cache_read_input_tokens: 2000, output_tokens: 8 }
+          }
+        }
+      ])
+    )
+    const m = await extractMeta(fp)
+    expect(m?.model).toBe('claude-opus-4-8')
+    expect(m?.outputTokens).toBe(13) // 5 + 8
+    expect(m?.inputTokens).toBe(3112) // (10+100+1000) + (2+0+2000)
+    expect(m?.sizeBytes).toBeGreaterThan(0)
+    expect(m?.firstActivityAt).toBe(Date.parse('2026-06-12T10:00:00.000Z'))
+  })
+
+  it('ignores the <synthetic> model and tolerates missing usage (zeros)', async () => {
+    const fp = path.join(tmpDir, `${randomUUID()}.jsonl`)
+    await writeFile(
+      fp,
+      jsonl([
+        { type: 'user', uuid: 'u1', isSidechain: false, timestamp: '2026-06-12T10:00:00.000Z', cwd: CWD, message: { role: 'user', content: 'hi' } },
+        {
+          type: 'assistant',
+          uuid: 'a1',
+          isSidechain: false,
+          timestamp: '2026-06-12T10:00:01.000Z',
+          message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'x' }] }
+        }
+      ])
+    )
+    const m = await extractMeta(fp)
+    expect(m?.model).toBeNull()
+    expect(m?.outputTokens).toBe(0)
+    expect(m?.inputTokens).toBe(0)
+  })
+})

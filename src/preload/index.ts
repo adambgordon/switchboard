@@ -12,6 +12,7 @@ const api: SwitchboardApi = {
   listConversations: () => ipcRenderer.invoke(IPC.sessionsList),
   getTranscript: (id) => ipcRenderer.invoke(IPC.sessionsGet, id),
   onSessionsChanged: (cb) => subscribe(IPC.sessionsChanged, cb as never),
+  renameConversation: (id, title) => ipcRenderer.invoke(IPC.sessionsRename, id, title),
 
   resume: (sessionId, cwd, title) => ipcRenderer.invoke(IPC.ptyResume, sessionId, cwd, title),
   startNew: (cwd) => ipcRenderer.invoke(IPC.ptyStartNew, cwd),

@@ -93,6 +93,9 @@ interface Props {
   onResumeSession: (id: string) => void
   /** Stop (kill) a live session from its right-click menu. No-op on a not-live row. */
   onStopSession: (id: string) => void
+  /** Open the conversation-info modal for a row (the right-click "Rename" item). `edit` starts it
+   *  in title-edit mode. */
+  onShowInfo: (id: string, edit: boolean) => void
   /** Reorder the pinned list — the drag-to-reorder commit (indices into `pinnedOrder`). */
   onReorderPins: (from: number, to: number) => void
   /** Current pinned order (display order, top-first) — resolves drag from/to indices. */
@@ -144,6 +147,7 @@ export default function TallyRail({
   onMarkUnread,
   onResumeSession,
   onStopSession,
+  onShowInfo,
   onReorderPins,
   pinnedOrder,
   onReorderLive,
@@ -408,6 +412,15 @@ export default function TallyRail({
               <span className="sb-ctxmenu-hint">⇧⌘U</span>
             </button>
           )}
+          <button
+            className="sb-ctxmenu-item"
+            onClick={() => {
+              onShowInfo(ctxMenu.id, true)
+              setCtxMenu(null)
+            }}
+          >
+            <span>Rename…</span>
+          </button>
           <button className="sb-ctxmenu-item" onClick={() => copySessionId(ctxMenu.id)}>
             {ctxMenu.copied && (
               <span className="sb-ctxmenu-check">
