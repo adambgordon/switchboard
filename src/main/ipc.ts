@@ -6,6 +6,7 @@ import { readdir } from 'node:fs/promises'
 import { IPC, type Transcript } from '../shared/types'
 import { indexConversations } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
+import { appendCustomTitle } from './sessions/rename'
 import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
 
@@ -55,6 +56,20 @@ export function registerIpc(): void {
       return await parseTranscript(fp)
     } catch {
       return null
+    }
+  })
+  // Set/clear a conversation's title (the one write path into the JSONL): append Claude Code's own
+  // `custom-title` line, then re-index + broadcast IMMEDIATELY so the new title lands in the UI now
+  // rather than ~600ms later when the file watcher catches the same write (which then no-ops).
+  ipcMain.handle(IPC.sessionsRename, async (_e, sessionId: string, title: string): Promise<boolean> => {
+    const fp = await resolveSessionFile(sessionId)
+    if (!fp) return false
+    try {
+      await appendCustomTitle(fp, sessionId, title)
+      broadcast(IPC.sessionsChanged, await indexConversations(PROJECTS_ROOT))
+      return true
+    } catch {
+      return false
     }
   })
 
