@@ -33,6 +33,7 @@
   align-items: center;
   gap: var(--s2);
   margin-top: 5px;
+  min-height: 25px; /* = the magnifier button, so opening/closing search doesn't shift the head */
 }
 .sb-rail-search-btn {
   display: inline-flex;
@@ -47,9 +48,6 @@
 .sb-rail-search-btn:hover {
   color: var(--ink);
   background: var(--paper-hover);
-}
-.sb-rail-search-btn.active {
-  color: var(--ink-soft);
 }
 /* the New "+" — same icon-button treatment as the search magnifier, so they pair up vertically */
 .sb-rail-new-btn {
@@ -78,11 +76,26 @@
   width: calc(var(--pane-w) - 36px);
   top: calc(100% + 8px);
 }
+/* While searching, the field fills the whole row and the ✕ floats inside its right edge (the
+   magnifier shows only when search is closed). Boxed like the rename title input; the box stays the
+   entire time search is open — not just on focus — since the field only mounts while searching, so
+   the outline persists until you exit. The negative margin keeps the text flush with the count above
+   while the box bleeds into the head gutter. */
+.sb-rail-search-box {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
 .sb-rail-search-input {
   flex: 1;
   min-width: 0;
-  background: none;
-  border: none;
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  padding: 3px 26px 3px 7px; /* right pad clears the inset ✕ */
+  margin-left: -7px;
   font-size: var(--text-sm);
   color: var(--ink);
 }
@@ -91,6 +104,21 @@
 }
 .sb-rail-search-input:focus {
   outline: none;
+}
+.sb-rail-search-clear {
+  position: absolute;
+  right: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-rail-search-clear:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
 }
 .sb-rail-count-wrap {
   display: flex;

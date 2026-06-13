@@ -207,12 +207,8 @@ kbd {
   border-radius: var(--r-pill);
   animation: sb-fade-in var(--dur-fast) var(--ease);
 }
-.sb-find-icon {
-  color: var(--ink-faint);
-  flex-shrink: 0;
-}
 .sb-find-input {
-  width: 150px;
+  width: 180px;
   font-size: var(--text-sm);
   color: var(--ink);
   background: none;

@@ -14,7 +14,7 @@ const THEME_MODES: { value: ThemeMode; label: string }[] = [
 const CAP_TIP =
   "Each live session is a real claude process with its own terminal. At the limit, starting another reclaims whichever session has been idle longest — sessions still working are never stopped, and you're never blocked from starting a new one. Raising the limit means a higher cap on resource consumption: more memory, CPU, and GPU per live terminal. This is intended to prevent Claude Code instances from overwhelming your machine. Increase at your own risk."
 
-type Page = 'app' | 'shortcuts'
+type Page = 'app' | 'shortcuts' | 'faq'
 
 interface Shortcut {
   keys: string[]
@@ -23,6 +23,10 @@ interface Shortcut {
 interface Group {
   title: string
   items: Shortcut[]
+}
+interface Faq {
+  q: string
+  a: ReactNode
 }
 
 // The Shortcuts page mirrors the README keyboard table. ⌘Q / zoom are macOS default-menu
@@ -56,6 +60,89 @@ const GROUPS: Group[] = [
       { keys: ['⌘,'], desc: 'Open Preferences' },
       { keys: ['⌘?'], desc: 'Show keyboard shortcuts' }
     ]
+  }
+]
+
+// A few orientation notes for the FAQ page — the non-obvious interactions worth surfacing.
+const FAQ: Faq[] = [
+  {
+    q: "How do I see a conversation's details?",
+    a: (
+      <>
+        Click the conversation name at the top of the main pane, or right-click any row →{' '}
+        <strong>Session details…</strong>. The panel shows the folder, branch, model, message count,
+        size, token usage, and session ID.
+      </>
+    )
+  },
+  {
+    q: 'How do I rename a conversation?',
+    a: (
+      <>
+        Open <strong>Session details</strong> and edit the title in place at the top.
+      </>
+    )
+  },
+  {
+    q: 'Does selecting a conversation start it?',
+    a: (
+      <>
+        No — selecting only previews the transcript (read-only). A live <code>claude</code> process
+        starts only when you <strong>Resume</strong> an existing conversation or start a{' '}
+        <strong>New</strong> one.
+      </>
+    )
+  },
+  {
+    q: 'What do the dots next to live conversations mean?',
+    a: (
+      <>
+        The cobalt dot next to a live conversation tracks its turn:
+        <ul className="sb-faq-legend">
+          <li>
+            <span className="sb-faq-dot">
+              <span className="sb-dot busy" />
+            </span>
+            <span>
+              <strong>Breathing</strong> — Claude is working
+            </span>
+          </li>
+          <li>
+            <span className="sb-faq-dot">
+              <span className="sb-dot asking" />
+            </span>
+            <span>
+              <strong>Pulsing ripple</strong> — Claude is waiting on your reply
+            </span>
+          </li>
+          <li>
+            <span className="sb-faq-dot">
+              <span className="sb-dot awaiting" />
+            </span>
+            <span>
+              <strong>Solid</strong> — the turn finished and unread
+            </span>
+          </li>
+          <li>
+            <span className="sb-faq-dot">
+              <span className="sb-dot quiet" />
+            </span>
+            <span>
+              <strong>Hollow</strong> — finished and read
+            </span>
+          </li>
+        </ul>
+      </>
+    )
+  },
+  {
+    q: 'Where does Switchboard get its data?',
+    a: (
+      <>
+        Everything is read from the JSONL files Claude Code writes under{' '}
+        <code>~/.claude/projects/</code>. Switchboard is a viewer — it never owns your conversations.
+      </>
+    )
   }
 ]
 
@@ -175,6 +262,12 @@ export default function SettingsModal({
               onClick={() => onChangePage('shortcuts')}
             >
               Shortcuts
+            </button>
+            <button
+              className={`sb-settings-nav-item${page === 'faq' ? ' active' : ''}`}
+              onClick={() => onChangePage('faq')}
+            >
+              FAQ
             </button>
           </nav>
 
@@ -315,7 +408,7 @@ export default function SettingsModal({
                 </div>
               </div>
               </>
-            ) : (
+            ) : page === 'shortcuts' ? (
               GROUPS.map((group) => (
                 <div className="sb-modal-group" key={group.title}>
                   <div className="sb-modal-group-label label-caps">{group.title}</div>
@@ -335,6 +428,15 @@ export default function SettingsModal({
                   </div>
                 </div>
               ))
+            ) : (
+              <div className="sb-faq">
+                {FAQ.map((item) => (
+                  <div className="sb-faq-item" key={item.q}>
+                    <div className="sb-faq-q">{item.q}</div>
+                    <div className="sb-faq-a">{item.a}</div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
