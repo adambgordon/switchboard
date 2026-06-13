@@ -52,6 +52,7 @@ const GROUPS: Group[] = [
       { keys: ['⌘B'], desc: 'Toggle the pane' },
       { keys: ['⌘+', '⌘−'], desc: 'Zoom in / out' },
       { keys: ['⌘0'], desc: 'Reset zoom' },
+      { keys: ['⌘R'], desc: 'Refresh the terminal (does not reload)' },
       { keys: ['⌘,'], desc: 'Open Preferences' },
       { keys: ['⌘?'], desc: 'Show keyboard shortcuts' }
     ]

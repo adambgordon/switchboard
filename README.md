@@ -108,6 +108,7 @@ _For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUD
 | `Esc` | Close the find bar / clear the query and close search / close menu / close Preferences |
 | `⌘Q` | Quit — ends all live sessions |
 | `⌘+` / `⌘−` / `⌘0` | Zoom in / out / reset |
+| `⌘R` | Refresh the terminal — forces a clean redraw (does **not** reload) |
 
 ## Develop
 
