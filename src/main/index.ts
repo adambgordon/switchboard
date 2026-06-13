@@ -2,6 +2,7 @@ import { app, BrowserWindow, nativeImage, nativeTheme, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { registerIpc, disposeIpc, openExternalUrl } from './ipc'
+import { installAppMenu } from './menu'
 import { loadWindowState, saveWindowState, resolvePlacement } from './windowState'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -102,6 +103,11 @@ app.setName('Switchboard')
 
 app.whenReady().then(() => {
   registerIpc()
+  // Replace Electron's default menu with our own: it drops the destructive Reload / Force Reload
+  // (a renderer reload blanks every live terminal — see menu.ts) and binds ⌘R to a "Refresh"
+  // (zoom-wiggle repaint) instead. Role-based submenus keep every standard menu/shortcut
+  // (App / File / Edit / Window, copy/paste, quit, zoom).
+  installAppMenu()
   // Dev convenience: the packaged .app gets its dock icon from the bundle, but an
   // unpackaged `npm run dev` shows Electron's default. Point the dock at our PNG so
   // both match. No-op if the icon hasn't been generated yet.
