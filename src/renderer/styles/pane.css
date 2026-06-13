@@ -37,6 +37,25 @@
   color: var(--ink);
   letter-spacing: -0.02em;
 }
+/* The title doubles as the button that opens the conversation-info modal — reset the button chrome
+   but keep the .sb-pane-title type; truncate needs an explicit block + full width. Hover/focus get a
+   darkened background like the other minimal buttons (padding + negative margin keep the text aligned
+   with the path below). Neutral ink, never an accent. */
+.sb-pane-title-btn {
+  display: block;
+  max-width: 100%;
+  text-align: left;
+  cursor: pointer;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+.sb-pane-title-btn:hover,
+.sb-pane-title-btn:focus-visible {
+  outline: none;
+  background: var(--paper-hover);
+}
 .sb-pane-meta {
   display: flex;
   align-items: center;

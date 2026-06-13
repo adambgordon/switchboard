@@ -45,3 +45,56 @@ export function basename(p: string): string {
   const parts = p.replace(/\/+$/, '').split('/')
   return parts[parts.length - 1] || p
 }
+
+/** Human-readable byte size, e.g. "892 B", "14 KB", "1.2 MB". One decimal under 10 units. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  const kb = n / 1024
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
+  const gb = mb / 1024
+  return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`
+}
+
+/** Compact elapsed duration from milliseconds, e.g. "<1m", "45m", "3h 12m", "2d 4h". */
+export function formatDuration(ms: number): string {
+  if (ms < 60_000) return '<1m'
+  const totalMin = Math.floor(ms / 60_000)
+  const min = totalMin % 60
+  const totalHr = Math.floor(totalMin / 60)
+  const hr = totalHr % 24
+  const days = Math.floor(totalHr / 24)
+  if (days > 0) return hr > 0 ? `${days}d ${hr}h` : `${days}d`
+  if (totalHr > 0) return min > 0 ? `${totalHr}h ${min}m` : `${totalHr}h`
+  return `${min}m`
+}
+
+/** Compact count with a metric prefix, e.g. 942 -> "942", 5200 -> "5.2K", 324315 -> "324K",
+ *  18389031 -> "18.4M". One decimal under 100 of a unit; the exact count belongs in a tooltip. */
+export function formatMetric(n: number): string {
+  const units: [number, string][] = [
+    [1e9, 'G'],
+    [1e6, 'M'],
+    [1e3, 'K']
+  ]
+  for (const [div, suffix] of units) {
+    if (n >= div) {
+      const v = n / div
+      const s = v >= 100 ? String(Math.round(v)) : v.toFixed(1).replace(/\.0$/, '')
+      return `${s}${suffix}`
+    }
+  }
+  return String(n)
+}
+
+/** Compact absolute local date+time (no weekday/seconds), e.g. "Jun 12, 2026, 11:17 PM". */
+export function absShort(ms: number): string {
+  return new Date(ms).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}

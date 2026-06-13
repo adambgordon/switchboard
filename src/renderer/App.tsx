@@ -22,6 +22,7 @@ import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './c
 import ResizeHandle from './components/ResizeHandle'
 import SettingsModal from './components/SettingsModal'
 import CapWarningModal from './components/CapWarningModal'
+import ConversationInfoModal from './components/ConversationInfoModal'
 import TooltipLayer from './components/TooltipLayer'
 
 type View = 'transcript' | 'terminal'
@@ -40,6 +41,11 @@ function synthMeta(p: PtyState): ConversationMeta {
     mtime: p.lastActivity,
     messageCount: 0,
     version: null,
+    sizeBytes: 0,
+    model: null,
+    outputTokens: 0,
+    inputTokens: 0,
+    firstActivityAt: null,
     provisional: true
   }
 }
@@ -119,6 +125,9 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [settingsPage, setSettingsPage] = useState<'app' | 'shortcuts' | null>(null)
+  // Conversation-info modal target: which session, and whether to open straight into title-edit
+  // (the right-click "Rename") vs view (clicking the pane title). Null when closed.
+  const [infoModal, setInfoModal] = useState<{ sessionId: string; edit: boolean } | null>(null)
   // Section keys revealed past their cap via "Show more" (ephemeral — resets on reload).
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
   const searchRef = useRef<HTMLInputElement>(null)
@@ -431,6 +440,19 @@ export default function App() {
     [metaById, resume]
   )
 
+  // Open the conversation-info modal for a row/title. `edit` starts it in title-edit mode (the
+  // right-click "Rename" entry point); clicking the pane title opens it in view mode. Opening the
+  // modal does NOT select or navigate — it's an overlay over the current view.
+  const showInfo = useCallback((id: string, edit: boolean) => {
+    setInfoModal({ sessionId: id, edit })
+  }, [])
+  // Set/clear a conversation's title. Fire-and-forget: main appends Claude Code's own custom-title
+  // line then re-indexes + broadcasts, so the new title flows back through useSessions to the rail,
+  // pane header, and the (still-open) info modal. An empty title resets to the auto-generated one.
+  const renameConversation = useCallback((id: string, title: string) => {
+    void window.api.renameConversation(id, title)
+  }, [])
+
   // Toggle the search box; closing it clears the query so filtering ends with it.
   const toggleSearch = useCallback(() => {
     setSearchOpen((o) => {
@@ -537,6 +559,16 @@ export default function App() {
         }
         return
       }
+      // The conversation-info modal owns the keyboard the same way: Esc closes it, the rest is inert.
+      // (While its title field is editing, the input's own Esc handler stopPropagation's to cancel the
+      // edit without bubbling here — so a first Esc backs out of edit, a second closes the modal.)
+      if (infoModal) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setInfoModal(null)
+        }
+        return
+      }
       if (mod && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         newConversation()
@@ -612,6 +644,7 @@ export default function App() {
     query,
     settingsPage,
     capWarning,
+    infoModal,
     findOpen,
     closeFind,
     selectedId,
@@ -630,6 +663,13 @@ export default function App() {
 
   const title = selectedMeta?.title ?? selectedPty?.title ?? 'Conversation'
   const cwd = selectedMeta?.cwd ?? selectedPty?.cwd ?? ''
+
+  // Resolve the info-modal target's meta + live process. A live-but-unindexed session still resolves
+  // via the synthesized meta, mirroring the rail.
+  const infoPty = infoModal ? ptys.bySession.get(infoModal.sessionId) ?? null : null
+  const infoMeta = infoModal
+    ? metaById.get(infoModal.sessionId) ?? (infoPty ? synthMeta(infoPty) : null)
+    : null
 
   return (
     <div className="sb-app">
@@ -675,6 +715,7 @@ export default function App() {
             onMarkUnread={markUnread}
             onResumeSession={resumeSession}
             onStopSession={stopSession}
+            onShowInfo={showInfo}
             onReorderPins={commitReorder}
             pinnedOrder={pinnedOrder}
             onReorderLive={commitLiveReorder}
@@ -716,6 +757,9 @@ export default function App() {
           onKill={() => {
             if (selectedPty) killSession(selectedPty.ptyId)
           }}
+          onShowInfo={() => {
+            if (selectedId) showInfo(selectedId, false)
+          }}
           onEngage={onEngage}
           onMarkUnread={markUnread}
           paneRef={paneRef}
@@ -745,6 +789,16 @@ export default function App() {
         onResetMaxLive={resetMaxLive}
       />
       <CapWarningModal capWarning={capWarning} onDismiss={() => setCapWarnDismissed(true)} />
+      <ConversationInfoModal
+        open={!!infoModal}
+        meta={infoMeta}
+        pty={infoPty}
+        startInEdit={infoModal?.edit ?? false}
+        onClose={() => setInfoModal(null)}
+        onRename={(t) => {
+          if (infoModal) renameConversation(infoModal.sessionId, t)
+        }}
+      />
       <TooltipLayer />
     </div>
   )

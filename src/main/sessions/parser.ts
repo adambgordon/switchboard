@@ -492,6 +492,11 @@ export function extractTurnState(text: string): {
   return { turnState: undefined, turnEndedAt: null, lastActivityAt }
 }
 
+/** A finite number, or 0 — for reading optional numeric `usage` fields without NaN poisoning a sum. */
+function numField(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0
+}
+
 /**
  * Efficient metadata-only pass for the sidebar. Returns null when the file has
  * no parseable content or no cwd (cwd is the source of truth for grouping).
@@ -501,10 +506,12 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
 
   let text: string
   let mtime: number
+  let sizeBytes: number
   try {
     const [content, stats] = await Promise.all([readFile(filePath, 'utf8'), stat(filePath)])
     text = content
     mtime = stats.mtimeMs
+    sizeBytes = stats.size
   } catch {
     return null
   }
@@ -518,6 +525,10 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
   let gitBranch: string | null = null
   let version: string | null = null
   let messageCount = 0
+  let model: string | null = null
+  let outputTokens = 0
+  let inputTokens = 0
+  let firstActivityAt: number | null = null
 
   for (const line of splitLines(text)) {
     const obj = parseLine(line)
@@ -551,10 +562,30 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
 
     messageCount += 1
 
+    // First/last message timestamps bound the conversation's elapsed span (Duration in the info modal).
+    const ts = typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN
+    if (!Number.isNaN(ts) && firstActivityAt == null) firstActivityAt = ts
+
     const message = obj.message
     if (obj.type === 'user' && firstUserText == null && message && typeof message === 'object') {
       const t = userMessageText(message as Record<string, unknown>)
       if (t.trim().length > 0) firstUserText = t
+    }
+
+    // Per-turn model + token usage, summed across the conversation (assistant lines only). `usage`
+    // shape: { input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens }.
+    if (obj.type === 'assistant' && message && typeof message === 'object') {
+      const m = message as Record<string, unknown>
+      if (typeof m.model === 'string' && m.model.length > 0 && m.model !== '<synthetic>') model = m.model
+      const usage = m.usage
+      if (usage && typeof usage === 'object') {
+        const u = usage as Record<string, unknown>
+        outputTokens += numField(u.output_tokens)
+        inputTokens +=
+          numField(u.input_tokens) +
+          numField(u.cache_creation_input_tokens) +
+          numField(u.cache_read_input_tokens)
+      }
     }
   }
 
@@ -574,6 +605,11 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     mtime,
     messageCount,
     version,
+    sizeBytes,
+    model,
+    outputTokens,
+    inputTokens,
+    firstActivityAt,
     turnState,
     turnEndedAt,
     lastActivityAt,

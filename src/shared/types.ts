@@ -49,6 +49,16 @@ export interface ConversationMeta {
   messageCount: number
   /** claude version that last wrote the file. */
   version: string | null
+  /** size of the session JSONL on disk, in bytes. */
+  sizeBytes: number
+  /** claude model id the session ran on (last non-synthetic assistant line), or null. */
+  model: string | null
+  /** cumulative output tokens Claude generated across the conversation. */
+  outputTokens: number
+  /** cumulative input tokens fed to the model (input + cache creation + cache read), summed across turns. */
+  inputTokens: number
+  /** ms epoch of the first user/assistant message (for the elapsed-duration span). Null when none. */
+  firstActivityAt: number | null
   /**
    * Coarse state of the latest turn, derived from the transcript tail (main chain only):
    * 'awaiting' = the last assistant turn ended (awaiting the user); 'in_progress' = a turn
@@ -130,6 +140,7 @@ export interface PtyState {
 export const IPC = {
   sessionsList: 'sessions:list',
   sessionsGet: 'sessions:get',
+  sessionsRename: 'sessions:rename', // renderer -> main: set/clear a conversation's custom title
   sessionsChanged: 'sessions:changed', // push
   ptyResume: 'pty:resume',
   ptyStartNew: 'pty:startNew',
@@ -153,6 +164,14 @@ export interface SwitchboardApi {
   getTranscript(sessionId: string): Promise<Transcript | null>
   /** Subscribe to live re-indexes (file watcher). Returns an unsubscribe fn. */
   onSessionsChanged(cb: (groups: ConversationGroup[]) => void): () => void
+  /**
+   * Set a conversation's title by appending Claude Code's own `custom-title` line to its JSONL
+   * (the same mechanism as `/rename`) — so the rename is real and survives into `claude --resume`.
+   * Pass an empty/whitespace `title` to clear it back to the auto-generated title. Resolves to
+   * `true` on success, `false` if the session file can't be found. Main re-indexes immediately,
+   * so the new title arrives via `onSessionsChanged` without waiting for the file watcher.
+   */
+  renameConversation(sessionId: string, title: string): Promise<boolean>
 
   // --- live sessions (explicit spawn only) ---
   resume(sessionId: string, cwd: string, title?: string): Promise<PtyState>
