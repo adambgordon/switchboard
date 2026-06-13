@@ -52,11 +52,11 @@ function Row({
 }
 
 /**
- * Conversation-info modal — opened by clicking the pane title (view) or a row's right-click "Rename…"
- * (title field focused). The conversation title IS the modal heading, edited **in place**: an
- * always-editable input that commits on blur / Enter and reverts on Esc. Below, a list of detail
- * rows whose values are selectable; only Session ID carries a copy button. Rename writes Claude
- * Code's own `custom-title` line (App → window.api.renameConversation).
+ * Conversation-info modal — opened by clicking the pane title or a row's right-click "Session details…"
+ * (both open in view mode). The conversation title IS the modal heading, edited **in place**: an
+ * always-editable input that commits on blur, commits-and-closes on Enter, and reverts on Esc. Below,
+ * a list of detail rows whose values are selectable; only Session ID carries a copy button. Rename
+ * writes Claude Code's own `custom-title` line (App → window.api.renameConversation).
  */
 export default function ConversationInfoModal({ open, meta, pty, startInEdit, onClose, onRename }: Props) {
   const sessionId = meta?.sessionId ?? pty?.sessionId ?? ''
@@ -86,7 +86,7 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
   const titleRef = useRef(title)
   titleRef.current = title
 
-  // Open / target change: reseed the draft and route focus (Rename… opens straight in the field).
+  // Open / target change: reseed the draft and route focus (startInEdit opens straight in the field).
   useEffect(() => {
     if (!open) return
     setDraft(titleRef.current)
@@ -120,8 +120,10 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
   }
   const onTitleKey = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') {
+      // Commit (via blur) and dismiss — Enter both saves the title and closes the modal.
       e.preventDefault()
       inputRef.current?.blur() // blur commits
+      onClose()
     } else if (e.key === 'Escape') {
       // Revert this edit; stopPropagation so App's Esc doesn't also close the modal (a second Esc,
       // now out of the field, closes it).

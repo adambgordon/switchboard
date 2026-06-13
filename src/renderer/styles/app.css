@@ -585,6 +585,64 @@ body.sb-resizing .sb-pane {
   background: var(--paper-pane);
 }
 
+/* ---- FAQ page: question + answer prose (a tall list just scrolls within the fixed body) ---- */
+.sb-faq {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  user-select: text; /* selectable — the global body sets user-select:none */
+}
+.sb-faq-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sb-faq-q {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+.sb-faq-a {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.sb-faq-a strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+.sb-faq-a code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink);
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  padding: 0 5px;
+}
+/* The liveness-dot legend renders the real `.sb-dot` states (breathing / ripple / solid / hollow).
+   Each dot sits in a fixed cell so its breathing halo and ripple rings have room and aren't clipped. */
+.sb-faq-legend {
+  list-style: none;
+  margin: 9px 0 2px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.sb-faq-legend li {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.sb-faq-dot {
+  flex-shrink: 0;
+  width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* ---- App page: the default-folder setting (toggle on-state is INK, never cobalt — cobalt is
    liveness-only, the two-accent invariant) ---- */
 .sb-setting {
