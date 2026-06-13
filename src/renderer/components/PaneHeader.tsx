@@ -105,15 +105,18 @@ export default function PaneHeader({
       )}
 
       <div className="sb-pane-actions">
-        <button
-          className={`sb-pane-find${find.open ? ' active' : ''}`}
-          onClick={find.onToggle}
-          data-tip="Find in this conversation (⌘F)"
-          aria-label="Find in this conversation"
-          aria-pressed={find.open}
-        >
-          <Search size={13} />
-        </button>
+        {/* The magnifier opens find; once open it's hidden — the find bar's own ✕ closes it, sitting
+            roughly where the magnifier was, so the two never both show. */}
+        {!find.open && (
+          <button
+            className="sb-pane-find"
+            onClick={find.onToggle}
+            data-tip="Find in this conversation (⌘F)"
+            aria-label="Find in this conversation"
+          >
+            <Search size={13} />
+          </button>
+        )}
         <button
           className={`sb-pane-pin${pinned ? ' pinned' : ''}`}
           onClick={onTogglePin}
