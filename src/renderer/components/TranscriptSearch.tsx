@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
-import { Search, Close, Chevron } from './icons'
+import { Close, Chevron } from './icons'
 
 interface Props {
   query: string
@@ -62,7 +62,6 @@ export default function TranscriptSearch({
 
   return (
     <div className="sb-find" role="search">
-      <Search size={13} className="sb-find-icon" />
       <input
         ref={inputRef}
         className="sb-find-input"

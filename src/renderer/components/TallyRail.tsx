@@ -6,7 +6,7 @@ import { useRowReorder } from '../lib/useRowReorder'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import ConversationRow from './ConversationRow'
 import NewConversationMenu from './NewConversationMenu'
-import { Check, Chevron, Help, Plus, Search } from './icons'
+import { Chevron, Close, Help, Plus, Search } from './icons'
 
 /** One row in the pane: a conversation that may be live, pinned, both, or neither. */
 export interface RailEntry {
@@ -93,8 +93,8 @@ interface Props {
   onResumeSession: (id: string) => void
   /** Stop (kill) a live session from its right-click menu. No-op on a not-live row. */
   onStopSession: (id: string) => void
-  /** Open the conversation-info modal for a row (the right-click "Rename" item). `edit` starts it
-   *  in title-edit mode. */
+  /** Open the conversation-info modal for a row (the right-click "Session details…" item). `edit`
+   *  starts it in title-edit mode. */
   onShowInfo: (id: string, edit: boolean) => void
   /** Reorder the pinned list — the drag-to-reorder commit (indices into `pinnedOrder`). */
   onReorderPins: (from: number, to: number) => void
@@ -210,17 +210,15 @@ export default function TallyRail({
     selector: '.sb-row.live:not(.pinned)[data-session]'
   })
 
-  // Right-click / two-finger menu, on any row (live or not): copy the session ID, plus — on a live
+  // Right-click / two-finger menu, on any row (live or not): open Session details, plus — on a live
   // row — mark read/unread and stop the session, or — on a not-live row — resume it. One instance,
-  // positioned at the cursor; dismissed by an outside click, Esc, or scroll — or, after a copy,
-  // auto-dismissed once the "Copied" flash shows.
+  // positioned at the cursor; dismissed by an outside click, Esc, or scroll.
   const [ctxMenu, setCtxMenu] = useState<{
     id: string
     x: number
     y: number
     live: boolean
     unread: boolean
-    copied?: boolean
   } | null>(null)
   const openRowMenu = (e: MouseEvent, id: string): void => {
     const entry = entryById(id)
@@ -233,13 +231,6 @@ export default function TallyRail({
       unread: entry.liveState === 'awaiting' || entry.liveState === 'asking'
     })
   }
-  // Copy the conversation's session ID, then flash "Copied" on the item (the dismiss effect below
-  // clears the menu shortly after). navigator.clipboard works in the Electron renderer — file://
-  // and localhost are both secure contexts, and clicking the item is the required user gesture.
-  const copySessionId = (id: string): void => {
-    void navigator.clipboard.writeText(id).catch(() => {})
-    setCtxMenu((m) => (m && m.id === id ? { ...m, copied: true } : m))
-  }
   useEffect(() => {
     if (!ctxMenu) return
     const close = (): void => setCtxMenu(null)
@@ -249,14 +240,10 @@ export default function TallyRail({
     document.addEventListener('click', close)
     document.addEventListener('keydown', onKey)
     document.addEventListener('scroll', close, true)
-    // After a copy, leave the "Copied" flash up briefly, then dismiss. Keyed off ctxMenu, so a
-    // menu reopened within the window resets this rather than being closed by a stale timer.
-    const copiedTimer = ctxMenu.copied ? setTimeout(() => setCtxMenu(null), 700) : undefined
     return () => {
       document.removeEventListener('click', close)
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('scroll', close, true)
-      if (copiedTimer) clearTimeout(copiedTimer)
     }
   }, [ctxMenu])
 
@@ -296,28 +283,39 @@ export default function TallyRail({
         </div>
         <div className="sb-rail-sub-row">
           {searchOpen ? (
-            <input
-              ref={searchRef}
-              className="sb-rail-search-input"
-              placeholder="Search conversations"
-              value={query}
-              spellCheck={false}
-              autoCorrect="off"
-              autoCapitalize="off"
-              onChange={(e) => onQueryChange(e.target.value)}
-            />
+            <div className="sb-rail-search-box">
+              <input
+                ref={searchRef}
+                className="sb-rail-search-input"
+                placeholder="Search conversations"
+                value={query}
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                onChange={(e) => onQueryChange(e.target.value)}
+              />
+              <button
+                className="sb-rail-search-clear"
+                onClick={onSearchToggle}
+                data-tip="Close search"
+                aria-label="Close search"
+              >
+                <Close size={14} />
+              </button>
+            </div>
           ) : (
-            <div className="sb-rail-sub mono">{subLabel}</div>
+            <>
+              <div className="sb-rail-sub mono">{subLabel}</div>
+              <button
+                className="sb-rail-search-btn"
+                onClick={onSearchToggle}
+                data-tip="Search all conversations (⌘F)"
+                aria-label="Search all conversations"
+              >
+                <Search size={15} />
+              </button>
+            </>
           )}
-          <button
-            className={`sb-rail-search-btn${searchOpen ? ' active' : ''}`}
-            onClick={onSearchToggle}
-            data-tip="Search all conversations (⌘F)"
-            aria-label="Search all conversations"
-            aria-pressed={searchOpen}
-          >
-            <Search size={15} />
-          </button>
         </div>
       </div>
 
@@ -415,19 +413,11 @@ export default function TallyRail({
           <button
             className="sb-ctxmenu-item"
             onClick={() => {
-              onShowInfo(ctxMenu.id, true)
+              onShowInfo(ctxMenu.id, false)
               setCtxMenu(null)
             }}
           >
-            <span>Rename…</span>
-          </button>
-          <button className="sb-ctxmenu-item" onClick={() => copySessionId(ctxMenu.id)}>
-            {ctxMenu.copied && (
-              <span className="sb-ctxmenu-check">
-                <Check size={13} />
-              </span>
-            )}
-            <span>{ctxMenu.copied ? 'Copied' : 'Copy session ID'}</span>
+            <span>Session details…</span>
           </button>
           {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**
               (not-live) — so the two always occupy the same slot. Separated from the benign items above. */}

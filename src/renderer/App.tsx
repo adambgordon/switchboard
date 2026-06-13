@@ -124,9 +124,9 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [settingsPage, setSettingsPage] = useState<'app' | 'shortcuts' | null>(null)
-  // Conversation-info modal target: which session, and whether to open straight into title-edit
-  // (the right-click "Rename") vs view (clicking the pane title). Null when closed.
+  const [settingsPage, setSettingsPage] = useState<'app' | 'shortcuts' | 'faq' | null>(null)
+  // Conversation-info modal target: which session, and whether to open straight into title-edit vs
+  // view (both the pane title and the right-click "Session details…" open in view). Null when closed.
   const [infoModal, setInfoModal] = useState<{ sessionId: string; edit: boolean } | null>(null)
   // Section keys revealed past their cap via "Show more" (ephemeral — resets on reload).
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
