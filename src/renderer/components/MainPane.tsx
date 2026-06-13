@@ -28,6 +28,8 @@ interface Props {
   onShowHistory: () => void
   onGoLive: () => void
   onKill: () => void
+  /** Open the conversation-info modal (clicking the pane title). */
+  onShowInfo: () => void
   /** Genuine engagement with the open conversation (a click or keystroke in the pane body) —
    *  used to clear a manual "unread" mark once you actually start working in it. */
   onEngage?: () => void
@@ -113,6 +115,7 @@ export default function MainPane(props: Props) {
     onShowHistory,
     onGoLive,
     onKill,
+    onShowInfo,
     onEngage,
     onMarkUnread,
     paneRef,
@@ -208,6 +211,7 @@ export default function MainPane(props: Props) {
           onShowHistory={onShowHistory}
           onGoLive={onGoLive}
           onKill={onKill}
+          onShowInfo={onShowInfo}
           find={{
             open: findOpen,
             focusReq: findFocusReq,

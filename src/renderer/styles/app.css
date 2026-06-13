@@ -725,6 +725,95 @@ body.sb-resizing .sb-pane {
   color: var(--ink-soft);
 }
 
+/* ---- conversation-info modal (ConversationInfoModal): a compact info card whose heading IS the
+   conversation title, edited IN PLACE (an input styled as the heading), plus a list of copyable
+   detail rows. Reuses the shared .sb-modal scrim+card. Neutral ink throughout — the lone accent is
+   the static cobalt liveness dot in the Status row, and only when live (two-accent invariant).
+   `.sb-info-label` inherits its color/type from .label-caps; rules here are layout. ---- */
+.sb-modal-info {
+  width: 460px;
+}
+/* head holds the editable title (heading-styled input) + auto-generate (rewind) + close */
+.sb-info-head {
+  gap: 8px;
+}
+.sb-info-title-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+  margin-left: -7px; /* keep the text flush with the card's content edge */
+  transition: all var(--dur-fast) var(--ease);
+}
+.sb-info-title-input::placeholder {
+  color: var(--ink-faint);
+}
+/* hover shows the same boxed/outlined affordance as the focused (editing) state */
+.sb-info-title-input:hover,
+.sb-info-title-input:focus {
+  outline: none;
+  background: var(--paper);
+  border-color: var(--rule-strong);
+}
+.sb-info-body {
+  padding: 6px 18px 16px;
+  overflow-y: auto;
+}
+
+/* detail rows — a label · value list, each value copyable on row hover */
+.sb-info-grid {
+  display: flex;
+  flex-direction: column;
+}
+.sb-info-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.sb-info-row:last-child {
+  border-bottom: none;
+}
+.sb-info-row > .sb-info-label {
+  flex-shrink: 0;
+  width: 112px; /* fits the longest key ("INPUT + CACHE") on one line */
+  white-space: nowrap;
+}
+.sb-info-value {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  /* values are selectable (the global body sets user-select:none) — highlight to copy */
+  user-select: text;
+  cursor: text;
+}
+.sb-info-value.mono {
+  font-size: var(--text-xs);
+}
+.sb-info-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+/* the per-row copy reveals on row hover (matches the transcript's hover-revealed copies);
+   .copy-btn.copied keeps it visible through the check-flash even once the pointer leaves */
+.sb-info-copy {
+  flex-shrink: 0;
+}
+.sb-info-row:hover .sb-info-copy {
+  opacity: 1;
+}
+
 /* live-sessions cap — a compact slider sitting flush-right in the setting head (where the stepper
    was): slider · value · reset. Neutral INK fill + thumb only (never cobalt — the two-accent
    invariant; matches the ink toggle). */

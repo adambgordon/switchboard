@@ -17,6 +17,8 @@ interface Props {
   onShowHistory: () => void
   onGoLive: () => void
   onKill: () => void
+  /** Open the conversation-info modal (clicking the title). */
+  onShowInfo: () => void
   /** Find-in-conversation bar state + handlers (the bar renders inline in this header). */
   find: {
     open: boolean
@@ -44,6 +46,7 @@ export default function PaneHeader({
   onShowHistory,
   onGoLive,
   onKill,
+  onShowInfo,
   find
 }: Props) {
   const live = !!pty
@@ -51,13 +54,16 @@ export default function PaneHeader({
   return (
     <header className="sb-pane-header">
       <div className="sb-pane-id">
-        <h1 className="sb-pane-title truncate" data-tip={title}>
+        <button
+          type="button"
+          className="sb-pane-title sb-pane-title-btn truncate"
+          aria-label={`Conversation info: ${title}`}
+          onClick={onShowInfo}
+        >
           {title}
-        </h1>
+        </button>
         <div className="sb-pane-meta mono">
-          <span className="sb-pane-cwd truncate" data-tip={cwd}>
-            {cwd || '—'}
-          </span>
+          <span className="sb-pane-cwd truncate">{cwd || '—'}</span>
           {meta && (
             <>
               <span className="sb-sep">·</span>

@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentPropsWithoutRef, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -7,48 +7,7 @@ import type { TranscriptBlock } from '@shared/types'
 import type { MessageGroup } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, turnMarkdown } from '../lib/clipboard'
-import { Check, Copy } from './icons'
-
-/* ------------------------------------------------------------------ *
- * Copy affordance — a hover-revealed icon button that flashes a check
- * for ~700ms on click (the TallyRail.copySessionId pattern). Neutral
- * ink only (copy isn't an accent action). `getText` is read lazily on
- * click, so callers pull from a ref / the DOM / props at that moment.
- * ------------------------------------------------------------------ */
-function CopyButton({
-  getText,
-  className,
-  tip = 'Copy'
-}: {
-  getText: () => string
-  className?: string
-  tip?: string
-}): ReactNode {
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<number | undefined>(undefined)
-  useEffect(() => () => window.clearTimeout(timer.current), [])
-  const onClick = (e: ReactMouseEvent): void => {
-    // Never toggle a surrounding <details>, start a text selection, or bubble to the pane.
-    e.preventDefault()
-    e.stopPropagation()
-    const text = getText()
-    if (!text) return
-    void navigator.clipboard.writeText(text).catch(() => {})
-    setCopied(true)
-    window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => setCopied(false), 700)
-  }
-  return (
-    <button
-      type="button"
-      className={`copy-btn${className ? ' ' + className : ''}${copied ? ' copied' : ''}`}
-      onClick={onClick}
-      aria-label={tip}
-    >
-      {copied ? <Check size={13} /> : <Copy size={13} />}
-    </button>
-  )
-}
+import CopyButton from './CopyButton'
 
 /** Read a rendered markdown table's cells into rows (row 0 = header). Shared by the table copy button
  *  and the turn copy. */

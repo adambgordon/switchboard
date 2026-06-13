@@ -18,6 +18,11 @@ function meta(p: Partial<ConversationMeta> = {}): ConversationMeta {
     mtime: SPAWN,
     messageCount: 1,
     version: null,
+    sizeBytes: 0,
+    model: null,
+    outputTokens: 0,
+    inputTokens: 0,
+    firstActivityAt: null,
     ...p
   }
 }
