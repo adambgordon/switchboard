@@ -130,7 +130,7 @@ Quality gates:
 
 ```bash
 npm run typecheck    # tsc over main (node) and renderer (web) projects
-npm test             # vitest — parser / indexer / customTitle unit tests
+npm test             # vitest — unit tests (parser, indexer, liveness, theme, rename, …)
 SWITCHBOARD_SMOKE=1 node_modules/.bin/electron .   # headless boot check: node-pty spawns + renderer loads
 ```
 
@@ -146,7 +146,9 @@ src/
   main/                    Electron main process (Node)
     index.ts               window, security (CSP lives in index.html), lifecycle, dev dock icon, boot self-test (SWITCHBOARD_SMOKE)
     ipc.ts                 IPC handlers; owns the file watcher + PtyManager
-    sessions/              parser.ts · indexer.ts · watcher.ts  (read ~/.claude/projects)
+    menu.ts                custom app menu — ⌘R→Refresh (no reload roles), File/View/Window
+    windowState.ts         persists window bounds/position across launches
+    sessions/              parser.ts · indexer.ts · watcher.ts · rename.ts  (read ~/.claude/projects)
     pty/manager.ts         spawns login shells, types the claude command; output activity → LRU eviction (configurable cap, default 8)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
   renderer/                React 18 + Vite
@@ -160,6 +162,8 @@ src/
 ```
 
 Everything the UI shows is derived from the session **JSONL files** Claude Code writes — Switchboard never owns conversation data. A `chokidar` watcher re-indexes on change, which is what keeps the pane titles and the Formatted view live.
+
+> Deeper reference for contributors: [`docs/architecture.md`](docs/architecture.md) (module map + state), [`docs/design.md`](docs/design.md) (visual / UX invariants), and [`docs/gotchas.md`](docs/gotchas.md) (subsystem traps).
 
 ### Why a login shell?
 
