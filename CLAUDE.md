@@ -33,7 +33,7 @@ The building blocks (run individually as needed):
 1. `npm run typecheck` — `tsc` over BOTH projects (main = node, renderer = web). Must be clean.
 2. `npm run build` — `electron-vite build` → `out/`. Must succeed. **Does NOT update the `.app`** — `out/` is what `npm run dev` and the smoke check consume, not the packaged bundle.
 3. **Boot smoke:** `SWITCHBOARD_SMOKE=1 node_modules/.bin/electron .` — prints `SMOKE PASS | pty:true | window:loaded`. The only headless check that node-pty loads/spawns under Electron's ABI and the renderer loads. `window:none` is a sampling race (re-run); only `did-fail-load` / `preload-error` lines indicate a real failure.
-4. `npm test` — vitest (parser / indexer / customTitle). The renderer is not unit-tested.
+4. `npm test` — vitest over `test/` (12 suites: main-side parser/indexer/rename/customTitle/windowState + renderer-lib liveness/theme/navHistory/pins/clipboard/findMatches/messageGroups). The renderer UI is not unit-tested.
 5. `npm run package` — `electron-vite build` + `electron-builder --dir`, rebuilding the installed `dist/mac-arm64/Switchboard.app`. `npm run build` alone does NOT do this. Quit (⌘Q) and reopen the app to load it.
 
 For iterating, `npm run dev` (hot reload) is the inner loop. The renderer (visual feel, live terminal, drag/scroll) can only be truly verified by a human running `npm run dev` or the freshly-packaged `.app` — typecheck/build/smoke don't catch React-runtime or visual issues. Say so rather than claiming the UI works.
@@ -44,12 +44,12 @@ Set `SWITCHBOARD_DEV_LABEL=<name>` before `npm run dev` to tag the window title 
 
 The detailed implementation lore lives in `docs/` so it isn't loaded into every session. Mention the relevant path and the file is pulled in on demand — these are intentionally *not* `@`-imported (which would re-expand them into context). Read the one that covers what you're about to touch:
 
-- **[`docs/architecture.md`](docs/architecture.md)** — module map, the IPC contract (`src/shared/types.ts`), main-process layout, renderer state hooks, the liveness model, the rename / info modal, navigation & focus, Preferences, find-in-conversation, tooltips, theming. *Read before touching `src/main/**` or renderer internals.*
-- **[`docs/gotchas.md`](docs/gotchas.md)** — subsystem traps that have bitten before: node-pty rebuild, the ⌘R-refresh custom menu, terminal/xterm rendering (WebGL/canvas, lineHeight, Unicode v11, cursor, hidden-repaint, the 0×0-resize trap, initial-fit ordering), font warming, packaging, localStorage, the macOS Option key. *Read before touching the terminal, the menu, fonts, or the build.*
-- **[`docs/design.md`](docs/design.md)** — visual & UX invariants: the two-accent color system, row controls, stable-key ordering, single-family type, preview≠spawn, the read-only Formatted view, transcript rendering, design tokens, the two-theme rules. *Read before any UI / CSS change.*
+- **[`docs/architecture.md`](docs/architecture.md)** — module map, the IPC contract (`src/shared/types.ts`), main-process layout, renderer state hooks, the liveness model, the rename / info modal, navigation & focus, Preferences, find-in-conversation, tooltips, theming. *Read before touching `src/main/**`, IPC, or any renderer state/behavior — liveness, navigation/focus, find, theming, modals.*
+- **[`docs/gotchas.md`](docs/gotchas.md)** — subsystem traps that have bitten before: node-pty rebuild, the ⌘R-refresh custom menu, terminal/xterm rendering (WebGL/canvas, lineHeight, Unicode v11, cursor, hidden-repaint, the 0×0-resize trap, initial-fit ordering), font warming, packaging, localStorage, the macOS Option key. *Read before touching the terminal, the menu, fonts, the build, or the Formatted view.*
+- **[`docs/design.md`](docs/design.md)** — visual & UX invariants: the two-accent color system, row controls, stable-key ordering, single-family type, preview≠spawn, the read-only Formatted view, transcript rendering, design tokens, the two-theme rules. *Read before any change to visual appearance — CSS, color, layout, the two-accent / two-theme rules.*
 
 ## Conventions
 
 - TypeScript strict; 2-space indent; no semicolons (match `src/shared/types.ts`). Prefer named exports. No formatter is configured.
 - Main/preload imports are relative; the renderer uses the `@shared` / `@renderer` aliases.
-- Repo-wide test/build is cheap here; still prefer the filtered loop above.
+- Repo-wide test/build is cheap here; to iterate on one suite use `npx vitest run test/<name>.test.ts` or `npm run test:watch`.
