@@ -161,6 +161,8 @@ src/
 
 Everything the UI shows is derived from the session **JSONL files** Claude Code writes — Switchboard never owns conversation data. A `chokidar` watcher re-indexes on change, which is what keeps the pane titles and the Formatted view live.
 
+> Deeper reference for contributors: [`docs/architecture.md`](docs/architecture.md) (module map + state), [`docs/design.md`](docs/design.md) (visual / UX invariants), and [`docs/gotchas.md`](docs/gotchas.md) (subsystem traps).
+
 ### Why a login shell?
 
 A GUI Electron app inherits a minimal `PATH` (no `~/.local/bin`, no Homebrew), so invoking `claude` directly fails. Switchboard spawns your **login + interactive shell** (`$SHELL -l -i`) — which sources your profile and gets the real `PATH` — then types the `claude` command into it. Bonus: when `claude` exits you're left at a normal prompt, exactly like Terminal.app.
