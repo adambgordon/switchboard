@@ -29,14 +29,14 @@ open dist/mac-arm64/Switchboard.app
 
 ## Build, validate, run
 
-The building blocks (run individually as needed):
+Full first-run setup, the dev loop, and the contributor quality gates live in README → **Develop**; this section is the **validate-before-done** checklist. The building blocks (run individually as needed):
 1. `npm run typecheck` — `tsc` over BOTH projects (main = node, renderer = web). Must be clean.
-2. `npm run build` — `electron-vite build` → `out/`. Must succeed. **Does NOT update the `.app`** — `out/` is what `npm run dev` and the smoke check consume, not the packaged bundle.
+2. `npm run build` — `electron-vite build` → `out/`. Must succeed. **Does NOT update the `.app`** — `out/` is what the **boot smoke check** consumes (so run `build` first); `npm run dev` runs its own build, and the packaged `.app` is separate.
 3. **Boot smoke:** `SWITCHBOARD_SMOKE=1 node_modules/.bin/electron .` — prints `SMOKE PASS | pty:true | window:loaded`. The only headless check that node-pty loads/spawns under Electron's ABI and the renderer loads. `window:none` is a sampling race (re-run); only `did-fail-load` / `preload-error` lines indicate a real failure.
 4. `npm test` — vitest over `test/` (12 suites: main-side parser/indexer/rename/customTitle/windowState + renderer-lib liveness/theme/navHistory/pins/clipboard/findMatches/messageGroups). The renderer UI is not unit-tested.
 5. `npm run package` — `electron-vite build` + `electron-builder --dir`, rebuilding the installed `dist/mac-arm64/Switchboard.app`. `npm run build` alone does NOT do this. Quit (⌘Q) and reopen the app to load it.
 
-For iterating, `npm run dev` (hot reload) is the inner loop. The renderer (visual feel, live terminal, drag/scroll) can only be truly verified by a human running `npm run dev` or the freshly-packaged `.app` — typecheck/build/smoke don't catch React-runtime or visual issues. Say so rather than claiming the UI works.
+For iterating, `npm run dev` (hot reload) is the inner loop (first run / after an Electron bump: `npm run rebuild` first — node-pty must match Electron's ABI; see `docs/gotchas.md`). The renderer (visual feel, live terminal, drag/scroll) can only be truly verified by a human running `npm run dev` or the freshly-packaged `.app` — typecheck/build/smoke don't catch React-runtime or visual issues. Say so rather than claiming the UI works.
 
 Set `SWITCHBOARD_DEV_LABEL=<name>` before `npm run dev` to tag the window title **and** the title bar (a mono pill left of the gear) — so several dev instances can run side by side and stay tellable apart (there's no single-instance lock; Vite auto-increments the port). Unset in normal and packaged runs, where the title stays a plain "Switchboard".
 
@@ -52,4 +52,5 @@ The detailed implementation lore lives in `docs/` so it isn't loaded into every 
 
 - TypeScript strict; 2-space indent; no semicolons (match `src/shared/types.ts`). Prefer named exports. No formatter is configured.
 - Main/preload imports are relative; the renderer uses the `@shared` / `@renderer` aliases.
+- **Testing:** unit tests live in `test/` (vitest) and cover **pure logic only** — main-process parsing/indexing plus renderer-lib helpers pulled out of components (`liveness`, `theme`, `navHistory`, `pins`/`reorderArray`, `clipboard`, `findMatches`, `messageGroups`); the **renderer UI is not unit-tested**. Keep pure logic in `lib/` so it's importable under the **node** tsconfig (no DOM lib) — a test-imported module must not touch `window`/`document` (why `theme.ts` is pure and the DOM half is `themeDom.ts`; see Theming in `docs/architecture.md`).
 - Repo-wide test/build is cheap here; to iterate on one suite use `npx vitest run test/<name>.test.ts` or `npm run test:watch`.
