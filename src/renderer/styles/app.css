@@ -589,7 +589,7 @@ body.sb-resizing .sb-pane {
 .sb-faq {
   display: flex;
   flex-direction: column;
-  gap: var(--s4);
+  gap: var(--s5);
   user-select: text; /* selectable — the global body sets user-select:none */
 }
 .sb-faq-item {
@@ -790,6 +790,8 @@ body.sb-resizing .sb-pane {
    `.sb-info-label` inherits its color/type from .label-caps; rules here are layout. ---- */
 .sb-modal-info {
   width: 460px;
+  /* the whole dialog reads in the terminal mono face (IBM Plex Mono) — title, labels, and values */
+  font-family: var(--font-mono);
 }
 /* head holds the editable title (heading-styled input) + auto-generate (rewind) + close */
 .sb-info-head {
@@ -821,7 +823,7 @@ body.sb-resizing .sb-pane {
   border-color: var(--rule-strong);
 }
 .sb-info-body {
-  padding: 6px 18px 16px;
+  padding: 16px 18px 16px;
   overflow-y: auto;
 }
 
@@ -849,14 +851,13 @@ body.sb-resizing .sb-pane {
 .sb-info-value {
   flex: 1;
   min-width: 0;
-  font-size: var(--text-sm);
+  /* every value is mono now (terminal face, inherited) and ONE size — so e.g. Session ID and
+     Started read identically. The `.mono` Row prop no longer changes size, only intent. */
+  font-size: var(--text-xs);
   color: var(--ink-soft);
   /* values are selectable (the global body sets user-select:none) — highlight to copy */
   user-select: text;
   cursor: text;
-}
-.sb-info-value.mono {
-  font-size: var(--text-xs);
 }
 .sb-info-live {
   display: inline-flex;
@@ -870,6 +871,20 @@ body.sb-resizing .sb-pane {
 }
 .sb-info-row:hover .sb-info-copy {
   opacity: 1;
+}
+/* sections — a caps header (mono + faint, via .label-caps) over a group of detail rows, so the
+   dialog reads as grouped blocks (Workspace · Activity · Tokens · Session) rather than one long list */
+.sb-info-section + .sb-info-section {
+  margin-top: 14px;
+}
+/* Section headers are the dialog's chrome — UI face (Hanken), not the mono data below them.
+   --tracking-caps (0.14em) is tuned for mono, so loosen-to-tighten for Hanken caps. */
+.sb-info-section-label {
+  padding-bottom: 3px;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
 }
 
 /* live-sessions cap — a compact slider sitting flush-right in the setting head (where the stepper

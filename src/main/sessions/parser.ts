@@ -527,7 +527,16 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
   let messageCount = 0
   let model: string | null = null
   let outputTokens = 0
-  let inputTokens = 0
+  let inputBaseTokens = 0
+  let cacheWriteTokens = 0
+  let cacheReadTokens = 0
+  // The same assistant response is written across multiple JSONL lines (one per content block), each
+  // repeating identical `usage` — so count each response ONCE, keyed by message id, or totals inflate
+  // ~3x. Sidechain (sub-agent) turns have their own ids and are real cost, so they're counted too.
+  const countedUsageIds = new Set<string>()
+  // The latest MAIN-CHAIN turn's input + cache = current context-window occupancy (a live snapshot,
+  // what Claude Code's status line shows) — distinct from the cumulative sums above.
+  let contextTokens = 0
   let firstActivityAt: number | null = null
 
   for (const line of splitLines(text)) {
@@ -572,19 +581,30 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
       if (t.trim().length > 0) firstUserText = t
     }
 
-    // Per-turn model + token usage, summed across the conversation (assistant lines only). `usage`
-    // shape: { input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens }.
+    // Per-turn model + token usage (assistant lines only). `usage` shape: { input_tokens,
+    // cache_creation_input_tokens, cache_read_input_tokens, output_tokens }. Cumulative sums dedup by
+    // message id (the same response repeats across lines); contextTokens tracks the live window.
     if (obj.type === 'assistant' && message && typeof message === 'object') {
       const m = message as Record<string, unknown>
       if (typeof m.model === 'string' && m.model.length > 0 && m.model !== '<synthetic>') model = m.model
       const usage = m.usage
       if (usage && typeof usage === 'object') {
         const u = usage as Record<string, unknown>
-        outputTokens += numField(u.output_tokens)
-        inputTokens +=
-          numField(u.input_tokens) +
-          numField(u.cache_creation_input_tokens) +
-          numField(u.cache_read_input_tokens)
+        const base = numField(u.input_tokens)
+        const write = numField(u.cache_creation_input_tokens)
+        const read = numField(u.cache_read_input_tokens)
+        // Current context = the most recent MAIN-CHAIN turn's input + cache (sidechain turns don't
+        // define the main window). Re-set on every such line; the last one wins.
+        if (obj.isSidechain !== true) contextTokens = base + write + read
+        // Sum each response once. A missing id (shouldn't happen) is always counted.
+        const id = typeof m.id === 'string' ? m.id : ''
+        if (id === '' || !countedUsageIds.has(id)) {
+          if (id !== '') countedUsageIds.add(id)
+          outputTokens += numField(u.output_tokens)
+          inputBaseTokens += base
+          cacheWriteTokens += write
+          cacheReadTokens += read
+        }
       }
     }
   }
@@ -608,7 +628,11 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     sizeBytes,
     model,
     outputTokens,
-    inputTokens,
+    inputTokens: inputBaseTokens + cacheWriteTokens + cacheReadTokens,
+    inputBaseTokens,
+    cacheWriteTokens,
+    cacheReadTokens,
+    contextTokens,
     firstActivityAt,
     turnState,
     turnEndedAt,

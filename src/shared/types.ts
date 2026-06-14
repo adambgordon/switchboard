@@ -53,10 +53,21 @@ export interface ConversationMeta {
   sizeBytes: number
   /** claude model id the session ran on (last non-synthetic assistant line), or null. */
   model: string | null
-  /** cumulative output tokens Claude generated across the conversation. */
+  /** cumulative output tokens Claude generated across the conversation (deduped by message id). */
   outputTokens: number
-  /** cumulative input tokens fed to the model (input + cache creation + cache read), summed across turns. */
+  /** cumulative input tokens fed to the model (base input + cache creation + cache read), summed
+   *  across turns and deduped by message id. = inputBaseTokens + cacheWriteTokens + cacheReadTokens. */
   inputTokens: number
+  /** cumulative base (non-cache) input tokens — Anthropic's "Base Input" pricing tier. */
+  inputBaseTokens: number
+  /** cumulative cache-write tokens (5m + 1h ephemeral creation) — the "Cache Write" pricing tiers. */
+  cacheWriteTokens: number
+  /** cumulative cache-read tokens (cache hits & refreshes) — the cheapest input tier. */
+  cacheReadTokens: number
+  /** tokens currently in the context window = the last main-chain turn's input + cache (base +
+   *  cache creation + cache read; output excluded, matching Claude Code's used_percentage). A live
+   *  snapshot, NOT a cumulative total. 0 before any assistant turn reports usage. */
+  contextTokens: number
   /** ms epoch of the first user/assistant message (for the elapsed-duration span). Null when none. */
   firstActivityAt: number | null
   /**
