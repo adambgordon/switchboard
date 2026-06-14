@@ -45,6 +45,10 @@ function synthMeta(p: PtyState): ConversationMeta {
     model: null,
     outputTokens: 0,
     inputTokens: 0,
+    inputBaseTokens: 0,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 0,
+    contextTokens: 0,
     firstActivityAt: null,
     provisional: true
   }

@@ -828,7 +828,7 @@ describe('extractTurnState', () => {
 })
 
 describe('extractMeta — size / model / tokens / first-activity', () => {
-  it('captures model, sums token usage (input + cache), sizes the file, stamps first activity', async () => {
+  it('captures model, sums token usage by tier + context, sizes the file, stamps first activity', async () => {
     const fp = path.join(tmpDir, `${randomUUID()}.jsonl`)
     await writeFile(
       fp,
@@ -871,8 +871,84 @@ describe('extractMeta — size / model / tokens / first-activity', () => {
     expect(m?.model).toBe('claude-opus-4-8')
     expect(m?.outputTokens).toBe(13) // 5 + 8
     expect(m?.inputTokens).toBe(3112) // (10+100+1000) + (2+0+2000)
+    expect(m?.inputBaseTokens).toBe(12) // 10 + 2
+    expect(m?.cacheWriteTokens).toBe(100) // 100 + 0
+    expect(m?.cacheReadTokens).toBe(3000) // 1000 + 2000
+    expect(m?.contextTokens).toBe(2002) // last main-chain turn: 2 + 0 + 2000
     expect(m?.sizeBytes).toBeGreaterThan(0)
     expect(m?.firstActivityAt).toBe(Date.parse('2026-06-12T10:00:00.000Z'))
+  })
+
+  it('dedups repeated usage by message id; sidechain turns count but do not set context', async () => {
+    const fp = path.join(tmpDir, `${randomUUID()}.jsonl`)
+    await writeFile(
+      fp,
+      jsonl([
+        { type: 'user', uuid: 'u1', isSidechain: false, timestamp: '2026-06-12T10:00:00.000Z', cwd: CWD, message: { role: 'user', content: 'hi' } },
+        // msg_A written across two lines (one per content block) — identical usage, must count ONCE.
+        {
+          type: 'assistant',
+          uuid: 'a1',
+          isSidechain: false,
+          timestamp: '2026-06-12T10:01:00.000Z',
+          message: {
+            role: 'assistant',
+            id: 'msg_A',
+            model: 'claude-opus-4-8',
+            content: [{ type: 'text', text: 'one' }],
+            usage: { input_tokens: 10, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000, output_tokens: 5 }
+          }
+        },
+        {
+          type: 'assistant',
+          uuid: 'a1b',
+          isSidechain: false,
+          timestamp: '2026-06-12T10:01:00.000Z',
+          message: {
+            role: 'assistant',
+            id: 'msg_A',
+            model: 'claude-opus-4-8',
+            content: [{ type: 'tool_use', id: 't', name: 'X', input: {} }],
+            usage: { input_tokens: 10, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000, output_tokens: 5 }
+          }
+        },
+        // msg_B — the last MAIN-chain turn; defines context.
+        {
+          type: 'assistant',
+          uuid: 'a2',
+          isSidechain: false,
+          timestamp: '2026-06-12T10:02:00.000Z',
+          message: {
+            role: 'assistant',
+            id: 'msg_B',
+            model: 'claude-opus-4-8',
+            content: [{ type: 'text', text: 'two' }],
+            usage: { input_tokens: 2, cache_read_input_tokens: 2000, output_tokens: 8 }
+          }
+        },
+        // msg_S — a sub-agent (sidechain) turn: real cost (counts), but never the main context window.
+        {
+          type: 'assistant',
+          uuid: 's1',
+          isSidechain: true,
+          timestamp: '2026-06-12T10:03:00.000Z',
+          message: {
+            role: 'assistant',
+            id: 'msg_S',
+            model: 'claude-opus-4-8',
+            content: [{ type: 'text', text: 'sub' }],
+            usage: { input_tokens: 7, cache_read_input_tokens: 70, output_tokens: 3 }
+          }
+        }
+      ])
+    )
+    const m = await extractMeta(fp)
+    expect(m?.outputTokens).toBe(16) // 5 (msg_A once) + 8 + 3
+    expect(m?.inputBaseTokens).toBe(19) // 10 + 2 + 7
+    expect(m?.cacheWriteTokens).toBe(100) // 100 (msg_A once) + 0 + 0
+    expect(m?.cacheReadTokens).toBe(3070) // 1000 + 2000 + 70
+    expect(m?.inputTokens).toBe(3189) // 19 + 100 + 3070
+    expect(m?.contextTokens).toBe(2002) // msg_B (last main chain): 2 + 0 + 2000 — sidechain ignored
   })
 
   it('ignores the <synthetic> model and tolerates missing usage (zeros)', async () => {

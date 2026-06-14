@@ -17,36 +17,42 @@ interface Props {
 }
 
 /**
- * One label · value detail row. The value text is selectable (highlight to copy); `tip` adds a
- * hover tooltip (used to surface the raw token counts), and `copy` adds a one-click copy button
+ * One label · value detail row. The value text is selectable (highlight to copy); `labelTip` adds a
+ * hover tooltip on the KEY describing what the row means, and `copy` adds a one-click copy button
  * (only the Session ID row uses it — everything else is select-to-copy).
  */
 function Row({
   label,
+  labelTip,
   mono,
-  tip,
   copy,
   children
 }: {
   label: string
+  labelTip?: string
   mono?: boolean
-  tip?: string
   copy?: string
   children: ReactNode
 }) {
   return (
     <div className="sb-info-row">
-      <span className="sb-info-label label-caps">{label}</span>
-      <span className={`sb-info-value${mono ? ' mono truncate' : ''}`}>
-        {/* When there's a tooltip, anchor it on an inline span that hugs the text — the value cell is
-            full-width (flex:1), so a data-tip on it would center the tooltip far to the right. */}
-        {tip ? (
-          <span data-tip={tip}>{children}</span>
-        ) : (
-          children
-        )}
+      {/* The tooltip rides an inline span hugging the label text — the label cell is a fixed width,
+          so a data-tip on it would center the tooltip off to the side of the text. */}
+      <span className="sb-info-label label-caps">
+        {labelTip ? <span data-tip={labelTip}>{label}</span> : label}
       </span>
+      <span className={`sb-info-value${mono ? ' mono truncate' : ''}`}>{children}</span>
       {copy ? <CopyButton className="sb-info-copy" tip={`Copy ${label.toLowerCase()}`} getText={() => copy} /> : null}
+    </div>
+  )
+}
+
+/** A titled group of detail rows — a caps section header above a `.sb-info-grid`. */
+function Section({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="sb-info-section">
+      <div className="sb-info-section-label label-caps">{label}</div>
+      <div className="sb-info-grid">{children}</div>
     </div>
   )
 }
@@ -66,7 +72,11 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
   const model = meta?.model ?? null
   const sizeBytes = meta?.sizeBytes ?? 0
   const outputTokens = meta?.outputTokens ?? 0
-  const inputTokens = meta?.inputTokens ?? 0
+  const inputBaseTokens = meta?.inputBaseTokens ?? 0
+  const cacheWriteTokens = meta?.cacheWriteTokens ?? 0
+  const cacheReadTokens = meta?.cacheReadTokens ?? 0
+  const contextTokens = meta?.contextTokens ?? 0
+  const hasTokenTotals = inputBaseTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0 || outputTokens > 0
   const lastActivity = meta?.lastActivityAt ?? meta?.mtime ?? pty?.lastActivity ?? null
   const firstActivity = meta?.firstActivityAt ?? null
   const durationMs =
@@ -172,7 +182,7 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
         </div>
 
         <div className="sb-info-body">
-          <div className="sb-info-grid">
+          <Section label="Workspace">
             <Row label="Folder" mono>
               {cwd || '—'}
             </Row>
@@ -186,20 +196,47 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
                 {model}
               </Row>
             )}
+          </Section>
+
+          <Section label="Activity">
             <Row label="Messages">{meta?.messageCount ?? 0}</Row>
             {sizeBytes > 0 && <Row label="Size">{formatBytes(sizeBytes)}</Row>}
             {durationMs != null && <Row label="Duration">{formatDuration(durationMs)}</Row>}
-            {outputTokens > 0 && (
-              <Row label="Output" tip={`${outputTokens.toLocaleString()} tokens`}>
-                {formatMetric(outputTokens)} tokens
-              </Row>
-            )}
-            {inputTokens > 0 && (
-              <Row label="Input + cache" tip={`${inputTokens.toLocaleString()} tokens`}>
-                {formatMetric(inputTokens)} tokens
-              </Row>
-            )}
-            {lastActivity != null && <Row label="Last active">{absShort(lastActivity)}</Row>}
+          </Section>
+
+          {/* Tokens: the live Context window first, then the cumulative per-tier session totals
+              (deduped by message id) — all visible, grouped under one section header. */}
+          {(contextTokens > 0 || hasTokenTotals) && (
+            <Section label="Tokens">
+              {contextTokens > 0 && (
+                <Row label="Context" labelTip="Tokens currently in the context window">
+                  {formatMetric(contextTokens)} tokens
+                </Row>
+              )}
+              {inputBaseTokens > 0 && (
+                <Row label="Input" labelTip="Base input tokens">
+                  {formatMetric(inputBaseTokens)} tokens
+                </Row>
+              )}
+              {outputTokens > 0 && (
+                <Row label="Output" labelTip="Output tokens">
+                  {formatMetric(outputTokens)} tokens
+                </Row>
+              )}
+              {cacheWriteTokens > 0 && (
+                <Row label="Cache write" labelTip="Cache-creation tokens">
+                  {formatMetric(cacheWriteTokens)} tokens
+                </Row>
+              )}
+              {cacheReadTokens > 0 && (
+                <Row label="Cache read" labelTip="Cache-read tokens">
+                  {formatMetric(cacheReadTokens)} tokens
+                </Row>
+              )}
+            </Section>
+          )}
+
+          <Section label="Session">
             {pty && (
               <>
                 <Row label="Status">
@@ -211,10 +248,11 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
                 <Row label="Started">{absShort(pty.startedAt)}</Row>
               </>
             )}
+            {lastActivity != null && <Row label="Last active">{absShort(lastActivity)}</Row>}
             <Row label="Session ID" mono copy={sessionId}>
               {sessionId || '—'}
             </Row>
-          </div>
+          </Section>
         </div>
       </div>
     </div>
