@@ -1,6 +1,6 @@
 {
   "name": "switchboard",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A switchboard for your Claude Code conversations — browse, preview, resume, and start sessions.",
   "main": "./out/main/index.js",
   "author": "Adam Gordon",
