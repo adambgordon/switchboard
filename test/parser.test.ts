@@ -407,6 +407,51 @@ describe('extractMeta', () => {
     expect(meta!.turnEndedAt).toBeNull()
     expect(meta!.lastActivityAt).toBe(Date.parse('2026-05-29T20:00:12.000Z'))
   })
+
+  it('surfaces sessionKind from the top-level field (background-job marker)', async () => {
+    const file = path.join(tmpDir, `${randomUUID()}.jsonl`)
+    await writeFile(
+      file,
+      jsonl([
+        { type: 'attachment', uuid: 'bgatt', cwd: CWD, sessionKind: 'bg', attachment: { type: 'x', content: '' } },
+        {
+          type: 'user',
+          uuid: 'bg1',
+          isSidechain: false,
+          timestamp: '2026-05-29T22:00:00.000Z',
+          cwd: CWD,
+          sessionKind: 'bg',
+          message: { role: 'user', content: 'background work' }
+        }
+      ]),
+      'utf8'
+    )
+    const meta = await extractMeta(file)
+    expect(meta).not.toBeNull()
+    expect(meta!.sessionKind).toBe('bg')
+  })
+
+  it('does NOT set sessionKind when "bg" only appears quoted inside message content', async () => {
+    const file = path.join(tmpDir, `${randomUUID()}.jsonl`)
+    await writeFile(
+      file,
+      jsonl([
+        {
+          type: 'user',
+          uuid: 'q1',
+          isSidechain: false,
+          timestamp: '2026-05-29T22:05:00.000Z',
+          cwd: CWD,
+          message: { role: 'user', content: 'the marker is "sessionKind":"bg" in my pasted output' }
+        }
+      ]),
+      'utf8'
+    )
+    const meta = await extractMeta(file)
+    expect(meta).not.toBeNull()
+    // Read from the structured top-level field, not a substring of the raw text.
+    expect(meta!.sessionKind).toBeUndefined()
+  })
 })
 
 describe('extractTurnState', () => {

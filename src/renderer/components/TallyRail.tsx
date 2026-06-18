@@ -49,7 +49,7 @@ interface Props {
   /** Ordered, non-empty sections (Pinned / Live / Recent), built in App. */
   sections: RailSection[]
   /** Live tally over ALL sessions (not the search-filtered set) — drives the count + status line. */
-  live: { count: number; working: number; asking: number; waiting: number; idle: number }
+  live: { count: number; working: number; asking: number; unread: number; idle: number }
   /** True during the initial conversation index, before sections are populated. */
   loading: boolean
   selectedSessionId: string | null
@@ -154,18 +154,18 @@ export default function TallyRail({
   liveOrder,
   reorderTick
 }: Props) {
-  const { count, working, asking, waiting, idle } = live
+  const { count, working, asking, unread, idle } = live
   const empty = sections.length === 0
 
   // The status sub-label, shown when something is live (the search field replaces it).
-  // working = mid-turn · asking = blocked on your reply · waiting = finished, not yet seen ·
+  // working = mid-turn · asking = blocked on your reply · unread = finished, not yet seen ·
   // idle = finished and seen.
   let subLabel = ''
   if (count > 0) {
     const parts: string[] = []
     if (working > 0) parts.push(`${working} working`)
     if (asking > 0) parts.push(`${asking} waiting on you`)
-    if (waiting > 0) parts.push(`${waiting} waiting`)
+    if (unread > 0) parts.push(`${unread} unread`)
     if (idle > 0) parts.push(`${idle} idle`)
     subLabel = parts.length > 0 ? parts.join(' · ') : 'all idle'
   }
@@ -173,6 +173,11 @@ export default function TallyRail({
   // Obsidian-style scrollbar: the thumb shows only while scrolling (+ a beat after), never at rest.
   const listRef = useRef<HTMLDivElement>(null)
   useAutoHideScrollbar(listRef)
+
+  // Divider under the head: shown only once the list is scrolled off the top (none at the very top),
+  // so the head reads as a fixed band separated from the content it sits above. Driven off the body's
+  // scrollTop — a boolean, so setState is a no-op re-render until it actually flips (no per-event cost).
+  const [scrolled, setScrolled] = useState(false)
 
   // Each section's visible rows, computed once via visibleEntries (the single source of truth for
   // visibility) and reused by both the FLIP signature below and the render, so the two never diverge.
@@ -187,6 +192,14 @@ export default function TallyRail({
   const orderSig = rendered.flatMap((r) => r.shown.map((e) => e.sessionId)).join('|')
   const controlSig = JSON.stringify([query, [...expandedSections].sort(), collapsedSections, reorderTick])
   useRailFlip(listRef, orderSig, controlSig)
+
+  // Re-evaluate the head divider when the visible content changes: collapsing a section or running a
+  // search can shrink the list back within the viewport (scrollTop snaps to 0) WITHOUT firing a scroll
+  // event, which would otherwise leave the divider stuck on.
+  useEffect(() => {
+    const el = listRef.current
+    if (el) setScrolled(el.scrollTop > 0)
+  }, [orderSig, controlSig])
 
   // Look up a rendered entry by id — used by the right-click menu.
   const entryById = (id: string): RailEntry | undefined =>
@@ -249,7 +262,7 @@ export default function TallyRail({
 
   return (
     <aside className="sb-rail">
-      <div className="sb-rail-head">
+      <div className={`sb-rail-head${scrolled ? ' scrolled' : ''}`}>
         <div className="sb-rail-head-top">
           <div className="sb-rail-count-wrap">
             <span className={`sb-rail-count${count > 0 ? ' on' : ''}`}>{count}</span>
@@ -319,7 +332,11 @@ export default function TallyRail({
         </div>
       </div>
 
-      <div className="sb-rail-body sb-autoscroll" ref={listRef}>
+      <div
+        className="sb-rail-body sb-autoscroll"
+        ref={listRef}
+        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
+      >
         {loading ? (
           <div className="sb-rail-empty">
             <div className="sb-rail-empty-mark" />

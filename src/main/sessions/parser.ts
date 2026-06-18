@@ -524,6 +524,7 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
   let lastPrompt: string | null = null
   let gitBranch: string | null = null
   let version: string | null = null
+  let sessionKind: string | null = null
   let messageCount = 0
   let model: string | null = null
   let outputTokens = 0
@@ -548,6 +549,10 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     }
     if (typeof obj.gitBranch === 'string') gitBranch = obj.gitBranch
     if (typeof obj.version === 'string') version = obj.version
+    // Read the structured top-level field (NOT a substring of the raw text): a conversation that
+    // merely quotes `"sessionKind":"bg"` in message content has no such top-level key, so it won't
+    // be mistaken for a background session. 'bg' marks a `/bg` daemon job; the indexer drops it.
+    if (sessionKind == null && typeof obj.sessionKind === 'string') sessionKind = obj.sessionKind
 
     switch (obj.type) {
       case 'custom-title':
@@ -638,6 +643,7 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     turnEndedAt,
     lastActivityAt,
     awaitingTool,
+    sessionKind: sessionKind ?? undefined,
     provisional: false
   }
 }
