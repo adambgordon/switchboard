@@ -17,8 +17,21 @@
 }
 
 .sb-rail-head {
-  padding: 18px 18px 0;
+  /* Bottom padding (6px) drops the scroll divider a touch below the count text so it isn't cramped.
+     It's PAIRED with a matching 6px reduction of .sb-rail-body's top padding (10 -> 4) so the first
+     row stays exactly where it was — change the two together. */
+  padding: 18px 18px 6px;
   flex-shrink: 0;
+  /* Divider under the liveness box, shown only when the list is scrolled off the top (the `.scrolled`
+     class is toggled from TallyRail off the body's scrollTop). INSET box-shadow, not a border or a
+     downward shadow: inset paints within the head's own box so the body sibling can't cover it, and it
+     adds no height — toggling it never shifts the list by 1px. `--rule` is the theme-aware divider
+     color, so the hairline reads in both light and dark. */
+  box-shadow: inset 0 -1px 0 0 transparent;
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+.sb-rail-head.scrolled {
+  box-shadow: inset 0 -1px 0 0 var(--rule);
 }
 /* top row of the head: the live-count on the left, the New "+" on the right — directly above the
    search magnifier in the row below, so the two read as a vertical control pair at the right gutter. */
@@ -156,7 +169,9 @@
      SMALL — ~6px horizontal reach (negative spread) — so they fade well short of the edge / scrollbar
      gutter and never hard-cut; their *strength* comes from opacity, not size. The scrollbar thumb is a
      pseudo-element painted above content, so it always sits on top of whatever shadow does reach it. */
-  padding: 10px;
+  /* Top padding trimmed to 4px (from 10) to offset .sb-rail-head's 6px bottom padding — keeps the
+     first row where it was while letting the head's divider sit a touch lower. L/R/bottom stay 10px. */
+  padding: 4px 10px 10px;
   display: flex;
   flex-direction: column;
   gap: 5px;

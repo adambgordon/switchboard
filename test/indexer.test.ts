@@ -158,6 +158,55 @@ describe('indexConversations', () => {
   })
 })
 
+describe('indexConversations background-job filtering', () => {
+  let root: string
+  let interactive: string
+
+  beforeAll(async () => {
+    root = await mkdtemp(path.join(TMP_BASE, 'indexer-bg-test-'))
+
+    // A normal interactive session in CWD_A — must be KEPT.
+    const ok = await writeSession(
+      root,
+      '-home-user-project-one',
+      [msgLine('user', CWD_A, 'interactive session')],
+      1_000_000_000_000
+    )
+    interactive = ok.id
+
+    // A background-job session in the SAME cwd (top-level sessionKind:'bg') — must be DROPPED,
+    // even though it has messages and a later mtime.
+    await writeSession(
+      root,
+      '-home-user-project-one',
+      [
+        {
+          type: 'user',
+          uuid: randomUUID(),
+          isSidechain: false,
+          timestamp: '2026-05-29T20:01:00.000Z',
+          cwd: CWD_A,
+          sessionKind: 'bg',
+          message: { role: 'user', content: 'backgrounded continuation' }
+        }
+      ],
+      2_000_000_000_000
+    )
+  })
+
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('drops sessionKind:"bg" sessions but keeps the interactive sibling', async () => {
+    const groups = await indexConversations(root)
+    const a = groups.find((g) => g.cwd === CWD_A)
+    expect(a).toBeDefined()
+    const ids = a!.conversations.map((c) => c.sessionId)
+    expect(ids).toEqual([interactive]) // the bg session is absent
+  })
+})
+
 describe('indexConversations resilience', () => {
   it('returns [] for a non-existent root (does not throw)', async () => {
     const missing = path.join(TMP_BASE, `does-not-exist-${randomUUID()}`)

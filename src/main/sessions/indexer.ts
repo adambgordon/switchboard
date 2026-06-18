@@ -125,6 +125,10 @@ export async function indexConversations(projectsRoot?: string): Promise<Convers
   for (const meta of metas) {
     if (!meta) continue
     if (meta.messageCount === 0) continue
+    // Drop background-job (daemon) sessions — `/bg` / `claude --bg`. Claude Code itself hides these
+    // from `/resume`; surfacing them here produces a phantom duplicate of the interactive
+    // conversation they forked from, with a stale (frozen) transcript. See parser.ts `sessionKind`.
+    if (meta.sessionKind === 'bg') continue
     const existing = groups.get(meta.cwd)
     if (existing) existing.push(meta)
     else groups.set(meta.cwd, [meta])

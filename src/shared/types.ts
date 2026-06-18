@@ -94,6 +94,13 @@ export interface ConversationMeta {
    * wants; today both resolve to the single 'asking' live state.
    */
   awaitingTool?: 'AskUserQuestion' | 'ExitPlanMode' | null
+  /**
+   * Claude Code session class, read verbatim from the on-disk `sessionKind` field. 'bg' marks a
+   * background-job (daemon) session created by `/bg` / `claude --bg`; Claude Code hides those from
+   * `/resume`, and the indexer drops them so they never surface as ordinary conversations.
+   * Undefined for normal interactive sessions (the field is absent on disk).
+   */
+  sessionKind?: string
   /** true when this is a freshly-started session with no persisted history yet. */
   provisional?: boolean
 }
