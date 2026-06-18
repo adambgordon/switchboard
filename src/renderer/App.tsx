@@ -254,7 +254,9 @@ export default function App() {
   const liveTally = useMemo(() => {
     let working = 0
     let asking = 0
-    let waiting = 0
+    // Named `unreadCount` (not `unread`) to avoid shadowing the `unread` seen-map from useSeen,
+    // referenced as `unread[p.sessionId]` just below. Surfaced as the tally's `unread` field.
+    let unreadCount = 0
     let idle = 0
     for (const p of ptys.active) {
       const meta = metaById.get(p.sessionId) ?? synthMeta(p)
@@ -267,10 +269,10 @@ export default function App() {
       )
       if (st === 'working') working++
       else if (st === 'asking') asking++
-      else if (st === 'awaiting') waiting++
+      else if (st === 'awaiting') unreadCount++
       else idle++
     }
-    return { count: ptys.active.length, working, asking, waiting, idle }
+    return { count: ptys.active.length, working, asking, unread: unreadCount, idle }
   }, [ptys.active, metaById, seen, unread, focused, selectedId])
 
   // Capacity modal: warn once the live set reaches the configured cap (maxLive). `capWarnDismissed`
