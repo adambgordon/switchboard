@@ -9,6 +9,7 @@ import { parseTranscript } from './sessions/parser'
 import { appendCustomTitle } from './sessions/rename'
 import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
+import { syncTrafficLights } from './trafficLights'
 
 const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 
@@ -105,6 +106,12 @@ export function registerIpc(): void {
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.
   ipcMain.on(IPC.windowSetBackgroundColor, (e, color: string) =>
     BrowserWindow.fromWebContents(e.sender)?.setBackgroundColor(color)
+  )
+  // Re-align the native macOS traffic lights to the current page zoom (the renderer pings on every
+  // resize). Native buttons can't scale, but repositioning keeps them centered + proportionally
+  // gapped to the wordmark — "zoom in place" (see trafficLights.ts).
+  ipcMain.on(IPC.windowSyncTrafficLights, (e) =>
+    syncTrafficLights(BrowserWindow.fromWebContents(e.sender))
   )
 
   // --- live re-index on file changes ---

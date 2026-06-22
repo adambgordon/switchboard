@@ -20,6 +20,17 @@
 .sb-term .xterm-viewport {
   background: transparent !important;
 }
+/* Always the text (I-beam) cursor over the terminal. Overrides xterm's own cursor rules: the
+   Option-held column-select crosshair (the macOS "+") and the mouse-events default arrow (set when
+   a TUI enables mouse reporting). Switchboard doesn't use rectangular selection, and claude owns
+   mouse modes regardless of the pointer shape — so the cursor stays a plain I-beam. The selectors
+   carry enough specificity to beat xterm's (the .sb-term prefix + matching the same classes), so no
+   !important is needed. */
+.sb-term .xterm,
+.sb-term .xterm.enable-mouse-events,
+.sb-term .xterm.column-select.focus {
+  cursor: text;
+}
 /* No scrollbar in the terminal — scrapped for a cleaner live surface. xterm still scrolls via
    wheel / keys, and claude (the live TUI) manages its own viewport. */
 .sb-term .xterm-viewport::-webkit-scrollbar {

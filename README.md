@@ -148,6 +148,7 @@ src/
     ipc.ts                 IPC handlers; owns the file watcher + PtyManager
     menu.ts                custom app menu — ⌘R→Refresh (no reload roles), File/View/Window
     windowState.ts         persists window bounds/position across launches
+    trafficLights.ts       re-aligns the native traffic lights to the page zoom (renderer pings on resize)
     sessions/              parser.ts · indexer.ts · watcher.ts · rename.ts  (read ~/.claude/projects)
     pty/manager.ts         spawns login shells, types the claude command; output activity → LRU eviction (configurable cap, default 8)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
