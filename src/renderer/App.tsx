@@ -153,6 +153,17 @@ export default function App() {
     initPtyStream()
   }, [])
 
+  // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
+  // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of
+  // center; every zoom fires a `resize`, so we ping main on resize to reposition them (main reads
+  // the authoritative zoom factor — see trafficLights.ts). Once on mount too, harmless at 100%.
+  useEffect(() => {
+    const sync = (): void => window.api.syncTrafficLights()
+    sync()
+    window.addEventListener('resize', sync)
+    return () => window.removeEventListener('resize', sync)
+  }, [])
+
   // The main pane always owns the keyboard. Whenever the selected conversation changes to a real
   // one — including via ⌘[ / ⌘] back/forward, which don't request focus themselves — focus its
   // surface so you can type (live) or hit Enter to resume (not-live). The explicit requestFocus in
