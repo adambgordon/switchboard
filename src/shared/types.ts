@@ -172,7 +172,8 @@ export const IPC = {
   ptyActiveChanged: 'pty:activeChanged', // push (PtyState[])
   dialogPickDirectory: 'dialog:pickDirectory',
   openExternal: 'shell:openExternal',
-  windowSetBackgroundColor: 'window:setBackgroundColor'
+  windowSetBackgroundColor: 'window:setBackgroundColor',
+  windowSyncTrafficLights: 'window:syncTrafficLights' // renderer -> main: re-align traffic lights to the current zoom
 } as const
 
 /** The typed surface exposed on `window.api` by the preload bridge. */
@@ -210,6 +211,9 @@ export interface SwitchboardApi {
   /** Match the window's native backgroundColor to the active theme's --paper, so a live resize
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void
+  /** Ask main to re-align the native macOS traffic lights to the current page zoom — fired by the
+   *  renderer on every `resize` (which fires on every zoom change). Fire-and-forget. */
+  syncTrafficLights(): void
 
   // --- image input (drag-drop) ---
   // `File` here is the ambient global (DOM File in the renderer, node:buffer File

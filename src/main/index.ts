@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { registerIpc, disposeIpc, openExternalUrl } from './ipc'
 import { installAppMenu } from './menu'
 import { loadWindowState, saveWindowState, resolvePlacement } from './windowState'
+import { trafficLightPositionFor } from './trafficLights'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -37,7 +38,8 @@ function createWindow(): void {
     // too. Values mirror tokens.css --paper (light / dark).
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1a17' : '#fbfbf9',
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
+    // Resting inset at 100% zoom; re-aligned per zoom via syncTrafficLights (trafficLights.ts).
+    trafficLightPosition: trafficLightPositionFor(1),
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,

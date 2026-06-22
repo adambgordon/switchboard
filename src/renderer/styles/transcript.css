@@ -14,6 +14,11 @@
   background: var(--paper-pane);
   /* reading text must be selectable even though body disables selection */
   user-select: text;
+  /* The Formatted view reads as one selectable text surface: an I-beam everywhere, never the
+     default arrow over the gaps between blocks. Interactive children keep their own cursor (links
+     and the tool-toggle declare `pointer`; Show-more / copy buttons inherit it from the global
+     `button` rule), so only the reading area gets the I-beam. */
+  cursor: text;
 }
 
 /* The transcript is click-focusable (tabIndex -1) so clicking it gives the main pane focus —

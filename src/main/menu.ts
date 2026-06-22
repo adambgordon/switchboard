@@ -1,4 +1,5 @@
 import { BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
+import { setTrafficLightSyncSuppressed } from './trafficLights'
 
 // How far to nudge the page zoom for a refresh, in zoom *levels* (Electron's 1.2^level scale).
 // A FULL level (1.0 ≈ 20%) is jarring; this is gentler (≈9%) while staying large enough to cross
@@ -31,12 +32,18 @@ function refreshFocused(): void {
   // in); nudge up only when we're already near the practical floor, so it's never clamped to a
   // no-op.
   const delta = z <= -3 ? REFRESH_ZOOM_NUDGE : -REFRESH_ZOOM_NUDGE
+  // The nudge changes the zoom, which the renderer reports so the traffic lights re-align (see
+  // trafficLights.ts) — but here it's transient and restored below, so suppress that sync across
+  // the wiggle. The restored zoom equals the original, so on un-suppress the lights are already
+  // where they belong; this just prevents a brief out-and-back jump of the buttons on every ⌘R.
+  setTrafficLightSyncSuppressed(win, true)
   wc.setZoomLevel(z + delta)
   // Restore a few frames later: the ResizeObserver coalesces within a frame, so an out-and-back in
   // one tick nets to no size change (and no SIGWINCH). ~60ms lets the intermediate layout land,
   // then we return to the user's exact zoom.
   setTimeout(() => {
     if (!win.isDestroyed()) wc.setZoomLevel(z)
+    setTrafficLightSyncSuppressed(win, false)
   }, 60)
 }
 
