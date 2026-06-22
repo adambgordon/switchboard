@@ -164,6 +164,10 @@
 .sb-rail-body {
   flex: 1;
   overflow-y: auto;
+  /* Always reserve the scrollbar gutter, scrollable or not — so collapsing a section (e.g. Recent)
+     that removes the overflow doesn't reclaim the ~6px gutter and shift every row sideways. The
+     padding stays constant; the gutter just sits empty when there's nothing to scroll. */
+  scrollbar-gutter: stable;
   /* overflow-y:auto also clips overflow-x, so a selected row's shadow is clipped at the scrollport
      edge. Rather than widen the padding (which narrows the rows), the loud shadows below are kept
      SMALL — ~6px horizontal reach (negative spread) — so they fade well short of the edge / scrollbar
