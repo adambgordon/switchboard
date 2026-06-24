@@ -6,6 +6,24 @@
 
 export type MessageRole = 'user' | 'assistant'
 
+/** Which coding agent produced a conversation. Drives the resume command, the transcript's
+ *  assistant label, the row logo, and the agent-specific token breakdown. */
+export type AgentKind = 'claude' | 'codex'
+
+export interface AgentInfo {
+  /** Display name for chrome (empty state, menus). */
+  label: string
+  /** Header label for this agent's assistant turns in the Formatted view. */
+  assistantLabel: string
+}
+
+/** Per-agent display metadata. Logos live in the renderer (keyed by AgentKind) so this file stays
+ *  free of any asset/DOM import — both processes import it. */
+export const AGENTS: Record<AgentKind, AgentInfo> = {
+  claude: { label: 'Claude Code', assistantLabel: 'Claude' },
+  codex: { label: 'Codex', assistantLabel: 'Codex' }
+}
+
 /** A content block within a message, normalized for read-only rendering. */
 export type TranscriptBlock =
   | { kind: 'text'; text: string }
@@ -34,8 +52,10 @@ export interface TranscriptMessage {
 
 /** Lightweight metadata for one conversation — what the sidebar list renders. */
 export interface ConversationMeta {
-  /** UUID; also the JSONL filename stem and the `claude --resume` token. */
+  /** UUID; also the JSONL filename stem and the agent's resume token. */
   sessionId: string
+  /** Which agent produced this conversation — drives the resume command, transcript label, row logo. */
+  agent: AgentKind
   /** Absolute cwd the session ran in. Read from file CONTENT, never decoded from the dashed dir name. */
   cwd: string
   /** Best human title: aiTitle -> cleaned first user prompt -> "Untitled". */
@@ -53,20 +73,28 @@ export interface ConversationMeta {
   sizeBytes: number
   /** claude model id the session ran on (last non-synthetic assistant line), or null. */
   model: string | null
-  /** cumulative output tokens Claude generated across the conversation (deduped by message id). */
+  /** cumulative output tokens the agent generated across the conversation. */
   outputTokens: number
-  /** cumulative input tokens fed to the model (base input + cache creation + cache read), summed
-   *  across turns and deduped by message id. = inputBaseTokens + cacheWriteTokens + cacheReadTokens. */
+  /** cumulative input tokens fed to the model (all input, including any cache/cached reads). */
   inputTokens: number
-  /** cumulative base (non-cache) input tokens — Anthropic's "Base Input" pricing tier. */
-  inputBaseTokens: number
-  /** cumulative cache-write tokens (5m + 1h ephemeral creation) — the "Cache Write" pricing tiers. */
-  cacheWriteTokens: number
-  /** cumulative cache-read tokens (cache hits & refreshes) — the cheapest input tier. */
-  cacheReadTokens: number
-  /** tokens currently in the context window = the last main-chain turn's input + cache (base +
-   *  cache creation + cache read; output excluded, matching Claude Code's used_percentage). A live
-   *  snapshot, NOT a cumulative total. 0 before any assistant turn reports usage. */
+  /** [Claude] cumulative base (non-cache) input tokens — Anthropic's "Base Input" pricing tier. */
+  inputBaseTokens?: number
+  /** [Claude] cumulative cache-write tokens (5m + 1h ephemeral creation) — the "Cache Write" pricing tiers. */
+  cacheWriteTokens?: number
+  /** [Claude] cumulative cache-read tokens (cache hits & refreshes) — the cheapest input tier. */
+  cacheReadTokens?: number
+  /** [Codex] cumulative cached input tokens (the subset of input served from cache). Codex reports
+   *  cached-vs-uncached input, NOT Anthropic's cache-write/cache-read tiers, so it's kept agent-native
+   *  and never mapped onto the Claude fields. */
+  cachedInputTokens?: number
+  /** [Codex] cumulative reasoning output tokens (no Claude on-disk analog). */
+  reasoningTokens?: number
+  /** [Codex] the model's context-window size (model_context_window) — the denominator for a context
+   *  gauge. Claude doesn't persist this on disk, so it's Codex-only. */
+  contextWindow?: number
+  /** tokens currently in the context window: for Claude, the last main-chain turn's input + cache
+   *  (output excluded, matching the status line's used_percentage); for Codex, the last turn's input
+   *  (incl. cached). A live snapshot, NOT a cumulative total. 0 before any usage is reported. */
   contextTokens: number
   /** ms epoch of the first user/assistant message (for the elapsed-duration span). Null when none. */
   firstActivityAt: number | null
@@ -108,6 +136,8 @@ export interface ConversationMeta {
 /** Full transcript payload for the preview pane. */
 export interface Transcript {
   sessionId: string
+  /** Which agent produced it — drives the per-agent assistant label in the Formatted view. */
+  agent: AgentKind
   cwd: string
   title: string
   messages: TranscriptMessage[]
@@ -141,8 +171,10 @@ export type LiveState = 'working' | 'asking' | 'awaiting' | 'quiet'
 export interface PtyState {
   /** Stable handle for this live process (distinct from sessionId). */
   ptyId: string
-  /** The claude session id this PTY is driving. */
+  /** The agent session id this PTY is driving. */
   sessionId: string
+  /** Which agent this PTY is running (drives the boot command). */
+  agent: AgentKind
   cwd: string
   title: string
   status: PtyStatus

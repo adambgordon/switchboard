@@ -232,6 +232,7 @@ export default function TallyRail({
     y: number
     live: boolean
     unread: boolean
+    agent: ConversationMeta['agent']
   } | null>(null)
   const openRowMenu = (e: MouseEvent, id: string): void => {
     const entry = entryById(id)
@@ -241,7 +242,8 @@ export default function TallyRail({
       x: e.clientX,
       y: e.clientY,
       live: !!entry.pty,
-      unread: entry.liveState === 'awaiting' || entry.liveState === 'asking'
+      unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
+      agent: entry.meta.agent
     })
   }
   useEffect(() => {
@@ -437,8 +439,9 @@ export default function TallyRail({
             <span>Session details…</span>
           </button>
           {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**
-              (not-live) — so the two always occupy the same slot. Separated from the benign items above. */}
-          <div className="sb-ctxmenu-sep" />
+              (not-live, Claude only in Phase 1) — so they share one slot. Separated from the benign
+              items above. A not-live Codex row has no action yet, so the divider drops with it. */}
+          {(ctxMenu.live || ctxMenu.agent === 'claude') && <div className="sb-ctxmenu-sep" />}
           {ctxMenu.live ? (
             <button
               className="sb-ctxmenu-item danger"
@@ -449,7 +452,7 @@ export default function TallyRail({
             >
               <span>Stop session</span>
             </button>
-          ) : (
+          ) : ctxMenu.agent === 'claude' ? (
             <button
               className="sb-ctxmenu-item live"
               onClick={() => {
@@ -459,7 +462,7 @@ export default function TallyRail({
             >
               <span>Resume</span>
             </button>
-          )}
+          ) : null}
         </div>
       )}
     </aside>

@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
-import { CONFIG, type PtyState, type PtyStatus } from '../../shared/types'
+import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
 
 interface Live {
   ptyId: string
   sessionId: string
+  agent: AgentKind
   cwd: string
   title: string
   origin: 'resume' | 'new'
@@ -57,11 +58,19 @@ export class PtyManager extends EventEmitter {
   }
 
   resume(sessionId: string, cwd: string, title = 'Conversation'): PtyState {
-    return this.spawn({ sessionId, cwd, title, origin: 'resume' })
+    // Phase 1 spawns only Claude (Codex resume lands in Phase 2). agent is threaded through so the
+    // rest of the plumbing (PtyState.agent, the boot command) is already agent-aware.
+    return this.spawn({ sessionId, cwd, title, origin: 'resume', agent: 'claude' })
   }
 
   startNew(cwd: string): PtyState {
-    return this.spawn({ sessionId: randomUUID(), cwd, title: 'New conversation', origin: 'new' })
+    return this.spawn({
+      sessionId: randomUUID(),
+      cwd,
+      title: 'New conversation',
+      origin: 'new',
+      agent: 'claude'
+    })
   }
 
   write(ptyId: string, data: string): void {
@@ -122,6 +131,7 @@ export class PtyManager extends EventEmitter {
     cwd: string
     title: string
     origin: 'resume' | 'new'
+    agent: AgentKind
   }): PtyState {
     // Don't double-spawn a session that's already live — just hand back the existing one.
     const existing = this.findBySession(o.sessionId)
@@ -149,6 +159,7 @@ export class PtyManager extends EventEmitter {
     const entry: Live = {
       ptyId,
       sessionId: o.sessionId,
+      agent: o.agent,
       cwd: o.cwd,
       title: o.title,
       origin: o.origin,
@@ -243,6 +254,7 @@ export class PtyManager extends EventEmitter {
     return {
       ptyId: e.ptyId,
       sessionId: e.sessionId,
+      agent: e.agent,
       cwd: e.cwd,
       title: e.title,
       status: e.status,

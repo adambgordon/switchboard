@@ -6,6 +6,7 @@ import { readdir } from 'node:fs/promises'
 import { IPC, type Transcript } from '../shared/types'
 import { indexConversations } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
+import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
 import { appendCustomTitle } from './sessions/rename'
 import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
@@ -51,13 +52,24 @@ export function registerIpc(): void {
   // --- conversations (read-only) ---
   ipcMain.handle(IPC.sessionsList, () => indexConversations(PROJECTS_ROOT))
   ipcMain.handle(IPC.sessionsGet, async (_e, sessionId: string): Promise<Transcript | null> => {
-    const fp = await resolveSessionFile(sessionId)
-    if (!fp) return null
-    try {
-      return await parseTranscript(fp)
-    } catch {
-      return null
+    // Claude first (its filename stem IS the id); fall back to a Codex rollout (trailing UUID).
+    const claudeFp = await resolveSessionFile(sessionId)
+    if (claudeFp) {
+      try {
+        return await parseTranscript(claudeFp)
+      } catch {
+        return null
+      }
     }
+    const codexFp = await resolveCodexFile(sessionId)
+    if (codexFp) {
+      try {
+        return await parseCodexTranscript(codexFp)
+      } catch {
+        return null
+      }
+    }
+    return null
   })
   // Set/clear a conversation's title (the one write path into the JSONL): append Claude Code's own
   // `custom-title` line, then re-index + broadcast IMMEDIATELY so the new title lands in the UI now
