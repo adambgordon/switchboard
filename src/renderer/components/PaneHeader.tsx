@@ -151,14 +151,12 @@ export default function PaneHeader({
               Stop
             </button>
           </>
-        ) : meta?.agent === 'claude' ? (
-          // Phase 1: Resume is wired for Claude only; a not-live Codex conversation is preview-only
-          // until Codex resume (`codex resume <id>`) lands in Phase 2.
+        ) : (
           <button className="sb-btn-resume" onClick={onResume} data-tip="Resume session (⏎)">
             <Play size={12} />
             Resume
           </button>
-        ) : null}
+        )}
       </div>
     </header>
   )

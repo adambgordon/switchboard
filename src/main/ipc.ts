@@ -3,7 +3,7 @@ import os from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { IPC, type Transcript } from '../shared/types'
+import { IPC, type AgentKind, type Transcript } from '../shared/types'
 import { indexConversations } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
@@ -16,10 +16,34 @@ const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 
 let watcher: SessionWatcher | null = null
 let mgr: PtyManager | null = null
+let liveTick: ReturnType<typeof setInterval> | null = null
+
+/**
+ * Live turn-state poll: while a live session has produced output recently, re-index every
+ * LIVE_TICK_MS to keep the working/asking/awaiting dot current. Codex flushes its rollout lazily and
+ * clusters writes near turn boundaries, so the file watcher's change events can arrive only once a
+ * turn is already complete; polling reads the open `in_progress` state sitting on disk.
+ *
+ * We keep polling for LIVE_INDEX_WINDOW_MS after the LAST output byte (not just while strictly
+ * "busy"), so the turn-END marker — which Codex writes a beat after the visible output stops — is
+ * caught by this fast poll instead of waiting on the slower watcher path (which is what left the dot
+ * breathing ~2-3s too long). A truly idle session (no output for the window) still costs nothing.
+ */
+const LIVE_TICK_MS = 500
+const LIVE_INDEX_WINDOW_MS = 2500
 
 function broadcast(channel: string, ...args: unknown[]): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send(channel, ...args)
+  }
+}
+
+/** Re-index both agents' sessions and push the result to the renderer. Swallows transient fs errors. */
+async function reindexAndBroadcast(): Promise<void> {
+  try {
+    broadcast(IPC.sessionsChanged, await indexConversations(PROJECTS_ROOT))
+  } catch {
+    /* transient fs error */
   }
 }
 
@@ -87,8 +111,8 @@ export function registerIpc(): void {
   })
 
   // --- live sessions (explicit spawn only) ---
-  ipcMain.handle(IPC.ptyResume, (_e, sessionId: string, cwd: string, title?: string) =>
-    mgr!.resume(sessionId, cwd, title)
+  ipcMain.handle(IPC.ptyResume, (_e, sessionId: string, cwd: string, agent: AgentKind, title?: string) =>
+    mgr!.resume(sessionId, cwd, agent, title)
   )
   ipcMain.handle(IPC.ptyStartNew, (_e, cwd: string) => {
     // Guard a stale default folder: if it's been deleted/renamed since it was chosen in Preferences,
@@ -126,21 +150,36 @@ export function registerIpc(): void {
     syncTrafficLights(BrowserWindow.fromWebContents(e.sender))
   )
 
-  // --- live re-index on file changes ---
+  // --- live re-index on file changes (structural: new conversations, renames, other windows) ---
   watcher = new SessionWatcher({
     projectsRoot: PROJECTS_ROOT,
-    onChange: async () => {
-      try {
-        broadcast(IPC.sessionsChanged, await indexConversations(PROJECTS_ROOT))
-      } catch {
-        /* transient fs error */
-      }
-    }
+    onChange: () => void reindexAndBroadcast()
   })
   watcher.start()
+
+  // --- live turn-state: recent-activity-gated periodic re-index ---
+  // The watcher catches structural changes, but Codex's lazy / boundary-clustered rollout flushes
+  // mean a change event often arrives only once a turn is already complete (verified empirically). So
+  // re-index on a timer while a live session produced output within LIVE_INDEX_WINDOW_MS — the active
+  // turn AND a short tail after it (so the turn-end marker is caught by this fast poll). The gate
+  // makes a truly idle session free; the in-flight guard keeps a slow re-index from stacking.
+  let ticking = false
+  liveTick = setInterval(() => {
+    if (ticking || !mgr) return
+    const now = Date.now()
+    if (!mgr.list().some((s) => now - s.lastActivity < LIVE_INDEX_WINDOW_MS)) return
+    ticking = true
+    void reindexAndBroadcast().finally(() => {
+      ticking = false
+    })
+  }, LIVE_TICK_MS)
 }
 
 export function disposeIpc(): void {
+  if (liveTick) {
+    clearInterval(liveTick)
+    liveTick = null
+  }
   watcher?.stop()
   watcher = null
   mgr?.killAll()

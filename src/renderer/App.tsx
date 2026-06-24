@@ -344,15 +344,10 @@ export default function App() {
   // Every landing on a conversation (click / ⌥⌘↑/↓ switch / Enter / resume / new) goes through
   // useNavHistory's `open`, which records a back/forward stop.
   const resume = useCallback(async (meta: ConversationMeta) => {
-    // Phase 1: only Claude conversations can be resumed (we spawn `claude --resume`). Codex resume —
-    // `codex resume <id>` — lands in Phase 2; until then the affordances are hidden for Codex rows
-    // (pane header + rail menu), and this guard is the backstop so ⏎ or any stray call can't spawn the
-    // wrong agent against a Codex session id.
-    if (meta.agent !== 'claude') return
     open(meta.sessionId)
     setSessionView(meta.sessionId, 'terminal')
     requestFocus(meta.sessionId)
-    await window.api.resume(meta.sessionId, meta.cwd, meta.title)
+    await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
   }, [open, requestFocus, setSessionView])
 
   const startNew = useCallback(async (cwd: string) => {

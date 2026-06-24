@@ -3,6 +3,19 @@ import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
 import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
 
+/**
+ * The shell command to type to boot an agent. Claude resumes by id (`--resume`) or starts a fresh
+ * session with a PRE-ASSIGNED id (`--session-id`). Codex resumes by id (`codex resume <id>`) but
+ * mints its OWN id for a new session, so a new Codex run is a bare `codex` (its rollout id is
+ * discovered afterward — see the new-session correlation in codex-integration.md).
+ */
+function bootCommandFor(agent: AgentKind, origin: 'resume' | 'new', sessionId: string): string {
+  if (agent === 'codex') {
+    return origin === 'resume' ? `codex resume ${sessionId}` : 'codex'
+  }
+  return origin === 'resume' ? `claude --resume ${sessionId}` : `claude --session-id ${sessionId}`
+}
+
 interface Live {
   ptyId: string
   sessionId: string
@@ -57,13 +70,12 @@ export class PtyManager extends EventEmitter {
     this.maxLive = Math.max(CONFIG.liveSessionsMin, Math.min(CONFIG.liveSessionsMax, Math.floor(n)))
   }
 
-  resume(sessionId: string, cwd: string, title = 'Conversation'): PtyState {
-    // Phase 1 spawns only Claude (Codex resume lands in Phase 2). agent is threaded through so the
-    // rest of the plumbing (PtyState.agent, the boot command) is already agent-aware.
-    return this.spawn({ sessionId, cwd, title, origin: 'resume', agent: 'claude' })
+  resume(sessionId: string, cwd: string, agent: AgentKind, title = 'Conversation'): PtyState {
+    return this.spawn({ sessionId, cwd, title, origin: 'resume', agent })
   }
 
   startNew(cwd: string): PtyState {
+    // New Codex sessions (which can't be pre-assigned an id) land in Phase 3; for now "new" is Claude.
     return this.spawn({
       sessionId: randomUUID(),
       cwd,
@@ -177,10 +189,7 @@ export class PtyManager extends EventEmitter {
     }
     this.live.set(ptyId, entry)
 
-    const bootCmd =
-      o.origin === 'resume'
-        ? `claude --resume ${o.sessionId}`
-        : `claude --session-id ${o.sessionId}`
+    const bootCmd = bootCommandFor(o.agent, o.origin, o.sessionId)
 
     const boot = (): void => {
       if (entry.booted) return
