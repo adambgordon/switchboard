@@ -12,7 +12,7 @@ const THEME_MODES: { value: ThemeMode; label: string }[] = [
 // The info-tooltip copy for the live-sessions cap — mirrors the capacity modal, plus the
 // raise-it-at-your-own-risk note the modal omits. Shown via a wide (wrapping) tooltip.
 const CAP_TIP =
-  "Each live session is a real claude process with its own terminal. At the limit, starting another reclaims whichever session has been idle longest — sessions still working are never stopped, and you're never blocked from starting a new one. Raising the limit means a higher cap on resource consumption: more memory, CPU, and GPU per live terminal. This is intended to prevent Claude Code instances from overwhelming your machine. Increase at your own risk."
+  "Each live session is a real agent process with its own terminal. At the limit, starting another reclaims whichever session has been idle longest — sessions still working are never stopped, and you're never blocked from starting a new one. Raising the limit means a higher cap on resource consumption: more memory, CPU, and GPU per live terminal. This is intended to prevent agent processes from overwhelming your machine. Increase at your own risk."
 
 type Page = 'app' | 'shortcuts' | 'faq'
 
@@ -87,9 +87,8 @@ const FAQ: Faq[] = [
     q: 'Does selecting a conversation start it?',
     a: (
       <>
-        No — selecting only previews the transcript (read-only). A live <code>claude</code> process
-        starts only when you <strong>Resume</strong> an existing conversation or start a{' '}
-        <strong>New</strong> one.
+        No — selecting only previews the transcript (read-only). A live agent process starts only
+        when you <strong>Resume</strong> an existing conversation or start a <strong>New</strong> one.
       </>
     )
   },
@@ -104,7 +103,7 @@ const FAQ: Faq[] = [
               <span className="sb-dot busy" />
             </span>
             <span>
-              <strong>Breathing</strong> — Claude is working
+              <strong>Breathing</strong> — the agent is working
             </span>
           </li>
           <li>
@@ -112,7 +111,7 @@ const FAQ: Faq[] = [
               <span className="sb-dot asking" />
             </span>
             <span>
-              <strong>Pulsing ripple</strong> — Claude is waiting on your reply
+              <strong>Pulsing ripple</strong> — the agent is waiting on your reply
             </span>
           </li>
           <li>
@@ -139,8 +138,9 @@ const FAQ: Faq[] = [
     q: 'Where does Switchboard get its data?',
     a: (
       <>
-        Everything is read from the JSONL files Claude Code writes under{' '}
-        <code>~/.claude/projects/</code>. Switchboard is a viewer — it never owns your conversations.
+        Everything is read from the session files your agents write — Claude Code under{' '}
+        <code>~/.claude/projects/</code> and Codex under <code>~/.codex/sessions/</code>. Switchboard
+        is a viewer — it never owns your conversations.
       </>
     )
   }

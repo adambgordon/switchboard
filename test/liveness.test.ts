@@ -11,6 +11,7 @@ const AFTER = SPAWN + 60_000 // 1 min after → genuine work by the current proc
 function meta(p: Partial<ConversationMeta> = {}): ConversationMeta {
   return {
     sessionId: 's',
+    agent: 'claude',
     cwd: '/x',
     title: 't',
     preview: '',

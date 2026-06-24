@@ -355,6 +355,25 @@
   color: var(--ink-ghost);
 }
 
+/* Per-agent logo (AgentLogo) — a CSS-mask glyph painted in the CURRENT text color, so it renders
+   grayscale and adapts to the theme regardless of the source SVG's own fill (Claude orange / ChatGPT
+   black). Used in the row meta line (inherits --ink-ghost) and reusable elsewhere. Size is set inline
+   by the component. */
+.sb-agent-logo {
+  display: inline-block;
+  flex-shrink: 0;
+  /* One tier stronger than the meta line's --ink-ghost so the mark reads with a bit more contrast —
+     --ink-faint is darker in light (#8a8a8a) and lighter in dark (#8e8e8e), both theme-aware. */
+  background-color: var(--ink-faint);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  vertical-align: middle;
+}
+
 /* "Show N more" — reveals the rest of a capped section (the Recent history) */
 .sb-rail-more {
   align-self: stretch;

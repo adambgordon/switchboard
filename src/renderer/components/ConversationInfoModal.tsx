@@ -70,13 +70,26 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
   const cwd = meta?.cwd ?? pty?.cwd ?? ''
   const branch = meta?.gitBranch && meta.gitBranch !== 'HEAD' ? meta.gitBranch : null
   const model = meta?.model ?? null
+  const agent = meta?.agent ?? 'claude'
+  // Phase 1: rename is wired for Claude only (it appends a `custom-title` line). Codex rename — via
+  // the app-server `thread/name/set` RPC — lands in a later phase, so its title is read-only for now.
+  const canRename = agent === 'claude'
   const sizeBytes = meta?.sizeBytes ?? 0
   const outputTokens = meta?.outputTokens ?? 0
+  const inputTokens = meta?.inputTokens ?? 0
   const inputBaseTokens = meta?.inputBaseTokens ?? 0
   const cacheWriteTokens = meta?.cacheWriteTokens ?? 0
   const cacheReadTokens = meta?.cacheReadTokens ?? 0
+  const cachedInputTokens = meta?.cachedInputTokens ?? 0
+  const reasoningTokens = meta?.reasoningTokens ?? 0
+  const contextWindow = meta?.contextWindow ?? 0
   const contextTokens = meta?.contextTokens ?? 0
-  const hasTokenTotals = inputBaseTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0 || outputTokens > 0
+  // Per-agent token categories — never converted/unified (Anthropic tiers and Codex's
+  // cached/reasoning split don't map onto each other).
+  const hasTokenTotals =
+    agent === 'codex'
+      ? inputTokens > 0 || cachedInputTokens > 0 || reasoningTokens > 0 || outputTokens > 0
+      : inputBaseTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0 || outputTokens > 0
   const lastActivity = meta?.lastActivityAt ?? meta?.mtime ?? pty?.lastActivity ?? null
   const firstActivity = meta?.firstActivityAt ?? null
   const durationMs =
@@ -166,6 +179,8 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
             autoCapitalize="off"
             placeholder="Conversation title"
             aria-label="Conversation title"
+            readOnly={!canRename}
+            data-tip={canRename ? undefined : 'Renaming Codex conversations is coming soon'}
             onChange={(e) => setDraft(e.target.value)}
             onFocus={() => {
               focusedRef.current = true
@@ -210,28 +225,59 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
             <Section label="Tokens">
               {contextTokens > 0 && (
                 <Row label="Context" labelTip="Tokens currently in the context window">
-                  {formatMetric(contextTokens)} tokens
+                  {contextWindow > 0
+                    ? `${formatMetric(contextTokens)} / ${formatMetric(contextWindow)} (${Math.round(
+                        (contextTokens / contextWindow) * 100
+                      )}%)`
+                    : `${formatMetric(contextTokens)} tokens`}
                 </Row>
               )}
-              {inputBaseTokens > 0 && (
-                <Row label="Input" labelTip="Base input tokens">
-                  {formatMetric(inputBaseTokens)} tokens
-                </Row>
-              )}
-              {outputTokens > 0 && (
-                <Row label="Output" labelTip="Output tokens">
-                  {formatMetric(outputTokens)} tokens
-                </Row>
-              )}
-              {cacheWriteTokens > 0 && (
-                <Row label="Cache write" labelTip="Cache-creation tokens">
-                  {formatMetric(cacheWriteTokens)} tokens
-                </Row>
-              )}
-              {cacheReadTokens > 0 && (
-                <Row label="Cache read" labelTip="Cache-read tokens">
-                  {formatMetric(cacheReadTokens)} tokens
-                </Row>
+              {agent === 'codex' ? (
+                <>
+                  {inputTokens > 0 && (
+                    <Row label="Input" labelTip="Total input tokens (including cached)">
+                      {formatMetric(inputTokens)} tokens
+                    </Row>
+                  )}
+                  {cachedInputTokens > 0 && (
+                    <Row label="Cached input" labelTip="Input tokens served from cache">
+                      {formatMetric(cachedInputTokens)} tokens
+                    </Row>
+                  )}
+                  {outputTokens > 0 && (
+                    <Row label="Output" labelTip="Output tokens">
+                      {formatMetric(outputTokens)} tokens
+                    </Row>
+                  )}
+                  {reasoningTokens > 0 && (
+                    <Row label="Reasoning" labelTip="Reasoning output tokens">
+                      {formatMetric(reasoningTokens)} tokens
+                    </Row>
+                  )}
+                </>
+              ) : (
+                <>
+                  {inputBaseTokens > 0 && (
+                    <Row label="Input" labelTip="Base input tokens">
+                      {formatMetric(inputBaseTokens)} tokens
+                    </Row>
+                  )}
+                  {outputTokens > 0 && (
+                    <Row label="Output" labelTip="Output tokens">
+                      {formatMetric(outputTokens)} tokens
+                    </Row>
+                  )}
+                  {cacheWriteTokens > 0 && (
+                    <Row label="Cache write" labelTip="Cache-creation tokens">
+                      {formatMetric(cacheWriteTokens)} tokens
+                    </Row>
+                  )}
+                  {cacheReadTokens > 0 && (
+                    <Row label="Cache read" labelTip="Cache-read tokens">
+                      {formatMetric(cacheReadTokens)} tokens
+                    </Row>
+                  )}
+                </>
               )}
             </Section>
           )}

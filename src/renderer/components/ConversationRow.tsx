@@ -3,6 +3,7 @@ import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { Pin } from './icons'
+import AgentLogo from './AgentLogo'
 
 interface Props {
   meta: ConversationMeta
@@ -86,6 +87,7 @@ function ConversationRowImpl({
           </span>
         )}
         <span className="sb-row-meta">
+          <AgentLogo agent={meta.agent} />
           <span className="mono">{relTime(meta.lastActivityAt ?? meta.mtime)}</span>
           <span className="sb-sep">·</span>
           <span className="mono">{meta.messageCount} msg</span>

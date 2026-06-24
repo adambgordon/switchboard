@@ -47,10 +47,10 @@ export default function CapWarningModal({ capWarning, onDismiss }: Props) {
         </div>
         <div className="sb-modal-body sb-cap-modal-body">
           <p className="sb-cap-modal-text">
-            You have {count} live Claude sessions — Switchboard&apos;s cap is set to {max} to keep
-            Claude Code processes from overwhelming your machine. Opening another tries to free a
-            slot by stopping whichever session has been idle longest. Sessions still working are
-            never stopped. You will never be blocked from starting a new conversation.
+            You have {count} live sessions — Switchboard&apos;s cap is set to {max} to keep agent
+            processes from overwhelming your machine. Opening another tries to free a slot by
+            stopping whichever session has been idle longest. Sessions still working are never
+            stopped. You will never be blocked from starting a new conversation.
           </p>
           <button className="sb-cap-modal-btn" onClick={onDismiss}>
             Got it
