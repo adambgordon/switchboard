@@ -1,9 +1,17 @@
 /**
  * Watches both agents' session roots — Claude Code `~/.claude/projects` and Codex
- * `~/.codex/sessions` — for session-file changes and fires a debounced `onChange` callback so the
- * main process can re-index.
+ * `~/.codex/sessions` — for session-file changes and fires a debounced `onChange` so the main
+ * process can re-index.
  *
  * Pure Node — no Electron, no DOM. Backed by chokidar v3.
+ *
+ * NOTE on live turn-state: this watcher reliably catches structural changes (a new conversation,
+ * a rename, a session in another window) but is NOT the signal that drives the live "working" dot.
+ * Codex flushes its rollout to disk lazily and clusters writes around turn boundaries, so a
+ * file-change event often only arrives once the turn is already complete — the open `in_progress`
+ * state is on disk between flushes but isn't always announced as an event. Live turn-state is
+ * instead driven by a busy-gated periodic re-index in ipc.ts (see `registerIpc`). This watcher
+ * keeps `awaitWriteFinish` so it reads complete lines for the structural-change path.
  */
 
 import { homedir } from 'node:os'
@@ -28,10 +36,9 @@ function defaultProjectsRoot(): string {
 }
 
 /**
- * Watches `<root>/**\/*.jsonl` for add/change/unlink and invokes a debounced
- * `onChange`. `start()` is idempotent; `stop()` tears the watcher down and is
- * safe to call when not started. Construction/start never throw if the root
- * does not yet exist (chokidar tolerates a missing path).
+ * Watches both roots' `**\/*.jsonl` for add/change/unlink and invokes a debounced `onChange`.
+ * `start()` is idempotent; `stop()` tears the watcher down and is safe to call when not started.
+ * Construction/start never throw if a root does not yet exist (chokidar tolerates a missing path).
  */
 export class SessionWatcher {
   private readonly claudeRoot: string

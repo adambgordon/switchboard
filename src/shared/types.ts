@@ -225,7 +225,7 @@ export interface SwitchboardApi {
   renameConversation(sessionId: string, title: string): Promise<boolean>
 
   // --- live sessions (explicit spawn only) ---
-  resume(sessionId: string, cwd: string, title?: string): Promise<PtyState>
+  resume(sessionId: string, cwd: string, agent: AgentKind, title?: string): Promise<PtyState>
   startNew(cwd: string): Promise<PtyState>
   sendInput(ptyId: string, data: string): void
   resize(ptyId: string, cols: number, rows: number): void
