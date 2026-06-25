@@ -101,6 +101,40 @@ async function safeExtractCodexMeta(filePath: string): Promise<ConversationMeta 
 }
 
 /**
+ * Per-file parsed-meta cache, keyed by absolute path. The caller owns it so it persists across
+ * re-index passes; pass nothing to {@link indexConversations} for a one-shot index (a fresh throwaway
+ * cache, i.e. no reuse).
+ */
+export type MetaCache = Map<string, ConversationMeta>
+
+/**
+ * Stat-gate a per-file extract: reuse the cached meta when the file's (mtime, size) is unchanged,
+ * else re-read + re-parse and refresh the cache. Transcript JSONL is append-only, so any content
+ * change moves both mtime and size — making (mtime, size) a sound, cheap invalidation key. This keeps
+ * the live-turn poll (which re-indexes every ~500ms) from re-reading + re-parsing every transcript on
+ * disk each pass; only the file(s) actually being appended get reprocessed.
+ */
+async function extractWithCache(
+  filePath: string,
+  cache: MetaCache,
+  extract: (fp: string) => Promise<ConversationMeta | null>
+): Promise<ConversationMeta | null> {
+  let st: Awaited<ReturnType<typeof stat>>
+  try {
+    st = await stat(filePath)
+  } catch {
+    cache.delete(filePath)
+    return null
+  }
+  const cached = cache.get(filePath)
+  if (cached && cached.mtime === st.mtimeMs && cached.sizeBytes === st.size) return cached
+  const meta = await extract(filePath)
+  if (meta) cache.set(filePath, meta)
+  else cache.delete(filePath)
+  return meta
+}
+
+/**
  * Derive the display label for a group keyed on `cwd`: the basename, falling
  * back to the full cwd when the basename is empty or ambiguous (e.g. `/`).
  */
@@ -114,7 +148,7 @@ function labelForCwd(cwd: string): string {
  * `/bg` daemon sessions (Claude Code itself hides those from `/resume`; surfacing them produces a
  * phantom duplicate of the interactive conversation they forked from). [] if the root is missing.
  */
-async function indexClaudeMetas(root: string): Promise<ConversationMeta[]> {
+async function indexClaudeMetas(root: string, cache: MetaCache): Promise<ConversationMeta[]> {
   try {
     const rootStat = await stat(root)
     if (!rootStat.isDirectory()) return []
@@ -125,7 +159,9 @@ async function indexClaudeMetas(root: string): Promise<ConversationMeta[]> {
   const projectDirs = await listProjectDirs(root)
   const fileLists = await Promise.all(projectDirs.map((dir) => listSessionFiles(dir)))
   const allFiles = fileLists.flat()
-  const metas = await mapWithConcurrency(allFiles, CONCURRENCY, safeExtractMeta)
+  const metas = await mapWithConcurrency(allFiles, CONCURRENCY, (f) =>
+    extractWithCache(f, cache, safeExtractMeta)
+  )
 
   const out: ConversationMeta[] = []
   for (const meta of metas) {
@@ -142,9 +178,11 @@ async function indexClaudeMetas(root: string): Promise<ConversationMeta[]> {
  * for non-interactive (`codex exec`) rollouts; here we additionally drop zero-message ones. [] if
  * the root is missing.
  */
-async function indexCodexMetas(root: string): Promise<ConversationMeta[]> {
+async function indexCodexMetas(root: string, cache: MetaCache): Promise<ConversationMeta[]> {
   const files = await listCodexRollouts(root)
-  const metas = await mapWithConcurrency(files, CONCURRENCY, safeExtractCodexMeta)
+  const metas = await mapWithConcurrency(files, CONCURRENCY, (f) =>
+    extractWithCache(f, cache, safeExtractCodexMeta)
+  )
 
   const out: ConversationMeta[] = []
   for (const meta of metas) {
@@ -162,14 +200,16 @@ async function indexCodexMetas(root: string): Promise<ConversationMeta[]> {
  */
 export async function indexConversations(
   projectsRoot?: string,
-  codexRoot?: string
+  codexRoot?: string,
+  cache?: MetaCache
 ): Promise<ConversationGroup[]> {
   const claudeRoot = projectsRoot ?? defaultProjectsRoot()
   const codexSessionsRoot = codexRoot ?? defaultCodexRoot()
+  const fileCache = cache ?? new Map()
 
   const [claudeMetas, codexMetas] = await Promise.all([
-    indexClaudeMetas(claudeRoot),
-    indexCodexMetas(codexSessionsRoot)
+    indexClaudeMetas(claudeRoot, fileCache),
+    indexCodexMetas(codexSessionsRoot, fileCache)
   ])
 
   const groups = new Map<string, ConversationMeta[]>()

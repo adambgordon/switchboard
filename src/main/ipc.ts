@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { IPC, type AgentKind, type Transcript } from '../shared/types'
-import { indexConversations } from './sessions/indexer'
+import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
 import { appendCustomTitle } from './sessions/rename'
@@ -17,6 +17,15 @@ const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 let watcher: SessionWatcher | null = null
 let mgr: PtyManager | null = null
 let liveTick: ReturnType<typeof setInterval> | null = null
+
+/** Persistent per-file meta cache shared across every re-index, so the frequent live-turn poll
+ *  re-parses only the transcript(s) actually changing rather than re-reading the whole index each
+ *  pass (387 MB+ of transcripts on a busy machine). See indexer's MetaCache / extractWithCache. */
+const metaCache: MetaCache = new Map()
+/** Signature of the last broadcast group tree, so reindexAndBroadcast can skip pushing an identical
+ *  snapshot — the poll's 2.5s idle tail, Codex's flat (lazy-flush) periods, and the watcher's
+ *  post-write re-fire after a rename all otherwise re-broadcast unchanged data. */
+let lastBroadcastSig: string | null = null
 
 /**
  * Live turn-state poll: while a live session has produced output recently, re-index every
@@ -41,7 +50,11 @@ function broadcast(channel: string, ...args: unknown[]): void {
 /** Re-index both agents' sessions and push the result to the renderer. Swallows transient fs errors. */
 async function reindexAndBroadcast(): Promise<void> {
   try {
-    broadcast(IPC.sessionsChanged, await indexConversations(PROJECTS_ROOT))
+    const groups = await indexConversations(PROJECTS_ROOT, undefined, metaCache)
+    const sig = JSON.stringify(groups)
+    if (sig === lastBroadcastSig) return
+    lastBroadcastSig = sig
+    broadcast(IPC.sessionsChanged, groups)
   } catch {
     /* transient fs error */
   }
@@ -74,7 +87,7 @@ export function registerIpc(): void {
   mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))
 
   // --- conversations (read-only) ---
-  ipcMain.handle(IPC.sessionsList, () => indexConversations(PROJECTS_ROOT))
+  ipcMain.handle(IPC.sessionsList, () => indexConversations(PROJECTS_ROOT, undefined, metaCache))
   ipcMain.handle(IPC.sessionsGet, async (_e, sessionId: string): Promise<Transcript | null> => {
     // Claude first (its filename stem IS the id); fall back to a Codex rollout (trailing UUID).
     const claudeFp = await resolveSessionFile(sessionId)
@@ -103,7 +116,7 @@ export function registerIpc(): void {
     if (!fp) return false
     try {
       await appendCustomTitle(fp, sessionId, title)
-      broadcast(IPC.sessionsChanged, await indexConversations(PROJECTS_ROOT))
+      await reindexAndBroadcast()
       return true
     } catch {
       return false
