@@ -16,6 +16,30 @@ function bootCommandFor(agent: AgentKind, origin: 'resume' | 'new', sessionId: s
   return origin === 'resume' ? `claude --resume ${sessionId}` : `claude --session-id ${sessionId}`
 }
 
+/**
+ * A clean environment for a spawned agent. Switchboard launches each agent as an INDEPENDENT session,
+ * but if Switchboard itself was started from inside a Claude Code session (e.g. `npm run dev` from a
+ * Claude Code terminal, or `open`ed from one), its own process.env carries that parent session's
+ * runtime markers: CLAUDECODE, CLAUDE_CODE_* (notably CLAUDE_CODE_CHILD_SESSION=1), the effort
+ * overrides, and the ANTHROPIC_* auth/base-url/model redirection. Inherited by a spawned `claude`,
+ * those make it behave as a nested CHILD — CLAUDE_CODE_CHILD_SESSION=1 SUPPRESSES interactive
+ * transcript persistence, so a new/resumed conversation writes no JSONL, never lands in the index,
+ * and shows no liveness. Strip them so every agent starts in a clean environment, identical to a
+ * normal terminal launch. The login shell re-sources the user's profile, restoring anything they
+ * legitimately set there; only the leaked runtime markers are removed. A no-op for the packaged app,
+ * where none of these are set.
+ */
+function cleanAgentEnv(): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k === 'CLAUDECODE' || k === 'CLAUDE_EFFORT') continue
+    if (k.startsWith('CLAUDE_CODE_')) continue
+    if (k.startsWith('ANTHROPIC_')) continue
+    out[k] = v
+  }
+  return out
+}
+
 interface Live {
   ptyId: string
   sessionId: string
@@ -159,7 +183,7 @@ export class PtyManager extends EventEmitter {
       rows: 30,
       cwd: o.cwd,
       env: {
-        ...process.env,
+        ...cleanAgentEnv(),
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
         // a breadcrumb so a shell rc can special-case Switchboard if desired
