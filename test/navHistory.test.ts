@@ -101,4 +101,34 @@ describe('navReducer', () => {
   it('home is a no-op when nothing is selected', () => {
     expect(navReducer(INITIAL, { type: 'home' })).toBe(INITIAL)
   })
+
+  // rekey: a provisional new-Codex session's placeholder id is swapped for its real rollout id on
+  // bind. It must update the selection AND every history stop so back/forward stay coherent.
+  it('rekey swaps the placeholder id in both selection and stack', () => {
+    const s = run([
+      { type: 'open', id: 'a' },
+      { type: 'open', id: 'P' },
+      { type: 'rekey', from: 'P', to: 'real' }
+    ])
+    expect(s).toEqual({ selectedId: 'real', stack: ['a', 'real'], cursor: 1 })
+  })
+
+  it('rekey swaps a stack entry that is not the current selection', () => {
+    const s = run([
+      { type: 'open', id: 'P' },
+      { type: 'open', id: 'b' },
+      { type: 'rekey', from: 'P', to: 'real' }
+    ])
+    expect(s).toEqual({ selectedId: 'b', stack: ['real', 'b'], cursor: 1 })
+  })
+
+  it('rekey is a no-op when the id is absent', () => {
+    const start = run([{ type: 'open', id: 'a' }])
+    expect(navReducer(start, { type: 'rekey', from: 'missing', to: 'x' })).toBe(start)
+  })
+
+  it('rekey is a no-op when from === to', () => {
+    const start = run([{ type: 'open', id: 'a' }])
+    expect(navReducer(start, { type: 'rekey', from: 'a', to: 'a' })).toBe(start)
+  })
 })

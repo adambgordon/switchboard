@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
 import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
+import { matchProvisionalCodex, type CodexBindCandidate } from '../sessions/codexParser'
 
 /**
  * The shell command to type to boot an agent. Claude resumes by id (`--resume`) or starts a fresh
@@ -53,6 +54,10 @@ interface Live {
   startedAt: number
   idleTimer: ReturnType<typeof setTimeout> | null
   bootTimer: ReturnType<typeof setTimeout> | null
+  // A new Codex session has no real id at spawn (Codex mints its own), so the PTY carries a
+  // placeholder sessionId and stays `provisional` until its rollout is indexed and bindProvisionalCodex
+  // swaps in the real id. Cleared on bind (or when the PTY exits).
+  provisional: boolean
   booted: boolean
   // Claude boots (the `claude` command is typed) only once the shell is ready AND the renderer
   // has sized the PTY to the real terminal dimensions. Booting before the resize makes claude
@@ -98,14 +103,31 @@ export class PtyManager extends EventEmitter {
     return this.spawn({ sessionId, cwd, title, origin: 'resume', agent })
   }
 
-  startNew(cwd: string): PtyState {
-    // New Codex sessions (which can't be pre-assigned an id) land in Phase 3; for now "new" is Claude.
+  startNew(cwd: string, agent: AgentKind): PtyState {
+    if (agent === 'codex') return this.startNewCodex(cwd)
+    // Claude gets a pre-assigned id and is live (and renamable) immediately.
     return this.spawn({
       sessionId: randomUUID(),
       cwd,
       title: 'New conversation',
       origin: 'new',
       agent: 'claude'
+    })
+  }
+
+  /**
+   * Start a new Codex session. Codex mints its OWN rollout id (and only writes the rollout at the
+   * first turn), so we spawn with a placeholder sessionId and mark the PTY `provisional`. The real
+   * id is swapped in later by bindProvisionalCodex, when the rollout is first indexed.
+   */
+  private startNewCodex(cwd: string): PtyState {
+    return this.spawn({
+      sessionId: randomUUID(), // placeholder; swapped for the real rollout id on bind
+      cwd,
+      title: 'New Codex conversation',
+      origin: 'new',
+      agent: 'codex',
+      provisional: true
     })
   }
 
@@ -162,12 +184,47 @@ export class PtyManager extends EventEmitter {
     return null
   }
 
+  /**
+   * Correlate any unbound provisional new-Codex PTYs to their now-indexed rollouts and bind them.
+   * Called from the re-index path (a new Codex rollout only lands on disk at its first turn, which is
+   * exactly when the live-turn re-index fires), so binding rides the indexing that already happens —
+   * no separate file poll. `candidates` is the freshly-indexed Codex conversation set. Cheap: returns
+   * immediately when nothing is provisional.
+   */
+  bindProvisionalCodex(candidates: CodexBindCandidate[]): void {
+    const provisional = [...this.live.values()]
+      .filter((e) => e.agent === 'codex' && e.provisional)
+      .map((e) => ({ ptyId: e.ptyId, cwd: e.cwd, startedAt: e.startedAt }))
+    if (provisional.length === 0) return
+    const liveIds = new Set([...this.live.values()].map((e) => e.sessionId))
+    for (const { ptyId, sessionId } of matchProvisionalCodex(provisional, candidates, liveIds)) {
+      this.bindCodex(ptyId, sessionId)
+    }
+  }
+
+  /** Swap a provisional Codex PTY's placeholder id for the real rollout id, then announce it: a
+   *  `bound` event (so the renderer re-keys its session-keyed state) followed by `active-changed`. */
+  private bindCodex(ptyId: string, realSessionId: string): void {
+    const entry = this.live.get(ptyId)
+    if (!entry || !entry.provisional) return
+    // Defensive: never bind onto an id another live PTY already owns.
+    for (const e of this.live.values()) {
+      if (e.ptyId !== ptyId && e.sessionId === realSessionId) return
+    }
+    const oldSessionId = entry.sessionId
+    entry.sessionId = realSessionId
+    entry.provisional = false
+    this.emit('bound', ptyId, oldSessionId, realSessionId)
+    this.emitActive()
+  }
+
   private spawn(o: {
     sessionId: string
     cwd: string
     title: string
     origin: 'resume' | 'new'
     agent: AgentKind
+    provisional?: boolean
   }): PtyState {
     // Don't double-spawn a session that's already live — just hand back the existing one.
     const existing = this.findBySession(o.sessionId)
@@ -205,6 +262,7 @@ export class PtyManager extends EventEmitter {
       startedAt: now,
       idleTimer: null,
       bootTimer: null,
+      provisional: o.provisional ?? false,
       booted: false,
       shellReady: false,
       sized: false,

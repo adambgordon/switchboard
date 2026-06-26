@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { parseCodexTranscriptText, extractCodexMetaFromText } from '../src/main/sessions/codexParser'
+import {
+  parseCodexTranscriptText,
+  extractCodexMetaFromText,
+  matchProvisionalCodex
+} from '../src/main/sessions/codexParser'
 
 const TS = '2026-06-23T14:36:56.000Z'
 const TS2 = '2026-06-23T14:37:10.000Z'
@@ -170,5 +174,60 @@ describe('parseCodexTranscriptText', () => {
     const dump = JSON.stringify(t.messages)
     expect(dump).not.toContain('permissions instructions')
     expect(dump).not.toContain('environment_context')
+  })
+})
+
+// --- new-session binding (Phase 3): matchProvisionalCodex (pure correlation) ---
+
+const T = 1_000_000 // a PTY spawn time
+const pty = (ptyId: string, cwd: string, startedAt: number) => ({ ptyId, cwd, startedAt })
+const cand = (sessionId: string, cwd: string, firstActivityAt: number | null) => ({ sessionId, cwd, firstActivityAt })
+
+describe('matchProvisionalCodex', () => {
+  it('binds a new rollout (same cwd, first activity after spawn) to the provisional PTY', () => {
+    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/x', T + 5000)], new Set())).toEqual([
+      { ptyId: 'p1', sessionId: 's1' }
+    ])
+  })
+
+  it('ignores rollouts in a different cwd', () => {
+    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/y', T + 5000)], new Set())).toEqual([])
+  })
+
+  it('ignores an OLD rollout whose first activity predates the spawn (the time gate)', () => {
+    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('old', '/x', T - 600000)], new Set())).toEqual([])
+  })
+
+  it('ignores rollouts with no activity yet', () => {
+    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/x', null)], new Set())).toEqual([])
+  })
+
+  it('excludes ids already driven by a live PTY', () => {
+    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/x', T + 5000)], new Set(['s1']))).toEqual([])
+  })
+
+  it('returns nothing when there are no provisional PTYs', () => {
+    expect(matchProvisionalCodex([], [cand('s1', '/x', T + 5000)], new Set())).toEqual([])
+  })
+
+  it('FIFO: the oldest PTY takes the earliest rollout in the same cwd', () => {
+    const r = matchProvisionalCodex(
+      [pty('pNew', '/x', T + 100), pty('pOld', '/x', T)],
+      [cand('sLate', '/x', T + 9000), cand('sEarly', '/x', T + 3000)],
+      new Set()
+    )
+    expect(r).toEqual([
+      { ptyId: 'pOld', sessionId: 'sEarly' },
+      { ptyId: 'pNew', sessionId: 'sLate' }
+    ])
+  })
+
+  it('binds each rollout to at most one PTY', () => {
+    const r = matchProvisionalCodex(
+      [pty('pOld', '/x', T), pty('pNew', '/x', T + 100)],
+      [cand('s1', '/x', T + 5000)],
+      new Set()
+    )
+    expect(r).toEqual([{ ptyId: 'pOld', sessionId: 's1' }])
   })
 })

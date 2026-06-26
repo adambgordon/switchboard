@@ -165,13 +165,38 @@
 .sb-newmenu-other:hover {
   color: var(--ink);
 }
-/* keyboard focus (⌘N / arrow nav) highlights the item neutrally — suppress the global
-   cobalt :focus-visible ring so a focused menu item never reads as "alive" */
-.sb-newmenu-item:focus-visible,
-.sb-newmenu-other:focus-visible {
+/* The keyboard cursor — the focused row. Uses :focus (NOT :focus-visible) so it shows CONSISTENTLY,
+   including the programmatic focus when the menu opens (Chromium's focus-visible heuristic fires
+   unreliably for programmatic focus, so the highlight flickered in/out on ⌘N). Suppress the global
+   cobalt ring so a focused menu item never reads as "alive". */
+.sb-newmenu-item:focus,
+.sb-newmenu-other:focus {
   outline: none;
   color: var(--ink);
   background: var(--paper-hover);
+}
+/* The default folder opens pre-selected and accented — a darker fill plus a border — but ONLY while
+   it's the focused row. Move the cursor off it and it drops back to a plain row (no lingering
+   highlight); whatever row you land on shows the neutral cursor above. */
+.sb-newmenu-item.selected:focus {
+  background: var(--paper-active);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+}
+/* Agent segment at the top of the New menu — the shared .sb-seg pill, stretched full-width with the
+   two agents splitting it evenly, each showing its grayscale logo + label. Not rendered at all when
+   only one agent is launchable, so single-agent users get the unchanged directory menu. */
+.sb-newmenu-agents {
+  display: flex;
+  width: 100%;
+  margin-bottom: 8px;
+}
+.sb-newmenu-agent {
+  flex: 1;
+  justify-content: center;
+}
+.sb-newmenu-agent:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ---- buttons ---- */
@@ -645,25 +670,27 @@ body.sb-resizing .sb-pane {
 
 /* ---- App page: the default-folder setting (toggle on-state is INK, never cobalt — cobalt is
    liveness-only, the two-accent invariant) ---- */
+/* Each setting stacks vertically: title → widget → description, all left-aligned. The title and
+   description span the full dialog width (wrapping only at its right edge); the inline widgets
+   (segmented control, slider) sit at their natural width, left-aligned via align-self below. */
 .sb-setting {
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
+  align-items: stretch;
+  gap: var(--s2);
 }
-.sb-setting-main {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--s4);
+/* Separate stacked settings within a group (e.g. default-agent above default-directory). */
+.sb-setting + .sb-setting {
+  margin-top: var(--s4);
 }
-.sb-setting-text {
-  min-width: 0;
+.sb-setting .sb-seg,
+.sb-setting .sb-slider-control {
+  align-self: flex-start;
 }
 .sb-setting-title {
   font-size: var(--text-base);
   font-weight: 600;
   color: var(--ink);
-  margin-bottom: 3px;
 }
 .sb-setting-desc {
   font-size: var(--text-sm);
@@ -680,39 +707,6 @@ body.sb-resizing .sb-pane {
   height: 18px;
   padding: 0 4px;
   vertical-align: baseline;
-}
-
-/* the on/off switch */
-.sb-toggle {
-  position: relative;
-  flex-shrink: 0;
-  width: 36px;
-  height: 18px;
-  margin-top: 4px;
-  border-radius: var(--r-pill);
-  background: var(--rule-strong);
-  transition: background var(--dur-fast) var(--ease);
-}
-.sb-toggle.on {
-  background: var(--ink);
-}
-.sb-toggle:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.sb-toggle-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--paper-raised);
-  box-shadow: 0 1px 2px rgba(var(--shadow-color), 0.25);
-  transition: transform var(--dur-fast) var(--ease);
-}
-.sb-toggle.on .sb-toggle-knob {
-  transform: translateX(18px);
 }
 
 /* the chosen-folder row */
