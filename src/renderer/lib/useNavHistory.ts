@@ -29,6 +29,7 @@ export type NavAction =
   | { type: 'home' }
   | { type: 'back' }
   | { type: 'forward' }
+  | { type: 'rekey'; from: string; to: string }
 
 const INITIAL: NavState = { selectedId: null, stack: [], cursor: -1 }
 
@@ -65,6 +66,18 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       if (state.cursor >= state.stack.length - 1) return state
       return { ...state, cursor: state.cursor + 1, selectedId: state.stack[state.cursor + 1] }
     }
+    case 'rekey': {
+      // A provisional session's placeholder id was replaced by its real id (a new-Codex bind). Swap
+      // it everywhere in the history so the current selection AND every back/forward stop keep
+      // pointing at the same conversation. No-op when the old id isn't present.
+      if (action.from === action.to) return state
+      if (state.selectedId !== action.from && !state.stack.includes(action.from)) return state
+      return {
+        ...state,
+        selectedId: state.selectedId === action.from ? action.to : state.selectedId,
+        stack: state.stack.map((id) => (id === action.from ? action.to : id))
+      }
+    }
     default:
       return state
   }
@@ -76,5 +89,6 @@ export function useNavHistory() {
   const home = useCallback(() => dispatch({ type: 'home' }), [])
   const back = useCallback(() => dispatch({ type: 'back' }), [])
   const forward = useCallback(() => dispatch({ type: 'forward' }), [])
-  return { selectedId: state.selectedId, open, home, back, forward }
+  const rekey = useCallback((from: string, to: string) => dispatch({ type: 'rekey', from, to }), [])
+  return { selectedId: state.selectedId, open, home, back, forward, rekey }
 }

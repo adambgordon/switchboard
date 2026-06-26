@@ -3,7 +3,8 @@ import os from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { IPC, type AgentKind, type Transcript } from '../shared/types'
+import { execFile } from 'node:child_process'
+import { IPC, type AgentAvailability, type AgentKind, type Transcript } from '../shared/types'
 import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
@@ -51,6 +52,18 @@ function broadcast(channel: string, ...args: unknown[]): void {
 async function reindexAndBroadcast(): Promise<void> {
   try {
     const groups = await indexConversations(PROJECTS_ROOT, undefined, metaCache)
+    // Late-bind new Codex sessions: a new Codex rollout only lands on disk at its first turn, which is
+    // exactly when this re-index fires (the live session goes active). Correlate any unbound provisional
+    // Codex PTY to its freshly-indexed rollout here, rather than racing a time-boxed file poll that the
+    // lazy flush outruns. Binding emits `bound` + `active-changed`, so the row upgrades in place and the
+    // rollout isn't also shown as a separate Recent conversation.
+    if (mgr) {
+      const codexCandidates = groups
+        .flatMap((g) => g.conversations)
+        .filter((c) => c.agent === 'codex')
+        .map((c) => ({ sessionId: c.sessionId, cwd: c.cwd, firstActivityAt: c.firstActivityAt ?? null }))
+      mgr.bindProvisionalCodex(codexCandidates)
+    }
     const sig = JSON.stringify(groups)
     if (sig === lastBroadcastSig) return
     lastBroadcastSig = sig
@@ -58,6 +71,38 @@ async function reindexAndBroadcast(): Promise<void> {
   } catch {
     /* transient fs error */
   }
+}
+
+/**
+ * Which agent CLIs are launchable, probed via the LOGIN+INTERACTIVE shell (`$SHELL -lic`) — the same
+ * shell the PtyManager spawns, so this reflects the real PATH a session would get, not the GUI app's
+ * minimal process.env. `command -v` prints the resolved path for each that exists and nothing for
+ * those that don't (exiting non-zero when one is missing — expected, so we ignore the error and parse
+ * stdout). Probed once and cached; the in-flight promise is shared so concurrent callers don't double-probe.
+ */
+let agentAvailability: AgentAvailability | null = null
+let agentAvailabilityProbe: Promise<AgentAvailability> | null = null
+
+function probeAgents(): Promise<AgentAvailability> {
+  const shell = process.env.SHELL || '/bin/zsh'
+  return new Promise((resolve) => {
+    execFile(shell, ['-lic', 'command -v claude; command -v codex'], { timeout: 4000 }, (_err, stdout) => {
+      const lines = (typeof stdout === 'string' ? stdout : '').split('\n').map((l) => l.trim())
+      const has = (name: string): boolean => lines.some((l) => l === name || l.endsWith('/' + name))
+      resolve({ claude: has('claude'), codex: has('codex') })
+    })
+  })
+}
+
+function listAgents(): Promise<AgentAvailability> {
+  if (agentAvailability) return Promise.resolve(agentAvailability)
+  if (!agentAvailabilityProbe) {
+    agentAvailabilityProbe = probeAgents().then((a) => {
+      agentAvailability = a
+      return a
+    })
+  }
+  return agentAvailabilityProbe
 }
 
 /** Resolve a sessionId to its JSONL path. The filename stem IS the sessionId. */
@@ -85,6 +130,14 @@ export function registerIpc(): void {
   mgr.on('data', (ptyId: string, data: string) => broadcast(IPC.ptyData, ptyId, data))
   mgr.on('exit', (ptyId: string, code: number | null) => broadcast(IPC.ptyExit, ptyId, code))
   mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))
+  // A provisional new-Codex PTY got its real rollout id — tell the renderer so it can re-key its
+  // session-keyed state (nav / seen / view) from the placeholder to the real id.
+  mgr.on('bound', (ptyId: string, oldId: string, newId: string) =>
+    broadcast(IPC.ptyBound, ptyId, oldId, newId)
+  )
+
+  // Warm the agent-availability probe now so the first New-menu open is instant (it's cached).
+  void listAgents()
 
   // --- conversations (read-only) ---
   ipcMain.handle(IPC.sessionsList, () => indexConversations(PROJECTS_ROOT, undefined, metaCache))
@@ -127,11 +180,11 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.ptyResume, (_e, sessionId: string, cwd: string, agent: AgentKind, title?: string) =>
     mgr!.resume(sessionId, cwd, agent, title)
   )
-  ipcMain.handle(IPC.ptyStartNew, (_e, cwd: string) => {
+  ipcMain.handle(IPC.ptyStartNew, (_e, cwd: string, agent: AgentKind) => {
     // Guard a stale default folder: if it's been deleted/renamed since it was chosen in Preferences,
     // reject so the renderer can fall back to the chooser instead of node-pty throwing on a bad cwd.
     if (!existsSync(cwd)) throw new Error(`Directory no longer exists: ${cwd}`)
-    return mgr!.startNew(cwd)
+    return mgr!.startNew(cwd, agent)
   })
   ipcMain.on(IPC.ptyInput, (_e, ptyId: string, data: string) => mgr!.write(ptyId, data))
   ipcMain.on(IPC.ptyResize, (_e, ptyId: string, cols: number, rows: number) =>
@@ -140,6 +193,7 @@ export function registerIpc(): void {
   ipcMain.on(IPC.ptyKill, (_e, ptyId: string) => mgr!.kill(ptyId))
   ipcMain.on(IPC.ptySetMaxLive, (_e, n: number) => mgr!.setMaxLive(n))
   ipcMain.handle(IPC.ptyActiveList, () => mgr!.list())
+  ipcMain.handle(IPC.agentsAvailable, () => listAgents())
 
   // --- misc ---
   ipcMain.handle(IPC.dialogPickDirectory, async () => {

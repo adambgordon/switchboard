@@ -1,7 +1,9 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Close, Folder, Info, Reset } from './icons'
 import { basename } from '../lib/format'
+import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
+import AgentLogo from './AgentLogo'
 
 const THEME_MODES: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'System' },
@@ -172,16 +174,19 @@ interface Props {
   /** Set the theme mode (from the Appearance segmented control). */
   onSetThemeMode: (mode: ThemeMode) => void
   // --- App page: default folder for new conversations ---
-  /** Absolute path of the default folder ('' = none chosen). */
+  /** Absolute path of the default folder ('' = none chosen). A chosen folder is always active. */
   defaultDir: string
-  /** Whether the default folder is active (+ / ⌘N skip the chooser). */
-  defaultDirEnabled: boolean
-  /** Open the native picker to choose the default folder (auto-enables on pick). */
+  /** Open the native picker to choose the default folder. */
   onChooseDefaultDir: () => void
-  /** Forget the default folder (also disables). */
+  /** Forget the default folder. */
   onClearDefaultDir: () => void
-  /** Flip the default folder on/off without losing the path. */
-  onToggleDefaultDirEnabled: () => void
+  // --- App page: default agent for new conversations (only meaningful with >1 agent installed) ---
+  /** True when more than one agent is launchable — otherwise the agent row is hidden (no choice). */
+  agentChoiceAvailable: boolean
+  /** The default-agent choice: 'none' (no default) or the agent ⌘N / + should start with. */
+  defaultAgentChoice: 'none' | AgentKind
+  /** Set the default-agent choice (a tri-state segmented control, like Theme — no on/off toggle). */
+  onSetDefaultAgentChoice: (value: 'none' | AgentKind) => void
   // --- App page: live-session cap ---
   /** Current max live sessions (the LRU cap). */
   maxLiveSessions: number
@@ -210,10 +215,11 @@ export default function SettingsModal({
   themeMode,
   onSetThemeMode,
   defaultDir,
-  defaultDirEnabled,
   onChooseDefaultDir,
   onClearDefaultDir,
-  onToggleDefaultDirEnabled,
+  agentChoiceAvailable,
+  defaultAgentChoice,
+  onSetDefaultAgentChoice,
   maxLiveSessions,
   maxLiveMin,
   maxLiveMax,
@@ -277,51 +283,38 @@ export default function SettingsModal({
                 <div className="sb-modal-group">
                   <div className="sb-modal-group-label label-caps">Appearance</div>
                   <div className="sb-setting">
-                    <div className="sb-setting-main">
-                      <div className="sb-setting-text">
-                        <div className="sb-setting-title">Theme</div>
-                        <div className="sb-setting-desc">
-                          Follow the system theme, or force light or dark.
-                        </div>
-                      </div>
-                      <div className="sb-seg" role="radiogroup" aria-label="Theme">
-                        {THEME_MODES.map((m) => (
-                          <button
-                            key={m.value}
-                            type="button"
-                            role="radio"
-                            aria-checked={themeMode === m.value}
-                            className={`sb-seg-btn${themeMode === m.value ? ' active' : ''}`}
-                            onClick={() => onSetThemeMode(m.value)}
-                          >
-                            {m.label}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="sb-setting-title">Theme</div>
+                    <div className="sb-seg" role="radiogroup" aria-label="Theme">
+                      {THEME_MODES.map((m) => (
+                        <button
+                          key={m.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={themeMode === m.value}
+                          className={`sb-seg-btn${themeMode === m.value ? ' active' : ''}`}
+                          onClick={() => onSetThemeMode(m.value)}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
                     </div>
+                    <div className="sb-setting-desc">Follow the system theme, or force light or dark.</div>
                   </div>
                 </div>
-              <div className="sb-modal-group">
-                <div className="sb-modal-group-label label-caps">Live sessions</div>
-                <div className="sb-setting">
-                  <div className="sb-setting-main">
-                    <div className="sb-setting-text">
-                      <div className="sb-setting-title">
-                        Maximum live sessions
-                        <button
-                          type="button"
-                          className="sb-info"
-                          data-tip={CAP_TIP}
-                          data-tip-wide
-                          aria-label="About the live-session limit"
-                        >
-                          <Info size={14} />
-                        </button>
-                      </div>
-                      <div className="sb-setting-desc">
-                        How many conversations can run at once before Switchboard reclaims the
-                        longest-idle one to make room.
-                      </div>
+                <div className="sb-modal-group">
+                  <div className="sb-modal-group-label label-caps">Live sessions</div>
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">
+                      Maximum live sessions
+                      <button
+                        type="button"
+                        className="sb-info"
+                        data-tip={CAP_TIP}
+                        data-tip-wide
+                        aria-label="About the live-session limit"
+                      >
+                        <Info size={14} />
+                      </button>
                     </div>
                     <div className="sb-slider-control">
                       <input
@@ -351,62 +344,83 @@ export default function SettingsModal({
                         <Reset size={14} />
                       </button>
                     </div>
+                    <div className="sb-setting-desc">
+                      How many conversations can run at once before Switchboard reclaims the
+                      longest-idle one to make room.
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="sb-modal-group">
-                <div className="sb-modal-group-label label-caps">New conversations</div>
-                <div className="sb-setting">
-                  <div className="sb-setting-main">
-                    <div className="sb-setting-text">
-                      <div className="sb-setting-title">Start new conversations in a default directory</div>
+                <div className="sb-modal-group">
+                  <div className="sb-modal-group-label label-caps">New conversations</div>
+                  {agentChoiceAvailable && (
+                    <div className="sb-setting">
+                      <div className="sb-setting-title">Default agent</div>
+                      <div className="sb-seg" role="radiogroup" aria-label="Default agent">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={defaultAgentChoice === 'none'}
+                          className={`sb-seg-btn${defaultAgentChoice === 'none' ? ' active' : ''}`}
+                          onClick={() => onSetDefaultAgentChoice('none')}
+                        >
+                          None
+                        </button>
+                        {(['claude', 'codex'] as AgentKind[]).map((a) => (
+                          <button
+                            key={a}
+                            type="button"
+                            role="radio"
+                            aria-checked={defaultAgentChoice === a}
+                            className={`sb-seg-btn${defaultAgentChoice === a ? ' active' : ''}`}
+                            onClick={() => onSetDefaultAgentChoice(a)}
+                          >
+                            <AgentLogo agent={a} size={13} />
+                            {AGENTS[a].label}
+                          </button>
+                        ))}
+                      </div>
                       <div className="sb-setting-desc">
-                        Skip folder selection — <kbd className="sb-kbd">⌘N</kbd> and the{' '}
-                        <strong>+</strong> button start new conversations in this location
-                        automatically. Right-click the <strong>+</strong> button to choose a specific
-                        folder.
+                        Skip the agent picker — <kbd className="sb-kbd">⌘N</kbd> and the{' '}
+                        <strong>+</strong> button start new conversations with this agent.
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={defaultDirEnabled}
-                      aria-label="Start new conversations in a default directory"
-                      className={`sb-toggle${defaultDirEnabled ? ' on' : ''}`}
-                      disabled={!defaultDir}
-                      onClick={onToggleDefaultDirEnabled}
-                    >
-                      <span className="sb-toggle-knob" />
-                    </button>
-                  </div>
-                  <div className="sb-setting-folder">
-                    {defaultDir ? (
-                      <>
-                        <Folder size={15} className="sb-setting-folder-icon" />
-                        <div className="sb-setting-folder-info">
-                          <span className="sb-setting-folder-name truncate">{basename(defaultDir)}</span>
-                          <span className="sb-setting-folder-path mono truncate">{defaultDir}</span>
-                        </div>
-                        <div className="sb-setting-actions">
+                  )}
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">Default directory</div>
+                    <div className="sb-setting-folder">
+                      {defaultDir ? (
+                        <>
+                          <Folder size={15} className="sb-setting-folder-icon" />
+                          <div className="sb-setting-folder-info">
+                            <span className="sb-setting-folder-name truncate">{basename(defaultDir)}</span>
+                            <span className="sb-setting-folder-path mono truncate">{defaultDir}</span>
+                          </div>
+                          <div className="sb-setting-actions">
+                            <button className="sb-setting-btn" onClick={onChooseDefaultDir}>
+                              Change…
+                            </button>
+                            <button className="sb-setting-btn" onClick={onClearDefaultDir}>
+                              Clear
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="sb-setting-folder-empty">No folder chosen yet.</span>
                           <button className="sb-setting-btn" onClick={onChooseDefaultDir}>
-                            Change…
+                            Choose…
                           </button>
-                          <button className="sb-setting-btn" onClick={onClearDefaultDir}>
-                            Clear
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <span className="sb-setting-folder-empty">No folder chosen yet.</span>
-                        <button className="sb-setting-btn" onClick={onChooseDefaultDir}>
-                          Choose…
-                        </button>
-                      </>
-                    )}
+                        </>
+                      )}
+                    </div>
+                    <div className="sb-setting-desc">
+                      Skip folder selection — <kbd className="sb-kbd">⌘N</kbd> and the{' '}
+                      <strong>+</strong> button start new conversations in this location
+                      automatically. Right-click the <strong>+</strong> button to choose a specific
+                      folder.
+                    </div>
                   </div>
                 </div>
-              </div>
               </>
             ) : page === 'shortcuts' ? (
               GROUPS.map((group) => (

@@ -24,6 +24,12 @@ export const AGENTS: Record<AgentKind, AgentInfo> = {
   codex: { label: 'Codex', assistantLabel: 'Codex' }
 }
 
+/** Which agents can actually be SPAWNED — i.e. their CLI is launchable from the login shell (the
+ *  GUI app's own PATH is minimal, so this is probed via `$SHELL -lic 'command -v …'`, not
+ *  process.env). Browsing existing conversations needs only data on disk; new/resume needs the
+ *  binary. Drives the New menu's agent segmented control (auto-collapses to a single agent). */
+export type AgentAvailability = Record<AgentKind, boolean>
+
 /** A content block within a message, normalized for read-only rendering. */
 export type TranscriptBlock =
   | { kind: 'text'; text: string }
@@ -200,8 +206,10 @@ export const IPC = {
   ptySetMaxLive: 'pty:setMaxLive', // renderer -> main: update the live-PTY cap
   ptyData: 'pty:data', // push (ptyId, data)
   ptyExit: 'pty:exit', // push (ptyId, exitCode)
+  ptyBound: 'pty:bound', // push (ptyId, oldSessionId, newSessionId) — a provisional new-Codex PTY got its real id
   ptyActiveList: 'pty:activeList',
   ptyActiveChanged: 'pty:activeChanged', // push (PtyState[])
+  agentsAvailable: 'agents:available', // which agent CLIs are launchable from the login shell (cached)
   dialogPickDirectory: 'dialog:pickDirectory',
   openExternal: 'shell:openExternal',
   windowSetBackgroundColor: 'window:setBackgroundColor',
@@ -226,16 +234,27 @@ export interface SwitchboardApi {
 
   // --- live sessions (explicit spawn only) ---
   resume(sessionId: string, cwd: string, agent: AgentKind, title?: string): Promise<PtyState>
-  startNew(cwd: string): Promise<PtyState>
+  /**
+   * Start a NEW session for `agent` in `cwd`. Claude gets a pre-assigned id and is live immediately;
+   * Codex mints its own rollout id, so the returned PtyState is `provisional` (placeholder id) until
+   * the binding poller correlates the rollout and fires `onPtyBound`. Rejects if `cwd` is gone, or
+   * (Codex only) if another new-Codex session is still unbound (the serialize lock).
+   */
+  startNew(cwd: string, agent: AgentKind): Promise<PtyState>
   sendInput(ptyId: string, data: string): void
   resize(ptyId: string, cols: number, rows: number): void
   kill(ptyId: string): void
   onPtyData(cb: (ptyId: string, data: string) => void): () => void
   onPtyExit(cb: (ptyId: string, exitCode: number | null) => void): () => void
+  /** A provisional new-Codex PTY was correlated to its rollout: its sessionId changed from the
+   *  placeholder `oldSessionId` to the real `newSessionId` (same `ptyId`). Returns an unsubscribe fn. */
+  onPtyBound(cb: (ptyId: string, oldSessionId: string, newSessionId: string) => void): () => void
   listActive(): Promise<PtyState[]>
   onActiveChanged(cb: (states: PtyState[]) => void): () => void
   /** Update the main-process live-PTY cap (LRU eviction threshold). Fire-and-forget. */
   setMaxLiveSessions(n: number): void
+  /** Which agent CLIs are launchable from the login shell. Probed once in main and cached. */
+  listAgents(): Promise<AgentAvailability>
 
   // --- misc ---
   pickDirectory(): Promise<string | null>

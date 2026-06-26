@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type MouseEvent, type RefObject } from 'react'
-import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
+import type { AgentKind, ConversationMeta, LiveState, PtyState } from '@shared/types'
 import type { SectionKey } from '../lib/useLayout'
 import { useRailFlip } from '../lib/useRailFlip'
 import { useRowReorder } from '../lib/useRowReorder'
@@ -77,8 +77,18 @@ interface Props {
   onNewContextMenu: () => void
   onMenuClose: () => void
   recentDirs: string[]
-  onChooseDir: (cwd: string) => void
-  onPickOther: () => void
+  /** The default folder ('' = none) — pinned + preselected at the top of the menu's directory list. */
+  menuDefaultDir: string
+  /** Agents to offer in the menu's segmented control; collapses to a single agent when <2. */
+  menuAgents: AgentKind[]
+  /** The agent the menu shows selected (sticky last-picked / resolved default). */
+  menuAgent: AgentKind
+  /** Report the agent the user picks in the menu's segment, so the choice sticks across opens. */
+  onMenuAgentChange: (agent: AgentKind) => void
+  /** Start a new conversation in `cwd` with `agent` (a recent-dir click, or the resolved default). */
+  onChoose: (cwd: string, agent: AgentKind) => void
+  /** Pick a folder via the native dialog, then start a new `agent` conversation there. */
+  onPickOther: (agent: AgentKind) => void
   /** True when a default folder is set + enabled — the "+" / ⌘N spawn straight into it. */
   defaultDirActive: boolean
   /** Basename of the default folder, surfaced in the "+" tooltip when active. */
@@ -138,7 +148,11 @@ export default function TallyRail({
   onNewContextMenu,
   onMenuClose,
   recentDirs,
-  onChooseDir,
+  menuDefaultDir,
+  menuAgents,
+  menuAgent,
+  onMenuAgentChange,
+  onChoose,
   onPickOther,
   defaultDirActive,
   defaultDirLabel,
@@ -288,7 +302,11 @@ export default function TallyRail({
             <NewConversationMenu
               open={menuOpen}
               recentDirs={recentDirs}
-              onChoose={onChooseDir}
+              defaultDir={menuDefaultDir}
+              agents={menuAgents}
+              initialAgent={menuAgent}
+              onAgentChange={onMenuAgentChange}
+              onChoose={onChoose}
               onPickOther={onPickOther}
               onClose={onMenuClose}
             />
