@@ -801,6 +801,12 @@ body.sb-resizing .sb-pane {
 .sb-info-head {
   gap: 8px;
 }
+/* The Agent detail row: logo + agent name, baseline-aligned with the row's other values. */
+.sb-info-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .sb-info-title-input {
   flex: 1;
   min-width: 0;

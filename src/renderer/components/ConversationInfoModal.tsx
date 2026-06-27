@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { AGENTS } from '@shared/types'
 import type { ConversationMeta, PtyState } from '@shared/types'
 import { absShort, formatBytes, formatDuration, formatMetric } from '../lib/format'
+import AgentLogo from './AgentLogo'
 import CopyButton from './CopyButton'
 import { Close } from './icons'
 
@@ -71,7 +73,7 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
   const cwd = meta?.cwd ?? pty?.cwd ?? ''
   const branch = meta?.gitBranch && meta.gitBranch !== 'HEAD' ? meta.gitBranch : null
   const model = meta?.model ?? null
-  const agent = meta?.agent ?? 'claude'
+  const agent = meta?.agent ?? pty?.agent ?? 'claude'
   const sizeBytes = meta?.sizeBytes ?? 0
   const outputTokens = meta?.outputTokens ?? 0
   const inputTokens = meta?.inputTokens ?? 0
@@ -193,18 +195,24 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
         </div>
 
         <div className="sb-info-body">
-          <Section label="Workspace">
-            <Row label="Folder" mono>
+          <Section label="Environment">
+            <Row label="Agent">
+              <span className="sb-info-agent">
+                <AgentLogo agent={agent} size={14} />
+                {AGENTS[agent].label}
+              </span>
+            </Row>
+            {model && (
+              <Row label="Model" mono>
+                {model}
+              </Row>
+            )}
+            <Row label="Directory" mono>
               {cwd || '—'}
             </Row>
             {branch && (
               <Row label="Branch" mono>
                 {branch}
-              </Row>
-            )}
-            {model && (
-              <Row label="Model" mono>
-                {model}
               </Row>
             )}
           </Section>
