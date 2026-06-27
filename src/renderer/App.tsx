@@ -831,7 +831,6 @@ export default function App() {
             onPickOther={pickOther}
             defaultDirActive={!!defaultDir}
             defaultDirLabel={defaultDir ? basename(defaultDir) : ''}
-            onShowHelp={() => setSettingsPage('shortcuts')}
             onToggleUnread={toggleUnread}
             onMarkUnread={markUnread}
             onResumeSession={resumeSession}

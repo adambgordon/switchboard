@@ -55,7 +55,7 @@ const GROUPS: Group[] = [
     title: 'Window & app',
     items: [
       { keys: ['⌘Q'], desc: 'Quit — ends all live sessions' },
-      { keys: ['⌘B'], desc: 'Toggle the pane' },
+      { keys: ['⌘B'], desc: 'Toggle the sidebar' },
       { keys: ['⌘+', '⌘−'], desc: 'Zoom in / out' },
       { keys: ['⌘0'], desc: 'Reset zoom' },
       { keys: ['⌘R'], desc: 'Refresh the terminal (does not reload)' },
@@ -89,7 +89,7 @@ const FAQ: Faq[] = [
     q: 'Does selecting a conversation start it?',
     a: (
       <>
-        No — selecting only previews the transcript (read-only). A live agent process starts only
+        No, selecting only previews the transcript (read-only). A live agent process starts only
         when you <strong>Resume</strong> an existing conversation or start a <strong>New</strong> one.
       </>
     )
@@ -105,7 +105,7 @@ const FAQ: Faq[] = [
               <span className="sb-dot busy" />
             </span>
             <span>
-              <strong>Breathing</strong> — the agent is working
+              <strong>Breathing</strong>: the agent is working
             </span>
           </li>
           <li>
@@ -113,7 +113,7 @@ const FAQ: Faq[] = [
               <span className="sb-dot asking" />
             </span>
             <span>
-              <strong>Pulsing ripple</strong> — the agent is waiting on your reply
+              <strong>Pulsing ripple</strong>: the agent is waiting on your reply
             </span>
           </li>
           <li>
@@ -121,7 +121,7 @@ const FAQ: Faq[] = [
               <span className="sb-dot awaiting" />
             </span>
             <span>
-              <strong>Solid</strong> — the turn finished and unread
+              <strong>Solid</strong>: the turn finished and unread
             </span>
           </li>
           <li>
@@ -129,7 +129,7 @@ const FAQ: Faq[] = [
               <span className="sb-dot quiet" />
             </span>
             <span>
-              <strong>Hollow</strong> — finished and read
+              <strong>Hollow</strong>: finished and read
             </span>
           </li>
         </ul>
@@ -140,9 +140,9 @@ const FAQ: Faq[] = [
     q: 'Where does Switchboard get its data?',
     a: (
       <>
-        Everything is read from the session files your agents write — Claude Code under{' '}
-        <code>~/.claude/projects/</code> and Codex under <code>~/.codex/sessions/</code>. Switchboard
-        is a viewer — it never owns your conversations.
+        Everything is read from the session files your agents write. Claude Code sessions are
+        stored under <code>~/.claude/projects/</code> and Codex sessions under{' '}
+        <code>~/.codex/sessions/</code>. Switchboard is a viewer — it never owns your conversations.
       </>
     )
   }
@@ -290,11 +290,10 @@ export default function SettingsModal({
             </button>
           </nav>
 
-          <div className="sb-settings-page">
+          <div className={`sb-settings-page sb-page-${page}`}>
             {page === 'app' ? (
               <>
                 <div className="sb-modal-group">
-                  <div className="sb-modal-group-label label-caps">Appearance</div>
                   <div className="sb-setting">
                     <div className="sb-setting-title">Theme</div>
                     <div className="sb-seg" role="radiogroup" aria-label="Theme">
@@ -315,7 +314,6 @@ export default function SettingsModal({
                   </div>
                 </div>
                 <div className="sb-modal-group">
-                  <div className="sb-modal-group-label label-caps">Live sessions</div>
                   <div className="sb-setting">
                     <div className="sb-setting-title">
                       Maximum live sessions
@@ -364,7 +362,6 @@ export default function SettingsModal({
                   </div>
                 </div>
                 <div className="sb-modal-group">
-                  <div className="sb-modal-group-label label-caps">New conversations</div>
                   <div className="sb-setting">
                     <div className="sb-setting-title">Default agent</div>
                     <div
@@ -401,7 +398,7 @@ export default function SettingsModal({
                       ))}
                     </div>
                     <div className="sb-setting-desc">
-                      Skip the agent picker — <kbd className="sb-kbd">⌘N</kbd> and the{' '}
+                      Skip the agent picker: <kbd className="sb-kbd">⌘N</kbd> and the{' '}
                       <strong>+</strong> button start new conversations with this agent.
                     </div>
                   </div>
@@ -434,7 +431,7 @@ export default function SettingsModal({
                       )}
                     </div>
                     <div className="sb-setting-desc">
-                      Skip folder selection — <kbd className="sb-kbd">⌘N</kbd> and the{' '}
+                      Skip folder selection: <kbd className="sb-kbd">⌘N</kbd> and the{' '}
                       <strong>+</strong> button start new conversations in this location
                       automatically. Right-click the <strong>+</strong> button to choose a specific
                       folder.
@@ -445,7 +442,7 @@ export default function SettingsModal({
             ) : page === 'shortcuts' ? (
               GROUPS.map((group) => (
                 <div className="sb-modal-group" key={group.title}>
-                  <div className="sb-modal-group-label label-caps">{group.title}</div>
+                  <div className="sb-modal-group-label">{group.title}</div>
                   <div className="sb-shortcuts">
                     {group.items.map((s) => (
                       <div className="sb-shortcut" key={s.desc}>
