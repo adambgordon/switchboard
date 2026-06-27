@@ -397,6 +397,17 @@ export default function App() {
     return availableAgents[0] ?? 'claude'
   }, [defaultAgentEnabled, defaultAgent, agents, lastAgent, availableAgents])
 
+  // Settings mirrors what will actually happen at ⌘N: with <2 agents installed there's no choice to
+  // make, so the control is shown disabled with the forced selection (the sole agent, or None when
+  // none are installed). The persisted pref is left untouched, so reinstalling the second agent
+  // restores it.
+  const defaultAgentDisabled = availableAgents.length < 2
+  const defaultAgentChoice: 'none' | AgentKind = defaultAgentDisabled
+    ? availableAgents[0] ?? 'none'
+    : defaultAgentEnabled
+      ? defaultAgent
+      : 'none'
+
   // --- actions: a live process is created ONLY by resume() or startNew() ---
   // Remember a conversation's chosen view so it sticks across navigation.
   const setSessionView = useCallback((id: string, v: View) => {
@@ -889,8 +900,8 @@ export default function App() {
         defaultDir={defaultDir}
         onChooseDefaultDir={chooseDefaultDir}
         onClearDefaultDir={clearDefaultDir}
-        agentChoiceAvailable={availableAgents.length >= 2}
-        defaultAgentChoice={defaultAgentEnabled ? defaultAgent : 'none'}
+        defaultAgentChoice={defaultAgentChoice}
+        defaultAgentDisabled={defaultAgentDisabled}
         onSetDefaultAgentChoice={setDefaultAgentChoice}
         maxLiveSessions={maxLive}
         maxLiveMin={maxLiveMin}

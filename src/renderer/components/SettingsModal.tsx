@@ -180,11 +180,12 @@ interface Props {
   onChooseDefaultDir: () => void
   /** Forget the default folder. */
   onClearDefaultDir: () => void
-  // --- App page: default agent for new conversations (only meaningful with >1 agent installed) ---
-  /** True when more than one agent is launchable — otherwise the agent row is hidden (no choice). */
-  agentChoiceAvailable: boolean
-  /** The default-agent choice: 'none' (no default) or the agent ⌘N / + should start with. */
+  // --- App page: default agent for new conversations ---
+  /** The default-agent choice: 'none' (no default) or the agent ⌘N / + should start with. With <2
+   *  agents installed this is the forced display value (the sole agent, or 'none'). */
   defaultAgentChoice: 'none' | AgentKind
+  /** True when <2 agents are launchable — the control renders selected-but-disabled (no choice). */
+  defaultAgentDisabled: boolean
   /** Set the default-agent choice (a tri-state segmented control, like Theme — no on/off toggle). */
   onSetDefaultAgentChoice: (value: 'none' | AgentKind) => void
   // --- App page: live-session cap ---
@@ -217,8 +218,8 @@ export default function SettingsModal({
   defaultDir,
   onChooseDefaultDir,
   onClearDefaultDir,
-  agentChoiceAvailable,
   defaultAgentChoice,
+  defaultAgentDisabled,
   onSetDefaultAgentChoice,
   maxLiveSessions,
   maxLiveMin,
@@ -228,6 +229,18 @@ export default function SettingsModal({
   onResetMaxLive
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // When the Default-agent control is locked (only one — or no — agent installed), explain why on
+  // hover. The label hangs on the group div, not the buttons, because disabled buttons get
+  // `pointer-events: none` so the hover passes through to the group (native disabled buttons swallow
+  // mouse events outright, which would otherwise leave the tooltip dead over them).
+  const lockedAgentTip = !defaultAgentDisabled
+    ? undefined
+    : defaultAgentChoice === 'none'
+      ? 'No agents detected on your PATH — install Claude Code or Codex to set a default.'
+      : `Only ${AGENTS[defaultAgentChoice].label} is installed, so new conversations always use it. Install ${
+          AGENTS[defaultAgentChoice === 'claude' ? 'codex' : 'claude'].label
+        } to choose a default.`
 
   // Move focus into the dialog when it opens — so it reads as modal and the focus ring isn't
   // stranded on the gear / footer button sitting behind the scrim.
@@ -352,39 +365,46 @@ export default function SettingsModal({
                 </div>
                 <div className="sb-modal-group">
                   <div className="sb-modal-group-label label-caps">New conversations</div>
-                  {agentChoiceAvailable && (
-                    <div className="sb-setting">
-                      <div className="sb-setting-title">Default agent</div>
-                      <div className="sb-seg" role="radiogroup" aria-label="Default agent">
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">Default agent</div>
+                    <div
+                      className="sb-seg"
+                      role="radiogroup"
+                      aria-label="Default agent"
+                      aria-disabled={defaultAgentDisabled}
+                      data-tip={lockedAgentTip}
+                      data-tip-wide
+                    >
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={defaultAgentChoice === 'none'}
+                        disabled={defaultAgentDisabled}
+                        className={`sb-seg-btn${defaultAgentChoice === 'none' ? ' active' : ''}`}
+                        onClick={() => onSetDefaultAgentChoice('none')}
+                      >
+                        None
+                      </button>
+                      {(['claude', 'codex'] as AgentKind[]).map((a) => (
                         <button
+                          key={a}
                           type="button"
                           role="radio"
-                          aria-checked={defaultAgentChoice === 'none'}
-                          className={`sb-seg-btn${defaultAgentChoice === 'none' ? ' active' : ''}`}
-                          onClick={() => onSetDefaultAgentChoice('none')}
+                          aria-checked={defaultAgentChoice === a}
+                          disabled={defaultAgentDisabled}
+                          className={`sb-seg-btn${defaultAgentChoice === a ? ' active' : ''}`}
+                          onClick={() => onSetDefaultAgentChoice(a)}
                         >
-                          None
+                          <AgentLogo agent={a} size={13} />
+                          {AGENTS[a].label}
                         </button>
-                        {(['claude', 'codex'] as AgentKind[]).map((a) => (
-                          <button
-                            key={a}
-                            type="button"
-                            role="radio"
-                            aria-checked={defaultAgentChoice === a}
-                            className={`sb-seg-btn${defaultAgentChoice === a ? ' active' : ''}`}
-                            onClick={() => onSetDefaultAgentChoice(a)}
-                          >
-                            <AgentLogo agent={a} size={13} />
-                            {AGENTS[a].label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="sb-setting-desc">
-                        Skip the agent picker — <kbd className="sb-kbd">⌘N</kbd> and the{' '}
-                        <strong>+</strong> button start new conversations with this agent.
-                      </div>
+                      ))}
                     </div>
-                  )}
+                    <div className="sb-setting-desc">
+                      Skip the agent picker — <kbd className="sb-kbd">⌘N</kbd> and the{' '}
+                      <strong>+</strong> button start new conversations with this agent.
+                    </div>
+                  </div>
                   <div className="sb-setting">
                     <div className="sb-setting-title">Default directory</div>
                     <div className="sb-setting-folder">
