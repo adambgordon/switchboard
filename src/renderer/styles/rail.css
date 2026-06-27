@@ -373,6 +373,12 @@
   -webkit-mask-size: contain;
   vertical-align: middle;
 }
+/* In a rail row the mark recedes a tier (to the meta line's own --ink-ghost) — many rows, so it reads
+   as a quiet agent tag, not an emphasis. The header/modal marks keep the stronger global --ink-faint. */
+.sb-row-meta .sb-agent-logo {
+  background-color: var(--ink-ghost);
+  margin-right: 0.5ch; /* a little extra space after the logo, before the time */
+}
 
 /* "Show N more" — reveals the rest of a capped section (the Recent history) */
 .sb-rail-more {

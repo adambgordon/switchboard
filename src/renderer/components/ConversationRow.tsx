@@ -1,6 +1,6 @@
 import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
-import { relTime, basename } from '../lib/format'
+import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { Pin } from './icons'
 import AgentLogo from './AgentLogo'
@@ -88,13 +88,18 @@ function ConversationRowImpl({
         )}
         <span className="sb-row-meta">
           <AgentLogo agent={meta.agent} />
-          <span className="mono">{relTime(meta.lastActivityAt ?? meta.mtime)}</span>
+          <span className="mono" data-tip={absShort(meta.lastActivityAt ?? meta.mtime)}>
+            {relTime(meta.lastActivityAt ?? meta.mtime)}
+          </span>
           <span className="sb-sep">·</span>
           <span className="mono">{meta.messageCount} msg</span>
           {showCwd && (
-            <span className="sb-row-cwd mono truncate" data-tip={meta.cwd}>
-              {basename(meta.cwd)}
-            </span>
+            <>
+              <span className="sb-sep">·</span>
+              <span className="sb-row-cwd mono truncate" data-tip={meta.cwd}>
+                {basename(meta.cwd)}
+              </span>
+            </>
           )}
         </span>
       </span>
