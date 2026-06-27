@@ -62,7 +62,8 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
  * (both open in view mode). The conversation title IS the modal heading, edited **in place**: an
  * always-editable input that commits on blur, commits-and-closes on Enter, and reverts on Esc. Below,
  * a list of detail rows whose values are selectable; only Session ID carries a copy button. Rename
- * writes Claude Code's own `custom-title` line (App → window.api.renameConversation).
+ * (App → window.api.renameConversation) is dispatched per agent in main: Claude appends its own
+ * `custom-title` line; Codex calls the app-server `thread/name/set` RPC.
  */
 export default function ConversationInfoModal({ open, meta, pty, startInEdit, onClose, onRename }: Props) {
   const sessionId = meta?.sessionId ?? pty?.sessionId ?? ''
@@ -71,9 +72,6 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
   const branch = meta?.gitBranch && meta.gitBranch !== 'HEAD' ? meta.gitBranch : null
   const model = meta?.model ?? null
   const agent = meta?.agent ?? 'claude'
-  // Phase 1: rename is wired for Claude only (it appends a `custom-title` line). Codex rename — via
-  // the app-server `thread/name/set` RPC — lands in a later phase, so its title is read-only for now.
-  const canRename = agent === 'claude'
   const sizeBytes = meta?.sizeBytes ?? 0
   const outputTokens = meta?.outputTokens ?? 0
   const inputTokens = meta?.inputTokens ?? 0
@@ -179,8 +177,6 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
             autoCapitalize="off"
             placeholder="Conversation title"
             aria-label="Conversation title"
-            readOnly={!canRename}
-            data-tip={canRename ? undefined : 'Renaming Codex conversations is coming soon'}
             onChange={(e) => setDraft(e.target.value)}
             onFocus={() => {
               focusedRef.current = true

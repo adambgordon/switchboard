@@ -9,6 +9,7 @@ import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
 import { appendCustomTitle } from './sessions/rename'
+import { renameCodexThread } from './sessions/codexRename'
 import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
 import { syncTrafficLights } from './trafficLights'
@@ -161,14 +162,16 @@ export function registerIpc(): void {
     }
     return null
   })
-  // Set/clear a conversation's title (the one write path into the JSONL): append Claude Code's own
-  // `custom-title` line, then re-index + broadcast IMMEDIATELY so the new title lands in the UI now
-  // rather than ~600ms later when the file watcher catches the same write (which then no-ops).
+  // Set/clear a conversation's title, then re-index + broadcast IMMEDIATELY so the new title lands in
+  // the UI now rather than when the watcher/poll next fires. Dispatch by agent: a Claude session has a
+  // JSONL file (we append its own `custom-title` line); otherwise it's Codex — the sessionId IS the
+  // app-server threadId, and the rename writes Codex's own DB (`threads.title`), which the re-index's
+  // title read then surfaces (the rollout is untouched).
   ipcMain.handle(IPC.sessionsRename, async (_e, sessionId: string, title: string): Promise<boolean> => {
-    const fp = await resolveSessionFile(sessionId)
-    if (!fp) return false
+    const claudeFp = await resolveSessionFile(sessionId)
     try {
-      await appendCustomTitle(fp, sessionId, title)
+      if (claudeFp) await appendCustomTitle(claudeFp, sessionId, title)
+      else await renameCodexThread(sessionId, title.trim())
       await reindexAndBroadcast()
       return true
     } catch {
