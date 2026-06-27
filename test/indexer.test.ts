@@ -8,6 +8,11 @@ import { indexConversations } from '../src/main/sessions/indexer'
 /** Base for test temp dirs; honors CLAUDE_CODE_TMPDIR if set, else the system temp. */
 const TMP_BASE = process.env.CLAUDE_CODE_TMPDIR ?? tmpdir()
 
+/** A nonexistent Codex sessions root, so these Claude-focused tests stay hermetic — the indexer now
+ *  also scans `~/.codex/sessions` by default, which would otherwise leak the real machine's Codex
+ *  conversations into these assertions. */
+const NO_CODEX = path.join(TMP_BASE, 'switchboard-no-codex-DOES-NOT-EXIST')
+
 /** Serialize line-objects to JSONL text. */
 function jsonl(lines: unknown[]): string {
   return lines.map((l) => JSON.stringify(l)).join('\n') + '\n'
@@ -106,7 +111,7 @@ describe('indexConversations', () => {
   })
 
   it('groups conversations by exact cwd', async () => {
-    const groups = await indexConversations(root)
+    const groups = await indexConversations(root, NO_CODEX)
     const byCwd = new Map(groups.map((g) => [g.cwd, g]))
 
     expect(byCwd.has(CWD_A)).toBe(true)
@@ -116,7 +121,7 @@ describe('indexConversations', () => {
   })
 
   it('drops 0-message conversations', async () => {
-    const groups = await indexConversations(root)
+    const groups = await indexConversations(root, NO_CODEX)
     const a = groups.find((g) => g.cwd === CWD_A)!
     const ids = a.conversations.map((c) => c.sessionId)
     expect(ids).toContain(aOld)
@@ -125,20 +130,20 @@ describe('indexConversations', () => {
   })
 
   it('sorts conversations within a group by mtime desc', async () => {
-    const groups = await indexConversations(root)
+    const groups = await indexConversations(root, NO_CODEX)
     const a = groups.find((g) => g.cwd === CWD_A)!
     expect(a.conversations.map((c) => c.sessionId)).toEqual([aNew, aOld])
     expect(a.conversations[0].mtime).toBeGreaterThan(a.conversations[1].mtime)
   })
 
   it('sets label to the basename of the cwd', async () => {
-    const groups = await indexConversations(root)
+    const groups = await indexConversations(root, NO_CODEX)
     expect(groups.find((g) => g.cwd === CWD_A)!.label).toBe('project-one')
     expect(groups.find((g) => g.cwd === CWD_B)!.label).toBe('project-two')
   })
 
   it('sets latestMtime per group and sorts groups by latestMtime desc', async () => {
-    const groups = await indexConversations(root)
+    const groups = await indexConversations(root, NO_CODEX)
     const a = groups.find((g) => g.cwd === CWD_A)!
     const b = groups.find((g) => g.cwd === CWD_B)!
 
@@ -152,7 +157,7 @@ describe('indexConversations', () => {
   })
 
   it('contains the single B session', async () => {
-    const groups = await indexConversations(root)
+    const groups = await indexConversations(root, NO_CODEX)
     const b = groups.find((g) => g.cwd === CWD_B)!
     expect(b.conversations.map((c) => c.sessionId)).toEqual([bOnly])
   })
@@ -199,7 +204,7 @@ describe('indexConversations background-job filtering', () => {
   })
 
   it('drops sessionKind:"bg" sessions but keeps the interactive sibling', async () => {
-    const groups = await indexConversations(root)
+    const groups = await indexConversations(root, NO_CODEX)
     const a = groups.find((g) => g.cwd === CWD_A)
     expect(a).toBeDefined()
     const ids = a!.conversations.map((c) => c.sessionId)
@@ -210,7 +215,7 @@ describe('indexConversations background-job filtering', () => {
 describe('indexConversations resilience', () => {
   it('returns [] for a non-existent root (does not throw)', async () => {
     const missing = path.join(TMP_BASE, `does-not-exist-${randomUUID()}`)
-    const groups = await indexConversations(missing)
+    const groups = await indexConversations(missing, NO_CODEX)
     expect(groups).toEqual([])
   })
 
@@ -219,7 +224,7 @@ describe('indexConversations resilience', () => {
     const fileRoot = path.join(dir, 'a-file')
     await writeFile(fileRoot, 'not a dir', 'utf8')
     try {
-      const groups = await indexConversations(fileRoot)
+      const groups = await indexConversations(fileRoot, NO_CODEX)
       expect(groups).toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -229,8 +234,81 @@ describe('indexConversations resilience', () => {
   it('returns [] for an empty projects root', async () => {
     const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-empty-'))
     try {
-      const groups = await indexConversations(dir)
+      const groups = await indexConversations(dir, NO_CODEX)
       expect(groups).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('indexConversations meta cache', () => {
+  it('reuses the cached meta object when a file is unchanged', async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-cache-hit-'))
+    try {
+      await writeSession(
+        dir,
+        '-home-user-project-one',
+        [msgLine('user', CWD_A, 'cached'), msgLine('assistant', CWD_A, 'reply')],
+        1_000_000_000_000
+      )
+      const cache = new Map()
+      const first = await indexConversations(dir, NO_CODEX, cache)
+      const second = await indexConversations(dir, NO_CODEX, cache)
+      const a1 = first.find((g) => g.cwd === CWD_A)!.conversations[0]
+      const a2 = second.find((g) => g.cwd === CWD_A)!.conversations[0]
+      expect(a2).toBe(a1) // same object reference => served from cache, not re-parsed
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('re-parses (new meta object) after a file changes', async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-cache-miss-'))
+    try {
+      const r = await writeSession(
+        dir,
+        '-home-user-project-one',
+        [msgLine('user', CWD_A, 'v1'), msgLine('assistant', CWD_A, 'reply')],
+        1_000_000_000_000
+      )
+      const cache = new Map()
+      const a1 = (await indexConversations(dir, NO_CODEX, cache)).find((g) => g.cwd === CWD_A)!
+        .conversations[0]
+      // Append a turn + advance mtime so both size and mtime move (a real append does both).
+      await writeFile(
+        r.file,
+        jsonl([
+          msgLine('user', CWD_A, 'v1'),
+          msgLine('assistant', CWD_A, 'reply'),
+          msgLine('user', CWD_A, 'v2')
+        ]),
+        'utf8'
+      )
+      await utimes(r.file, 1_500_000, 1_500_000)
+      const a2 = (await indexConversations(dir, NO_CODEX, cache)).find((g) => g.cwd === CWD_A)!
+        .conversations[0]
+      expect(a2).not.toBe(a1) // (mtime, size) changed => re-parsed, new object
+      expect(a2.sessionId).toBe(a1.sessionId)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not reuse across calls when no cache is passed', async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-cache-none-'))
+    try {
+      await writeSession(
+        dir,
+        '-home-user-project-one',
+        [msgLine('user', CWD_A, 'x'), msgLine('assistant', CWD_A, 'y')],
+        1_000_000_000_000
+      )
+      const a1 = (await indexConversations(dir, NO_CODEX)).find((g) => g.cwd === CWD_A)!
+        .conversations[0]
+      const a2 = (await indexConversations(dir, NO_CODEX)).find((g) => g.cwd === CWD_A)!
+        .conversations[0]
+      expect(a2).not.toBe(a1) // fresh throwaway cache each call => new object
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -253,7 +331,7 @@ describe('indexConversations smoke (real ~/.claude/projects)', () => {
       return
     }
 
-    const groups = await indexConversations(realRoot)
+    const groups = await indexConversations(realRoot, NO_CODEX)
     expect(Array.isArray(groups)).toBe(true)
     for (const group of groups) {
       expect(typeof group.cwd).toBe('string')

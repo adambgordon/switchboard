@@ -80,10 +80,6 @@
   margin-top: 1px;
 }
 .sb-row-cwd {
-  color: var(--ink-faint);
-  background: var(--paper-active);
-  padding: 0 5px;
-  border-radius: var(--r-sm);
   max-width: 130px;
 }
 /* the pin toggle: hidden at rest (even when pinned); revealed on hover — across the whole row

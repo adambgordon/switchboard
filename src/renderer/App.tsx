@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
+import type { AgentKind, ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { useSessions } from './lib/useSessions'
 import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
 import { useLayout } from './lib/useLayout'
 import { useNewConvoDefault } from './lib/useNewConvoDefault'
+import { useNewConvoDefaultAgent } from './lib/useNewConvoDefaultAgent'
+import { useAgentAvailability } from './lib/useAgentAvailability'
 import { useMaxLiveSessions } from './lib/useMaxLiveSessions'
 import { useSeen } from './lib/useSeen'
 import { useWindowFocus } from './lib/useWindowFocus'
@@ -34,6 +36,7 @@ const RECENT_CAP = 30
 function synthMeta(p: PtyState): ConversationMeta {
   return {
     sessionId: p.sessionId,
+    agent: p.agent,
     cwd: p.cwd,
     title: p.title,
     preview: '',
@@ -84,13 +87,19 @@ export default function App() {
     },
     [reorderLive]
   )
-  const { seen, unread, markUnread, markRead } = useSeen()
+  const { seen, unread, markUnread, markRead, rekey: rekeySeen } = useSeen()
+  const { dir: defaultDir, setDir: setDefaultDir } = useNewConvoDefault()
   const {
-    dir: defaultDir,
-    enabled: defaultDirEnabled,
-    setDir: setDefaultDir,
-    setEnabled: setDefaultDirEnabled
-  } = useNewConvoDefault()
+    agent: defaultAgent,
+    enabled: defaultAgentEnabled,
+    setAgent: setDefaultAgent,
+    setEnabled: setDefaultAgentEnabled
+  } = useNewConvoDefaultAgent()
+  const agents = useAgentAvailability()
+  // The agent the New menu shows selected — sticky within a session (the last one picked or started),
+  // so reopening the menu remembers your choice. Ephemeral on purpose: the persisted default-agent
+  // preference is the cross-restart mechanism; this is just menu stickiness.
+  const [lastAgent, setLastAgent] = useState<AgentKind | null>(null)
   const {
     value: maxLive,
     min: maxLiveMin,
@@ -112,7 +121,7 @@ export default function App() {
   } = useLayout()
   const dragStartRef = useRef(0)
 
-  const { selectedId, open, home, back, forward } = useNavHistory()
+  const { selectedId, open, home, back, forward, rekey: rekeyNav } = useNavHistory()
   // Session-targeted focus request, bumped whenever you land on a conversation (a click, ⌥⌘↑/↓
   // switch, Enter, resume, new, go-live) — the main pane always takes the keyboard. A per-session
   // focusReq lets MainPane route focus to the right surface (a live terminal, else the Formatted
@@ -152,6 +161,27 @@ export default function App() {
   useEffect(() => {
     initPtyStream()
   }, [])
+
+  // A provisional new-Codex PTY just got its real rollout id. Migrate every piece of session-keyed
+  // state from the placeholder to the real id so the row upgrades IN PLACE — same terminal (it's
+  // keyed by ptyId, untouched), now carrying its real identity. rekeyNav swaps the current selection
+  // and history stops, so no new history entry is pushed; re-requesting focus keeps the terminal hot
+  // through the id change.
+  useEffect(() => {
+    const off = window.api.onPtyBound((_ptyId, oldId, newId) => {
+      if (oldId === newId) return
+      rekeyNav(oldId, newId)
+      rekeySeen(oldId, newId)
+      setViewBySession((prev) => {
+        if (!(oldId in prev)) return prev
+        const next = { ...prev, [newId]: prev[oldId] }
+        delete next[oldId]
+        return next
+      })
+      requestFocus(newId)
+    })
+    return off
+  }, [rekeyNav, rekeySeen, requestFocus])
 
   // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
   // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of
@@ -193,6 +223,15 @@ export default function App() {
     for (const c of allConversations) m.set(c.sessionId, c)
     return m
   }, [allConversations])
+
+  // A row is "provisional" when it's live but has no persisted meta yet — a new-Codex session before
+  // its rollout binds, or a new-Claude session in the ~1s before its JSONL indexes. Its id is a
+  // placeholder (Codex) or not-yet-on-disk (Claude), so id-keyed affordances (pin / rename / Session
+  // details) are gated off until it has a real, persisted identity.
+  const isProvisional = useCallback(
+    (id: string) => ptys.bySession.has(id) && !metaById.has(id),
+    [ptys.bySession, metaById]
+  )
 
   // The set of sessions matching the active search, or null when not searching. The
   // query filters entries *within* every section (Pinned/Live/Recent) — it does not
@@ -334,6 +373,41 @@ export default function App() {
   )
   const recentDirs = useMemo(() => groups.map((g) => g.cwd), [groups])
 
+  // Agent axis for "new conversation". `availableAgents` are the launchable CLIs. The agent is
+  // RESOLVED (no choice to present) when a usable default is set, or when only one agent exists;
+  // otherwise it's an open choice the menu must surface. Mirrors the directory axis (`resolvedDir`).
+  const availableAgents = useMemo<AgentKind[]>(
+    () => (['claude', 'codex'] as AgentKind[]).filter((a) => agents[a]),
+    [agents]
+  )
+  const resolvedAgent = useMemo<AgentKind | null>(() => {
+    if (defaultAgentEnabled && agents[defaultAgent]) return defaultAgent
+    if (availableAgents.length === 1) return availableAgents[0]
+    return null
+  }, [defaultAgentEnabled, defaultAgent, agents, availableAgents])
+  const resolvedDir = defaultDir || null
+  // Which agent the New menu shows selected (and commits with when its segment is hidden): the sticky
+  // last-picked agent if still available, else the resolved one, else the saved default, else the
+  // first available.
+  const menuAgent = useMemo<AgentKind>(() => {
+    // An explicit, enabled default agent wins over the sticky last pick; otherwise the menu remembers
+    // your last selection, falling back to the first available agent.
+    if (defaultAgentEnabled && agents[defaultAgent]) return defaultAgent
+    if (lastAgent && availableAgents.includes(lastAgent)) return lastAgent
+    return availableAgents[0] ?? 'claude'
+  }, [defaultAgentEnabled, defaultAgent, agents, lastAgent, availableAgents])
+
+  // Settings mirrors what will actually happen at ⌘N: with <2 agents installed there's no choice to
+  // make, so the control is shown disabled with the forced selection (the sole agent, or None when
+  // none are installed). The persisted pref is left untouched, so reinstalling the second agent
+  // restores it.
+  const defaultAgentDisabled = availableAgents.length < 2
+  const defaultAgentChoice: 'none' | AgentKind = defaultAgentDisabled
+    ? availableAgents[0] ?? 'none'
+    : defaultAgentEnabled
+      ? defaultAgent
+      : 'none'
+
   // --- actions: a live process is created ONLY by resume() or startNew() ---
   // Remember a conversation's chosen view so it sticks across navigation.
   const setSessionView = useCallback((id: string, v: View) => {
@@ -346,51 +420,63 @@ export default function App() {
     open(meta.sessionId)
     setSessionView(meta.sessionId, 'terminal')
     requestFocus(meta.sessionId)
-    await window.api.resume(meta.sessionId, meta.cwd, meta.title)
+    await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
   }, [open, requestFocus, setSessionView])
 
-  const startNew = useCallback(async (cwd: string) => {
+  const startNew = useCallback(async (cwd: string, agent: AgentKind) => {
     setMenuOpen(false)
-    const st = await window.api.startNew(cwd)
+    setLastAgent(agent) // starting an agent makes it the sticky menu default too
+    const st = await window.api.startNew(cwd, agent)
     open(st.sessionId)
     setSessionView(st.sessionId, 'terminal')
     requestFocus(st.sessionId)
   }, [open, requestFocus, setSessionView])
 
-  const pickOther = useCallback(async () => {
-    const dir = await window.api.pickDirectory()
-    if (dir) await startNew(dir)
-  }, [startNew])
+  const pickOther = useCallback(
+    async (agent: AgentKind) => {
+      const dir = await window.api.pickDirectory()
+      if (dir) await startNew(dir, agent)
+    },
+    [startNew]
+  )
 
-  // The "+" / ⌘N primary action. With a default folder enabled, spawn straight into it (skipping the
-  // chooser); if that folder has since been deleted, startNew rejects (main guards the cwd) and we
-  // fall back to opening the chooser. Otherwise toggle the chooser menu, exactly as before.
+  // The "+" / ⌘N primary action. Spawn straight away only when BOTH axes are settled — a usable
+  // default directory AND a resolved agent (a usable default-agent, or the sole installed one). A
+  // failed spawn (stale default dir, or the Codex serialize lock) falls back to the menu. Otherwise
+  // toggle the menu, which presents exactly the unresolved choice(s): the agent segment and/or the
+  // directory list.
   const newConversation = useCallback(() => {
-    if (defaultDirEnabled && defaultDir) void startNew(defaultDir).catch(() => setMenuOpen(true))
-    else setMenuOpen((o) => !o)
-  }, [defaultDirEnabled, defaultDir, startNew])
+    if (resolvedDir && resolvedAgent) {
+      void startNew(resolvedDir, resolvedAgent).catch(() => setMenuOpen(true))
+    } else {
+      setMenuOpen((o) => !o)
+    }
+  }, [resolvedDir, resolvedAgent, startNew])
 
   // Right-clicking the "+" always opens the chooser, even when a default is set — the escape hatch to
-  // start somewhere else once without toggling the setting off in Preferences.
+  // start somewhere else once without clearing the default in Preferences.
   const openNewMenu = useCallback(() => setMenuOpen(true), [])
 
-  // Preferences (App page) handlers for the default folder. Choosing one auto-enables it (you pick a
-  // folder in order to use it); the toggle then turns it off/on without losing the path; clearing it
-  // disables (nothing left to point at).
+  // Preferences (App page) handlers for the default folder. A chosen folder is always active (no
+  // on/off toggle), so choosing sets it and clearing forgets it.
   const chooseDefaultDir = useCallback(async () => {
     const dir = await window.api.pickDirectory()
-    if (dir) {
-      setDefaultDir(dir)
-      setDefaultDirEnabled(true)
-    }
-  }, [setDefaultDir, setDefaultDirEnabled])
-  const clearDefaultDir = useCallback(() => {
-    setDefaultDir('')
-    setDefaultDirEnabled(false)
-  }, [setDefaultDir, setDefaultDirEnabled])
-  const toggleDefaultDirEnabled = useCallback(
-    () => setDefaultDirEnabled(!defaultDirEnabled),
-    [defaultDirEnabled, setDefaultDirEnabled]
+    if (dir) setDefaultDir(dir)
+  }, [setDefaultDir])
+  const clearDefaultDir = useCallback(() => setDefaultDir(''), [setDefaultDir])
+
+  // The default-agent setting is a single tri-state (None / Claude Code / Codex), like Theme — no
+  // separate on/off toggle. 'none' just disables it (keeping the last agent value, unused).
+  const setDefaultAgentChoice = useCallback(
+    (value: 'none' | AgentKind) => {
+      if (value === 'none') {
+        setDefaultAgentEnabled(false)
+        return
+      }
+      setDefaultAgent(value)
+      setDefaultAgentEnabled(true)
+    },
+    [setDefaultAgent, setDefaultAgentEnabled]
   )
 
   const goLive = useCallback(() => {
@@ -457,12 +543,26 @@ export default function App() {
     [metaById, resume]
   )
 
+  // Pin/unpin, gated so a provisional row (no persisted identity yet) can't enter the persisted pin
+  // store under a placeholder id that would orphan once it binds to its real id.
+  const togglePinGated = useCallback(
+    (id: string) => {
+      if (!isProvisional(id)) togglePin(id)
+    },
+    [isProvisional, togglePin]
+  )
+
   // Open the conversation-info modal for a row/title. `edit` starts it in title-edit mode (the
   // right-click "Rename" entry point); clicking the pane title opens it in view mode. Opening the
-  // modal does NOT select or navigate — it's an overlay over the current view.
-  const showInfo = useCallback((id: string, edit: boolean) => {
-    setInfoModal({ sessionId: id, edit })
-  }, [])
+  // modal does NOT select or navigate — it's an overlay over the current view. Gated off while
+  // provisional: there's no persisted conversation to show details for / rename yet.
+  const showInfo = useCallback(
+    (id: string, edit: boolean) => {
+      if (isProvisional(id)) return
+      setInfoModal({ sessionId: id, edit })
+    },
+    [isProvisional]
+  )
   // Set/clear a conversation's title. Fire-and-forget: main appends Claude Code's own custom-title
   // line then re-indexes + broadcasts, so the new title flows back through useSessions to the rail,
   // pane header, and the (still-open) info modal. An empty title resets to the auto-generated one.
@@ -707,7 +807,7 @@ export default function App() {
             selectedSessionId={selectedId}
             onJump={clickLive}
             onSelect={clickConversation}
-            onTogglePin={togglePin}
+            onTogglePin={togglePinGated}
             query={query}
             onQueryChange={setQuery}
             searchRef={searchRef}
@@ -723,11 +823,14 @@ export default function App() {
             onNewContextMenu={openNewMenu}
             onMenuClose={() => setMenuOpen(false)}
             recentDirs={recentDirs}
-            onChooseDir={startNew}
+            menuDefaultDir={defaultDir}
+            menuAgents={availableAgents}
+            menuAgent={menuAgent}
+            onMenuAgentChange={setLastAgent}
+            onChoose={startNew}
             onPickOther={pickOther}
-            defaultDirActive={defaultDirEnabled && !!defaultDir}
+            defaultDirActive={!!defaultDir}
             defaultDirLabel={defaultDir ? basename(defaultDir) : ''}
-            onShowHelp={() => setSettingsPage('shortcuts')}
             onToggleUnread={toggleUnread}
             onMarkUnread={markUnread}
             onResumeSession={resumeSession}
@@ -764,7 +867,7 @@ export default function App() {
           activePtys={ptys.active}
           pinned={selectedId ? pinned.has(selectedId) : false}
           onTogglePin={() => {
-            if (selectedId) togglePin(selectedId)
+            if (selectedId) togglePinGated(selectedId)
           }}
           onResume={() => {
             if (selectedMeta) void resume(selectedMeta)
@@ -794,10 +897,11 @@ export default function App() {
         themeMode={themeMode}
         onSetThemeMode={setThemeMode}
         defaultDir={defaultDir}
-        defaultDirEnabled={defaultDirEnabled}
         onChooseDefaultDir={chooseDefaultDir}
         onClearDefaultDir={clearDefaultDir}
-        onToggleDefaultDirEnabled={toggleDefaultDirEnabled}
+        defaultAgentChoice={defaultAgentChoice}
+        defaultAgentDisabled={defaultAgentDisabled}
+        onSetDefaultAgentChoice={setDefaultAgentChoice}
         maxLiveSessions={maxLive}
         maxLiveMin={maxLiveMin}
         maxLiveMax={maxLiveMax}

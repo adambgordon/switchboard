@@ -131,7 +131,10 @@ export default function TranscriptView({
 
   // Coalesce consecutive same-source messages into groups (one header per run). Memoized on the
   // transcript so search-driven re-renders reuse the same group objects and MessageBlock's memo holds.
-  const groups = useMemo(() => (transcript ? buildGroups(transcript.messages) : []), [transcript])
+  const groups = useMemo(
+    () => (transcript ? buildGroups(transcript.messages, transcript.agent) : []),
+    [transcript]
+  )
 
   if (loading && !transcript) {
     return (

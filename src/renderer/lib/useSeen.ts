@@ -50,6 +50,9 @@ export interface Seen {
   markUnread: (sessionId: string) => void
   /** Force a conversation to read: clear any manual-unread flag AND advance its seen marker. */
   markRead: (sessionId: string) => void
+  /** Migrate a session's markers from `oldId` to `newId` (a new-Codex bind swaps the placeholder id
+   *  for the real one). No-op when there's nothing stored under `oldId`. */
+  rekey: (oldId: string, newId: string) => void
 }
 
 export function useSeen(): Seen {
@@ -94,5 +97,19 @@ export function useSeen(): Seen {
     })
   }, [])
 
-  return { seen, unread, markSeen, markUnread, markRead }
+  const rekey = useCallback((oldId: string, newId: string) => {
+    if (oldId === newId) return
+    const migrate = (key: string, set: typeof setSeen): void =>
+      set((prev) => {
+        if (!(oldId in prev)) return prev
+        const next = { ...prev, [newId]: prev[oldId] }
+        delete next[oldId]
+        saveMap(key, next)
+        return next
+      })
+    migrate(SEEN_KEY, setSeen)
+    migrate(UNREAD_KEY, setUnread)
+  }, [])
+
+  return { seen, unread, markSeen, markUnread, markRead, rekey }
 }

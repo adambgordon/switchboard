@@ -306,7 +306,7 @@ function MessageBlock({
   // (a text block). Result / Error / Interrupted and pure-tool-call turns have no prose — their
   // content is reachable via the per-block copy buttons instead.
   const isProseTurn =
-    (group.label === 'You' || group.label === 'Claude') &&
+    (group.label === 'You' || group.isAssistant) &&
     group.messages.some((m) => m.blocks.some((b) => b.kind === 'text'))
 
   return (

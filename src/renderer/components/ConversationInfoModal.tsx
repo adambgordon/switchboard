@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { AGENTS } from '@shared/types'
 import type { ConversationMeta, PtyState } from '@shared/types'
 import { absShort, formatBytes, formatDuration, formatMetric } from '../lib/format'
+import AgentLogo from './AgentLogo'
 import CopyButton from './CopyButton'
 import { Close } from './icons'
 
@@ -62,7 +64,8 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
  * (both open in view mode). The conversation title IS the modal heading, edited **in place**: an
  * always-editable input that commits on blur, commits-and-closes on Enter, and reverts on Esc. Below,
  * a list of detail rows whose values are selectable; only Session ID carries a copy button. Rename
- * writes Claude Code's own `custom-title` line (App → window.api.renameConversation).
+ * (App → window.api.renameConversation) is dispatched per agent in main: Claude appends its own
+ * `custom-title` line; Codex calls the app-server `thread/name/set` RPC.
  */
 export default function ConversationInfoModal({ open, meta, pty, startInEdit, onClose, onRename }: Props) {
   const sessionId = meta?.sessionId ?? pty?.sessionId ?? ''
@@ -70,13 +73,23 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
   const cwd = meta?.cwd ?? pty?.cwd ?? ''
   const branch = meta?.gitBranch && meta.gitBranch !== 'HEAD' ? meta.gitBranch : null
   const model = meta?.model ?? null
+  const agent = meta?.agent ?? pty?.agent ?? 'claude'
   const sizeBytes = meta?.sizeBytes ?? 0
   const outputTokens = meta?.outputTokens ?? 0
+  const inputTokens = meta?.inputTokens ?? 0
   const inputBaseTokens = meta?.inputBaseTokens ?? 0
   const cacheWriteTokens = meta?.cacheWriteTokens ?? 0
   const cacheReadTokens = meta?.cacheReadTokens ?? 0
+  const cachedInputTokens = meta?.cachedInputTokens ?? 0
+  const reasoningTokens = meta?.reasoningTokens ?? 0
+  const contextWindow = meta?.contextWindow ?? 0
   const contextTokens = meta?.contextTokens ?? 0
-  const hasTokenTotals = inputBaseTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0 || outputTokens > 0
+  // Per-agent token categories — never converted/unified (Anthropic tiers and Codex's
+  // cached/reasoning split don't map onto each other).
+  const hasTokenTotals =
+    agent === 'codex'
+      ? inputTokens > 0 || cachedInputTokens > 0 || reasoningTokens > 0 || outputTokens > 0
+      : inputBaseTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0 || outputTokens > 0
   const lastActivity = meta?.lastActivityAt ?? meta?.mtime ?? pty?.lastActivity ?? null
   const firstActivity = meta?.firstActivityAt ?? null
   const durationMs =
@@ -182,18 +195,24 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
         </div>
 
         <div className="sb-info-body">
-          <Section label="Workspace">
-            <Row label="Folder" mono>
+          <Section label="Environment">
+            <Row label="Agent">
+              <span className="sb-info-agent">
+                <AgentLogo agent={agent} size={14} />
+                {AGENTS[agent].label}
+              </span>
+            </Row>
+            {model && (
+              <Row label="Model" mono>
+                {model}
+              </Row>
+            )}
+            <Row label="Directory" mono>
               {cwd || '—'}
             </Row>
             {branch && (
               <Row label="Branch" mono>
                 {branch}
-              </Row>
-            )}
-            {model && (
-              <Row label="Model" mono>
-                {model}
               </Row>
             )}
           </Section>
@@ -210,28 +229,59 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
             <Section label="Tokens">
               {contextTokens > 0 && (
                 <Row label="Context" labelTip="Tokens currently in the context window">
-                  {formatMetric(contextTokens)} tokens
+                  {contextWindow > 0
+                    ? `${formatMetric(contextTokens)} / ${formatMetric(contextWindow)} (${Math.round(
+                        (contextTokens / contextWindow) * 100
+                      )}%)`
+                    : `${formatMetric(contextTokens)} tokens`}
                 </Row>
               )}
-              {inputBaseTokens > 0 && (
-                <Row label="Input" labelTip="Base input tokens">
-                  {formatMetric(inputBaseTokens)} tokens
-                </Row>
-              )}
-              {outputTokens > 0 && (
-                <Row label="Output" labelTip="Output tokens">
-                  {formatMetric(outputTokens)} tokens
-                </Row>
-              )}
-              {cacheWriteTokens > 0 && (
-                <Row label="Cache write" labelTip="Cache-creation tokens">
-                  {formatMetric(cacheWriteTokens)} tokens
-                </Row>
-              )}
-              {cacheReadTokens > 0 && (
-                <Row label="Cache read" labelTip="Cache-read tokens">
-                  {formatMetric(cacheReadTokens)} tokens
-                </Row>
+              {agent === 'codex' ? (
+                <>
+                  {inputTokens > 0 && (
+                    <Row label="Input" labelTip="Total input tokens (including cached)">
+                      {formatMetric(inputTokens)} tokens
+                    </Row>
+                  )}
+                  {cachedInputTokens > 0 && (
+                    <Row label="Cached input" labelTip="Input tokens served from cache">
+                      {formatMetric(cachedInputTokens)} tokens
+                    </Row>
+                  )}
+                  {outputTokens > 0 && (
+                    <Row label="Output" labelTip="Output tokens">
+                      {formatMetric(outputTokens)} tokens
+                    </Row>
+                  )}
+                  {reasoningTokens > 0 && (
+                    <Row label="Reasoning" labelTip="Reasoning output tokens">
+                      {formatMetric(reasoningTokens)} tokens
+                    </Row>
+                  )}
+                </>
+              ) : (
+                <>
+                  {inputBaseTokens > 0 && (
+                    <Row label="Input" labelTip="Base input tokens">
+                      {formatMetric(inputBaseTokens)} tokens
+                    </Row>
+                  )}
+                  {outputTokens > 0 && (
+                    <Row label="Output" labelTip="Output tokens">
+                      {formatMetric(outputTokens)} tokens
+                    </Row>
+                  )}
+                  {cacheWriteTokens > 0 && (
+                    <Row label="Cache write" labelTip="Cache-creation tokens">
+                      {formatMetric(cacheWriteTokens)} tokens
+                    </Row>
+                  )}
+                  {cacheReadTokens > 0 && (
+                    <Row label="Cache read" labelTip="Cache-read tokens">
+                      {formatMetric(cacheReadTokens)} tokens
+                    </Row>
+                  )}
+                </>
               )}
             </Section>
           )}
