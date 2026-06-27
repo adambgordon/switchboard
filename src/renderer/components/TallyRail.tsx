@@ -4,9 +4,10 @@ import type { SectionKey } from '../lib/useLayout'
 import { useRailFlip } from '../lib/useRailFlip'
 import { useRowReorder } from '../lib/useRowReorder'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
+import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
 import NewConversationMenu from './NewConversationMenu'
-import { Chevron, Close, Help, Plus, Search } from './icons'
+import { Chevron, Close, Plus, Search } from './icons'
 
 /** One row in the pane: a conversation that may be live, pinned, both, or neither. */
 export interface RailEntry {
@@ -93,8 +94,6 @@ interface Props {
   defaultDirActive: boolean
   /** Basename of the default folder, surfaced in the "+" tooltip when active. */
   defaultDirLabel: string
-  /** Open the Shortcuts page of the Settings modal (the footer ? button). */
-  onShowHelp: () => void
   /** Toggle a conversation read/unread (from its right-click menu). */
   onToggleUnread: (id: string) => void
   /** Option+click a live row — always mark it unread (never toggles). */
@@ -156,7 +155,6 @@ export default function TallyRail({
   onPickOther,
   defaultDirActive,
   defaultDirLabel,
-  onShowHelp,
   onToggleUnread,
   onMarkUnread,
   onResumeSession,
@@ -187,6 +185,8 @@ export default function TallyRail({
   // Obsidian-style scrollbar: the thumb shows only while scrolling (+ a beat after), never at rest.
   const listRef = useRef<HTMLDivElement>(null)
   useAutoHideScrollbar(listRef)
+  // Fade the last rows when the list overflows and isn't scrolled to the bottom (more below).
+  useOverflowFade(listRef)
 
   // Divider under the head: shown only once the list is scrolled off the top (none at the very top),
   // so the head reads as a fixed band separated from the content it sits above. Driven off the body's
@@ -411,20 +411,6 @@ export default function TallyRail({
             )
           })
         )}
-      </div>
-
-      <div className="sb-rail-foot">
-        <div className="sb-rail-brand">
-          <span className="sb-rail-wordmark">Switchboard</span>
-        </div>
-        <button
-          className="sb-rail-help-btn"
-          onClick={onShowHelp}
-          data-tip="Keyboard shortcuts (⌘?)"
-          aria-label="Keyboard shortcuts"
-        >
-          <Help size={15} />
-        </button>
       </div>
 
       {ctxMenu && (

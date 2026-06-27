@@ -8,12 +8,31 @@
   flex-direction: column;
   background: var(--paper-sunken);
   min-height: 0;
+  position: relative; /* anchor the bottom scroll-fade ::after */
 }
 /* The rail is focusable (tabIndex -1) so ⌘G can hand it the keyboard, but it shows no focus ring —
    feedback is the selected row's highlight, and cobalt is reserved for liveness (cf. .sb-row above). */
 .sb-rail:focus,
 .sb-rail:focus-visible {
   outline: none;
+}
+/* Bottom scroll-fade: shown only while the conversation list overflows AND isn't scrolled to the
+   bottom (useOverflowFade toggles `has-fade-bottom` on .sb-rail-body). Pinned to the rail's visible
+   bottom so it doesn't scroll with the rows; pointer-events:none so it never blocks clicks/scroll. */
+.sb-rail::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 28px;
+  background: linear-gradient(to top, var(--paper-sunken), transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.sb-rail:has(.sb-rail-body.has-fade-bottom)::after {
+  opacity: 1;
 }
 
 .sb-rail-head {
@@ -270,41 +289,6 @@
   box-shadow: 0 0 0 2px var(--ink-ghost);
 }
 
-.sb-rail-foot {
-  padding: 12px 18px;
-  border-top: 1px solid var(--rule);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.sb-rail-help-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  margin-right: -4px; /* pull the glyph flush with the 18px gutter, matching the wordmark */
-  border-radius: var(--r-sm);
-  color: var(--ink-ghost);
-  transition: all var(--dur-fast) var(--ease);
-}
-.sb-rail-help-btn:hover {
-  color: var(--ink);
-  background: var(--paper-hover);
-}
-.sb-rail-wordmark {
-  font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-ghost);
-  letter-spacing: 0.01em;
-}
-.sb-rail-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
 /* ---- section headers (Pinned / Live / Recent): a collapsible toggle on the
    left, with the Recent scope segmented control on the right ---- */
 .sb-rail-section {
@@ -362,9 +346,10 @@
 .sb-agent-logo {
   display: inline-block;
   flex-shrink: 0;
-  /* One tier stronger than the meta line's --ink-ghost so the mark reads with a bit more contrast —
-     --ink-faint is darker in light (#8a8a8a) and lighter in dark (#8e8e8e), both theme-aware. */
-  background-color: var(--ink-faint);
+  /* Painted in the surrounding text color so the mark lightens/darkens WITH it — e.g. the agent
+     segmented controls (rest --ink-faint → hover --ink-soft → active --ink) and the modal Agent row.
+     Each context sets the color; the rail/header meta lines just inherit their own. */
+  background-color: currentColor;
   mask-repeat: no-repeat;
   mask-position: center;
   mask-size: contain;
@@ -376,7 +361,7 @@
 /* In a rail row the mark recedes a tier (to the meta line's own --ink-ghost) — many rows, so it reads
    as a quiet agent tag, not an emphasis. The header/modal marks keep the stronger global --ink-faint. */
 .sb-row-meta .sb-agent-logo {
-  background-color: var(--ink-ghost);
+  /* color comes from currentColor (the meta line's --ink-ghost) — no override needed. */
   margin-right: 0.5ch; /* a little extra space after the logo, before the time */
 }
 

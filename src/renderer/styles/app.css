@@ -503,12 +503,18 @@ body.sb-resizing .sb-pane {
   overflow-y: auto;
 }
 .sb-modal-group {
-  margin-top: 12px;
+  margin-top: var(--s5);
 }
 .sb-modal-group:first-child {
   margin-top: 0;
 }
+/* Shortcuts-page section header (the App page no longer renders labels): Hanken display, bold —
+   not the mono/caps `label-caps` utility. */
 .sb-modal-group-label {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--ink);
   padding: 6px 0;
 }
 .sb-shortcuts {
@@ -519,7 +525,7 @@ body.sb-resizing .sb-pane {
   display: flex;
   align-items: center;
   gap: var(--s4);
-  padding: 6px 0;
+  padding: var(--s2) 0;
   border-bottom: 1px solid var(--rule-soft);
 }
 .sb-shortcut:last-child {
@@ -564,7 +570,7 @@ body.sb-resizing .sb-pane {
 
 /* ---- settings modal: left nav + page (selection is INK, never cobalt — two-accent invariant) ---- */
 .sb-modal-settings {
-  width: 690px;
+  width: 760px;
 }
 /* Mirror the main app's three surfaces so the modal reads as a little Switchboard: the head takes
    the title-bar's slightly-off-white (--paper), the nav takes the rail's sunken grey
@@ -579,7 +585,7 @@ body.sb-resizing .sb-pane {
    lets the page scroll on short windows (or if the shortcut list ever grows past this height). */
 .sb-settings-body {
   display: flex;
-  height: 680px;
+  height: 740px;
   max-height: calc(100vh - 128px);
 }
 .sb-settings-nav {
@@ -618,19 +624,32 @@ body.sb-resizing .sb-pane {
   padding: 14px 20px 18px;
   overflow-y: auto;
   background: var(--paper-pane);
+  /* Settings text is selectable (the global body sets user-select:none) and shows the I-beam.
+     Buttons, the slider, and the nav keep their own cursor (pointer), so only text reads as text. */
+  user-select: text;
+  cursor: text;
 }
 
 /* ---- FAQ page: question + answer prose (a tall list just scrolls within the fixed body) ---- */
 .sb-faq {
   display: flex;
   flex-direction: column;
-  gap: var(--s5);
+  gap: 0;
   user-select: text; /* selectable — the global body sets user-select:none */
 }
 .sb-faq-item {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: var(--s5) 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.sb-faq-item:first-child {
+  padding-top: 0;
+}
+.sb-faq-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 .sb-faq-q {
   font-size: var(--text-md);
@@ -688,17 +707,27 @@ body.sb-resizing .sb-pane {
   flex-direction: column;
   align-items: stretch;
   gap: var(--s2);
+  padding: var(--s4) 0;
+  border-bottom: 1px solid var(--rule-soft);
 }
-/* Separate stacked settings within a group (e.g. default-agent above default-directory). */
-.sb-setting + .sb-setting {
-  margin-top: var(--s4);
+/* The App page reads as one flat divided list: its groups add no gap of their own (the per-setting
+   padding is the rhythm), the first setting hugs the top, and the last drops its divider + pad. */
+.sb-page-app .sb-modal-group {
+  margin-top: 0;
+}
+.sb-page-app .sb-modal-group:first-child .sb-setting:first-child {
+  padding-top: 0;
+}
+.sb-page-app .sb-modal-group:last-child .sb-setting:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 .sb-setting .sb-seg,
 .sb-setting .sb-slider-control {
   align-self: flex-start;
 }
 .sb-setting-title {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--ink);
 }
