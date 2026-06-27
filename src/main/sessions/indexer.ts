@@ -14,7 +14,7 @@ import path from 'node:path'
 import type { ConversationGroup, ConversationMeta } from '../../shared/types'
 import { extractMeta } from './parser'
 import { defaultCodexRoot, extractCodexMeta, listCodexRollouts } from './codexParser'
-import { readCodexTitles } from './codexThreadsDb'
+import { readCodexThreads } from './codexThreadsDb'
 
 /** Default projects root: `~/.claude/projects`. */
 function defaultProjectsRoot(): string {
@@ -185,17 +185,21 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<Conversa
     extractWithCache(f, cache, safeExtractCodexMeta)
   )
 
-  // Prefer Codex's own title (state_*.sqlite `threads.title`) over the rollout-derived one: it carries
-  // renames (which never touch the rollout — see codexRename.ts) and otherwise matches what Codex
-  // shows. One cheap query per pass; falls back to the rollout title when the DB has no row. Spread so
-  // the overlay doesn't mutate the cached meta object (the cache keys on file mtime/size, not title).
-  const titles = readCodexTitles(path.dirname(root))
+  // Consult Codex's own index DB once per pass: DROP archived threads (Codex hides those from its own
+  // list, so surfacing them would make the two browsers disagree), and prefer the DB title over the
+  // rollout-derived one (it carries renames — which never touch the rollout, see codexRename.ts — and
+  // otherwise matches what Codex shows). Falls back to the rollout title when the DB has no row (or is
+  // transiently unreadable). Spread so the overlay doesn't mutate the cached meta (the cache keys on
+  // file mtime/size, not title).
+  const threads = readCodexThreads(path.dirname(root))
 
   const out: ConversationMeta[] = []
   for (const meta of metas) {
     if (!meta) continue
     if (meta.messageCount === 0) continue
-    const dbTitle = titles.get(meta.sessionId)
+    const row = threads.get(meta.sessionId)
+    if (row?.archived) continue
+    const dbTitle = row && row.title.trim().length > 0 ? row.title : null
     out.push(dbTitle ? { ...meta, title: dbTitle } : meta)
   }
   return out
