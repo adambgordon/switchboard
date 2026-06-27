@@ -1,5 +1,6 @@
 import type { ConversationMeta, PtyState } from '@shared/types'
-import { relTime } from '../lib/format'
+import { relTime, absShort } from '../lib/format'
+import AgentLogo from './AgentLogo'
 import TranscriptSearch from './TranscriptSearch'
 import { Pin, Play, Search, Stop, Transcript as TranscriptIcon } from './icons'
 
@@ -50,6 +51,7 @@ export default function PaneHeader({
   find
 }: Props) {
   const live = !!pty
+  const agent = meta?.agent ?? pty?.agent ?? null
 
   return (
     <header className="sb-pane-header">
@@ -63,29 +65,32 @@ export default function PaneHeader({
           {title}
         </button>
         <div className="sb-pane-meta mono">
-          <span className="sb-pane-cwd truncate">{cwd || '—'}</span>
-          {meta && (
+          {agent && <AgentLogo agent={agent} size={13} />}
+          {meta ? (
             <>
+              <span data-tip={absShort(meta.lastActivityAt ?? meta.mtime)}>
+                {relTime(meta.lastActivityAt ?? meta.mtime)}
+              </span>
               <span className="sb-sep">·</span>
               <span>{meta.messageCount} msg</span>
-            </>
-          )}
-          {meta?.gitBranch && meta.gitBranch !== 'HEAD' && (
-            <>
               <span className="sb-sep">·</span>
-              <span>{meta.gitBranch}</span>
+              <span className="sb-pane-cwd truncate">{cwd || '—'}</span>
+              {meta.gitBranch && meta.gitBranch !== 'HEAD' && (
+                <>
+                  <span className="sb-sep">·</span>
+                  <span>{meta.gitBranch}</span>
+                </>
+              )}
             </>
-          )}
-          {meta && (
+          ) : (
             <>
-              <span className="sb-sep">·</span>
-              <span>{relTime(meta.lastActivityAt ?? meta.mtime)}</span>
-            </>
-          )}
-          {!meta && live && (
-            <>
-              <span className="sb-sep">·</span>
-              <span>new session</span>
+              {live && (
+                <>
+                  <span>new session</span>
+                  <span className="sb-sep">·</span>
+                </>
+              )}
+              <span className="sb-pane-cwd truncate">{cwd || '—'}</span>
             </>
           )}
         </div>

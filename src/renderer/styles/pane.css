@@ -64,6 +64,9 @@
   font-size: var(--text-xs);
   color: var(--ink-faint);
 }
+.sb-pane-meta .sb-agent-logo {
+  margin-right: 0.5ch; /* a little extra space after the logo, before the time */
+}
 .sb-pane-cwd {
   max-width: 360px;
 }

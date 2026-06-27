@@ -228,7 +228,7 @@ export async function parseTranscript(filePath: string): Promise<Transcript> {
   try {
     text = await readFile(filePath, 'utf8')
   } catch {
-    return { sessionId, cwd: '', title: 'Untitled', messages: [] }
+    return { sessionId, agent: 'claude', cwd: '', title: 'Untitled', messages: [] }
   }
 
   const messages: TranscriptMessage[] = []
@@ -300,7 +300,7 @@ export async function parseTranscript(filePath: string): Promise<Transcript> {
   }
 
   const title = resolveTitle({ customTitle, aiTitle, summary, firstUserText })
-  return { sessionId, cwd, title, messages }
+  return { sessionId, agent: 'claude', cwd, title, messages }
 }
 
 /** Built-in tools that PARK the turn waiting for the user's reply (rather than just running). */
@@ -623,6 +623,7 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
 
   return {
     sessionId,
+    agent: 'claude',
     cwd,
     title,
     preview,
