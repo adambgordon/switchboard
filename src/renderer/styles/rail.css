@@ -289,6 +289,22 @@
   box-shadow: 0 0 0 2px var(--ink-ghost);
 }
 
+/* Lightweight inter-row dividers — a thin, inset hairline centered in the 5px gap between two adjacent
+   flat rows, but ONLY when both are at rest: a live card carries its own border, a selected row a ring,
+   a hovered row a fill, so the divider yields to all three. It's a painted pseudo (not a border that
+   adds height), and the + combinator re-evaluates on hover/select, so it appears/disappears with zero
+   reflow. Inset (narrower than the row) so it reads quieter than the section rules above. */
+.sb-rail-body .sb-row:not(.card):not(.selected):not(:hover) + .sb-row:not(.card):not(.selected):not(:hover)::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 8px;
+  right: 8px;
+  height: 1px;
+  background: var(--rule);
+  pointer-events: none;
+}
+
 /* ---- section headers (Pinned / Live / Recent): a collapsible toggle on the
    left, with the Recent scope segmented control on the right ---- */
 .sb-rail-section {
@@ -296,7 +312,11 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--s2);
-  padding: 12px 4px 4px;
+  /* Wider than the rows: drop the horizontal padding and pull out a few px with a negative margin so
+     the chevron starts a touch further left and the count ends a touch further right — the section
+     rule visibly spans past the row text, reading as a stronger break between sections. */
+  padding: 12px 0 4px;
+  margin: 0 -4px;
 }
 .sb-rail-section:first-child {
   padding-top: 2px;
@@ -325,14 +345,17 @@
 .sb-rail-section-label {
   color: var(--ink-soft);
   flex-shrink: 0;
+  font-weight: 600;
 }
 /* Leader rule: a hairline filling the gap between the section label and its count, so each
-   header doubles as a thin divider marking the break between sections (Pinned / Live / Recent).
-   height:0 + border-top renders as a single centered line (the head is align-items:center). */
+   header doubles as a divider marking the break between sections (Pinned / Live / Recent). Heavier
+   than the lightweight inter-row dividers below (thicker + the stronger rule color) so the section
+   break clearly outranks them. height:0 + border-top renders as a single centered line (the head is
+   align-items:center). */
 .sb-rail-section-rule {
   flex: 1;
   height: 0;
-  border-top: 1px solid var(--rule);
+  border-top: 2px solid var(--rule-strong);
 }
 .sb-rail-section-count {
   font-size: var(--text-2xs);

@@ -1,9 +1,11 @@
 /*
  * Transcript renderer — read-only conversation stream.
  * A well-set technical journal: paper, graphite ink, hairline rules.
- * Color appears in exactly ONE concept: the danger red on a tool_result error —
- * the message's "Error" header label plus the card's border/wash. Everything else
- * is strictly ink / paper / rule grayscale.
+ * Color is reserved, with two concepts: the danger red on a tool_result error (the message's "Error"
+ * header label plus the card's border/wash), and a muted SYNTAX palette inside fenced code blocks
+ * (.hljs-* — see the "syntax highlighting" section below). The syntax hues are a deliberate exception so
+ * code reads like code; they live ONLY inside .hljs code. Everything else is strictly ink/paper/rule
+ * grayscale, and cobalt stays reserved for liveness (it never appears here).
  */
 
 /* ---- scroll container & centered column ---- */
@@ -11,14 +13,15 @@
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  /* Manual scroll compensation owns position during window-growth (TranscriptView), so disable the
+     browser's scroll anchoring — otherwise both adjust on a prepend and the view double-shifts. */
+  overflow-anchor: none;
   background: var(--paper-pane);
   /* reading text must be selectable even though body disables selection */
   user-select: text;
-  /* The Formatted view reads as one selectable text surface: an I-beam everywhere, never the
-     default arrow over the gaps between blocks. Interactive children keep their own cursor (links
-     and the tool-toggle declare `pointer`; Show-more / copy buttons inherit it from the global
-     `button` rule), so only the reading area gets the I-beam. */
-  cursor: text;
+  /* Cursor is left to the natural per-element default — i-beam over the message text (.message-body
+     opts in below), pointer over buttons/links, and the plain arrow over the gaps (inherited from
+     body). So the container sets NO cursor of its own. */
 }
 
 /* The transcript is click-focusable (tabIndex -1) so clicking it gives the main pane focus —
@@ -73,6 +76,7 @@
 
 .role-label {
   color: var(--ink-faint);
+  font-weight: 600;
 }
 
 /* a tool_result error turn: the header label goes danger-red (the one place color appears) */
@@ -99,6 +103,9 @@
   font-size: var(--text-base);
   line-height: 1.6;
   color: var(--ink);
+  /* i-beam over the reading text; buttons/links inside still win with their own pointer, and the gaps
+     outside .message-body keep the body's plain arrow. */
+  cursor: text;
 }
 
 /* a comfortable gap between stacked blocks inside one turn */
@@ -204,6 +211,103 @@
   font-size: inherit;
   color: var(--ink);
   white-space: pre;
+}
+
+/* ---- syntax highlighting (rehype-highlight / highlight.js token classes) ----
+   A deliberate, documented EXCEPTION to the transcript's grayscale rule (see the file header): fenced
+   code carries a muted, editorial syntax palette, themed per light/dark. The base text + sunken
+   background come from .md-pre/.md-code above; here we only tint the token spans. Comments + deletions
+   reuse the theme-aware ink/danger tokens (so they flip for free); the rest are explicit muted hues with
+   a dark override. Cobalt is never used (it stays liveness-only). */
+.hljs-comment,
+.hljs-quote {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-tag,
+.hljs-name,
+.hljs-literal {
+  color: #a626a4;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: #50a14f;
+}
+.hljs-number,
+.hljs-meta,
+.hljs-symbol,
+.hljs-bullet {
+  color: #b76b01;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: #4078f2;
+}
+.hljs-type,
+.hljs-built_in,
+.hljs-title.class_ {
+  color: #0184bc;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-variable,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: #4078f2;
+}
+.hljs-deletion {
+  color: var(--danger-ink);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+.hljs-link {
+  text-decoration: underline;
+}
+/* dark palette — brighter, still desaturated, tuned to read on the dark code surface */
+:root[data-theme='dark'] .hljs-keyword,
+:root[data-theme='dark'] .hljs-selector-tag,
+:root[data-theme='dark'] .hljs-tag,
+:root[data-theme='dark'] .hljs-name,
+:root[data-theme='dark'] .hljs-literal {
+  color: #c678dd;
+}
+:root[data-theme='dark'] .hljs-string,
+:root[data-theme='dark'] .hljs-regexp,
+:root[data-theme='dark'] .hljs-addition {
+  color: #98c379;
+}
+:root[data-theme='dark'] .hljs-number,
+:root[data-theme='dark'] .hljs-meta,
+:root[data-theme='dark'] .hljs-symbol,
+:root[data-theme='dark'] .hljs-bullet {
+  color: #d19a66;
+}
+:root[data-theme='dark'] .hljs-title,
+:root[data-theme='dark'] .hljs-title.function_,
+:root[data-theme='dark'] .hljs-section {
+  color: #61afef;
+}
+:root[data-theme='dark'] .hljs-type,
+:root[data-theme='dark'] .hljs-built_in,
+:root[data-theme='dark'] .hljs-title.class_ {
+  color: #56b6c2;
+}
+:root[data-theme='dark'] .hljs-attr,
+:root[data-theme='dark'] .hljs-attribute,
+:root[data-theme='dark'] .hljs-property,
+:root[data-theme='dark'] .hljs-variable,
+:root[data-theme='dark'] .hljs-selector-class,
+:root[data-theme='dark'] .hljs-selector-id {
+  color: #61afef;
 }
 
 .md-ul,
@@ -339,17 +443,19 @@
   align-items: center;
   gap: var(--s2);
   font-size: var(--text-xs);
-  color: var(--ink-soft);
+  color: var(--ink-faint);
   /* the tool name is a click target (toggle) — never let repeated clicks select its text */
   user-select: none;
 }
 
 .tool-name {
-  color: var(--ink);
+  color: var(--ink-soft);
 }
 
 /* The tool head IS the disclosure toggle (no separate "Input" row, no chevron — just the gear):
-   the whole "⚙ Name" row is clickable, and the gear + the name both lighten on hover. */
+   the whole "⚙ Name" row is clickable. It rests dim and STRENGTHENS on hover (the gear + the name
+   both intensify — darker in light, brighter in dark — via the ink tokens, so it's theme-correct
+   without a per-theme branch). */
 .tool-toggle {
   cursor: pointer;
   list-style: none;
@@ -364,11 +470,11 @@
 }
 
 .tool-toggle:hover {
-  color: var(--ink-faint);
+  color: var(--ink-soft);
 }
 
 .tool-toggle:hover .tool-name {
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 .tool-json,
@@ -388,12 +494,11 @@
   overflow-wrap: anywhere;
 }
 
-/* the result body sits alone now (the Result/Error label moved to the header). A slightly smaller
-   bottom padding than the rest splits the difference between flush (too tight under the clamp cut)
-   and full padding (too airy) — it's the gap below the 12th line when truncated. */
+/* the result body sits alone now (the Result/Error label moved to the header). Padding is symmetric
+   top/bottom (the shared --s3 above) so a short result reads evenly boxed; the clamped-tail case
+   relies on the .is-faded gradient mask below to soften the 12th-line cut. */
 .tool-result-body {
   margin-top: 0;
-  padding-bottom: 6px;
 }
 
 /* Clamp the collapsed result to 12 RENDERED (wrapped) lines. content-box so max-height bounds the
@@ -593,6 +698,14 @@
   border: 1px solid var(--rule);
 }
 
+/* An error result wraps its inner sunken body in a red card with --s3 padding, so push the copy button
+   in by that padding — it then lands at the inner block's top-right corner with the SAME 6px inset as
+   every other block's copy button, instead of floating over the red border. */
+.result-card.is-error .copy-block {
+  top: calc(var(--s3) + 6px);
+  right: calc(var(--s3) + 6px);
+}
+
 /* reveal — fade IN on hover; the opacity transition lives here (not on the base), so hide is instant.
    .copied keeps the button shown through the check-flash even once the pointer leaves. */
 .message:hover .copy-turn,
@@ -602,4 +715,54 @@
 .copy-btn.copied {
   opacity: 1;
   transition: opacity var(--dur-fast) var(--ease);
+}
+
+/* ---- jump-to-edge buttons — floating chips, bottom-right of the reading column, shown only when the
+   transcript is scrolled away from that edge (↑ to top, ↓ to bottom). Neutral ink (two-accent
+   invariant), the same chip treatment as the copy buttons, sized up to a comfortable target. The
+   .transcript-wrap is the positioned ancestor; the buttons float over the scroll viewport. ---- */
+.transcript-wrap {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+.transcript-jump {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  /* the wrapper covers nothing clickable around the pill — let scroll/selection through */
+  pointer-events: none;
+}
+.transcript-jump-top {
+  top: var(--s5);
+}
+.transcript-jump-bottom {
+  bottom: var(--s5);
+}
+.transcript-jump-btn {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  box-shadow: var(--shadow-sel-hover);
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+  animation: sb-fade-in var(--dur-fast) var(--ease);
+}
+.transcript-jump-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink-ghost);
+}
+.transcript-jump-arrow-down {
+  transform: rotate(180deg);
 }

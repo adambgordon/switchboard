@@ -111,13 +111,15 @@
  * redeclared here; type / spacing / radii / motion / layout are shared.
  */
 :root[data-theme='dark'] {
-  /* ---- paper & ink (neutral; INVERTED elevation — rail/chrome lighter, content the dark canvas) ---- */
-  --paper: #161616; /* app shell / titlebar — the lighter chrome */
-  --paper-raised: #242424; /* raised tiles: live cards, modals, menus — lighter still, so they pop on the rail */
-  --paper-pane: #0f0f0f; /* main content (pane / Formatted / terminal) — the DARK canvas */
-  --paper-sunken: #161616; /* left pane / rail + recessed bits — lighter chrome (sits ABOVE --paper-pane here) */
-  --paper-hover: #2c2c2c;
-  --paper-active: #343434;
+  /* ---- paper & ink (neutral; INVERTED elevation — rail/chrome lighter, content the dark canvas) ---- *
+   * Lightened a tad from the original near-black set (pane #0f0f0f / rail #161616) to ease the contrast
+   * while preserving the inverted-elevation ORDER: pane < sunken(=app shell) < raised < hover < active. */
+  --paper: #1f1f1f; /* app shell / titlebar — the lighter chrome (tracks --paper-sunken) */
+  --paper-raised: #2a2a2a; /* raised tiles: live cards, modals, menus — lighter still, so they pop on the rail */
+  --paper-pane: #171717; /* main content (pane / Formatted / terminal) — the DARK canvas */
+  --paper-sunken: #1f1f1f; /* left pane / rail + recessed bits — lighter chrome (sits ABOVE --paper-pane here) */
+  --paper-hover: #313131;
+  --paper-active: #3a3a3a;
 
   --ink: #f2f2f2; /* primary text — soft off-white, not pure */
   --ink-soft: #c0c0c0; /* secondary */
@@ -125,7 +127,7 @@
   --ink-ghost: #626262; /* disabled, placeholders */
 
   --rule: #2b2b2b; /* hairline */
-  --rule-soft: #1f1f1f; /* softer = closer to the surface */
+  --rule-soft: #272727; /* softer = closer to the surface (nudged up to stay just above the lightened paper) */
   --rule-strong: #3f3f3f; /* stronger = more contrast */
 
   /* ---- accent 1: electric cobalt = alive (brightened for dark; tints flip to dark) ---- */

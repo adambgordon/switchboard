@@ -7,6 +7,26 @@
   background: var(--paper);
 }
 
+/* App veil (AppVeil) — a white cover above everything that fades out on launch (soft fade-in from
+   white) and brackets the ⌘R refresh zoom (cover → wiggle underneath → fade back). `opaque` covers
+   instantly (no transition); `fading` eases opacity to 0, then the element unmounts on transitionend. */
+.sb-app-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #fff;
+  opacity: 1;
+  pointer-events: none;
+}
+/* Dark theme fades from BLACK, not white — a white flash in a dark app is jarring. */
+:root[data-theme='dark'] .sb-app-veil {
+  background: #000;
+}
+.sb-app-veil.fading {
+  opacity: 0;
+  transition: opacity 800ms var(--ease);
+}
+
 .sb-body {
   flex: 1;
   display: flex;
@@ -1010,9 +1030,24 @@ body.sb-resizing .sb-pane {
   box-shadow: var(--shadow-pop);
   animation: sb-fade-in var(--dur-fast) var(--ease);
 }
+/* Fade out on close (kept mounted by the `closing` flag for one fade, then unmounted) instead of
+   vanishing. A keyframe — NOT a transition — so it can't be shadowed by the just-finished sb-fade-in
+   open animation; `forwards` holds it transparent until unmount. */
+@keyframes sb-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.sb-ctxmenu.closing {
+  animation: sb-fade-out var(--dur-slow) var(--ease) forwards;
+}
 .sb-ctxmenu-item {
   display: flex;
   align-items: center;
+  gap: 10px;
   width: 100%;
   padding: 7px 10px;
   border-radius: var(--r-sm);
@@ -1020,6 +1055,36 @@ body.sb-resizing .sb-pane {
   color: var(--ink-soft);
   text-align: left;
   transition: background var(--dur-fast);
+}
+/* leading action icon — never squish, and it rides the item's color (ink-soft → ink / danger / live). */
+.sb-ctxmenu-item svg {
+  flex-shrink: 0;
+}
+/* The read/unread dot mirrors the liveness dot's SHAPE (7px; a 1.5px hollow ring or a solid disc) and
+   points at the END state of the action: filled = "Mark as unread" (unread reads as a solid dot),
+   hollow = "Mark as read" (read reads as a hollow ring). Colorless (ink) at rest; it snaps to cobalt on
+   hover to preview the live accent. The 3px side margins pad the 7px dot into the ~13px icon column so
+   its label lines up with the other items. (The Pin likewise shows its end state, via its `filled` prop
+   — no morph.) */
+.sb-menu-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin: 0 3px;
+  border-radius: 50%;
+}
+.sb-menu-dot.filled {
+  background: var(--ink-faint);
+}
+.sb-menu-dot.hollow {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ink-faint);
+}
+.sb-ctxmenu-item:hover .sb-menu-dot.filled {
+  background: var(--live);
+}
+.sb-ctxmenu-item:hover .sb-menu-dot.hollow {
+  box-shadow: inset 0 0 0 1.5px var(--live);
 }
 .sb-ctxmenu-item:hover {
   background: var(--paper-hover);
@@ -1058,5 +1123,7 @@ body.sb-resizing .sb-pane {
 .sb-ctxmenu-sep {
   height: 1px;
   margin: 4px 6px;
-  background: var(--rule);
+  /* --rule-strong, not --rule: on the raised menu surface (esp. dark --paper-raised #2a2a2a) a plain
+     --rule hairline is ~invisible; the stronger rule reads in both themes. */
+  background: var(--rule-strong);
 }

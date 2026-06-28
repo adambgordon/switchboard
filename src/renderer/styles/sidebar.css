@@ -26,8 +26,8 @@
 .sb-row:focus-visible {
   outline: none;
 }
-/* right-hand gutter: the liveness dot at rest, the pin toggle on hover — the two
-   share one slot (the pin overlays the dot, which fades out on hover) */
+/* right-hand gutter: the liveness dot at rest, the ⋮ actions button on hover — the two
+   share one slot (the menu button overlays the dot, which fades out on hover) */
 .sb-row-gutter {
   position: relative;
   width: 18px;
@@ -41,9 +41,9 @@
 .sb-row .sb-dot {
   transition: opacity var(--dur-fast);
 }
-/* The dot exists only on live rows. Fade it (revealing the pin beneath) only when the gutter
-   itself is hovered — not the whole row — so a live row's cobalt dot holds steady unless you
-   reach for its pin slot. */
+/* The dot exists only on live rows. Fade it (revealing the ⋮ menu button beneath) only when the
+   gutter itself is hovered — not the whole row — so a live row's cobalt dot holds steady unless you
+   reach for its actions slot. */
 .sb-row-gutter:hover .sb-dot {
   opacity: 0;
 }
@@ -82,11 +82,11 @@
 .sb-row-cwd {
   max-width: 130px;
 }
-/* the pin toggle: hidden at rest (even when pinned); revealed on hover — across the whole row
-   when it's not live, but only over the gutter when it IS live (so hovering a live row's body
-   never disturbs its liveness dot). filled glyph = pinned, outline = unpinned. absolutely
-   placed so it overlays the gutter's dot rather than taking its own column. */
-.sb-row-pin {
+/* the ⋮ actions button: hidden at rest, revealed on hover — across the whole row when it's not live,
+   but only over the gutter when it IS live (so hovering a live row's body never disturbs its liveness
+   dot). Absolutely placed so it overlays the gutter's dot rather than taking its own column; hovering
+   it (or clicking) opens the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume). */
+.sb-row-menu-btn {
   position: absolute;
   inset: 0;
   display: flex;
@@ -101,16 +101,16 @@
     color var(--dur-fast),
     background var(--dur-fast);
 }
-.sb-row:not(.live):hover .sb-row-pin,
-.sb-row.live .sb-row-gutter:hover .sb-row-pin {
+.sb-row:not(.live):hover .sb-row-menu-btn,
+.sb-row.live .sb-row-gutter:hover .sb-row-menu-btn {
   opacity: 1;
   pointer-events: auto;
 }
-/* While a row slides to a new position (useRailFlip sets .sb-flipping for the slide's duration),
-   keep its pin toggle hidden. The pin is hover-revealed, but a compositor transform doesn't re-run
-   :hover, so the row begins the slide under the cursor and the pin would otherwise hang visible the
-   whole glide, fading only on arrival. !important to beat the hover reveals above. */
-.sb-row.sb-flipping .sb-row-pin {
+/* While a row slides to a new position (useRailFlip sets .sb-flipping for the slide's duration), keep
+   its menu button hidden. It's hover-revealed, but a compositor transform doesn't re-run :hover, so the
+   row begins the slide under the cursor and the button would otherwise hang visible the whole glide,
+   fading only on arrival. !important to beat the hover reveals above. */
+.sb-row.sb-flipping .sb-row-menu-btn {
   opacity: 0 !important;
   pointer-events: none !important;
 }
@@ -126,16 +126,9 @@
   border-color: var(--rule);
   box-shadow: none;
 }
-.sb-row-pin:hover {
+.sb-row-menu-btn:hover {
   color: var(--ink);
   background: var(--paper-active);
-}
-/* a pinned row's toggle reads slightly stronger (still hover-only) */
-.sb-row-pin.pinned {
-  color: var(--ink-soft);
-}
-.sb-row-pin.pinned:hover {
-  color: var(--ink);
 }
 
 /* ---- gesture affordances (useRowReorder) ---- */

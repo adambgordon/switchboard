@@ -213,7 +213,10 @@ export const IPC = {
   dialogPickDirectory: 'dialog:pickDirectory',
   openExternal: 'shell:openExternal',
   windowSetBackgroundColor: 'window:setBackgroundColor',
-  windowSyncTrafficLights: 'window:syncTrafficLights' // renderer -> main: re-align traffic lights to the current zoom
+  windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
+  windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
+  appRefreshStart: 'app:refreshStart', // push: ⌘R refresh begun — renderer covers the window with the white veil
+  appRefreshEnd: 'app:refreshEnd' // push: ⌘R refresh restored — renderer fades the veil back out
 } as const
 
 /** The typed surface exposed on `window.api` by the preload bridge. */
@@ -265,6 +268,15 @@ export interface SwitchboardApi {
   /** Ask main to re-align the native macOS traffic lights to the current page zoom — fired by the
    *  renderer on every `resize` (which fires on every zoom change). Fire-and-forget. */
   syncTrafficLights(): void
+  /** ⌘R refresh lifecycle pushes: `start` fires before the zoom wiggle (renderer covers the window with
+   *  a white veil), `end` after the zoom is restored (renderer fades the veil out), so the relayout is
+   *  hidden. Also used for the launch fade-in. Each returns an unsubscribe fn. */
+  onRefreshStart(cb: () => void): () => void
+  onRefreshEnd(cb: () => void): () => void
+  /** Swap the macOS dock icon to the light or dark variant (a Preferences toggle, independent of the
+   *  light/dark THEME). Fire-and-forget; the renderer re-pushes the saved choice on mount, since a
+   *  packaged dock resets to the bundled .icns each launch. No-op off macOS. */
+  setDockIcon(dark: boolean): void
 
   // --- image input (drag-drop) ---
   // `File` here is the ambient global (DOM File in the renderer, node:buffer File

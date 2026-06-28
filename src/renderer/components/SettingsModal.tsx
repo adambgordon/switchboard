@@ -121,7 +121,7 @@ const FAQ: Faq[] = [
               <span className="sb-dot awaiting" />
             </span>
             <span>
-              <strong>Solid</strong>: the turn finished and unread
+              <strong>Solid</strong>: the turn finished and is unread
             </span>
           </li>
           <li>
@@ -173,6 +173,10 @@ interface Props {
   themeMode: ThemeMode
   /** Set the theme mode (from the Appearance segmented control). */
   onSetThemeMode: (mode: ThemeMode) => void
+  /** Whether the macOS dock icon uses the dark variant (independent of the theme). */
+  darkIcon: boolean
+  /** Toggle the dark dock icon (a Light / Dark segmented control). */
+  onSetDarkIcon: (value: boolean) => void
   // --- App page: default folder for new conversations ---
   /** Absolute path of the default folder ('' = none chosen). A chosen folder is always active. */
   defaultDir: string
@@ -215,6 +219,8 @@ export default function SettingsModal({
   onClose,
   themeMode,
   onSetThemeMode,
+  darkIcon,
+  onSetDarkIcon,
   defaultDir,
   onChooseDefaultDir,
   onClearDefaultDir,
@@ -311,6 +317,30 @@ export default function SettingsModal({
                       ))}
                     </div>
                     <div className="sb-setting-desc">Follow the system theme, or force light or dark.</div>
+                  </div>
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">App icon</div>
+                    <div className="sb-seg" role="radiogroup" aria-label="App icon">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={!darkIcon}
+                        className={`sb-seg-btn${!darkIcon ? ' active' : ''}`}
+                        onClick={() => onSetDarkIcon(false)}
+                      >
+                        Light
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={darkIcon}
+                        className={`sb-seg-btn${darkIcon ? ' active' : ''}`}
+                        onClick={() => onSetDarkIcon(true)}
+                      >
+                        Dark
+                      </button>
+                    </div>
+                    <div className="sb-setting-desc">Use a dark dock icon, independent of the app theme.</div>
                   </div>
                 </div>
                 <div className="sb-modal-group">

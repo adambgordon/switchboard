@@ -7,7 +7,7 @@ import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
 import NewConversationMenu from './NewConversationMenu'
-import { Chevron, Close, Plus, Search } from './icons'
+import { Chevron, Close, Plus, Search, Pin, Info, Stop, Play } from './icons'
 
 /** One row in the pane: a conversation that may be live, pinned, both, or neither. */
 export interface RailEntry {
@@ -237,42 +237,107 @@ export default function TallyRail({
     selector: '.sb-row.live:not(.pinned)[data-session]'
   })
 
-  // Right-click / two-finger menu, on any row (live or not): open Session details, plus — on a live
-  // row — mark read/unread and stop the session, or — on a not-live row — resume it. One instance,
-  // positioned at the cursor; dismissed by an outside click, Esc, or scroll.
+  // Row actions menu, on any row (live or not): Pin/Unpin, plus — live — mark read/unread + Stop, or —
+  // not-live — Resume, and Session details. One shared instance, opened by CLICKING the ⋮ button
+  // (anchored under it) or right-clicking (at the cursor); dismissed by an outside click, Esc, or scroll.
   const [ctxMenu, setCtxMenu] = useState<{
     id: string
-    x: number
-    y: number
+    /** viewport coords; `left` for a cursor (right-click) anchor, `right` for the ⋮-button anchor. */
+    top: number
+    left?: number
+    right?: number
     live: boolean
     unread: boolean
+    pinned: boolean
   } | null>(null)
-  const openRowMenu = (e: MouseEvent, id: string): void => {
+  const menuStateFor = (id: string): { live: boolean; unread: boolean; pinned: boolean } | null => {
     const entry = entryById(id)
-    if (!entry) return
-    setCtxMenu({
-      id,
-      x: e.clientX,
-      y: e.clientY,
+    if (!entry) return null
+    return {
       live: !!entry.pty,
-      unread: entry.liveState === 'awaiting' || entry.liveState === 'asking'
-    })
+      unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
+      pinned: entry.pinned
+    }
+  }
+  // `closing` drives the fade-out: the menu stays mounted with a `.closing` class for one fade, then
+  // unmounts (so it dissolves instead of vanishing). `closeTimerRef` is the inactivity auto-dismiss;
+  // `fadeTimerRef` is the fade→unmount delay.
+  const [closing, setClosing] = useState(false)
+  const closeTimerRef = useRef<number | null>(null)
+  const fadeTimerRef = useRef<number | null>(null)
+  const cancelAutoClose = (): void => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+  }
+  // Fade out, then unmount. Idempotent while a fade is already running.
+  const closeMenu = (): void => {
+    cancelAutoClose()
+    if (fadeTimerRef.current != null) return
+    setClosing(true)
+    fadeTimerRef.current = window.setTimeout(() => {
+      setCtxMenu(null)
+      setClosing(false)
+      fadeTimerRef.current = null
+    }, 440)
+  }
+  // Auto-dismiss: once open, fade out after a grace UNLESS the pointer is over the menu. Entering the
+  // menu cancels the timer (never closes while hovered); leaving re-arms it.
+  const armAutoClose = (): void => {
+    cancelAutoClose()
+    closeTimerRef.current = window.setTimeout(closeMenu, 1500)
+  }
+  // Open (or re-open) the menu — cancel any in-flight fade so it snaps back to fully shown.
+  const openMenu = (data: NonNullable<typeof ctxMenu>): void => {
+    if (fadeTimerRef.current != null) {
+      clearTimeout(fadeTimerRef.current)
+      fadeTimerRef.current = null
+    }
+    setClosing(false)
+    setCtxMenu(data)
+    armAutoClose()
+  }
+  // Right-click / two-finger: open at the cursor.
+  const openRowMenu = (e: MouseEvent, id: string): void => {
+    const s = menuStateFor(id)
+    if (!s) return
+    openMenu({ id, top: e.clientY, left: e.clientX, ...s })
+  }
+  // The ⋮ button (click): TOGGLE — close if this row's menu is already open, else open anchored under
+  // the button's right edge. Read the rect synchronously — React nulls currentTarget after the handler.
+  const openRowMenuFromButton = (e: MouseEvent, id: string): void => {
+    if (ctxMenu && ctxMenu.id === id && !closing) {
+      closeMenu()
+      return
+    }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const s = menuStateFor(id)
+    if (!s) return
+    openMenu({ id, top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right), ...s })
   }
   useEffect(() => {
     if (!ctxMenu) return
-    const close = (): void => setCtxMenu(null)
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setCtxMenu(null)
+      if (e.key === 'Escape') closeMenu()
     }
-    document.addEventListener('click', close)
+    document.addEventListener('click', closeMenu)
     document.addEventListener('keydown', onKey)
-    document.addEventListener('scroll', close, true)
+    document.addEventListener('scroll', closeMenu, true)
     return () => {
-      document.removeEventListener('click', close)
+      document.removeEventListener('click', closeMenu)
       document.removeEventListener('keydown', onKey)
-      document.removeEventListener('scroll', close, true)
+      document.removeEventListener('scroll', closeMenu, true)
     }
   }, [ctxMenu])
+  // Clear pending timers on unmount.
+  useEffect(
+    () => () => {
+      cancelAutoClose()
+      if (fadeTimerRef.current != null) clearTimeout(fadeTimerRef.current)
+    },
+    []
+  )
 
   return (
     <aside className="sb-rail">
@@ -396,9 +461,9 @@ export default function TallyRail({
                     showCwd
                     card={section.variant === 'card' && !!entry.pty}
                     onSelect={onSelect}
-                    onTogglePin={onTogglePin}
                     onJump={onJump}
                     onMarkUnread={onMarkUnread}
+                    onOpenMenu={openRowMenuFromButton}
                     onContextMenu={openRowMenu}
                   />
                 ))}
@@ -415,29 +480,42 @@ export default function TallyRail({
 
       {ctxMenu && (
         <div
-          className="sb-ctxmenu"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          className={`sb-ctxmenu${closing ? ' closing' : ''}`}
+          style={{ top: ctxMenu.top, left: ctxMenu.left, right: ctxMenu.right }}
           onClick={(e) => e.stopPropagation()}
+          onMouseEnter={cancelAutoClose}
+          onMouseLeave={armAutoClose}
         >
+          <button
+            className="sb-ctxmenu-item"
+            onClick={() => {
+              onTogglePin(ctxMenu.id)
+              closeMenu()
+            }}
+          >
+            <Pin size={13} filled={!ctxMenu.pinned} />
+            <span>{ctxMenu.pinned ? 'Unpin' : 'Pin'}</span>
+          </button>
           {ctxMenu.live && (
             <button
               className="sb-ctxmenu-item"
               onClick={() => {
                 onToggleUnread(ctxMenu.id)
-                setCtxMenu(null)
+                closeMenu()
               }}
             >
+              <span className={`sb-menu-dot ${ctxMenu.unread ? 'hollow' : 'filled'}`} aria-hidden="true" />
               <span>{ctxMenu.unread ? 'Mark as read' : 'Mark as unread'}</span>
-              <span className="sb-ctxmenu-hint">⇧⌘U</span>
             </button>
           )}
           <button
             className="sb-ctxmenu-item"
             onClick={() => {
               onShowInfo(ctxMenu.id, false)
-              setCtxMenu(null)
+              closeMenu()
             }}
           >
+            <Info size={14} />
             <span>Session details…</span>
           </button>
           {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**
@@ -448,9 +526,10 @@ export default function TallyRail({
               className="sb-ctxmenu-item danger"
               onClick={() => {
                 onStopSession(ctxMenu.id)
-                setCtxMenu(null)
+                closeMenu()
               }}
             >
+              <Stop size={14} />
               <span>Stop session</span>
             </button>
           ) : (
@@ -458,9 +537,10 @@ export default function TallyRail({
               className="sb-ctxmenu-item live"
               onClick={() => {
                 onResumeSession(ctxMenu.id)
-                setCtxMenu(null)
+                closeMenu()
               }}
             >
+              <Play size={14} />
               <span>Resume</span>
             </button>
           )}

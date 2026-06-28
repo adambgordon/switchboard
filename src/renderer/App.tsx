@@ -14,6 +14,7 @@ import { useWindowFocus } from './lib/useWindowFocus'
 import { useTranscript } from './lib/useTranscript'
 import { useNavHistory } from './lib/useNavHistory'
 import { useTheme } from './lib/useTheme'
+import { useDarkIcon } from './lib/useDarkIcon'
 import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
@@ -26,6 +27,7 @@ import SettingsModal from './components/SettingsModal'
 import CapWarningModal from './components/CapWarningModal'
 import ConversationInfoModal from './components/ConversationInfoModal'
 import TooltipLayer from './components/TooltipLayer'
+import AppVeil from './components/AppVeil'
 
 type View = 'transcript' | 'terminal'
 
@@ -109,6 +111,7 @@ export default function App() {
     reset: resetMaxLive
   } = useMaxLiveSessions()
   const { mode: themeMode, resolved: themeResolved, setMode: setThemeMode, toggle: toggleTheme } = useTheme()
+  const darkIcon = useDarkIcon()
   const focused = useWindowFocus()
   const {
     paneWidth,
@@ -208,6 +211,12 @@ export default function App() {
   useEffect(() => {
     window.api.setMaxLiveSessions(maxLive)
   }, [maxLive])
+
+  // Push the dark-dock-icon choice to main on mount + on change (main can't read renderer localStorage,
+  // and a packaged dock resets to the bundled icon each launch, so re-pushing on mount restores it).
+  useEffect(() => {
+    window.api.setDockIcon(darkIcon.value)
+  }, [darkIcon.value])
 
   // Focus the search field whenever it opens (magnifier click or ⌘F).
   useEffect(() => {
@@ -790,6 +799,7 @@ export default function App() {
 
   return (
     <div className="sb-app">
+      <AppVeil />
       <TitleBar
         paneCollapsed={paneCollapsed}
         onTogglePane={togglePane}
@@ -896,6 +906,8 @@ export default function App() {
         onClose={() => setSettingsPage(null)}
         themeMode={themeMode}
         onSetThemeMode={setThemeMode}
+        darkIcon={darkIcon.value}
+        onSetDarkIcon={darkIcon.set}
         defaultDir={defaultDir}
         onChooseDefaultDir={chooseDefaultDir}
         onClearDefaultDir={clearDefaultDir}
