@@ -1,5 +1,5 @@
 /**
- * Reading Codex conversation titles from Codex's own index DB.
+ * Reading Codex conversation metadata (title + archived) from Codex's own index DB.
  *
  * A Codex rename (codexRename.ts) writes `threads.title` in `~/.codex/state_*.sqlite`, NOT the
  * rollout — so the rollout-derived title (codexParser's `cleanTitle(firstUser)`) never reflects it.
@@ -9,8 +9,9 @@
  *
  * `state_N.sqlite` is WAL-mode; `node:sqlite` opened read-only honors the `-wal` (verified), so a
  * fresh rename is visible immediately even before a checkpoint. The filename is versioned, so we glob
- * `state_*.sqlite` and pick the newest. Every failure mode (missing DB, schema drift, lock) degrades
- * to an empty map — the title read must never crash the index.
+ * `state_*.sqlite` and pick the newest. Every failure mode degrades to an empty map — the read must
+ * never crash the index — including a readonly-open race: while Codex is actively writing, a
+ * read-only open can transiently fail (`SQLITE_CANTOPEN`); the next pass picks it up.
  *
  * Pure Node — no Electron, no DOM. Synchronous (node:sqlite is sync; the `threads` table is tiny).
  */
@@ -43,29 +44,42 @@ function newestStateDb(home: string): string | null {
   return best ? path.join(home, best.file) : null
 }
 
+/** A Codex thread's index-DB row (the bits Switchboard needs). */
+export interface CodexThreadRow {
+  /** The session's title (auto-derived from the first message, or the renamed value); '' when absent. */
+  title: string
+  /** Codex's own archived flag (`archived` INTEGER, 0/1) — archived threads are hidden from its own
+   *  list, so Switchboard drops them too, keeping the two browsers in sync. */
+  archived: boolean
+}
+
 /**
- * Map of Codex sessionId (== threadId) -> title, read from the newest `state_*.sqlite`. Only
- * non-empty titles are included; absent/empty entries leave the caller on its rollout-derived
- * fallback. Returns an empty map on any failure.
+ * Map of Codex sessionId (== threadId) -> { title, archived }, read from the newest `state_*.sqlite`.
+ * Includes EVERY thread row, so the caller can both prefer the DB title and drop archived ids; the
+ * title is the raw value ('' when absent) — the indexer applies the non-empty check. Returns an empty
+ * map on any failure (missing DB, schema drift, or a readonly-open race while Codex is mid-write —
+ * see the gotcha), leaving callers on their rollout-derived fallback.
  */
-export function readCodexTitles(home: string = defaultCodexHome()): Map<string, string> {
-  const titles = new Map<string, string>()
+export function readCodexThreads(home: string = defaultCodexHome()): Map<string, CodexThreadRow> {
+  const threads = new Map<string, CodexThreadRow>()
   const dbPath = newestStateDb(home)
-  if (!dbPath) return titles
+  if (!dbPath) return threads
 
   let db: DatabaseSync | undefined
   try {
     db = new DatabaseSync(dbPath, { readOnly: true })
-    const rows = db.prepare('SELECT id, title FROM threads').all() as Array<Record<string, unknown>>
+    const rows = db
+      .prepare('SELECT id, title, archived FROM threads')
+      .all() as Array<Record<string, unknown>>
     for (const row of rows) {
-      const id = row.id
-      const title = row.title
-      if (typeof id === 'string' && typeof title === 'string' && title.trim().length > 0) {
-        titles.set(id, title)
-      }
+      if (typeof row.id !== 'string') continue
+      threads.set(row.id, {
+        title: typeof row.title === 'string' ? row.title : '',
+        archived: !!row.archived
+      })
     }
   } catch {
-    return titles
+    return threads
   } finally {
     try {
       db?.close()
@@ -73,5 +87,5 @@ export function readCodexTitles(home: string = defaultCodexHome()): Map<string, 
       /* already closed */
     }
   }
-  return titles
+  return threads
 }
