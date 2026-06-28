@@ -1,6 +1,6 @@
 # Switchboard
 
-A **switchboard** for your Claude Code conversations. A single unified app to use **your** Claude Code setup. Preview and search all conversations instantly (without starting Claude), run sessions in parallel, and pin important conversations.
+A **switchboard** for your AI coding-agent conversations — **Claude Code and Codex**, side by side. A single unified app over **your** existing setup: preview and search every conversation instantly (without starting an agent), resume or start sessions in parallel, and pin the important ones.
 
 ## Screenshots
 
@@ -68,24 +68,24 @@ Then quit (⌘Q) (if already running) and reopen the app.
 ## Requirements
 
 - **macOS** on **Apple Silicon** — built and validated there; Intel is untested.
-- **[Claude Code](https://claude.com/claude-code)** installed and on your `PATH`. Switchboard reads the sessions Claude Code writes and drives the `claude` CLI — it does nothing useful without it.
+- **At least one supported agent** on your `PATH` — **[Claude Code](https://claude.com/claude-code)** and/or **Codex** (OpenAI's `codex` CLI). Switchboard reads the sessions each agent writes and drives its CLI; it browses whatever's already on disk and launches whichever agents are installed. Both is the happy path, but either alone works.
 - **Node.js 26** — see [`.nvmrc`](.nvmrc) (`nvm use` picks it up).
 - **Xcode Command Line Tools** — the embedded terminal (`node-pty`) compiles native code. Install with `xcode-select --install`.
 
 
 ## What it does
 
-- **Browse** — reads the JSONL files Claude Code already writes under `~/.claude/projects/`; titles and previews update live as a file watcher re-indexes. Switchboard owns no data of its own.
+- **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped together by folder so a repo's conversations from both agents sit side by side; titles and previews update live as a file watcher re-indexes. Switchboard owns no data of its own.
 - **Preview without disturbing** — click any conversation to render its transcript instantly from disk. **No `claude` process is started**, so you can click through dozens to find the one you want.
-- **Resume / start, explicitly** — the only way to spawn a live process is **Resume** (`claude --resume`) or **New** (`claude --session-id`), each dropping you into a real terminal.
+- **Resume / start, explicitly** — the only way to spawn a live process is **Resume** or **New**, each dropping you into a real terminal running the right agent (`claude --resume` / `codex resume`, and so on). **New** lets you pick the agent when more than one is installed.
 - **Formatted ⇄ Terminal** — for a live conversation, toggle between the raw **Terminal** (where you type) and a **Formatted** view that re-renders the transcript as a clean log and stays pinned to the latest message. The choice sticks per conversation.
 - **Copy from the transcript** — in the **Formatted** view, hover a turn (beside its timestamp), a code block, a table, or a tool call/result for a copy button: a turn copies as markdown (tool I/O excluded); code and tables copy their raw source. Each flashes a check when copied.
 - **Pin & organize** — the left pane has three collapsible sections: **Pinned**, **Live** (running now), and **Recent**. Pins persist across restarts; live and pinned rows drag to reorder; a cobalt dot tracks each live conversation's turn-state — working, waiting on your reply, finished-unread, or seen.
 - **Right-click any row** — a quick menu to open **Session details**, resume or stop a session, and mark it read or unread. **⌥-click** a live row (or its terminal) to mark it unread directly.
-- **Rename & inspect** — click a conversation's title at the top of the pane (or right-click a row → **Session details**) to open an info card: folder, git branch, model, message count, size, duration, token usage broken out by pricing tier (input · output · cache write · cache read) plus current context size, last activity, and session ID — values are selectable to copy (and session ID has a one-click copy). Rename **in place** right in the heading — press **Enter** to save. Renames are real: they write Claude Code's own title record, so they carry into `claude --resume` too.
+- **Rename & inspect** — click a conversation's title at the top of the pane (or right-click a row → **Session details**) to open an info card: agent, folder, git branch, model, message count, size, duration, token usage (per-agent categories) plus current context size, last activity, and session ID — values are selectable to copy (and session ID has a one-click copy). Rename **in place** right in the heading — press **Enter** to save. Renames are real and go through each agent's *own* store — Claude Code's title record (carries into `claude --resume`), Codex's app-server `thread/name/set` — never a Switchboard-private one.
 - **Search, two kinds** — fuzzy search *across* conversations (titles, previews, directories), and find-in-conversation (`⌘F`) that highlights every match in the Formatted transcript, including inside collapsed tool calls and clamped results.
 - **Navigate by keyboard** — switch conversations with `⌥⌘↑` / `⌥⌘↓` (the main pane stays focused, so you can type or hit `⏎` to resume), browser-style back/forward, and more (see below).
-- **Default start folder** — set a default directory in Preferences so **New** (`⌘N`) skips the folder picker and starts there.
+- **Defaults for New** — set a default directory and/or a default agent in Preferences so **New** (`⌘N`) skips the picker(s) and starts there with that agent.
 - **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences.
 
 _For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUDE.md)._
@@ -104,7 +104,7 @@ _For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUD
 | `⌘[` / `⌘]` | Back / forward through the conversations you've opened |
 | `⌘B` | Toggle the pane |
 | `⌘,` | Open Preferences (the title-bar gear opens the same dialog) |
-| `⌘?` | Open Preferences to the Shortcuts page (the footer `?` button does the same) |
+| `⌘?` | Open Preferences to the Shortcuts page |
 | `Esc` | Close the find bar / clear the query and close search / close menu / close Preferences |
 | `⌘Q` | Quit — ends all live sessions |
 | `⌘+` / `⌘−` / `⌘0` | Zoom in / out / reset |
@@ -149,7 +149,7 @@ src/
     menu.ts                custom app menu — ⌘R→Refresh (no reload roles), File/View/Window
     windowState.ts         persists window bounds/position across launches
     trafficLights.ts       re-aligns the native traffic lights to the page zoom (renderer pings on resize)
-    sessions/              parser.ts · indexer.ts · watcher.ts · rename.ts  (read ~/.claude/projects)
+    sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
     pty/manager.ts         spawns login shells, types the claude command; output activity → LRU eviction (configurable cap, default 8)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
   renderer/                React 18 + Vite
@@ -162,7 +162,7 @@ src/
     styles/                tokens.css (design system) + per-zone CSS
 ```
 
-Everything the UI shows is derived from the session **JSONL files** Claude Code writes — Switchboard never owns conversation data. A `chokidar` watcher re-indexes on change, which is what keeps the pane titles and the Formatted view live.
+Everything the UI shows is derived from the session files each agent writes (Claude Code's JSONL, Codex's rollouts + its `state_*.sqlite` for titles) — Switchboard never owns conversation data. A `chokidar` watcher re-indexes on change, which is what keeps the pane titles and the Formatted view live.
 
 > Deeper reference for contributors: [`docs/architecture.md`](docs/architecture.md) (module map + state), [`docs/design.md`](docs/design.md) (visual / UX invariants), and [`docs/gotchas.md`](docs/gotchas.md) (subsystem traps).
 

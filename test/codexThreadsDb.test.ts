@@ -21,12 +21,17 @@ function freshHome(): string {
   tmpDirs.push(dir)
   return dir
 }
-function makeStateDb(home: string, n: number, rows: Array<[string, string]>, withTable = true): void {
+function makeStateDb(
+  home: string,
+  n: number,
+  rows: Array<[string, string, number?]>,
+  withTable = true
+): void {
   const db = new DatabaseSync!(path.join(home, `state_${n}.sqlite`))
   if (withTable) {
-    db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT)')
-    const ins = db.prepare('INSERT INTO threads (id, title) VALUES (?, ?)')
-    for (const [id, title] of rows) ins.run(id, title)
+    db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, archived INTEGER)')
+    const ins = db.prepare('INSERT INTO threads (id, title, archived) VALUES (?, ?, ?)')
+    for (const [id, title, archived = 0] of rows) ins.run(id, title, archived)
   } else {
     db.exec('CREATE TABLE other (x TEXT)')
   }
@@ -44,39 +49,39 @@ afterEach(() => {
   }
 })
 
-describe.skipIf(!DatabaseSync)('readCodexTitles', () => {
-  it('maps id -> title and drops empty/whitespace titles', async () => {
+describe.skipIf(!DatabaseSync)('readCodexThreads', () => {
+  it('maps id -> { title, archived }, keeps raw titles, and flags archived rows', async () => {
     const home = freshHome()
     makeStateDb(home, 5, [
-      ['id-a', 'Alpha thread'],
-      ['id-b', '  '],
-      ['id-c', '']
+      ['id-a', 'Alpha thread', 0],
+      ['id-b', '  ', 0], // raw — the indexer applies the non-empty check, not the reader
+      ['id-c', 'Archived one', 1]
     ])
-    const { readCodexTitles } = await import('../src/main/sessions/codexThreadsDb')
-    const titles = readCodexTitles(home)
-    expect(titles.get('id-a')).toBe('Alpha thread')
-    expect(titles.has('id-b')).toBe(false)
-    expect(titles.has('id-c')).toBe(false)
+    const { readCodexThreads } = await import('../src/main/sessions/codexThreadsDb')
+    const threads = readCodexThreads(home)
+    expect(threads.get('id-a')).toEqual({ title: 'Alpha thread', archived: false })
+    expect(threads.get('id-b')).toEqual({ title: '  ', archived: false })
+    expect(threads.get('id-c')).toEqual({ title: 'Archived one', archived: true })
   })
 
   it('reads the newest state_<N>.sqlite when several exist', async () => {
     const home = freshHome()
-    makeStateDb(home, 3, [['id-a', 'OLD title']])
-    makeStateDb(home, 5, [['id-a', 'NEW title']])
-    const { readCodexTitles } = await import('../src/main/sessions/codexThreadsDb')
-    expect(readCodexTitles(home).get('id-a')).toBe('NEW title')
+    makeStateDb(home, 3, [['id-a', 'OLD title', 0]])
+    makeStateDb(home, 5, [['id-a', 'NEW title', 0]])
+    const { readCodexThreads } = await import('../src/main/sessions/codexThreadsDb')
+    expect(readCodexThreads(home).get('id-a')?.title).toBe('NEW title')
   })
 
   it('returns an empty map when the home has no state DB', async () => {
     const home = freshHome()
-    const { readCodexTitles } = await import('../src/main/sessions/codexThreadsDb')
-    expect(readCodexTitles(home).size).toBe(0)
+    const { readCodexThreads } = await import('../src/main/sessions/codexThreadsDb')
+    expect(readCodexThreads(home).size).toBe(0)
   })
 
   it('returns an empty map (never throws) when the threads table is missing', async () => {
     const home = freshHome()
     makeStateDb(home, 5, [], false)
-    const { readCodexTitles } = await import('../src/main/sessions/codexThreadsDb')
-    expect(readCodexTitles(home).size).toBe(0)
+    const { readCodexThreads } = await import('../src/main/sessions/codexThreadsDb')
+    expect(readCodexThreads(home).size).toBe(0)
   })
 })
