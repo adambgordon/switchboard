@@ -36,7 +36,7 @@ function createWindow(): void {
     // frame). The renderer re-syncs the exact --paper for the resolved theme via
     // IPC.windowSetBackgroundColor before the window is shown, so explicit Light/Dark land right
     // too. Values mirror tokens.css --paper (light / dark).
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1a17' : '#fbfbf9',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1f1f1f' : '#fbfbf9',
     titleBarStyle: 'hiddenInset',
     // Resting inset at 100% zoom; re-aligned per zoom via syncTrafficLights (trafficLights.ts).
     trafficLightPosition: trafficLightPositionFor(1),

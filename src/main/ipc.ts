@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
+import { app, ipcMain, BrowserWindow, dialog, shell, nativeImage } from 'electron'
 import os from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -219,6 +219,19 @@ export function registerIpc(): void {
   ipcMain.on(IPC.windowSyncTrafficLights, (e) =>
     syncTrafficLights(BrowserWindow.fromWebContents(e.sender))
   )
+  // Swap the macOS dock icon to match the user's "dark icon" preference. The renderer pushes the
+  // current choice on mount + on toggle (main can't read renderer localStorage). The light/dark PNGs
+  // ship via electron-builder `extraResources` (Contents/Resources) for the packaged app; in dev
+  // they're read straight from build/. No-op off macOS / when the dock is unavailable.
+  ipcMain.on(IPC.windowSetDockIcon, (_e, dark: boolean) => {
+    if (process.platform !== 'darwin' || !app.dock) return
+    const file = dark ? 'icon-dark.png' : 'icon.png'
+    const iconPath = app.isPackaged
+      ? join(process.resourcesPath, file)
+      : join(app.getAppPath(), 'build', file)
+    const img = nativeImage.createFromPath(iconPath)
+    if (!img.isEmpty()) app.dock.setIcon(img)
+  })
 
   // --- live re-index on file changes (structural: new conversations, renames, other windows) ---
   watcher = new SessionWatcher({

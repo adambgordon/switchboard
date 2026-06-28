@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <filter id="cardShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- dark squircle (macOS safe area: 824 on a 1024 canvas) — mirrors the app's dark chrome
+       (paper #1f1f1f) with a hairline lighter stroke, the dark counterpart of build/icon.svg. -->
+  <rect x="100" y="100" width="824" height="824" rx="186" ry="186"
+        fill="#1f1f1f" stroke="#3a3a3a" stroke-width="3" filter="url(#cardShadow)"/>
+
+  <!-- the one accent: electric cobalt = live, echoing .sb-brand-mark. brightened to the dark-theme
+       live token (#3b6cf0); the halo is that cobalt at 0.24 (the wash the working dot breathes behind). -->
+  <circle cx="512" cy="512" r="250" fill="#3b6cf0" fill-opacity="0.24"/>
+  <circle cx="512" cy="512" r="150" fill="#3b6cf0"/>
+</svg>

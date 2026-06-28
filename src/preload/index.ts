@@ -31,6 +31,9 @@ const api: SwitchboardApi = {
   openExternal: (url) => ipcRenderer.send(IPC.openExternal, url),
   setBackgroundColor: (color) => ipcRenderer.send(IPC.windowSetBackgroundColor, color),
   syncTrafficLights: () => ipcRenderer.send(IPC.windowSyncTrafficLights),
+  onRefreshStart: (cb) => subscribe(IPC.appRefreshStart, cb as never),
+  onRefreshEnd: (cb) => subscribe(IPC.appRefreshEnd, cb as never),
+  setDockIcon: (dark) => ipcRenderer.send(IPC.windowSetDockIcon, dark),
 
   getPathForFile: (file) => webUtils.getPathForFile(file)
 }

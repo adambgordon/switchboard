@@ -1,6 +1,7 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import type { Transcript } from '@shared/types'
 import MessageBlock from './MessageBlock'
+import { Arrow } from './icons'
 import { buildGroups, type MessageGroup } from '../lib/messageGroups'
 import { attachAutoHide } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
@@ -34,6 +35,12 @@ interface TranscriptViewProps {
 /** Distance from the bottom (px) within which we keep the view pinned to latest. */
 const NEAR_BOTTOM_PX = 120
 
+/** Render-windowing: mount only the last WINDOW groups on open, then grow toward the full set in
+ *  GROW_STEP-sized idle chunks. Keeps first paint of a long transcript instant — the dominant cost is
+ *  mounting each group's ReactMarkdown, so capping the initial mount is what makes it feel instant. */
+const WINDOW = 60
+const GROW_STEP = 120
+
 function LoadingState(): ReactNode {
   return (
     <div className="transcript-loading">
@@ -64,6 +71,27 @@ export default function TranscriptView({
   const lastSessionRef = useRef<string | null>(null)
   // Detach for the auto-hiding scrollbar, re-bound whenever the scroll node mounts/changes.
   const detachAutoHideRef = useRef<(() => void) | null>(null)
+  // rAF handle for the on-open "keep snapping to the bottom until the height settles" loop.
+  const repinRafRef = useRef<number | null>(null)
+
+  // Jump-to-edge affordance — reactive flags for whether the scroll sits near the top / bottom, driving
+  // the floating buttons (shown only when scrolled away from that edge). nearBottomRef below stays the
+  // imperative pin-to-latest signal; these are the React-state twin so the buttons re-render on scroll.
+  const [atTop, setAtTop] = useState(true)
+  const [atBottom, setAtBottom] = useState(true)
+  // Render-windowing (see WINDOW above): how many trailing groups are currently mounted.
+  const [visibleCount, setVisibleCount] = useState(WINDOW)
+  // pre-grow scrollHeight: recorded just before a chunk mounts so the layout effect can add the
+  // prepended height back to scrollTop (otherwise the viewport jumps down by what we mounted above).
+  const growHeightRef = useRef<number | null>(null)
+  // set when a jump-to-top needs the full transcript mounted first; consumed once it is.
+  const pendingTopRef = useRef(false)
+  const measureEdges = useCallback((el: HTMLDivElement): void => {
+    const top = el.scrollTop <= NEAR_BOTTOM_PX
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+    setAtTop((prev) => (prev === top ? prev : top))
+    setAtBottom((prev) => (prev === bottom ? prev : bottom))
+  }, [])
 
   // Find-in-conversation: highlights matches in the rendered text and scrolls the active one in.
   useTranscriptSearch({
@@ -79,7 +107,8 @@ export default function TranscriptView({
     const el = scrollElRef.current
     if (!el) return
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
-  }, [])
+    measureEdges(el)
+  }, [measureEdges])
 
   // Callback ref: attach/detach the scroll listener + the auto-hiding scrollbar as the container mounts.
   const attachScroll = useCallback(
@@ -104,14 +133,48 @@ export default function TranscriptView({
   useLayoutEffect(() => {
     const el = scrollElRef.current
     if (!el || !transcript) return
-    if (lastSessionRef.current !== transcript.sessionId) {
+    const opened = lastSessionRef.current !== transcript.sessionId
+    if (opened) {
       lastSessionRef.current = transcript.sessionId
       nearBottomRef.current = true
-      el.scrollTop = el.scrollHeight
-    } else if (nearBottomRef.current) {
+    }
+    if (opened || nearBottomRef.current) {
       el.scrollTop = el.scrollHeight
     }
-  }, [transcript])
+    measureEdges(el)
+    if (!opened) return
+    // On open, KEEP re-asserting the bottom for the next frames: the content height changes AFTER this
+    // first pin — tool results clamp to 12 lines via ResizeObserver, and the window grows in the
+    // background — so a one-shot pin gets stranded mid-history. Re-snap each frame (cheap; a no-op once
+    // we're already at the bottom) until the height holds steady for a few frames or we hit the cap.
+    // Bails immediately if the user scrolls up (nearBottomRef flips in handleScroll).
+    if (repinRafRef.current != null) cancelAnimationFrame(repinRafRef.current)
+    let frames = 0
+    let lastHeight = el.scrollHeight
+    let stable = 0
+    const repin = (): void => {
+      const node = scrollElRef.current
+      if (!node || !nearBottomRef.current) {
+        repinRafRef.current = null
+        return
+      }
+      node.scrollTop = node.scrollHeight
+      const h = node.scrollHeight
+      stable = h === lastHeight ? stable + 1 : 0
+      lastHeight = h
+      frames += 1
+      if (frames < 40 && stable < 5) {
+        repinRafRef.current = requestAnimationFrame(repin)
+      } else {
+        repinRafRef.current = null
+        measureEdges(node)
+      }
+    }
+    repinRafRef.current = requestAnimationFrame(repin)
+    return () => {
+      if (repinRafRef.current != null) cancelAnimationFrame(repinRafRef.current)
+    }
+  }, [transcript, measureEdges])
 
   // Focus the scroll container when the main pane should take the keyboard for this conversation —
   // the Formatted-view counterpart to TerminalView grabbing focus on its focusKey. Selecting a
@@ -136,11 +199,66 @@ export default function TranscriptView({
     [transcript]
   )
 
+  const total = groups.length
+  const searching = searchQuery.trim().length > 0
+  // Reset the window when the conversation changes (render-phase, guarded so it converges next render).
+  const winSessionRef = useRef<string | null>(null)
+  if (transcript && winSessionRef.current !== transcript.sessionId) {
+    winSessionRef.current = transcript.sessionId
+    setVisibleCount(WINDOW)
+  }
+  // Grow the window toward the full set, one idle chunk at a time — requestIdleCallback pauses the
+  // catch-up while the user is scrolling/typing, so it never competes with interaction.
+  useEffect(() => {
+    if (!transcript || visibleCount >= total) return
+    const grow = (): void => {
+      const el = scrollElRef.current
+      if (el) growHeightRef.current = el.scrollHeight
+      setVisibleCount((c) => Math.min(total, c + GROW_STEP))
+    }
+    const handle = requestIdleCallback(grow, { timeout: 500 })
+    return () => cancelIdleCallback(handle)
+  }, [transcript, visibleCount, total])
+  // A search must reach matches in older messages, so mount everything while searching — and leave it
+  // mounted (bump visibleCount, don't just override the slice) so clearing the search doesn't shrink
+  // the list back and yank the scroll position.
+  useEffect(() => {
+    if (searching && visibleCount < total) setVisibleCount(total)
+  }, [searching, visibleCount, total])
+  // After a grow (or a jump-to-top that forced a full mount) keep the viewport stable: honor a pending
+  // jump-to-top once everything is mounted, else add the prepended height back so nothing visibly jumps.
+  useLayoutEffect(() => {
+    const el = scrollElRef.current
+    if (!el) return
+    if (pendingTopRef.current && visibleCount >= total) {
+      pendingTopRef.current = false
+      growHeightRef.current = null
+      el.scrollTop = 0
+      measureEdges(el)
+      return
+    }
+    const prev = growHeightRef.current
+    if (prev == null) return
+    growHeightRef.current = null
+    if (nearBottomRef.current) {
+      // The common open / read-latest case: stay pinned to the TRUE bottom no matter what grew above,
+      // so opening a long conversation snaps straight to the latest message (no drift, no scroll).
+      el.scrollTop = el.scrollHeight
+    } else {
+      // Scrolled up reading history: add back exactly the prepended height so the view holds still.
+      const delta = el.scrollHeight - prev
+      if (delta > 0) el.scrollTop += delta
+    }
+    measureEdges(el)
+  }, [visibleCount, total, measureEdges])
+
   if (loading && !transcript) {
     return (
-      <div className="transcript-scroll sb-autoscroll" ref={attachScroll} tabIndex={-1}>
-        <div className="transcript-content">
-          <LoadingState />
+      <div className="transcript-wrap">
+        <div className="transcript-scroll sb-autoscroll" ref={attachScroll} tabIndex={-1}>
+          <div className="transcript-content">
+            <LoadingState />
+          </div>
         </div>
       </div>
     )
@@ -149,26 +267,78 @@ export default function TranscriptView({
   if (!transcript) return null
 
   const count = transcript.messages.length
+  // The windowed tail to render (full set while searching — see the effect above). dividerBefore is
+  // computed against the absolute index into `groups`, so slicing never breaks the You↔non-You rule.
+  const start = Math.max(0, total - (searching ? total : visibleCount))
+  const visibleGroups = start > 0 ? groups.slice(start) : groups
+  const jumpToEdge = (toTop: boolean): void => {
+    const el = scrollElRef.current
+    if (!el) return
+    // Jump-to-top needs the whole transcript mounted first (the window may hold only the tail): flag it
+    // and let the layout effect scroll to the true top once the grow-to-full completes.
+    if (toTop && visibleCount < total) {
+      pendingTopRef.current = true
+      setVisibleCount(total)
+      return
+    }
+    // Instant snap — no scroll animation (the layout effect handles the pending jump-to-top once the
+    // full transcript has mounted).
+    el.scrollTop = toTop ? 0 : el.scrollHeight
+  }
 
   return (
-    <div className="transcript-scroll sb-autoscroll" ref={attachScroll} tabIndex={-1}>
-      <div className="transcript-content" ref={contentRef}>
-        {groups.map((group, i) => (
-          <MessageBlock
-            key={group.key}
-            group={group}
-            dividerBefore={i > 0 && isHumanGroup(group) !== isHumanGroup(groups[i - 1])}
-          />
-        ))}
-        {count > 0 ? (
-          <footer className="transcript-foot">
-            <span className="transcript-foot-rule" aria-hidden="true" />
-            <span className="transcript-foot-label label-caps">
-              End of transcript · {count} {count === 1 ? 'message' : 'messages'}
-            </span>
-          </footer>
-        ) : null}
+    <div className="transcript-wrap">
+      <div className="transcript-scroll sb-autoscroll" ref={attachScroll} tabIndex={-1}>
+        <div className="transcript-content" ref={contentRef}>
+          {visibleGroups.map((group, j) => {
+            const idx = start + j
+            return (
+              <MessageBlock
+                key={group.key}
+                group={group}
+                dividerBefore={idx > 0 && isHumanGroup(group) !== isHumanGroup(groups[idx - 1])}
+              />
+            )
+          })}
+          {count > 0 ? (
+            <footer className="transcript-foot">
+              <span className="transcript-foot-rule" aria-hidden="true" />
+              <span className="transcript-foot-label label-caps">
+                End of transcript · {count} {count === 1 ? 'message' : 'messages'}
+              </span>
+            </footer>
+          ) : null}
+        </div>
       </div>
+      {/* Floating jump-to-edge pills — each shown only when scrolled away from THAT edge, anchored to
+          its own edge (top pill up top, bottom pill at the bottom), center-aligned. pointer-events are
+          re-enabled per-button so the wrapper never blocks scroll/selection. */}
+      {!atTop ? (
+        <div className="transcript-jump transcript-jump-top">
+          <button
+            type="button"
+            className="transcript-jump-btn"
+            aria-label="Jump to top"
+            onClick={() => jumpToEdge(true)}
+          >
+            Jump to top
+            <Arrow size={14} />
+          </button>
+        </div>
+      ) : null}
+      {!atBottom ? (
+        <div className="transcript-jump transcript-jump-bottom">
+          <button
+            type="button"
+            className="transcript-jump-btn"
+            aria-label="Jump to bottom"
+            onClick={() => jumpToEdge(false)}
+          >
+            Jump to bottom
+            <Arrow size={14} className="transcript-jump-arrow-down" />
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

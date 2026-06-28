@@ -143,7 +143,7 @@ export function useRowReorder(containerRef: RefObject<HTMLElement>, opts: RowReo
     const onPointerDown = (e: PointerEvent): void => {
       if (e.button !== 0 || !optsRef.current.enabled) return
       const t = e.target as HTMLElement | null
-      if (t?.closest('.sb-row-pin')) return // the pin button owns its own click
+      if (t?.closest('.sb-row-menu-btn')) return // the ⋮ menu button owns its own click
       const hit = t?.closest<HTMLElement>(optsRef.current.selector) ?? null
       if (!hit) return
       dragged = hit
