@@ -2,7 +2,7 @@ import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
-import { Pin } from './icons'
+import { Dots } from './icons'
 import AgentLogo from './AgentLogo'
 
 interface Props {
@@ -16,13 +16,14 @@ interface Props {
   /** Raised card chrome — used by the rail's Pinned/Live sections. */
   card?: boolean
   onSelect: (id: string) => void
-  onTogglePin: (id: string) => void
   /** When set and the row is live, clicking jumps to its terminal instead of previewing. */
   onJump?: (id: string) => void
   /** Option+click on a live row — always mark it unread (never toggles). */
   onMarkUnread?: (id: string) => void
-  /** Right-click / two-finger click — opens the row's context menu (copy session ID on any row,
-   * plus mark read/unread on a live one). */
+  /** Open the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume) by clicking the ⋮
+   * button; the menu anchors under it. */
+  onOpenMenu?: (e: MouseEvent, id: string) => void
+  /** Right-click / two-finger click — opens the same actions menu at the cursor. */
   onContextMenu?: (e: MouseEvent, id: string) => void
 }
 
@@ -35,9 +36,9 @@ function ConversationRowImpl({
   showCwd,
   card,
   onSelect,
-  onTogglePin,
   onJump,
   onMarkUnread,
+  onOpenMenu,
   onContextMenu
 }: Props) {
   // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe).
@@ -120,16 +121,15 @@ function ConversationRowImpl({
           />
         )}
         <button
-          className={`sb-row-pin${pinned ? ' pinned' : ''}`}
-          data-tip={pinned ? 'Unpin conversation' : 'Pin conversation'}
-          aria-label={pinned ? 'Unpin conversation' : 'Pin conversation'}
-          aria-pressed={pinned}
+          className="sb-row-menu-btn"
+          aria-label="Conversation actions"
+          aria-haspopup="menu"
           onClick={(e) => {
             e.stopPropagation()
-            onTogglePin(meta.sessionId)
+            onOpenMenu?.(e, meta.sessionId)
           }}
         >
-          <Pin size={11} filled={pinned} />
+          <Dots size={15} />
         </button>
       </span>
     </div>

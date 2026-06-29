@@ -24,6 +24,26 @@ function svg(path: React.ReactNode, { size = 16, className, strokeWidth = 1.6 }:
 }
 
 export const Chevron = (p: IconProps) => svg(<polyline points="6 9 12 15 18 9" />, p)
+// Up arrow (shaft + head) — the jump-to-top/bottom pills (rotate 180° for down).
+export const Arrow = (p: IconProps) =>
+  svg(
+    <>
+      <line x1="12" y1="19" x2="12" y2="5" />
+      <polyline points="5 12 12 5 19 12" />
+    </>,
+    p
+  )
+// Vertical three-dot "kebab" — the row overflow-menu trigger. Filled dots (the shared svg() sets
+// fill:none for line icons, so each circle opts back into a solid fill).
+export const Dots = (p: IconProps) =>
+  svg(
+    <>
+      <circle cx="12" cy="5" r="2.3" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="19" r="2.3" fill="currentColor" stroke="none" />
+    </>,
+    p
+  )
 export const Check = (p: IconProps) => svg(<polyline points="20 6 9 17 4 12" />, p)
 export const Copy = (p: IconProps) =>
   svg(

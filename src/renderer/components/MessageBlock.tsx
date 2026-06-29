@@ -3,11 +3,37 @@ import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
+import python from 'highlight.js/lib/languages/python'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import json from 'highlight.js/lib/languages/json'
+import java from 'highlight.js/lib/languages/java'
+import bash from 'highlight.js/lib/languages/bash'
+import go from 'highlight.js/lib/languages/go'
+import rust from 'highlight.js/lib/languages/rust'
+import sql from 'highlight.js/lib/languages/sql'
+import yaml from 'highlight.js/lib/languages/yaml'
+import xml from 'highlight.js/lib/languages/xml'
+import css from 'highlight.js/lib/languages/css'
+import markdown from 'highlight.js/lib/languages/markdown'
 import type { TranscriptBlock } from '@shared/types'
 import type { MessageGroup } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, turnMarkdown } from '../lib/clipboard'
 import CopyButton from './CopyButton'
+
+/* Syntax highlighting — a curated language subset (passed to rehype-highlight, which REPLACES lowlight's
+ * default ~37 'common' grammars, keeping the bundle lean). Unknown languages are tolerated (a build-time
+ * file warning, never a throw), so an unlisted ```fence just renders unstyled. NOTE: html lives in `xml`
+ * and shell in `bash` (aliases ```ts / ```py / ```html resolve automatically). The token COLORS live in
+ * transcript.css (.hljs-*), themed per light/dark — the one sanctioned exception to the transcript's
+ * otherwise strict grayscale (see the header note there). */
+const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, rust, sql, yaml, xml, css, markdown }
+// Annotated so the literal is read as a plugin tuple (PluggableList), not a nested array.
+const rehypePlugins: ComponentPropsWithoutRef<typeof ReactMarkdown>['rehypePlugins'] = [
+  [rehypeHighlight, { languages: HLJS_LANGUAGES }]
+]
 
 /** Read a rendered markdown table's cells into rows (row 0 = header). Shared by the table copy button
  *  and the turn copy. */
@@ -74,8 +100,11 @@ const markdownComponents: Components = {
   ),
   // Inline code is a bare <code>; fenced blocks render inside <pre>.
   // CSS distinguishes the two via `.md-code` vs `pre.md-pre .md-code`.
-  code: ({ children, ...rest }: ComponentPropsWithoutRef<'code'>) => (
-    <code className="md-code" {...rest}>
+  // Merge the incoming className: rehype-highlight sets `hljs language-xxx` on fenced <code> plus the
+  // token <span class="hljs-*"> children — clobbering className with a bare "md-code" would drop the
+  // highlight hooks. The highlighted spans arrive as `children`, so rendering them as-is preserves them.
+  code: ({ className, children, ...rest }: ComponentPropsWithoutRef<'code'>) => (
+    <code className={['md-code', className].filter(Boolean).join(' ')} {...rest}>
       {children}
     </code>
   ),
@@ -137,7 +166,7 @@ function AssistantMarkdown({ text }: { text: string }): ReactNode {
   )
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={components}>
         {text}
       </ReactMarkdown>
     </div>

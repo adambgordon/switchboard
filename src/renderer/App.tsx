@@ -14,6 +14,7 @@ import { useWindowFocus } from './lib/useWindowFocus'
 import { useTranscript } from './lib/useTranscript'
 import { useNavHistory } from './lib/useNavHistory'
 import { useTheme } from './lib/useTheme'
+import { useDarkIcon } from './lib/useDarkIcon'
 import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
@@ -26,6 +27,7 @@ import SettingsModal from './components/SettingsModal'
 import CapWarningModal from './components/CapWarningModal'
 import ConversationInfoModal from './components/ConversationInfoModal'
 import TooltipLayer from './components/TooltipLayer'
+import AppVeil from './components/AppVeil'
 
 type View = 'transcript' | 'terminal'
 
@@ -109,6 +111,7 @@ export default function App() {
     reset: resetMaxLive
   } = useMaxLiveSessions()
   const { mode: themeMode, resolved: themeResolved, setMode: setThemeMode, toggle: toggleTheme } = useTheme()
+  const darkIcon = useDarkIcon()
   const focused = useWindowFocus()
   const {
     paneWidth,
@@ -137,7 +140,9 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [settingsPage, setSettingsPage] = useState<'app' | 'shortcuts' | 'faq' | null>(null)
+  const [settingsPage, setSettingsPage] = useState<
+    'appearance' | 'application' | 'shortcuts' | 'faq' | null
+  >(null)
   // Conversation-info modal target: which session, and whether to open straight into title-edit vs
   // view (both the pane title and the right-click "Session details…" open in view). Null when closed.
   const [infoModal, setInfoModal] = useState<{ sessionId: string; edit: boolean } | null>(null)
@@ -208,6 +213,12 @@ export default function App() {
   useEffect(() => {
     window.api.setMaxLiveSessions(maxLive)
   }, [maxLive])
+
+  // Push the dark-dock-icon choice to main on mount + on change (main can't read renderer localStorage,
+  // and a packaged dock resets to the bundled icon each launch, so re-pushing on mount restores it).
+  useEffect(() => {
+    window.api.setDockIcon(darkIcon.value)
+  }, [darkIcon.value])
 
   // Focus the search field whenever it opens (magnifier click or ⌘F).
   useEffect(() => {
@@ -660,7 +671,7 @@ export default function App() {
           setSettingsPage(null)
         } else if (mod && e.key === ',') {
           e.preventDefault()
-          setSettingsPage((p) => (p === 'app' ? null : 'app'))
+          setSettingsPage((p) => (p === 'appearance' ? null : 'appearance'))
         } else if (mod && (e.key === '/' || e.key === '?')) {
           e.preventDefault()
           setSettingsPage((p) => (p === 'shortcuts' ? null : 'shortcuts'))
@@ -725,9 +736,9 @@ export default function App() {
         e.preventDefault()
         if (selectedId) toggleUnread(selectedId)
       } else if (mod && e.key === ',') {
-        // ⌘, — macOS-standard Preferences shortcut; opens the Preferences modal to its App page.
+        // ⌘, — macOS-standard Preferences shortcut; opens the Preferences modal to its Appearance page.
         e.preventDefault()
-        setSettingsPage('app')
+        setSettingsPage('appearance')
       } else if (mod && (e.key === '/' || e.key === '?')) {
         // Displayed as ⌘? (reads as "help"); accept ⌘/ too so Shift doesn't matter. Opens the
         // Preferences modal to its Shortcuts page.
@@ -790,11 +801,12 @@ export default function App() {
 
   return (
     <div className="sb-app">
+      <AppVeil />
       <TitleBar
         paneCollapsed={paneCollapsed}
         onTogglePane={togglePane}
         onHome={home}
-        onOpenSettings={() => setSettingsPage('app')}
+        onOpenSettings={() => setSettingsPage('appearance')}
         resolvedTheme={themeResolved}
         onToggleTheme={toggleTheme}
       />
@@ -896,6 +908,8 @@ export default function App() {
         onClose={() => setSettingsPage(null)}
         themeMode={themeMode}
         onSetThemeMode={setThemeMode}
+        darkIcon={darkIcon.value}
+        onSetDarkIcon={darkIcon.set}
         defaultDir={defaultDir}
         onChooseDefaultDir={chooseDefaultDir}
         onClearDefaultDir={clearDefaultDir}
