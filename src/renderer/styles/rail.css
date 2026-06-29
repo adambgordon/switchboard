@@ -343,6 +343,13 @@
   transform: rotate(-90deg);
 }
 .sb-rail-section-label {
+  /* Hanken (UI sans) with normal tracking — overrides .label-caps' mono + wide caps letter-spacing, so
+     these section headers read as chrome, not data. (rail.css loads after global.css → wins on equal
+     specificity.) */
+  font-family: var(--font-ui);
+  letter-spacing: normal;
+  /* Between .label-caps' --text-2xs and the conversation-title --text-sm. */
+  font-size: var(--text-xs);
   color: var(--ink-soft);
   flex-shrink: 0;
   font-weight: 600;
