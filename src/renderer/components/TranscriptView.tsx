@@ -35,11 +35,16 @@ interface TranscriptViewProps {
 /** Distance from the bottom (px) within which we keep the view pinned to latest. */
 const NEAR_BOTTOM_PX = 120
 
-/** Render-windowing: mount only the last WINDOW groups on open, then grow toward the full set in
- *  GROW_STEP-sized idle chunks. Keeps first paint of a long transcript instant — the dominant cost is
- *  mounting each group's ReactMarkdown, so capping the initial mount is what makes it feel instant. */
+/** Render-windowing: mount only the last WINDOW groups on open — keeps first paint of a long transcript
+ *  instant (the dominant cost is mounting each group's ReactMarkdown, so capping the initial mount is
+ *  what makes it feel instant). Older groups mount on demand: GROW_STEP at a time as the user scrolls
+ *  up (handleScroll, reverse infinite-scroll), or all at once for search / jump-to-top. */
 const WINDOW = 60
 const GROW_STEP = 120
+// Reverse infinite-scroll: start mounting the next-older chunk once the user scrolls within this many
+// px of the top, so it's in place before they reach it. Replaces the old eager idle-grow, which
+// prepended while pinned to the bottom and caused the open-time shake.
+const GROW_TRIGGER_PX = 1500
 
 function LoadingState(): ReactNode {
   return (
@@ -90,6 +95,13 @@ export default function TranscriptView({
   const growHeightRef = useRef<number | null>(null)
   // set when a jump-to-top needs the full transcript mounted first; consumed once it is.
   const pendingTopRef = useRef(false)
+  // Reverse infinite-scroll bookkeeping. The refs mirror render values so the stable scroll handler can
+  // read them without re-binding; growPendingRef gates one chunk per approach (cleared once the
+  // compensation effect has applied the prepend).
+  const visibleCountRef = useRef(WINDOW)
+  const totalRef = useRef(0)
+  const searchingRef = useRef(false)
+  const growPendingRef = useRef(false)
   const measureEdges = useCallback((el: HTMLDivElement): void => {
     const top = el.scrollTop <= NEAR_BOTTOM_PX
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
@@ -132,6 +144,20 @@ export default function TranscriptView({
       // Scrolled back down into the bottom band → resume sticking to the latest.
       nearBottomRef.current = true
     }
+    // Reverse infinite-scroll: mount the next-older chunk as the user nears the top. Gated to AFTER
+    // they've scrolled up off the bottom (never the initial pinned open — that was the eager-grow
+    // shake), one chunk at a time. The compensation effect preserves position on the prepend.
+    if (
+      !nearBottomRef.current &&
+      !searchingRef.current &&
+      !growPendingRef.current &&
+      visibleCountRef.current < totalRef.current &&
+      top < GROW_TRIGGER_PX
+    ) {
+      growPendingRef.current = true
+      growHeightRef.current = el.scrollHeight
+      setVisibleCount((c) => Math.min(totalRef.current, c + GROW_STEP))
+    }
     measureEdges(el)
   }, [measureEdges])
 
@@ -170,10 +196,11 @@ export default function TranscriptView({
     measureEdges(el)
     if (!opened) return
     // On open, KEEP re-asserting the bottom for the next frames: the content height changes AFTER this
-    // first pin — tool results clamp to 12 lines via ResizeObserver, and the window grows in the
-    // background — so a one-shot pin gets stranded mid-history. Re-snap each frame (cheap; a no-op once
-    // we're already at the bottom) until the height holds steady for a few frames or we hit the cap.
-    // Bails immediately if the user scrolls up (nearBottomRef flips in handleScroll).
+    // first pin (tool results measuring overflow + adding "Show more" via ResizeObserver), so a one-shot
+    // pin can get stranded. Re-snap each frame (cheap; a no-op once we're already at the bottom) until
+    // the height holds steady for a few frames or we hit the cap. Bails immediately if the user scrolls
+    // up (nearBottomRef flips in handleScroll). The content ResizeObserver below also covers later
+    // settles; this rAF loop covers the first frames.
     if (repinRafRef.current != null) cancelAnimationFrame(repinRafRef.current)
     let frames = 0
     let lastHeight = el.scrollHeight
@@ -228,24 +255,22 @@ export default function TranscriptView({
 
   const total = groups.length
   const searching = searchQuery.trim().length > 0
+  // Mirror render values into refs for the stable scroll handler (reverse infinite-scroll trigger).
+  visibleCountRef.current = visibleCount
+  totalRef.current = total
+  searchingRef.current = searching
   // Reset the window when the conversation changes (render-phase, guarded so it converges next render).
   const winSessionRef = useRef<string | null>(null)
   if (transcript && winSessionRef.current !== transcript.sessionId) {
     winSessionRef.current = transcript.sessionId
     setVisibleCount(WINDOW)
+    // Drop any pending scroll-grow bookkeeping from the previous conversation.
+    growPendingRef.current = false
+    growHeightRef.current = null
   }
-  // Grow the window toward the full set, one idle chunk at a time — requestIdleCallback pauses the
-  // catch-up while the user is scrolling/typing, so it never competes with interaction.
-  useEffect(() => {
-    if (!transcript || visibleCount >= total) return
-    const grow = (): void => {
-      const el = scrollElRef.current
-      if (el) growHeightRef.current = el.scrollHeight
-      setVisibleCount((c) => Math.min(total, c + GROW_STEP))
-    }
-    const handle = requestIdleCallback(grow, { timeout: 500 })
-    return () => cancelIdleCallback(handle)
-  }, [transcript, visibleCount, total])
+  // The window grows ON SCROLL-UP now (handleScroll), not eagerly: eager idle-grow prepended chunks
+  // while pinned to the bottom, and chasing the bottom through each prepend produced the open-time
+  // shake. Search and jump-to-top still force a full mount on demand (effects below / jumpToEdge).
   // A search must reach matches in older messages, so mount everything while searching — and leave it
   // mounted (bump visibleCount, don't just override the slice) so clearing the search doesn't shrink
   // the list back and yank the scroll position.
@@ -268,6 +293,7 @@ export default function TranscriptView({
     const prev = growHeightRef.current
     if (prev == null) return
     growHeightRef.current = null
+    growPendingRef.current = false // chunk mounted + about to be position-compensated; allow the next
     if (nearBottomRef.current) {
       // The common open / read-latest case: stay pinned to the TRUE bottom no matter what grew above,
       // so opening a long conversation snaps straight to the latest message (no drift, no scroll).
@@ -281,6 +307,25 @@ export default function TranscriptView({
     }
     measureEdges(el)
   }, [visibleCount, total, measureEdges])
+
+  // Keep the bottom pinned through ASYNC content-height changes while pinned — a tool-result's
+  // "Show more" affordance settling in via its own ResizeObserver, font/markdown reflow — that don't
+  // flow through the grow/compensation path. A ResizeObserver fires after layout but BEFORE paint, so
+  // re-pinning here corrects the change in the same frame, no flash. Only while pinned (near bottom);
+  // scrolled-up history reading is the compensation effect's job and must not be yanked down.
+  useEffect(() => {
+    const content = contentRef.current
+    const el = scrollElRef.current
+    if (!content || !el) return
+    const ro = new ResizeObserver(() => {
+      if (!nearBottomRef.current) return
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 1) return
+      el.scrollTop = el.scrollHeight
+      lastTopRef.current = el.scrollTop
+    })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [transcript])
 
   if (loading && !transcript) {
     return (
