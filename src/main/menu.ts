@@ -1,5 +1,6 @@
 import { BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
 import { setTrafficLightSyncSuppressed } from './trafficLights'
+import { IPC } from '../shared/types'
 
 // How far to nudge the page zoom for a refresh, in zoom *levels* (Electron's 1.2^level scale).
 // A FULL level (1.0 ≈ 20%) is jarring; this is gentler (≈9%) while staying large enough to cross
@@ -27,6 +28,10 @@ function refreshFocused(): void {
   const win = BrowserWindow.getFocusedWindow()
   if (!win || win.isDestroyed()) return
   const wc = win.webContents
+  // Cover the window with the white veil first (renderer), so the whole zoom wiggle below — including
+  // its brief relayout / WebGL recomposite — happens hidden. The renderer fades it back out on the
+  // `appRefreshEnd` push once the zoom is restored (AppVeil has a failsafe if that push is missed).
+  wc.send(IPC.appRefreshStart)
   const z = wc.getZoomLevel()
   // Nudge DOWN by default (smaller cells = more rows/cols, and a touch less jarring than zooming
   // in); nudge up only when we're already near the practical floor, so it's never clamped to a
@@ -37,14 +42,21 @@ function refreshFocused(): void {
   // the wiggle. The restored zoom equals the original, so on un-suppress the lights are already
   // where they belong; this just prevents a brief out-and-back jump of the buttons on every ⌘R.
   setTrafficLightSyncSuppressed(win, true)
-  wc.setZoomLevel(z + delta)
-  // Restore a few frames later: the ResizeObserver coalesces within a frame, so an out-and-back in
-  // one tick nets to no size change (and no SIGWINCH). ~60ms lets the intermediate layout land,
-  // then we return to the user's exact zoom.
+  // Wait one+ frame so the veil has painted before the zoom relayouts beneath it.
   setTimeout(() => {
-    if (!win.isDestroyed()) wc.setZoomLevel(z)
-    setTrafficLightSyncSuppressed(win, false)
-  }, 60)
+    if (win.isDestroyed()) return
+    wc.setZoomLevel(z + delta)
+    // Restore a few frames later: the ResizeObserver coalesces within a frame, so an out-and-back in
+    // one tick nets to no size change (and no SIGWINCH). ~60ms lets the intermediate layout land,
+    // then we return to the user's exact zoom and fade the veil away.
+    setTimeout(() => {
+      if (!win.isDestroyed()) {
+        wc.setZoomLevel(z)
+        wc.send(IPC.appRefreshEnd)
+      }
+      setTrafficLightSyncSuppressed(win, false)
+    }, 60)
+  }, 24)
 }
 
 /**

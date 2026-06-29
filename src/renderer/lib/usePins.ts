@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
  * Pinned conversations — a user-curated, MANUALLY ORDERED list of session IDs that surface in the
  * Tally Rail whether or not they're live. Persisted in localStorage (renderer state; survives
  * restarts). The ordered array is the source of truth (top of the list = index 0); a Set is derived
- * for the rail's membership filters. Newly pinned conversations land on top; the user drags to reorder.
+ * for the rail's membership filters. Newly pinned conversations land at the BOTTOM; the user drags to reorder.
  */
 const KEY = 'switchboard.pinnedOrder'
 const LEGACY_KEY = 'switchboard.pinnedSessions'
@@ -66,8 +66,8 @@ export function usePins(): Pins {
 
   const toggle = useCallback((sessionId: string) => {
     setOrder((prev) => {
-      // New pin lands on top (index 0); unpin removes.
-      const next = prev.includes(sessionId) ? prev.filter((id) => id !== sessionId) : [sessionId, ...prev]
+      // New pin lands at the bottom (end of the list); unpin removes.
+      const next = prev.includes(sessionId) ? prev.filter((id) => id !== sessionId) : [...prev, sessionId]
       save(next)
       return next
     })

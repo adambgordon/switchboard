@@ -55,15 +55,15 @@ const LIGHT_THEME = {
   brightWhite: '#1a1a1a'
 }
 
-// Neutral near-black dark theme: bg matches the dark --paper-raised (the terminal is a raised pane,
-// as in light where it's #fff = --paper-raised), fg is the dark --ink, and the ANSI palette is
-// lifted to read on the near-black surface. Neutral grays (no warm cast); chromatic slots stay
-// vivid. Cobalt selection at a higher alpha for contrast.
+// Neutral dark theme: bg matches the dark --paper-pane (#171717, the main content surface the terminal
+// fills — kept in lockstep with tokens.css so the canvas and its surrounding pane read as one), fg is
+// the dark --ink, and the ANSI palette is lifted to read on the dark surface. Neutral grays (no warm
+// cast); chromatic slots stay vivid. Cobalt selection at a higher alpha for contrast.
 const DARK_THEME = {
-  background: '#0f0f0f',
+  background: '#171717',
   foreground: '#f2f2f2',
   cursor: 'rgba(0,0,0,0)',
-  cursorAccent: '#0f0f0f',
+  cursorAccent: '#171717',
   selectionBackground: 'rgba(59, 108, 240, 0.3)',
   black: '#3a3a3a',
   red: '#f0786a',

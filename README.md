@@ -48,7 +48,9 @@ Because you built it locally, macOS doesn't quarantine it — it opens without t
 
 ## Updates
 
-**Ask Claude to update for you.** Ask Claude:
+**In the app** — open Preferences (`⌘,`) → **Application** → **Updates** → **Check for updates**. If you're behind, **Update** pulls the latest and rebuilds in place (a few minutes), then **Relaunch** loads the new build. *(Needs the app running from its built `dist/` folder; if you moved it elsewhere, it shows you the manual command below instead.)*
+
+**Or ask Claude:**
 
 ```
 Update Switchboard
@@ -78,15 +80,15 @@ Then quit (⌘Q) (if already running) and reopen the app.
 - **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped together by folder so a repo's conversations from both agents sit side by side; titles and previews update live as a file watcher re-indexes. Switchboard owns no data of its own.
 - **Preview without disturbing** — click any conversation to render its transcript instantly from disk. **No `claude` process is started**, so you can click through dozens to find the one you want.
 - **Resume / start, explicitly** — the only way to spawn a live process is **Resume** or **New**, each dropping you into a real terminal running the right agent (`claude --resume` / `codex resume`, and so on). **New** lets you pick the agent when more than one is installed.
-- **Formatted ⇄ Terminal** — for a live conversation, toggle between the raw **Terminal** (where you type) and a **Formatted** view that re-renders the transcript as a clean log and stays pinned to the latest message. The choice sticks per conversation.
+- **Formatted ⇄ Terminal** — for a live conversation, toggle between the raw **Terminal** (where you type) and a **Formatted** view that re-renders the transcript as a clean log — with syntax-highlighted code blocks — and stays pinned to the latest message. The choice sticks per conversation.
 - **Copy from the transcript** — in the **Formatted** view, hover a turn (beside its timestamp), a code block, a table, or a tool call/result for a copy button: a turn copies as markdown (tool I/O excluded); code and tables copy their raw source. Each flashes a check when copied.
 - **Pin & organize** — the left pane has three collapsible sections: **Pinned**, **Live** (running now), and **Recent**. Pins persist across restarts; live and pinned rows drag to reorder; a cobalt dot tracks each live conversation's turn-state — working, waiting on your reply, finished-unread, or seen.
-- **Right-click any row** — a quick menu to open **Session details**, resume or stop a session, and mark it read or unread. **⌥-click** a live row (or its terminal) to mark it unread directly.
+- **Row menu (⋮)** — each row's **⋮** button (or a right-click) opens a quick menu to pin/unpin, open **Session details**, resume or stop a session, and mark it read or unread. **⌥-click** a live row (or its terminal) to mark it unread directly.
 - **Rename & inspect** — click a conversation's title at the top of the pane (or right-click a row → **Session details**) to open an info card: agent, folder, git branch, model, message count, size, duration, token usage (per-agent categories) plus current context size, last activity, and session ID — values are selectable to copy (and session ID has a one-click copy). Rename **in place** right in the heading — press **Enter** to save. Renames are real and go through each agent's *own* store — Claude Code's title record (carries into `claude --resume`), Codex's app-server `thread/name/set` — never a Switchboard-private one.
 - **Search, two kinds** — fuzzy search *across* conversations (titles, previews, directories), and find-in-conversation (`⌘F`) that highlights every match in the Formatted transcript, including inside collapsed tool calls and clamped results.
 - **Navigate by keyboard** — switch conversations with `⌥⌘↑` / `⌥⌘↓` (the main pane stays focused, so you can type or hit `⏎` to resume), browser-style back/forward, and more (see below).
 - **Defaults for New** — set a default directory and/or a default agent in Preferences so **New** (`⌘N`) skips the picker(s) and starts there with that agent.
-- **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences.
+- **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences → Appearance, where you can also pick a light or dark **dock icon** independent of the theme.
 
 _For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUDE.md)._
 
@@ -149,14 +151,15 @@ src/
     menu.ts                custom app menu — ⌘R→Refresh (no reload roles), File/View/Window
     windowState.ts         persists window bounds/position across launches
     trafficLights.ts       re-aligns the native traffic lights to the page zoom (renderer pings on resize)
+    updater.ts             self-update: GitHub-compare check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
     sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
     pty/manager.ts         spawns login shells, types the claude command; output activity → LRU eviction (configurable cap, default 8)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
   renderer/                React 18 + Vite
     App.tsx                two-column layout + state orchestration (per-conversation view memory, back/forward history)
     components/            TitleBar · MainPane · PaneHeader · TranscriptView · TranscriptSearch ·
-                           TerminalDeck/TerminalView · TallyRail · ResizeHandle · SettingsModal · TooltipLayer · …
-    lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus · useLayout · useTheme · useTranscript ·
+                           TerminalDeck/TerminalView · TallyRail · ResizeHandle · SettingsModal · UpdatesSetting · AppVeil · TooltipLayer · …
+    lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus · useLayout · useTheme · useDarkIcon · useTranscript ·
                            useNavHistory · useSyncedAnimation · useRailFlip · useTranscriptSearch · useAutoHideScrollbar ·
                            messageGroups · fuzzy · findMatches · ptyStream · format
     styles/                tokens.css (design system) + per-zone CSS
