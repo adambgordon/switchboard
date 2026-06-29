@@ -321,13 +321,20 @@ export default function TallyRail({
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') closeMenu()
     }
+    // Scroll-to-close is scoped to the RAIL body, not a document-wide capture listener. The menu is
+    // viewport-fixed but anchored to a rail row, so only a list scroll detaches it. A `document`
+    // capture listener also caught the transcript pane's scrolls — and opening a large conversation
+    // re-pins to the bottom for 1–2s (window-grow + tool-result overflow settle), spamming scroll
+    // events that slammed the menu shut the instant it opened. Scroll events don't bubble, so a
+    // listener on the rail body fires only for rail scrolls.
+    const railBody = listRef.current
     document.addEventListener('click', closeMenu)
     document.addEventListener('keydown', onKey)
-    document.addEventListener('scroll', closeMenu, true)
+    railBody?.addEventListener('scroll', closeMenu)
     return () => {
       document.removeEventListener('click', closeMenu)
       document.removeEventListener('keydown', onKey)
-      document.removeEventListener('scroll', closeMenu, true)
+      railBody?.removeEventListener('scroll', closeMenu)
     }
   }, [ctxMenu])
   // Clear pending timers on unmount.
