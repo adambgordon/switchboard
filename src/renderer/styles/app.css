@@ -730,15 +730,19 @@ body.sb-resizing .sb-pane {
   padding: var(--s4) 0;
   border-bottom: 1px solid var(--rule-soft);
 }
-/* The App page reads as one flat divided list: its groups add no gap of their own (the per-setting
-   padding is the rhythm), the first setting hugs the top, and the last drops its divider + pad. */
-.sb-page-app .sb-modal-group {
+/* The settings pages read as one flat divided list: their groups add no gap of their own (the
+   per-setting padding is the rhythm), the first setting hugs the top, and the last drops its divider
+   + pad. Applies to both settings content pages (Appearance / Application). */
+.sb-page-appearance .sb-modal-group,
+.sb-page-application .sb-modal-group {
   margin-top: 0;
 }
-.sb-page-app .sb-modal-group:first-child .sb-setting:first-child {
+.sb-page-appearance .sb-modal-group:first-child .sb-setting:first-child,
+.sb-page-application .sb-modal-group:first-child .sb-setting:first-child {
   padding-top: 0;
 }
-.sb-page-app .sb-modal-group:last-child .sb-setting:last-child {
+.sb-page-appearance .sb-modal-group:last-child .sb-setting:last-child,
+.sb-page-application .sb-modal-group:last-child .sb-setting:last-child {
   padding-bottom: 0;
   border-bottom: none;
 }
@@ -812,15 +816,79 @@ body.sb-resizing .sb-pane {
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--ink-soft);
-  background: var(--paper-raised);
+  /* A light gray fill, not white (--btn is per-theme: light a hair off white, dark a readable gray). */
+  background: var(--btn);
   border: 1px solid var(--rule-strong);
   border-radius: var(--r-sm);
   transition: all var(--dur-fast) var(--ease);
 }
 .sb-setting-btn:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--btn-hover);
   border-color: var(--ink-ghost);
+}
+
+/* --- Updates (self-update control on the App page; see UpdatesSetting.tsx) --- */
+.sb-update {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sb-update-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* version + status stacked at the RIGHT (version on top, smaller; status below, not bold); the single
+   action button — when there is one — sits at the left. */
+.sb-update-info {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  text-align: right;
+}
+.sb-update-version {
+  font-size: var(--text-2xs);
+  color: var(--ink-faint);
+}
+.sb-update-status {
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+}
+.sb-update-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sb-update-note {
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  line-height: 1.5;
+}
+.sb-update-cmd {
+  align-self: flex-start;
+  padding: 5px 8px;
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+}
+.sb-update-log {
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--ink-faint);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--paper-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
 }
 
 /* info affordance beside a setting title — opens a wide explanatory tooltip (data-tip-wide) */

@@ -35,7 +35,13 @@ const api: SwitchboardApi = {
   onRefreshEnd: (cb) => subscribe(IPC.appRefreshEnd, cb as never),
   setDockIcon: (dark) => ipcRenderer.send(IPC.windowSetDockIcon, dark),
 
-  getPathForFile: (file) => webUtils.getPathForFile(file)
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+
+  getUpdateInfo: () => ipcRenderer.invoke(IPC.updatesGetInfo),
+  checkForUpdates: () => ipcRenderer.invoke(IPC.updatesCheck),
+  runUpdate: () => ipcRenderer.invoke(IPC.updatesRun),
+  onUpdateProgress: (cb) => subscribe(IPC.updatesProgress, cb as never),
+  relaunchForUpdate: () => ipcRenderer.send(IPC.updatesRelaunch)
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -12,6 +12,8 @@
   --paper-sunken: #f4f4f4; /* sidebar / rail */
   --paper-hover: #ededed;
   --paper-active: #e6e6e6;
+  --btn: #f3f3f3; /* settings buttons: a light gray, not white */
+  --btn-hover: #ebebeb;
 
   --ink: #1a1a1a; /* primary text — near-black, not pure */
   --ink-soft: #454545; /* secondary */
@@ -120,6 +122,8 @@
   --paper-sunken: #1f1f1f; /* left pane / rail + recessed bits — lighter chrome (sits ABOVE --paper-pane here) */
   --paper-hover: #313131;
   --paper-active: #3a3a3a;
+  --btn: #313131; /* settings buttons: kept at the readable dark gray (inverted elevation) */
+  --btn-hover: #3a3a3a;
 
   --ink: #f2f2f2; /* primary text — soft off-white, not pure */
   --ink-soft: #c0c0c0; /* secondary */

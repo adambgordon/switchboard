@@ -13,6 +13,7 @@ import { renameCodexThread } from './sessions/codexRename'
 import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
 import { syncTrafficLights } from './trafficLights'
+import { buildInfo, checkForUpdates, runUpdate, relaunchForUpdate } from './updater'
 
 const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 
@@ -232,6 +233,13 @@ export function registerIpc(): void {
     const img = nativeImage.createFromPath(iconPath)
     if (!img.isEmpty()) app.dock.setIcon(img)
   })
+
+  // --- self-update: check compares the build commit to main (GitHub API, HTTPS); run shells out to
+  // `git pull --ff-only <https> main && npm run setup` in the source repo, streaming output. ---
+  ipcMain.handle(IPC.updatesGetInfo, () => buildInfo())
+  ipcMain.handle(IPC.updatesCheck, () => checkForUpdates())
+  ipcMain.handle(IPC.updatesRun, (e) => runUpdate((line) => e.sender.send(IPC.updatesProgress, line)))
+  ipcMain.on(IPC.updatesRelaunch, () => relaunchForUpdate())
 
   // --- live re-index on file changes (structural: new conversations, renames, other windows) ---
   watcher = new SessionWatcher({
