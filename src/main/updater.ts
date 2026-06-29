@@ -7,9 +7,8 @@
  *
  * Pure, unit-tested helpers (repo discovery, compare interpretation, the dev fake) live in updater-core.
  */
-import { app } from 'electron'
+import { app, net } from 'electron'
 import { spawn } from 'node:child_process'
-import { request } from 'node:https'
 import type { UpdateCheck, UpdateInfo, UpdateRunResult } from '../shared/types'
 import { findRepoRootFrom, interpretCompare, parseFakeUpdate } from './updater-core'
 
@@ -40,37 +39,48 @@ export function buildInfo(): UpdateInfo {
   }
 }
 
-/** GitHub compare `main...<head>` → `behind_by` (commits the head is behind main). HTTPS, no auth. */
+/**
+ * GitHub compare `main...<head>` → `behind_by` (commits the head is behind main). Unauthenticated.
+ *
+ * Uses Electron's `net` (Chromium's network stack), NOT `node:https`. On a TLS-inspecting corporate
+ * network — a firewall that re-signs api.github.com with an internal root CA — `node:https` fails with
+ * SELF_SIGNED_CERT_IN_CHAIN: Electron's Node is backed by BoringSSL, which trusts only its bundled
+ * Mozilla CA set and ignores the SSL_CERT_FILE / NODE_EXTRA_CA_CERTS that make system tools work (and a
+ * GUI app wouldn't inherit those env vars regardless). `net` uses the OS trust store + system proxy, like
+ * curl / Chrome / git already do on the machine. `net` has no `timeout` option, so we abort on a manual timer.
+ */
 function githubBehindBy(head: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const req = request(
-      {
-        hostname: 'api.github.com',
-        path: `/repos/${OWNER}/${REPO}/compare/${BRANCH}...${encodeURIComponent(head)}`,
-        method: 'GET',
-        headers: { 'User-Agent': 'Switchboard', Accept: 'application/vnd.github+json' },
-        timeout: 8000
-      },
-      (res) => {
-        let body = ''
-        res.setEncoding('utf8')
-        res.on('data', (c) => (body += c))
-        res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-            try {
-              const json = JSON.parse(body) as { behind_by?: number }
-              resolve(typeof json.behind_by === 'number' ? json.behind_by : 0)
-            } catch {
-              reject(new Error('bad response'))
-            }
-          } else {
-            reject(new Error(`HTTP ${res.statusCode ?? '?'}`))
+    const req = net.request({
+      method: 'GET',
+      url: `https://api.github.com/repos/${OWNER}/${REPO}/compare/${BRANCH}...${encodeURIComponent(head)}`
+    })
+    req.setHeader('User-Agent', 'Switchboard')
+    req.setHeader('Accept', 'application/vnd.github+json')
+    const timer = setTimeout(() => req.abort(), 8000)
+    req.on('response', (res) => {
+      let body = ''
+      res.on('data', (c) => (body += c.toString()))
+      res.on('end', () => {
+        clearTimeout(timer)
+        const code = res.statusCode
+        if (code && code >= 200 && code < 300) {
+          try {
+            const json = JSON.parse(body) as { behind_by?: number }
+            resolve(typeof json.behind_by === 'number' ? json.behind_by : 0)
+          } catch {
+            reject(new Error('bad response'))
           }
-        })
-      }
-    )
-    req.on('error', reject)
-    req.on('timeout', () => req.destroy(new Error('timeout')))
+        } else {
+          reject(new Error(`HTTP ${code ?? '?'}`))
+        }
+      })
+    })
+    req.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+    req.on('abort', () => reject(new Error('timeout')))
     req.end()
   })
 }
