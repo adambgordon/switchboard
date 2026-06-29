@@ -4,6 +4,7 @@ import { basename } from '../lib/format'
 import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
 import AgentLogo from './AgentLogo'
+import UpdatesSetting from './UpdatesSetting'
 
 const THEME_MODES: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'System' },
@@ -16,7 +17,7 @@ const THEME_MODES: { value: ThemeMode; label: string }[] = [
 const CAP_TIP =
   "Each live session is a real agent process with its own terminal. At the limit, starting another reclaims whichever session has been idle longest — sessions still working are never stopped, and you're never blocked from starting a new one. Raising the limit means a higher cap on resource consumption: more memory, CPU, and GPU per live terminal. This is intended to prevent agent processes from overwhelming your machine. Increase at your own risk."
 
-type Page = 'app' | 'shortcuts' | 'faq'
+type Page = 'appearance' | 'application' | 'shortcuts' | 'faq'
 
 interface Shortcut {
   keys: string[]
@@ -207,11 +208,11 @@ interface Props {
 }
 
 /**
- * The Preferences modal — a left nav (App / Shortcuts) over the shared scrim+card. The App page holds
- * the default-folder-for-new-conversations setting (a folder + an enabled toggle); Shortcuts is the
- * former ShortcutsModal content. Open it to a specific page via `page` (⌘, / title-bar gear → app;
- * ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is handled by App's global key handler,
- * which also makes the rest of the keyboard inert while open.
+ * The Preferences modal — a left nav (Appearance / Application / Shortcuts / FAQ) over the shared
+ * scrim+card. Appearance holds theme + dock icon; Application holds Updates (first), the live-session
+ * cap, and the new-conversation defaults; Shortcuts / FAQ are reference. Open it to a specific page via
+ * `page` (⌘, / title-bar gear → appearance; ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is
+ * handled by App's global key handler, which also makes the rest of the keyboard inert while open.
  */
 export default function SettingsModal({
   page,
@@ -277,10 +278,16 @@ export default function SettingsModal({
         <div className="sb-settings-body">
           <nav className="sb-settings-nav">
             <button
-              className={`sb-settings-nav-item${page === 'app' ? ' active' : ''}`}
-              onClick={() => onChangePage('app')}
+              className={`sb-settings-nav-item${page === 'appearance' ? ' active' : ''}`}
+              onClick={() => onChangePage('appearance')}
             >
-              App
+              Appearance
+            </button>
+            <button
+              className={`sb-settings-nav-item${page === 'application' ? ' active' : ''}`}
+              onClick={() => onChangePage('application')}
+            >
+              Application
             </button>
             <button
               className={`sb-settings-nav-item${page === 'shortcuts' ? ' active' : ''}`}
@@ -297,7 +304,7 @@ export default function SettingsModal({
           </nav>
 
           <div className={`sb-settings-page sb-page-${page}`}>
-            {page === 'app' ? (
+            {page === 'appearance' ? (
               <>
                 <div className="sb-modal-group">
                   <div className="sb-setting">
@@ -342,6 +349,12 @@ export default function SettingsModal({
                     </div>
                     <div className="sb-setting-desc">Use a dark dock icon, independent of the app theme.</div>
                   </div>
+                </div>
+              </>
+            ) : page === 'application' ? (
+              <>
+                <div className="sb-modal-group">
+                  <UpdatesSetting />
                 </div>
                 <div className="sb-modal-group">
                   <div className="sb-setting">

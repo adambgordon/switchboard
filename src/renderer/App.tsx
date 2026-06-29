@@ -140,7 +140,9 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [settingsPage, setSettingsPage] = useState<'app' | 'shortcuts' | 'faq' | null>(null)
+  const [settingsPage, setSettingsPage] = useState<
+    'appearance' | 'application' | 'shortcuts' | 'faq' | null
+  >(null)
   // Conversation-info modal target: which session, and whether to open straight into title-edit vs
   // view (both the pane title and the right-click "Session details…" open in view). Null when closed.
   const [infoModal, setInfoModal] = useState<{ sessionId: string; edit: boolean } | null>(null)
@@ -669,7 +671,7 @@ export default function App() {
           setSettingsPage(null)
         } else if (mod && e.key === ',') {
           e.preventDefault()
-          setSettingsPage((p) => (p === 'app' ? null : 'app'))
+          setSettingsPage((p) => (p === 'appearance' ? null : 'appearance'))
         } else if (mod && (e.key === '/' || e.key === '?')) {
           e.preventDefault()
           setSettingsPage((p) => (p === 'shortcuts' ? null : 'shortcuts'))
@@ -734,9 +736,9 @@ export default function App() {
         e.preventDefault()
         if (selectedId) toggleUnread(selectedId)
       } else if (mod && e.key === ',') {
-        // ⌘, — macOS-standard Preferences shortcut; opens the Preferences modal to its App page.
+        // ⌘, — macOS-standard Preferences shortcut; opens the Preferences modal to its Appearance page.
         e.preventDefault()
-        setSettingsPage('app')
+        setSettingsPage('appearance')
       } else if (mod && (e.key === '/' || e.key === '?')) {
         // Displayed as ⌘? (reads as "help"); accept ⌘/ too so Shift doesn't matter. Opens the
         // Preferences modal to its Shortcuts page.
@@ -804,7 +806,7 @@ export default function App() {
         paneCollapsed={paneCollapsed}
         onTogglePane={togglePane}
         onHome={home}
-        onOpenSettings={() => setSettingsPage('app')}
+        onOpenSettings={() => setSettingsPage('appearance')}
         resolvedTheme={themeResolved}
         onToggleTheme={toggleTheme}
       />

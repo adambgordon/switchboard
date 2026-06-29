@@ -216,8 +216,40 @@ export const IPC = {
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
   appRefreshStart: 'app:refreshStart', // push: ⌘R refresh begun — renderer covers the window with the white veil
-  appRefreshEnd: 'app:refreshEnd' // push: ⌘R refresh restored — renderer fades the veil back out
+  appRefreshEnd: 'app:refreshEnd', // push: ⌘R refresh restored — renderer fades the veil back out
+  updatesGetInfo: 'updates:getInfo', // build version/sha + whether this copy can self-update
+  updatesCheck: 'updates:check', // compare the build commit to main (GitHub API)
+  updatesRun: 'updates:run', // git pull + npm run setup in the source repo
+  updatesProgress: 'updates:progress', // push (line) — streamed update output
+  updatesRelaunch: 'updates:relaunch' // renderer -> main: quit + relaunch into the rebuilt app
 } as const
+
+/** Build identity + whether this copy can rebuild itself. */
+export interface UpdateInfo {
+  /** package.json version baked into the bundle (app.getVersion()). */
+  version: string
+  /** Full commit the build was packaged from, or 'dev' for an unpackaged run. */
+  sha: string
+  /** First 7 of `sha` (or 'dev') — for display. */
+  shaShort: string
+  /** Absolute path to the source repo when this build can rebuild itself, else null (e.g. the .app
+   *  was moved out of its dist/ folder). null → the UI offers the manual command instead of Update. */
+  repoRoot: string | null
+  /** false for `npm run dev`; the in-app update only operates on the packaged .app. */
+  packaged: boolean
+}
+
+/** Result of comparing the build's commit to the latest on `main` (GitHub compare API → behind_by). */
+export type UpdateCheck =
+  | { status: 'current' }
+  | { status: 'behind'; behindBy: number }
+  | { status: 'unknown'; reason: string }
+
+/** Terminal result of an in-app update run (git pull + npm run setup). */
+export interface UpdateRunResult {
+  ok: boolean
+  code: number | null
+}
 
 /** The typed surface exposed on `window.api` by the preload bridge. */
 export interface SwitchboardApi {
@@ -283,6 +315,19 @@ export interface SwitchboardApi {
   // under the node tsconfig) — a type reference, not a DOM import.
   /** Resolve a dropped File to its absolute filesystem path (Electron webUtils). */
   getPathForFile(file: File): string
+
+  // --- self-update ---
+  /** Build version/sha + whether this copy can rebuild itself (source repo findable, packaged). */
+  getUpdateInfo(): Promise<UpdateInfo>
+  /** Compare the build's commit to the latest on `main` (GitHub compare API). */
+  checkForUpdates(): Promise<UpdateCheck>
+  /** Run `git pull --ff-only <https> main && npm run setup` in the source repo, streaming output via
+   *  onUpdateProgress. Resolves when it finishes (ok=false on any failure, or in a dev run). */
+  runUpdate(): Promise<UpdateRunResult>
+  /** Streamed stdout/stderr lines from an in-flight runUpdate. Returns an unsubscribe fn. */
+  onUpdateProgress(cb: (line: string) => void): () => void
+  /** Quit and relaunch into the freshly-built .app (after a successful runUpdate). */
+  relaunchForUpdate(): void
 }
 
 /** Config knobs shared across processes. */
