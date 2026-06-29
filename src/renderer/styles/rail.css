@@ -348,14 +348,15 @@
   font-weight: 600;
 }
 /* Leader rule: a hairline filling the gap between the section label and its count, so each
-   header doubles as a divider marking the break between sections (Pinned / Live / Recent). Heavier
-   than the lightweight inter-row dividers below (thicker + the stronger rule color) so the section
-   break clearly outranks them. height:0 + border-top renders as a single centered line (the head is
+   header doubles as a divider marking the break between sections (Pinned / Live / Recent). Thin like
+   the inter-row dividers below, but a darker / higher-contrast color (--ink-ghost reads darker than
+   the --rule grays on light and lighter on dark — more contrast in BOTH themes) so the section break
+   still outranks them. height:0 + border-top renders as a single centered line (head is
    align-items:center). */
 .sb-rail-section-rule {
   flex: 1;
   height: 0;
-  border-top: 2px solid var(--rule-strong);
+  border-top: 1px solid var(--ink-ghost);
 }
 .sb-rail-section-count {
   font-size: var(--text-2xs);
