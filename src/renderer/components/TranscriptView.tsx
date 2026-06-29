@@ -68,6 +68,10 @@ export default function TranscriptView({
   const contentRef = useRef<HTMLDivElement | null>(null)
   // Assume we want to be at the bottom until the user scrolls away from it.
   const nearBottomRef = useRef(true)
+  // Last observed scrollTop. Lets handleScroll tell a user's upward scroll (scrollTop DECREASES) apart
+  // from content growing beneath a pinned viewport (scrollTop UNCHANGED) — see handleScroll. Every
+  // programmatic scroll write updates this so our own writes are never mistaken for a user gesture.
+  const lastTopRef = useRef(0)
   const lastSessionRef = useRef<string | null>(null)
   // Detach for the auto-hiding scrollbar, re-bound whenever the scroll node mounts/changes.
   const detachAutoHideRef = useRef<(() => void) | null>(null)
@@ -106,7 +110,28 @@ export default function TranscriptView({
   const handleScroll = useCallback((): void => {
     const el = scrollElRef.current
     if (!el) return
-    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+    const top = el.scrollTop
+    const dist = el.scrollHeight - top - el.clientHeight
+    const prev = lastTopRef.current
+    lastTopRef.current = top
+    if (nearBottomRef.current) {
+      // Pinned to the bottom. A gap to the bottom can open for two very different reasons:
+      //  • the user scrolled UP — scrollTop DECREASES — which releases the pin; vs
+      //  • content GREW beneath a fixed scrollTop (tool results clamping, the window growing) —
+      //    scrollTop is UNCHANGED — which must NOT release it.
+      // Mistaking the latter for the former was the large-conversation bug: a single >NEAR_BOTTOM_PX
+      // post-pin height settle latched near=false and stranded the view mid-history. So only an actual
+      // decrease releases the pin; an unchanged scrollTop with a gap means re-assert the bottom.
+      if (top < prev - 0.5) {
+        nearBottomRef.current = false
+      } else if (dist >= NEAR_BOTTOM_PX) {
+        el.scrollTop = el.scrollHeight
+        lastTopRef.current = el.scrollTop
+      }
+    } else if (dist < NEAR_BOTTOM_PX) {
+      // Scrolled back down into the bottom band → resume sticking to the latest.
+      nearBottomRef.current = true
+    }
     measureEdges(el)
   }, [measureEdges])
 
@@ -140,6 +165,7 @@ export default function TranscriptView({
     }
     if (opened || nearBottomRef.current) {
       el.scrollTop = el.scrollHeight
+      lastTopRef.current = el.scrollTop
     }
     measureEdges(el)
     if (!opened) return
@@ -159,6 +185,7 @@ export default function TranscriptView({
         return
       }
       node.scrollTop = node.scrollHeight
+      lastTopRef.current = node.scrollTop
       const h = node.scrollHeight
       stable = h === lastHeight ? stable + 1 : 0
       lastHeight = h
@@ -234,6 +261,7 @@ export default function TranscriptView({
       pendingTopRef.current = false
       growHeightRef.current = null
       el.scrollTop = 0
+      lastTopRef.current = el.scrollTop
       measureEdges(el)
       return
     }
@@ -244,10 +272,12 @@ export default function TranscriptView({
       // The common open / read-latest case: stay pinned to the TRUE bottom no matter what grew above,
       // so opening a long conversation snaps straight to the latest message (no drift, no scroll).
       el.scrollTop = el.scrollHeight
+      lastTopRef.current = el.scrollTop
     } else {
       // Scrolled up reading history: add back exactly the prepended height so the view holds still.
       const delta = el.scrollHeight - prev
       if (delta > 0) el.scrollTop += delta
+      lastTopRef.current = el.scrollTop
     }
     measureEdges(el)
   }, [visibleCount, total, measureEdges])
@@ -274,6 +304,11 @@ export default function TranscriptView({
   const jumpToEdge = (toTop: boolean): void => {
     const el = scrollElRef.current
     if (!el) return
+    // A jump is an explicit pin choice. Jumping to the TOP must release the bottom-stick: otherwise the
+    // scroll handler, still pinned, reads the resulting gap to the bottom as content-grew-beneath and
+    // snaps right back down (the jump only "worked" once you'd scrolled up first, which already cleared
+    // the stick). Jumping to the BOTTOM resumes sticking.
+    nearBottomRef.current = !toTop
     // Jump-to-top needs the whole transcript mounted first (the window may hold only the tail): flag it
     // and let the layout effect scroll to the true top once the grow-to-full completes.
     if (toTop && visibleCount < total) {
@@ -284,6 +319,7 @@ export default function TranscriptView({
     // Instant snap — no scroll animation (the layout effect handles the pending jump-to-top once the
     // full transcript has mounted).
     el.scrollTop = toTop ? 0 : el.scrollHeight
+    lastTopRef.current = el.scrollTop
   }
 
   return (
