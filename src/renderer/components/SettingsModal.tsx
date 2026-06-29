@@ -423,7 +423,7 @@ export default function SettingsModal({
                         className={`sb-seg-btn${defaultAgentChoice === 'none' ? ' active' : ''}`}
                         onClick={() => onSetDefaultAgentChoice('none')}
                       >
-                        None
+                        No default
                       </button>
                       {(['claude', 'codex'] as AgentKind[]).map((a) => (
                         <button
