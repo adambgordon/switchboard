@@ -3,19 +3,7 @@ import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
 import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
 import { matchProvisionalCodex, type CodexBindCandidate } from '../sessions/codexParser'
-
-/**
- * The shell command to type to boot an agent. Claude resumes by id (`--resume`) or starts a fresh
- * session with a PRE-ASSIGNED id (`--session-id`). Codex resumes by id (`codex resume <id>`) but
- * mints its OWN id for a new session, so a new Codex run is a bare `codex` (its rollout id is
- * discovered afterward — see the new-session correlation in codex-integration.md).
- */
-function bootCommandFor(agent: AgentKind, origin: 'resume' | 'new', sessionId: string): string {
-  if (agent === 'codex') {
-    return origin === 'resume' ? `codex resume ${sessionId}` : 'codex'
-  }
-  return origin === 'resume' ? `claude --resume ${sessionId}` : `claude --session-id ${sessionId}`
-}
+import { bootPayloadFor } from './bootCommand'
 
 /**
  * A clean environment for a spawned agent. Switchboard launches each agent as an INDEPENDENT session,
@@ -271,14 +259,14 @@ export class PtyManager extends EventEmitter {
     }
     this.live.set(ptyId, entry)
 
-    const bootCmd = bootCommandFor(o.agent, o.origin, o.sessionId)
-
     const boot = (): void => {
       if (entry.booted) return
       entry.booted = true
       if (entry.bootTimer) clearTimeout(entry.bootTimer)
-      // \r submits the line in the interactive shell.
-      proc.write(`${bootCmd}\r`)
+      // Clear any stray content on the shell's input line (a recalled-history line from an up-arrow,
+      // or a keystroke typed in the brief window before boot) before typing the command, so nothing
+      // fuses onto it; the trailing \r submits. See bootPayloadFor.
+      proc.write(bootPayloadFor(o.agent, o.origin, o.sessionId))
     }
     // Boot claude only once the shell is ready (first output) AND the renderer has sized the PTY
     // (first resize). Booting earlier starts claude's resume replay at the 80×30 spawn default; the
