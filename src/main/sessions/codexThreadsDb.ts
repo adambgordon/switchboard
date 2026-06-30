@@ -48,6 +48,9 @@ function newestStateDb(home: string): string | null {
 export interface CodexThreadRow {
   /** The session's title (auto-derived from the first message, or the renamed value); '' when absent. */
   title: string
+  /** The first user message (raw); '' when absent. Lets the indexer detect an auto-derived title —
+   *  Codex marks a title as a real rename only when it differs from this (see codexSessionIndex.ts). */
+  firstUserMessage: string
   /** Codex's own archived flag (`archived` INTEGER, 0/1) — archived threads are hidden from its own
    *  list, so Switchboard drops them too, keeping the two browsers in sync. */
   archived: boolean
@@ -69,12 +72,13 @@ export function readCodexThreads(home: string = defaultCodexHome()): Map<string,
   try {
     db = new DatabaseSync(dbPath, { readOnly: true })
     const rows = db
-      .prepare('SELECT id, title, archived FROM threads')
+      .prepare('SELECT id, title, first_user_message, archived FROM threads')
       .all() as Array<Record<string, unknown>>
     for (const row of rows) {
       if (typeof row.id !== 'string') continue
       threads.set(row.id, {
         title: typeof row.title === 'string' ? row.title : '',
+        firstUserMessage: typeof row.first_user_message === 'string' ? row.first_user_message : '',
         archived: !!row.archived
       })
     }
