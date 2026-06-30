@@ -40,7 +40,7 @@ For iterating, `npm run dev` (hot reload) is the inner loop (first run / after a
 
 Set `SWITCHBOARD_DEV_LABEL=<name>` before `npm run dev` to tag the window title **and** the title bar (a mono pill left of the gear) — so several dev instances can run side by side and stay tellable apart (there's no single-instance lock; Vite auto-increments the port). Unset in normal and packaged runs, where the title stays a plain "Switchboard".
 
-Set `SWITCHBOARD_FAKE_UPDATE=current|behind:N|unknown` before `npm run dev` to force the Preferences → Application → Updates check result, so its states are eyeball-able in dev (the real GitHub-compare check needs a packaged build whose commit is pushed to `main`). Inert in production unless explicitly set.
+Set `SWITCHBOARD_FAKE_UPDATE=current|behind|unknown` before `npm run dev` to force the Preferences → Application → Updates check result, so its states are eyeball-able in dev (the real `git ls-remote` check needs a packaged build whose commit is pushed to `main`). Inert in production unless explicitly set.
 
 ## Deep reference (read on demand)
 
