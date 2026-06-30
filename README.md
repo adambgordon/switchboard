@@ -151,7 +151,7 @@ src/
     menu.ts                custom app menu — ⌘R→Refresh (no reload roles), File/View/Window
     windowState.ts         persists window bounds/position across launches
     trafficLights.ts       re-aligns the native traffic lights to the page zoom (renderer pings on resize)
-    updater.ts             self-update: GitHub-compare check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
+    updater.ts             self-update: git ls-remote check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
     sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
     pty/manager.ts         spawns login shells, types the claude command; output activity → LRU eviction (configurable cap, default 8)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
