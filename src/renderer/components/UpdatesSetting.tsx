@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { UpdateCheck, UpdateInfo } from '@shared/types'
+import type { UpdateCheck } from '@shared/types'
+import type { Updates } from '../lib/useUpdates'
 
 // The documented manual update (README / CLAUDE.md "Update Switchboard"), shown when this copy can't
 // rebuild itself (moved out of its dist/ folder).
@@ -14,56 +15,42 @@ function statusText(check: UpdateCheck | null): string {
     : 'Couldn’t check for updates'
 }
 
+interface Props {
+  /** The shared self-update state, owned by App's useUpdates() so it survives this modal closing and so
+   *  the launch check / attention dot can read it too. */
+  updates: Updates
+}
+
 /**
- * Self-contained Updates control for the Preferences → Application page. Owns its own state via
- * window.api (no App plumbing — it's purely main-backed). Auto-checks on mount (each time the page
- * opens). Single-button-per-state: every state surfaces exactly ONE action (or none), never a row of
- * choices. The in-app update runs only on the packaged app with its source repo findable; otherwise it
- * shows the manual command. See src/main/updater.ts.
+ * The Updates control on the Preferences → Application page. A thin presenter over the App-owned
+ * `useUpdates` state (so a launch-time check and the gear/nav attention dot share it). Single-button-
+ * per-state: every state surfaces exactly ONE action (or none), never a row of choices. While a check
+ * is in flight the action slot holds a disabled "Checking…" button. The in-app update runs only on the
+ * packaged app with its source repo findable; otherwise it shows the manual command. See useUpdates.ts
+ * and src/main/updater.ts.
  */
-export default function UpdatesSetting(): ReactNode {
-  const [info, setInfo] = useState<UpdateInfo | null>(null)
-  const [check, setCheck] = useState<UpdateCheck | null>(null) // null = a check is in flight
-  const [phase, setPhase] = useState<'idle' | 'updating' | 'done' | 'failed'>('idle')
-  const [log, setLog] = useState('')
+export default function UpdatesSetting({ updates }: Props): ReactNode {
+  const { info, check, checking, phase, log, canSelfUpdate, runCheck, runUpdate, relaunch } = updates
   const [copied, setCopied] = useState(false)
   const mounted = useRef(true)
   const logRef = useRef<HTMLPreElement>(null)
 
-  const runCheck = useCallback(async (): Promise<void> => {
-    setCheck(null)
-    const result = await window.api.checkForUpdates()
-    if (mounted.current) setCheck(result)
-  }, [])
-
-  // Auto-check on mount (the page opening). getUpdateInfo is one-shot; runCheck hits the network.
+  // Re-check when the page (re)opens, but never disturb an in-flight / finished run — a re-check only
+  // touches `checking`/`check`, so the gear/nav dot stays put (runCheck keeps the last result).
   useEffect(() => {
     mounted.current = true
-    void window.api.getUpdateInfo().then((i) => {
-      if (mounted.current) setInfo(i)
-    })
-    void runCheck()
+    if (phase === 'idle' && !checking) void runCheck()
     return () => {
       mounted.current = false
     }
-  }, [runCheck])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount (page open), not on every tick
+  }, [])
 
   // Keep the streamed log pinned to its newest line.
   useEffect(() => {
     const el = logRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [log])
-
-  const update = useCallback(async (): Promise<void> => {
-    setPhase('updating')
-    setLog('')
-    const off = window.api.onUpdateProgress((line) => {
-      if (mounted.current) setLog((prev) => prev + line)
-    })
-    const result = await window.api.runUpdate()
-    off()
-    if (mounted.current) setPhase(result.ok ? 'done' : 'failed')
-  }, [])
 
   const copyCmd = useCallback((): void => {
     void navigator.clipboard.writeText(MANUAL_CMD)
@@ -75,30 +62,37 @@ export default function UpdatesSetting(): ReactNode {
 
   // Self-update needs the source repo (always found in production; in `npm run dev` too — runUpdate
   // itself is gated to the packaged app in main, so clicking in dev just reports that).
-  const canSelfUpdate = !!info?.repoRoot
   const detached = phase === 'idle' && check?.status === 'behind' && !canSelfUpdate
-  const showLog = phase === 'updating' || phase === 'done' || phase === 'failed'
+  // The log ("mini terminal") auto-closes once the update succeeds — only an in-flight or FAILED run
+  // keeps it open (a failure needs the output to read the error).
+  const showLog = phase === 'updating' || phase === 'failed'
 
   // Exactly one action per state (or none).
-  const btn = (label: string, onClick: () => void): ReactNode => (
-    <button type="button" className="sb-setting-btn" onClick={onClick}>
+  const btn = (label: string, onClick: () => void, disabled = false): ReactNode => (
+    <button type="button" className="sb-setting-btn" onClick={onClick} disabled={disabled}>
       {label}
     </button>
   )
   let button: ReactNode = null
-  if (phase === 'done') button = btn('Relaunch', () => window.api.relaunchForUpdate())
-  else if (phase === 'failed') button = btn('Try again', () => void update())
-  else if (phase === 'idle' && check) {
-    if (check.status === 'current') button = btn('Check again', () => void runCheck())
-    else if (check.status === 'behind' && canSelfUpdate) button = btn('Update now', () => void update())
+  if (phase === 'done') button = btn('Relaunch', () => relaunch())
+  else if (phase === 'failed') button = btn('Try again', () => void runUpdate())
+  else if (phase === 'idle') {
+    if (checking) button = btn('Checking…', () => {}, true)
+    else if (check?.status === 'current') button = btn('Check again', () => void runCheck())
+    else if (check?.status === 'behind' && canSelfUpdate)
+      button = btn('Download update', () => void runUpdate())
     else if (detached) button = btn(copied ? 'Copied' : 'Copy command', copyCmd)
-    else if (check.status === 'unknown' && check.reason !== 'dev')
+    else if (check?.status === 'unknown' && check.reason !== 'dev')
       button = btn('Try again', () => void runCheck())
     // 'unknown' + dev → no button (status only)
   }
   // phase 'updating' → no button (the log carries it)
 
-  // The status line reflects the phase (an in-flight / finished run) over the last check result.
+  // The status line reflects the phase (an in-flight / finished run) over the last check result. While
+  // re-checking we keep the LAST known status visible ("Up to date" stays put) so the version/status
+  // block doesn't change height and shift — the disabled "Checking…" button already signals activity,
+  // and a non-empty status differs from it so it never reads twice. On the first check there's no prior
+  // status (empty); .sb-update-status reserves a line's height in CSS so it doesn't shift when it fills.
   const displayStatus =
     phase === 'updating'
       ? 'Updating…'
@@ -106,7 +100,11 @@ export default function UpdatesSetting(): ReactNode {
         ? 'Update complete'
         : phase === 'failed'
           ? 'Update failed'
-          : statusText(check)
+          : checking
+            ? check
+              ? statusText(check)
+              : ''
+            : statusText(check)
 
   return (
     <div className="sb-setting">
