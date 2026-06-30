@@ -309,6 +309,39 @@ describe('parseTranscript', () => {
     expect(t.messages.map((m) => m.uuid)).toEqual(['p', 'a'])
   })
 
+  it('drops the /compact summary line (not a typed prompt)', async () => {
+    const file = path.join(tmpDir, `${randomUUID()}.jsonl`)
+    await writeFile(
+      file,
+      jsonl([
+        { type: 'user', uuid: 'p', isSidechain: false, cwd: CWD, message: { role: 'user', content: 'go' } },
+        {
+          type: 'assistant',
+          uuid: 'a',
+          isSidechain: false,
+          cwd: CWD,
+          message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] }
+        },
+        {
+          type: 'user',
+          uuid: 'compact',
+          isSidechain: false,
+          isCompactSummary: true,
+          isVisibleInTranscriptOnly: true,
+          cwd: CWD,
+          message: {
+            role: 'user',
+            content: 'This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n...'
+          }
+        }
+      ]),
+      'utf8'
+    )
+    const t = await parseTranscript(file)
+    // The summary is machine-injected continuation context, not a user turn → dropped from the view.
+    expect(t.messages.map((m) => m.uuid)).toEqual(['p', 'a'])
+  })
+
   it('returns an empty transcript for a non-existent file (no throw)', async () => {
     const t = await parseTranscript(path.join(tmpDir, 'does-not-exist.jsonl'))
     expect(t.messages).toEqual([])
@@ -869,6 +902,87 @@ describe('extractTurnState', () => {
       ])
     )
     expect(r.turnState).toBeUndefined()
+  })
+
+  // --- /compact summary must NOT read as in_progress (else the dot breathes forever) ---
+
+  it('awaiting after a manual /compact leaves the session idle at the prompt', () => {
+    // The `/compact` summary is a `user` line (isCompactSummary) whose free-text content would
+    // otherwise classify as a real prompt → in_progress → breathing forever. It must be modeled
+    // as a finished (ended) turn. The trailing caveat / command echo / stdout are noise.
+    const r = extractTurnState(
+      jsonl([
+        {
+          type: 'assistant',
+          isSidechain: false,
+          timestamp: T1,
+          message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] }
+        },
+        {
+          type: 'user',
+          isSidechain: false,
+          isCompactSummary: true,
+          isVisibleInTranscriptOnly: true,
+          timestamp: T2,
+          message: {
+            role: 'user',
+            content: 'This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n1. Primary Request and Intent: ...'
+          }
+        },
+        {
+          type: 'user',
+          isMeta: true,
+          isSidechain: false,
+          timestamp: T2,
+          message: { role: 'user', content: '<local-command-caveat>Caveat: DO NOT respond to these messages</local-command-caveat>' }
+        },
+        {
+          type: 'user',
+          isSidechain: false,
+          timestamp: T2,
+          message: { role: 'user', content: '<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>' }
+        },
+        {
+          type: 'user',
+          isSidechain: false,
+          timestamp: T2,
+          message: { role: 'user', content: '<local-command-stdout>Compacted (ctrl+o to see full summary)</local-command-stdout>' }
+        }
+      ])
+    )
+    expect(r.turnState).toBe('awaiting')
+    expect(r.turnEndedAt).toBe(Date.parse(T2))
+    expect(r.lastActivityAt).toBe(Date.parse(T2))
+  })
+
+  it('flips back to in_progress when an auto-compact continuation assistant line follows the summary', () => {
+    const T3 = '2026-06-01T17:01:00.000Z'
+    const r = extractTurnState(
+      jsonl([
+        {
+          type: 'assistant',
+          isSidechain: false,
+          timestamp: T1,
+          message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't', name: 'Bash', input: {} }] }
+        },
+        {
+          type: 'user',
+          isSidechain: false,
+          isCompactSummary: true,
+          timestamp: T2,
+          message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n...' }
+        },
+        {
+          // Streaming fragment of the auto-continuation — no stop_reason yet ⇒ still generating.
+          type: 'assistant',
+          isSidechain: false,
+          timestamp: T3,
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Picking up where we left off' }] }
+        }
+      ])
+    )
+    expect(r.turnState).toBe('in_progress')
+    expect(r.lastActivityAt).toBe(Date.parse(T3))
   })
 })
 
