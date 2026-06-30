@@ -153,7 +153,8 @@ src/
     trafficLights.ts       re-aligns the native traffic lights to the page zoom (renderer pings on resize)
     updater.ts             self-update: git ls-remote check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
     sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexSessionIndex · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
-    pty/manager.ts         spawns login shells, types the claude command; output activity → LRU eviction (configurable cap, default 8)
+    pty/manager.ts         spawns login shells, types the agent command; output activity → LRU eviction (configurable cap, default 8)
+    pty/bootCommand.ts     per-agent boot command + Ctrl-E/Ctrl-U line-clear so stray prompt content can't fuse onto it (pure, unit-tested)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
   renderer/                React 18 + Vite
     App.tsx                two-column layout + state orchestration (per-conversation view memory, back/forward history)
