@@ -15,6 +15,7 @@ import type { ConversationGroup, ConversationMeta } from '../../shared/types'
 import { extractMeta } from './parser'
 import { defaultCodexRoot, extractCodexMeta, listCodexRollouts } from './codexParser'
 import { readCodexThreads } from './codexThreadsDb'
+import { readCodexSessionNames, resolveCodexTitle } from './codexSessionIndex'
 
 /** Default projects root: `~/.claude/projects`. */
 function defaultProjectsRoot(): string {
@@ -185,13 +186,15 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<Conversa
     extractWithCache(f, cache, safeExtractCodexMeta)
   )
 
-  // Consult Codex's own index DB once per pass: DROP archived threads (Codex hides those from its own
-  // list, so surfacing them would make the two browsers disagree), and prefer the DB title over the
-  // rollout-derived one (it carries renames — which never touch the rollout, see codexRename.ts — and
-  // otherwise matches what Codex shows). Falls back to the rollout title when the DB has no row (or is
-  // transiently unreadable). Spread so the overlay doesn't mutate the cached meta (the cache keys on
-  // file mtime/size, not title).
+  // Consult Codex's own stores once per pass (both reads are cheap — a tiny SQLite table and a small
+  // append-only file): DROP archived threads (Codex hides those from its own list, so surfacing them
+  // would make the two browsers disagree), and resolve each title the way Codex itself does. A rename
+  // writes both the volatile `threads.title` (re-derived to the first message on resume) and the
+  // durable `session_index.jsonl`; resolveCodexTitle prefers a distinct DB title, else the session
+  // name, else the rollout-derived one — so a reverted DB title still surfaces the real rename. Spread
+  // so the overlay doesn't mutate the cached meta (the cache keys on file mtime/size, not title).
   const threads = readCodexThreads(path.dirname(root))
+  const sessionNames = readCodexSessionNames(path.dirname(root))
 
   const out: ConversationMeta[] = []
   for (const meta of metas) {
@@ -199,8 +202,13 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<Conversa
     if (meta.messageCount === 0) continue
     const row = threads.get(meta.sessionId)
     if (row?.archived) continue
-    const dbTitle = row && row.title.trim().length > 0 ? row.title : null
-    out.push(dbTitle ? { ...meta, title: dbTitle } : meta)
+    const title = resolveCodexTitle({
+      rolloutTitle: meta.title,
+      dbTitle: row?.title ?? null,
+      dbFirstUserMessage: row?.firstUserMessage ?? null,
+      sessionName: sessionNames.get(meta.sessionId) ?? null
+    })
+    out.push(title === meta.title ? meta : { ...meta, title })
   }
   return out
 }

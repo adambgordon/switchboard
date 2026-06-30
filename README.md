@@ -152,7 +152,7 @@ src/
     windowState.ts         persists window bounds/position across launches
     trafficLights.ts       re-aligns the native traffic lights to the page zoom (renderer pings on resize)
     updater.ts             self-update: git ls-remote check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
-    sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
+    sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexSessionIndex · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
     pty/manager.ts         spawns login shells, types the claude command; output activity → LRU eviction (configurable cap, default 8)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
   renderer/                React 18 + Vite
