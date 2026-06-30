@@ -3,6 +3,7 @@ import { Close, Folder, Info, Reset } from './icons'
 import { basename } from '../lib/format'
 import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
+import type { Updates } from '../lib/useUpdates'
 import AgentLogo from './AgentLogo'
 import UpdatesSetting from './UpdatesSetting'
 
@@ -169,6 +170,8 @@ interface Props {
   page: Page | null
   onChangePage: (p: Page) => void
   onClose: () => void
+  /** The shared self-update state (App-owned). Feeds the Updates control and the Application-nav dot. */
+  updates: Updates
   // --- App page: appearance ---
   /** The current theme mode (system / light / dark). */
   themeMode: ThemeMode
@@ -218,6 +221,7 @@ export default function SettingsModal({
   page,
   onChangePage,
   onClose,
+  updates,
   themeMode,
   onSetThemeMode,
   darkIcon,
@@ -288,6 +292,9 @@ export default function SettingsModal({
               onClick={() => onChangePage('application')}
             >
               Application
+              {updates.needsAttention && (
+                <span className="sb-attn-dot sb-attn-dot-nav" aria-hidden="true" />
+              )}
             </button>
             <button
               className={`sb-settings-nav-item${page === 'shortcuts' ? ' active' : ''}`}
@@ -354,7 +361,7 @@ export default function SettingsModal({
             ) : page === 'application' ? (
               <>
                 <div className="sb-modal-group">
-                  <UpdatesSetting />
+                  <UpdatesSetting updates={updates} />
                 </div>
                 <div className="sb-modal-group">
                   <div className="sb-setting">

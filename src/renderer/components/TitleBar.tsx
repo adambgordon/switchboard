@@ -11,6 +11,9 @@ interface Props {
   resolvedTheme: ResolvedTheme
   /** Flip light ↔ dark as an explicit choice — the title-bar quick toggle. */
   onToggleTheme: () => void
+  /** The app isn't up to date (update available, or downloaded-but-not-relaunched) — show a neutral
+   *  ink dot on the gear. */
+  updatesNeedAttention?: boolean
 }
 
 export default function TitleBar({
@@ -19,7 +22,8 @@ export default function TitleBar({
   onHome,
   onOpenSettings,
   resolvedTheme,
-  onToggleTheme
+  onToggleTheme,
+  updatesNeedAttention
 }: Props) {
   return (
     <header className="sb-titlebar">
@@ -49,10 +53,11 @@ export default function TitleBar({
       <button
         className="sb-panel-toggle"
         onClick={onOpenSettings}
-        data-tip="Preferences (⌘,)"
-        aria-label="Preferences"
+        data-tip={updatesNeedAttention ? 'Preferences (⌘,) — update available' : 'Preferences (⌘,)'}
+        aria-label={updatesNeedAttention ? 'Preferences — update available' : 'Preferences'}
       >
         <Gear size={16} />
+        {updatesNeedAttention && <span className="sb-attn-dot sb-attn-dot-gear" aria-hidden="true" />}
       </button>
     </header>
   )

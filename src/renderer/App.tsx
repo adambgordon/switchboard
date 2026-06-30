@@ -15,6 +15,7 @@ import { useTranscript } from './lib/useTranscript'
 import { useNavHistory } from './lib/useNavHistory'
 import { useTheme } from './lib/useTheme'
 import { useDarkIcon } from './lib/useDarkIcon'
+import { useUpdates } from './lib/useUpdates'
 import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
@@ -112,6 +113,7 @@ export default function App() {
   } = useMaxLiveSessions()
   const { mode: themeMode, resolved: themeResolved, setMode: setThemeMode, toggle: toggleTheme } = useTheme()
   const darkIcon = useDarkIcon()
+  const updates = useUpdates()
   const focused = useWindowFocus()
   const {
     paneWidth,
@@ -809,6 +811,7 @@ export default function App() {
         onOpenSettings={() => setSettingsPage('appearance')}
         resolvedTheme={themeResolved}
         onToggleTheme={toggleTheme}
+        updatesNeedAttention={updates.needsAttention}
       />
       <div className="sb-body" style={{ '--pane-w': `${paneWidth}px` } as CSSProperties}>
         {!paneCollapsed && (
@@ -906,6 +909,7 @@ export default function App() {
         page={settingsPage}
         onChangePage={setSettingsPage}
         onClose={() => setSettingsPage(null)}
+        updates={updates}
         themeMode={themeMode}
         onSetThemeMode={setThemeMode}
         darkIcon={darkIcon.value}

@@ -48,7 +48,7 @@ Because you built it locally, macOS doesn't quarantine it — it opens without t
 
 ## Updates
 
-**In the app** — open Preferences (`⌘,`) → **Application** → **Updates** → **Check for updates**. If you're behind, **Update** pulls the latest and rebuilds in place (a few minutes), then **Relaunch** loads the new build. *(Needs the app running from its built `dist/` folder; if you moved it elsewhere, it shows you the manual command below instead.)*
+**In the app** — open Preferences (`⌘,`) → **Application** → **Updates** → **Check for updates**. If you're behind, **Download update** pulls the latest and rebuilds in place (a few minutes), then **Relaunch** loads the new build. A dot on the gear (and the **Application** row) marks when an update is waiting. *(Needs the app running from its built `dist/` folder; if you moved it elsewhere, it shows you the manual command below instead.)*
 
 **Or ask Claude:**
 
