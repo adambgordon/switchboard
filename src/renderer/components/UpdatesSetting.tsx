@@ -8,9 +8,7 @@ const MANUAL_CMD = 'git pull && npm run setup'
 function statusText(check: UpdateCheck | null): string {
   if (!check) return 'Checking…'
   if (check.status === 'current') return 'Up to date'
-  if (check.status === 'behind') {
-    return `${check.behindBy} commit${check.behindBy === 1 ? '' : 's'} behind`
-  }
+  if (check.status === 'behind') return 'Update available'
   return check.reason === 'dev'
     ? 'Dev build — updates apply to the packaged app'
     : 'Couldn’t check for updates'
