@@ -407,6 +407,7 @@ body.sb-resizing .sb-pane {
 /* ---- title-bar panel toggles ---- */
 .sb-panel-toggle {
   -webkit-app-region: no-drag;
+  position: relative; /* anchors the gear's attention dot (.sb-attn-dot-gear) */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -421,6 +422,28 @@ body.sb-resizing .sb-pane {
 }
 .sb-panel-toggle.active {
   color: var(--ink-soft);
+}
+
+/* Attention dot — a small NEUTRAL ink dot marking "the app isn't up to date" (update available, or
+   downloaded-but-not-relaunched). Neutral by design: the two-accent invariant reserves cobalt for
+   "alive" and red for "destructive", and the Updates surface stays grayscale. Shown on the title-bar
+   gear and the Application nav row. */
+.sb-attn-dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+  pointer-events: none;
+}
+.sb-attn-dot-gear {
+  top: 2px;
+  right: 2px;
+}
+.sb-attn-dot-nav {
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
 }
 
 /* ---- keyboard-shortcuts modal ---- */
@@ -620,6 +643,7 @@ body.sb-resizing .sb-pane {
   overflow-y: auto;
 }
 .sb-settings-nav-item {
+  position: relative; /* anchors the Application row's attention dot (.sb-attn-dot-nav) */
   width: 100%;
   padding: 7px 10px;
   border-radius: var(--r-sm);
@@ -822,10 +846,15 @@ body.sb-resizing .sb-pane {
   border-radius: var(--r-sm);
   transition: all var(--dur-fast) var(--ease);
 }
-.sb-setting-btn:hover {
+.sb-setting-btn:not(:disabled):hover {
   color: var(--ink);
   background: var(--btn-hover);
   border-color: var(--ink-ghost);
+}
+/* Greyed, inert placeholder — e.g. the "Checking…" button while an update check is in flight. */
+.sb-setting-btn:disabled {
+  color: var(--ink-faint);
+  cursor: default;
 }
 
 /* --- Updates (self-update control on the App page; see UpdatesSetting.tsx) --- */
@@ -856,6 +885,9 @@ body.sb-resizing .sb-pane {
 .sb-update-status {
   font-size: var(--text-xs);
   color: var(--ink-soft);
+  /* Always reserve one line so an empty status (the first check, before a result) doesn't collapse the
+     version/status block and shift it as the text appears/disappears. */
+  min-height: 1lh;
 }
 .sb-update-manual {
   display: flex;
