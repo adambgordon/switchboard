@@ -24,14 +24,19 @@ function freshHome(): string {
 function makeStateDb(
   home: string,
   n: number,
-  rows: Array<[string, string, number?]>,
+  rows: Array<[string, string, number?, string?]>,
   withTable = true
 ): void {
   const db = new DatabaseSync!(path.join(home, `state_${n}.sqlite`))
   if (withTable) {
-    db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, archived INTEGER)')
-    const ins = db.prepare('INSERT INTO threads (id, title, archived) VALUES (?, ?, ?)')
-    for (const [id, title, archived = 0] of rows) ins.run(id, title, archived)
+    db.exec(
+      'CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, first_user_message TEXT, archived INTEGER)'
+    )
+    const ins = db.prepare(
+      'INSERT INTO threads (id, title, first_user_message, archived) VALUES (?, ?, ?, ?)'
+    )
+    for (const [id, title, archived = 0, firstUserMessage = ''] of rows)
+      ins.run(id, title, firstUserMessage, archived)
   } else {
     db.exec('CREATE TABLE other (x TEXT)')
   }
@@ -50,18 +55,24 @@ afterEach(() => {
 })
 
 describe.skipIf(!DatabaseSync)('readCodexThreads', () => {
-  it('maps id -> { title, archived }, keeps raw titles, and flags archived rows', async () => {
+  it('maps id -> { title, firstUserMessage, archived }, keeps raw values, and flags archived rows', async () => {
     const home = freshHome()
     makeStateDb(home, 5, [
       ['id-a', 'Alpha thread', 0],
       ['id-b', '  ', 0], // raw — the indexer applies the non-empty check, not the reader
-      ['id-c', 'Archived one', 1]
+      ['id-c', 'Archived one', 1],
+      ['id-d', 'Title D', 0, 'first msg of d']
     ])
     const { readCodexThreads } = await import('../src/main/sessions/codexThreadsDb')
     const threads = readCodexThreads(home)
-    expect(threads.get('id-a')).toEqual({ title: 'Alpha thread', archived: false })
-    expect(threads.get('id-b')).toEqual({ title: '  ', archived: false })
-    expect(threads.get('id-c')).toEqual({ title: 'Archived one', archived: true })
+    expect(threads.get('id-a')).toEqual({ title: 'Alpha thread', firstUserMessage: '', archived: false })
+    expect(threads.get('id-b')).toEqual({ title: '  ', firstUserMessage: '', archived: false })
+    expect(threads.get('id-c')).toEqual({ title: 'Archived one', firstUserMessage: '', archived: true })
+    expect(threads.get('id-d')).toEqual({
+      title: 'Title D',
+      firstUserMessage: 'first msg of d',
+      archived: false
+    })
   })
 
   it('reads the newest state_<N>.sqlite when several exist', async () => {
