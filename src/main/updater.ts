@@ -1,16 +1,17 @@
 /**
- * Self-updater glue. The check compares the build's commit (baked as __GIT_SHA__ by electron.vite.config)
- * to the latest on `main` via the GitHub compare API — over HTTPS, unauthenticated (the repo is public),
- * so it never touches SSH (which `origin` uses and which a GUI-spawned `git` can't reliably reach). The
- * update shells out to the documented `git pull --ff-only <https> main && npm run setup` in the source
- * repo (found by walking up for `.git`), streaming output back, then relaunches into the rebuilt .app.
+ * Self-updater glue. The check resolves `main`'s tip commit via `git ls-remote` over HTTPS (in a login
+ * shell) and compares it to the build's baked __GIT_SHA__; the update shells out to the documented
+ * `git pull --ff-only <https> main && npm run setup` in the source repo (found by walking up for `.git`),
+ * streaming output back, then relaunches into the rebuilt .app. Everything goes through git over HTTPS —
+ * never SSH (which `origin` uses and a GUI-spawned `git` can't reliably reach), and never the GitHub REST
+ * API (unauthenticated, shared-IP rate-limited — see remoteMainSha / docs/gotchas.md).
  *
- * Pure, unit-tested helpers (repo discovery, compare interpretation, the dev fake) live in updater-core.
+ * Pure, unit-tested helpers (repo discovery, SHA comparison, the dev fake) live in updater-core.
  */
-import { app, net } from 'electron'
+import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import type { UpdateCheck, UpdateInfo, UpdateRunResult } from '../shared/types'
-import { findRepoRootFrom, interpretCompare, parseFakeUpdate } from './updater-core'
+import { findRepoRootFrom, interpretRemoteSha, parseFakeUpdate } from './updater-core'
 
 // Replaced at build time by electron.vite.config's `define`; 'dev' when the config couldn't read git.
 declare const __GIT_SHA__: string
@@ -40,48 +41,48 @@ export function buildInfo(): UpdateInfo {
 }
 
 /**
- * GitHub compare `main...<head>` → `behind_by` (commits the head is behind main). Unauthenticated.
+ * Resolve `main`'s tip commit SHA via `git ls-remote` over HTTPS, in a LOGIN shell.
  *
- * Uses Electron's `net` (Chromium's network stack), NOT `node:https`. On a TLS-inspecting corporate
- * network — a firewall that re-signs api.github.com with an internal root CA — `node:https` fails with
- * SELF_SIGNED_CERT_IN_CHAIN: Electron's Node is backed by BoringSSL, which trusts only its bundled
- * Mozilla CA set and ignores the SSL_CERT_FILE / NODE_EXTRA_CA_CERTS that make system tools work (and a
- * GUI app wouldn't inherit those env vars regardless). `net` uses the OS trust store + system proxy, like
- * curl / Chrome / git already do on the machine. `net` has no `timeout` option, so we abort on a manual timer.
+ * NOT the GitHub REST API: that's `api.github.com`, unauthenticated-rate-limited to 60 req/hr PER IP —
+ * and behind a shared corporate NAT that pool is drained by everyone's ambient traffic, so the check
+ * 403s unpredictably (a public app has no token to raise the limit). git's smart-HTTP transport
+ * (`github.com`, not the REST API) isn't subject to that limit. A login shell gives git the PATH +
+ * corporate TLS config a GUI app lacks — the same reason runUpdate uses one, and why we avoid hitting
+ * the API over node:https (Electron's BoringSSL ignores the corporate CA; see docs/gotchas.md).
  */
-function githubBehindBy(head: string): Promise<number> {
+function remoteMainSha(): Promise<string> {
   return new Promise((resolve, reject) => {
-    const req = net.request({
-      method: 'GET',
-      url: `https://api.github.com/repos/${OWNER}/${REPO}/compare/${BRANCH}...${encodeURIComponent(head)}`
-    })
-    req.setHeader('User-Agent', 'Switchboard')
-    req.setHeader('Accept', 'application/vnd.github+json')
-    const timer = setTimeout(() => req.abort(), 8000)
-    req.on('response', (res) => {
-      let body = ''
-      res.on('data', (c) => (body += c.toString()))
-      res.on('end', () => {
-        clearTimeout(timer)
-        const code = res.statusCode
-        if (code && code >= 200 && code < 300) {
-          try {
-            const json = JSON.parse(body) as { behind_by?: number }
-            resolve(typeof json.behind_by === 'number' ? json.behind_by : 0)
-          } catch {
-            reject(new Error('bad response'))
-          }
-        } else {
-          reject(new Error(`HTTP ${code ?? '?'}`))
-        }
-      })
-    })
-    req.on('error', (e) => {
+    const shell = process.env.SHELL || '/bin/zsh'
+    const child = spawn(shell, ['-lc', `git ls-remote ${REPO_HTTPS} ${BRANCH}`], { env: process.env })
+    let out = ''
+    let err = ''
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, 8000)
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (d: string) => (out += d))
+    child.stderr.on('data', (d: string) => (err += d))
+    child.on('error', (e) => {
       clearTimeout(timer)
       reject(e)
     })
-    req.on('abort', () => reject(new Error('timeout')))
-    req.end()
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      if (timedOut) {
+        reject(new Error('timeout'))
+        return
+      }
+      if (code !== 0) {
+        reject(new Error(err.trim() || `git ls-remote exited ${code ?? '?'}`))
+        return
+      }
+      const sha = out.split(/\s/)[0] // "<sha>\trefs/heads/main"
+      if (/^[0-9a-f]{7,40}$/i.test(sha)) resolve(sha)
+      else reject(new Error('no ref'))
+    })
   })
 }
 
@@ -90,11 +91,11 @@ export async function checkForUpdates(): Promise<UpdateCheck> {
   const fake = parseFakeUpdate(process.env.SWITCHBOARD_FAKE_UPDATE)
   if (fake) return fake
   // The real check needs a packaged build whose commit is on the remote; `npm run dev` builds from an
-  // unpushed working tree, so report it plainly rather than 404ing against the compare API.
+  // unpushed working tree, so report it plainly rather than comparing against a SHA it can't match.
   if (!app.isPackaged) return { status: 'unknown', reason: 'dev' }
   if (buildSha() === 'dev') return { status: 'unknown', reason: 'no build commit' }
   try {
-    return interpretCompare(await githubBehindBy(buildSha()))
+    return interpretRemoteSha(buildSha(), await remoteMainSha())
   } catch (e) {
     return { status: 'unknown', reason: e instanceof Error ? e.message : 'check failed' }
   }

@@ -34,17 +34,21 @@ export function findRepoRootFrom(startDir: string, maxDepth = 12): string | null
 }
 
 /**
- * Map a GitHub compare of `main...<buildSha>` to an UpdateCheck. Per the compare API, `behind_by` is
- * the number of commits the BASE (main) has that the HEAD (the build) does not — i.e. exactly how many
- * commits the build is behind main. (Verified against the docs + a live API probe.)
+ * Compare the build's baked commit to `main`'s tip SHA (from `git ls-remote`) → an UpdateCheck.
+ * Equal ⇒ current; different ⇒ behind (an update exists). git smart-HTTP gives only the tip SHA, not a
+ * commit count, so the result is binary — no "N commits behind". SHAs are compared by prefix so a short
+ * build SHA still matches the full remote one (both are full today, but it's cheap insurance).
  */
-export function interpretCompare(behindBy: number): UpdateCheck {
-  return behindBy > 0 ? { status: 'behind', behindBy } : { status: 'current' }
+export function interpretRemoteSha(buildSha: string, remoteSha: string): UpdateCheck {
+  if (!remoteSha) return { status: 'unknown', reason: 'no remote sha' }
+  const a = buildSha.toLowerCase()
+  const b = remoteSha.toLowerCase()
+  return a.startsWith(b) || b.startsWith(a) ? { status: 'current' } : { status: 'behind' }
 }
 
 /**
  * Dev/QA override so every UI state is reachable in `npm run dev`, where the real check can't run (the
- * build commit isn't pushed to the remote). Reads `SWITCHBOARD_FAKE_UPDATE`: 'current' | 'behind[:N]' |
+ * build commit isn't pushed to the remote). Reads `SWITCHBOARD_FAKE_UPDATE`: 'current' | 'behind' |
  * 'unknown[:reason]'. Returns null when unset/unrecognized (→ the real check runs). Inert in the
  * packaged app unless the env var is explicitly set.
  */
@@ -52,10 +56,7 @@ export function parseFakeUpdate(value: string | undefined): UpdateCheck | null {
   if (!value) return null
   const v = value.trim()
   if (v === 'current') return { status: 'current' }
-  if (v.startsWith('behind')) {
-    const n = parseInt(v.split(':')[1] ?? '', 10)
-    return { status: 'behind', behindBy: Number.isFinite(n) && n > 0 ? n : 1 }
-  }
+  if (v.startsWith('behind')) return { status: 'behind' }
   if (v.startsWith('unknown')) return { status: 'unknown', reason: v.split(':')[1] || 'forced' }
   return null
 }

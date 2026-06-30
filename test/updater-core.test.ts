@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { findRepoRootFrom, interpretCompare, parseFakeUpdate } from '../src/main/updater-core'
+import { findRepoRootFrom, interpretRemoteSha, parseFakeUpdate } from '../src/main/updater-core'
 
 const here = dirname(fileURLToPath(import.meta.url)) // <repo>/test
 const repoRoot = resolve(here, '..') // <repo> — has .git + package.json name "switchboard"
@@ -22,13 +22,22 @@ describe('findRepoRootFrom', () => {
   })
 })
 
-describe('interpretCompare', () => {
-  it('is current when not behind', () => {
-    expect(interpretCompare(0)).toEqual({ status: 'current' })
+describe('interpretRemoteSha', () => {
+  it('is current when the build SHA matches the remote tip', () => {
+    expect(interpretRemoteSha('abc123def', 'abc123def')).toEqual({ status: 'current' })
   })
 
-  it('is behind by the commit count', () => {
-    expect(interpretCompare(3)).toEqual({ status: 'behind', behindBy: 3 })
+  it('matches by prefix (short vs full SHA), case-insensitively', () => {
+    expect(interpretRemoteSha('abc123', 'abc123def4567')).toEqual({ status: 'current' })
+    expect(interpretRemoteSha('ABC123', 'abc123')).toEqual({ status: 'current' })
+  })
+
+  it('is behind when the SHAs differ', () => {
+    expect(interpretRemoteSha('abc123', 'def456')).toEqual({ status: 'behind' })
+  })
+
+  it('is unknown when the remote SHA is empty', () => {
+    expect(interpretRemoteSha('abc123', '')).toEqual({ status: 'unknown', reason: 'no remote sha' })
   })
 })
 
@@ -39,10 +48,10 @@ describe('parseFakeUpdate', () => {
     expect(parseFakeUpdate('nonsense')).toBeNull()
   })
 
-  it('parses current / behind[:N] / unknown[:reason]', () => {
+  it('parses current / behind / unknown[:reason]', () => {
     expect(parseFakeUpdate('current')).toEqual({ status: 'current' })
-    expect(parseFakeUpdate('behind:5')).toEqual({ status: 'behind', behindBy: 5 })
-    expect(parseFakeUpdate('behind')).toEqual({ status: 'behind', behindBy: 1 })
+    expect(parseFakeUpdate('behind')).toEqual({ status: 'behind' })
+    expect(parseFakeUpdate('behind:5')).toEqual({ status: 'behind' }) // trailing :N tolerated, ignored
     expect(parseFakeUpdate('unknown:offline')).toEqual({ status: 'unknown', reason: 'offline' })
     expect(parseFakeUpdate('unknown')).toEqual({ status: 'unknown', reason: 'forced' })
   })

@@ -239,10 +239,11 @@ export interface UpdateInfo {
   packaged: boolean
 }
 
-/** Result of comparing the build's commit to the latest on `main` (GitHub compare API → behind_by). */
+/** Result of comparing the build's baked commit to `main`'s tip SHA (via `git ls-remote`). Binary:
+ *  'behind' means an update exists — git smart-HTTP yields the tip SHA only, not a commit count. */
 export type UpdateCheck =
   | { status: 'current' }
-  | { status: 'behind'; behindBy: number }
+  | { status: 'behind' }
   | { status: 'unknown'; reason: string }
 
 /** Terminal result of an in-app update run (git pull + npm run setup). */
