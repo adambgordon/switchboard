@@ -272,7 +272,9 @@ export async function parseTranscript(filePath: string): Promise<Transcript> {
     let userKind: 'human' | 'tool_result' | 'interrupted' | undefined
     if (role === 'user') {
       const kind = classifyUserLine(obj)
-      if (kind === 'noise') continue
+      // 'noise' (slash-command/bash/notification echo) and 'compact' (the `/compact` summary —
+      // machine-injected continuation context, not a typed prompt) are both dropped from the view.
+      if (kind === 'noise' || kind === 'compact') continue
       userKind = hasToolResult(msg) ? 'tool_result' : kind === 'interrupted' ? 'interrupted' : 'human'
     }
 
@@ -350,9 +352,16 @@ function hasToolResult(message: unknown): boolean {
  * Classify a `user`-type transcript line for turn-state:
  *  - 'real'        — a typed prompt or a tool_result: a genuine turn (Claude is, or is about to be, working).
  *  - 'interrupted' — the "[Request interrupted by user]" sentinel: the turn was aborted (ended).
+ *  - 'compact'     — the `/compact` summary line (`isCompactSummary`): machine-injected continuation
+ *                    context that REPLACES history, not a typed prompt. {@link extractTurnState} models
+ *                    it as a finished (ended) turn, so a manual `/compact` — after which Claude sits idle
+ *                    at the prompt — does not read as in-progress and breathe forever.
  *  - 'noise'       — slash-command / bash / task-notification / caveat echo: not a turn at all.
  */
-function classifyUserLine(obj: Record<string, unknown>): 'real' | 'interrupted' | 'noise' {
+function classifyUserLine(obj: Record<string, unknown>): 'real' | 'interrupted' | 'noise' | 'compact' {
+  // Structural top-level flag, checked first and unambiguously — the summary's content is free text
+  // that none of the text-based tests below would catch.
+  if (obj.isCompactSummary === true) return 'compact'
   const message = obj.message
   // A tool_result is always a real, continuing turn — checked before the tag/meta tests, since
   // its result text could itself contain a wrapper tag (e.g. a Bash tool printing `<bash-stdout>`).
@@ -389,6 +398,10 @@ function classifyUserLine(obj: Record<string, unknown>): 'real' | 'interrupted' 
  *   - last meaningful user line is an interrupt sentinel ("[Request interrupted by user]")
  *     -> 'awaiting' (the turn was aborted; modeled as a terminal turn so the preceding
  *     dangling tool_use stops reading as in-progress)
+ *   - last meaningful user line is the `/compact` summary (`isCompactSummary`) -> 'awaiting'
+ *     (compaction REPLACES history and leaves the session idle at the prompt; modeled as a
+ *     terminal turn so a manual /compact does not read as in-progress and breathe forever — an
+ *     auto-compact's continuation assistant line that follows flips it back to in-progress)
  *   - last main line is an assistant that otherwise ended (end_turn / max_tokens /
  *     an interrupted turn with no stop_reason) -> 'awaiting'
  *   - no messages at all -> undefined
@@ -427,7 +440,7 @@ export function extractTurnState(text: string): {
 
     // Skip non-conversational user lines (slash-command/bash/notification/caveat echo) so they
     // never advance the turn-state — the tail then reflects the last REAL exchange.
-    let userKind: 'real' | 'interrupted' | 'noise' | null = null
+    let userKind: 'real' | 'interrupted' | 'noise' | 'compact' | null = null
     if (obj.type === 'user') {
       userKind = classifyUserLine(obj)
       if (userKind === 'noise') continue
@@ -448,9 +461,14 @@ export function extractTurnState(text: string): {
       const toolName = lastToolUseName(message)
       lastAssistantBlockingTool = toolName && BLOCKING_TOOLS.has(toolName) ? toolName : null
       if (!Number.isNaN(at)) lastAssistantAt = at
-    } else if (userKind === 'interrupted') {
-      // Esc mid-turn aborts it. Model it as a terminal (ended) turn so the dangling assistant
-      // tool_use that precedes the interrupt stops reading as in-progress.
+    } else if (userKind === 'interrupted' || userKind === 'compact') {
+      // Both END the turn, so model each as a terminal (ended) turn:
+      //  • 'interrupted' — Esc mid-turn aborts it, so the dangling assistant tool_use that precedes
+      //    the interrupt stops reading as in-progress.
+      //  • 'compact' — the `/compact` summary REPLACES history; after a manual /compact Claude sits
+      //    idle at the prompt, so the summary must not read as a fresh user turn (in-progress) and
+      //    breathe forever. An auto-compact streams a continuation assistant line right after, which
+      //    overwrites this back to in-progress — correct, since Claude is then working again.
       lastRole = 'assistant'
       lastAssistantStop = 'end_turn'
       lastAssistantBlockingTool = null
