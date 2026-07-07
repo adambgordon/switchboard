@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Children, isValidElement, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
@@ -21,6 +21,7 @@ import type { TranscriptBlock } from '@shared/types'
 import type { MessageGroup } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, turnMarkdown } from '../lib/clipboard'
+import { langLabelFromClassName } from '../lib/codeLang'
 import CopyButton from './CopyButton'
 
 /* Syntax highlighting — a curated language subset (passed to rehype-highlight, which REPLACES lowlight's
@@ -42,12 +43,31 @@ function tableRows(table: HTMLTableElement | null): string[][] {
   return Array.from(table.rows).map((row) => Array.from(row.cells).map((c) => c.textContent ?? ''))
 }
 
+/** The fence's language, read off the child <code>'s `language-xxx` class (set by rehype-highlight /
+ *  mdast). Null for bare fences and inline code. */
+function codeLang(children: ReactNode): string | null {
+  const code = Children.toArray(children).find(isValidElement)
+  const className = isValidElement(code)
+    ? (code.props as { className?: string }).className
+    : undefined
+  return langLabelFromClassName(className)
+}
+
 /* A fenced code block + a markdown table each get a corner copy button. The button lives on a
- * non-scrolling `position:relative` wrapper so it stays put while the inner block scrolls sideways. */
+ * non-scrolling `position:relative` wrapper so it stays put while the inner block scrolls sideways.
+ * A languaged fence also gets a quiet caps caption in the top-left gutter (`.md-lang`); it lives
+ * OUTSIDE the <pre> so it never lands in the copied text, and `.has-lang` opens the gutter so it
+ * clears line 1. */
 function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
   const ref = useRef<HTMLPreElement>(null)
+  const lang = codeLang(children)
   return (
-    <div className="md-pre-wrap">
+    <div className={lang ? 'md-pre-wrap has-lang' : 'md-pre-wrap'}>
+      {lang ? (
+        <span className="md-lang label-caps" aria-hidden="true">
+          {lang}
+        </span>
+      ) : null}
       <pre className="md-pre" ref={ref}>
         {children}
       </pre>

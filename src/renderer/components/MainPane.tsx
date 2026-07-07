@@ -145,14 +145,18 @@ export default function MainPane(props: Props) {
   // Defer the query feeding the DOM-walking search so typing stays responsive on big transcripts.
   const deferredQuery = useDeferredValue(findQuery)
 
-  // Closing the bar clears the search; a fresh query resets to the first match.
+  // Closing the bar clears the search. activeIndex is deliberately NOT reset here: the [deferredQuery]
+  // effect below already resets it on every query change (including this clear-to-empty), coupled to the
+  // DEFERRED query. Resetting it here — immediately, while deferredQuery still lags on the old query —
+  // made the search hook briefly see (index 0, old query, still-live ranges) and scroll back to match #0
+  // on close (the "snap back to where I opened search" bug).
   useEffect(() => {
     if (!findOpen) {
       setFindQuery('')
-      setActiveIndex(0)
       setMatchCount(0)
     }
   }, [findOpen])
+  // A fresh (or cleared) query resets to the first match — in step with the deferred query the hook uses.
   useEffect(() => {
     setActiveIndex(0)
   }, [deferredQuery])
