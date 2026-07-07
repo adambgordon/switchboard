@@ -215,6 +215,25 @@
   white-space: pre;
 }
 
+/* fenced-code language caption — a quiet caps label floating in the block's top-left gutter, mirroring
+   the hover copy chip on the right. Grayscale only (see file header). It lives outside the <pre>, so it
+   never lands in copied text and never scrolls with the code. Extra specificity beats .label-caps' own
+   color so the caption stays a whisper (--ink-ghost, quieter than the caps default --ink-faint). */
+.md-pre-wrap .md-lang {
+  position: absolute;
+  top: 7px;
+  left: 10px;
+  z-index: 1;
+  color: var(--ink-ghost);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* only a languaged fence opens the top gutter, so line 1 clears the caption; bare fences are untouched */
+.md-pre-wrap.has-lang .md-pre {
+  padding-top: calc(var(--s3) + var(--s4));
+}
+
 /* ---- syntax highlighting (rehype-highlight / highlight.js token classes) ----
    A deliberate, documented EXCEPTION to the transcript's grayscale rule (see the file header): fenced
    code carries a muted, editorial syntax palette, themed per light/dark. The base text + sunken
