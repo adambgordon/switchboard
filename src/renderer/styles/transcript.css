@@ -198,7 +198,7 @@
   background: var(--paper-code);
   border: 1px solid var(--rule);
   border-radius: var(--r-md);
-  padding: var(--s3) var(--s4);
+  padding: var(--s3);
   overflow-x: auto;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
