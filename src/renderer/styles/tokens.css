@@ -10,6 +10,7 @@
   --paper-raised: #ffffff; /* raised tiles: live cards, modals, menus, popovers */
   --paper-pane: #ffffff; /* main content surface: pane + Formatted + terminal (= raised in light) */
   --paper-sunken: #f4f4f4; /* sidebar / rail */
+  --paper-code: #f6f6f6; /* unified mono surface: fenced + inline code AND tool result/JSON — midway between sunken and pane */
   --paper-hover: #ededed;
   --paper-active: #e6e6e6;
   --btn: #f3f3f3; /* settings buttons: a light gray, not white */
@@ -120,6 +121,7 @@
   --paper-raised: #2a2a2a; /* raised tiles: live cards, modals, menus — lighter still, so they pop on the rail */
   --paper-pane: #171717; /* main content (pane / Formatted / terminal) — the DARK canvas */
   --paper-sunken: #1f1f1f; /* left pane / rail + recessed bits — lighter chrome (sits ABOVE --paper-pane here) */
+  --paper-code: #222222; /* unified mono surface: fenced + inline code AND tool result/JSON — a step up from sunken, below raised */
   --paper-hover: #313131;
   --paper-active: #3a3a3a;
   --btn: #313131; /* settings buttons: kept at the readable dark gray (inverted elevation) */
