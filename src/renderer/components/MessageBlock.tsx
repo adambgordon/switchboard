@@ -62,7 +62,7 @@ function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
   const ref = useRef<HTMLPreElement>(null)
   const lang = codeLang(children)
   return (
-    <div className={lang ? 'md-pre-wrap has-lang' : 'md-pre-wrap'}>
+    <div className={lang ? 'md-pre-wrap has-lang' : 'md-pre-wrap'} data-lang={lang ?? undefined}>
       {lang ? (
         <span className="md-lang label-caps" aria-hidden="true">
           {lang}
