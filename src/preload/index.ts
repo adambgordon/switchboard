@@ -50,3 +50,5 @@ contextBridge.exposeInMainWorld('platform', process.platform)
 // renderer can badge the wordmark — distinguishes parallel `npm run dev` windows. null in
 // normal/packaged runs. (Preload has process access; sandbox is off for the ESM preload.)
 contextBridge.exposeInMainWorld('devLabel', process.env.SWITCHBOARD_DEV_LABEL?.trim() || null)
+// Dev-only: hold the updater UI in its in-flight state for visual checks.
+contextBridge.exposeInMainWorld('fakeUpdating', process.env.SWITCHBOARD_FAKE_UPDATING === '1')
