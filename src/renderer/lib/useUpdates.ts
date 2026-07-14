@@ -31,11 +31,12 @@ export interface Updates {
  * modal closing. UpdatesSetting now just renders this state. The main-backed engine is src/main/updater.ts.
  */
 export function useUpdates(): Updates {
+  const fakeUpdating = window.fakeUpdating
   const [info, setInfo] = useState<UpdateInfo | null>(null)
   const [check, setCheck] = useState<UpdateCheck | null>(null)
-  const [checking, setChecking] = useState(true) // the launch check fires immediately
-  const [phase, setPhase] = useState<UpdatePhase>('idle')
-  const [log, setLog] = useState('')
+  const [checking, setChecking] = useState(!fakeUpdating) // the launch check fires immediately
+  const [phase, setPhase] = useState<UpdatePhase>(fakeUpdating ? 'updating' : 'idle')
+  const [log, setLog] = useState(fakeUpdating ? '» Previewing update progress…\n' : '')
 
   // Re-check without blanking the last result, so the attention dot stays stable across a re-check
   // (a brief null would make the dot flicker off and back on).
@@ -50,8 +51,9 @@ export function useUpdates(): Updates {
   // mounted-guard is needed (unlike the old in-modal version).
   useEffect(() => {
     void window.api.getUpdateInfo().then(setInfo)
+    if (fakeUpdating) return
     void runCheck()
-  }, [runCheck])
+  }, [fakeUpdating, runCheck])
 
   const runUpdate = useCallback(async (): Promise<void> => {
     setPhase('updating')

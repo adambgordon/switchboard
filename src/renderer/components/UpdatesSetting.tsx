@@ -15,6 +15,33 @@ function statusText(check: UpdateCheck | null): string {
     : 'Couldn’t check for updates'
 }
 
+function useCyclingDots(active: boolean): string {
+  const [dotCount, setDotCount] = useState(0)
+
+  useEffect(() => {
+    if (!active) {
+      setDotCount(0)
+      return
+    }
+    const id = window.setTimeout(() => setDotCount((n) => (n + 1) % 4), dotCount === 3 ? 450 : 150)
+    return () => window.clearTimeout(id)
+  }, [active, dotCount])
+
+  return '.'.repeat(dotCount)
+}
+
+function UpdatingStatus({ dots }: { dots: string }): ReactNode {
+  return (
+    <span className="sb-update-status sb-update-status-updating">
+      <span>Updating</span>
+      <span className="sb-update-dots">
+        <span>{dots}</span>
+        <span className="sb-update-dots-measure" aria-hidden="true">...</span>
+      </span>
+    </span>
+  )
+}
+
 interface Props {
   /** The shared self-update state, owned by App's useUpdates() so it survives this modal closing and so
    *  the launch check / attention dot can read it too. */
@@ -34,6 +61,7 @@ export default function UpdatesSetting({ updates }: Props): ReactNode {
   const [copied, setCopied] = useState(false)
   const mounted = useRef(true)
   const logRef = useRef<HTMLPreElement>(null)
+  const updatingDots = useCyclingDots(phase === 'updating')
 
   // Re-check when the page (re)opens, but never disturb an in-flight / finished run — a re-check only
   // touches `checking`/`check`, so the gear/nav dot stays put (runCheck keeps the last result).
@@ -93,9 +121,9 @@ export default function UpdatesSetting({ updates }: Props): ReactNode {
   // block doesn't change height and shift — the disabled "Checking…" button already signals activity,
   // and a non-empty status differs from it so it never reads twice. On the first check there's no prior
   // status (empty); .sb-update-status reserves a line's height in CSS so it doesn't shift when it fills.
-  const displayStatus =
+  const displayStatus: ReactNode =
     phase === 'updating'
-      ? 'Updating…'
+      ? <UpdatingStatus dots={updatingDots} />
       : phase === 'done'
         ? 'Update complete'
         : phase === 'failed'

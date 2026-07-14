@@ -889,6 +889,20 @@ body.sb-resizing .sb-pane {
      version/status block and shift it as the text appears/disappears. */
   min-height: 1lh;
 }
+.sb-update-status-updating {
+  display: inline-flex;
+  justify-content: flex-start;
+  text-align: left;
+}
+.sb-update-dots {
+  display: inline-grid;
+}
+.sb-update-dots > span {
+  grid-area: 1 / 1;
+}
+.sb-update-dots-measure {
+  visibility: hidden;
+}
 .sb-update-manual {
   display: flex;
   flex-direction: column;
