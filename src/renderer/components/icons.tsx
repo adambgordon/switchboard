@@ -98,6 +98,15 @@ export const Info = (p: IconProps) =>
     </>,
     p
   )
+// Person (head + shoulders) — the "You" section tag's mark, the human counterpart to the agent logos.
+export const Person = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </>,
+    p
+  )
 // Counter-clockwise circular arrow — a "rewind / reset to default" affordance.
 export const Reset = (p: IconProps) =>
   svg(
