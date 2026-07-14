@@ -5,6 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import type { AgentKind } from '@shared/types'
 import { attachPty } from '../lib/ptyStream'
 import type { ResolvedTheme } from '../lib/theme'
 
@@ -12,6 +13,8 @@ interface Props {
   ptyId: string
   /** The conversation this terminal hosts — needed so Option+click can mark it unread. */
   sessionId: string
+  /** Which agent owns this terminal — image paste uses each TUI's native input protocol. */
+  agent: AgentKind
   visible: boolean
   /** Bump counter of a focus request targeting THIS terminal, or null. Focusing happens only
    *  when this changes to a new value — never on mere visibility — so arrow-preview of a live
@@ -92,7 +95,7 @@ function escapePath(p: string): string {
   return p.replace(/([\s'"\\$`!&;|*?<>(){}[\]#~])/g, '\\$1')
 }
 
-export default function TerminalView({ ptyId, sessionId, visible, focusKey, theme, onMarkUnread }: Props) {
+export default function TerminalView({ ptyId, sessionId, agent, visible, focusKey, theme, onMarkUnread }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -213,16 +216,11 @@ export default function TerminalView({ ptyId, sessionId, visible, focusKey, them
     const detach = attachPty(ptyId, (d) => term.write(d))
     const onInput = term.onData((d) => window.api.sendInput(ptyId, d))
 
-    // Image input. claude attaches images on a *paste* (it reads the system
-    // clipboard, or parses an image path inside the pasted text) — never on plain
-    // typed text. So both gestures deliver via a bracketed paste (ESC[200~ … ESC
-    // [201~), the same sequence xterm emits on Cmd+V.
-    //
-    // Ctrl+V: emit an empty bracketed paste, mirroring Cmd+V, so claude reads the
-    // clipboard image itself and renders [Image #N].
+    // Image input is agent-specific. Claude reads the clipboard after an empty bracketed paste;
+    // Codex reserves the real Ctrl+V key and reads the clipboard from that key event.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.ctrlKey && !e.metaKey && !e.altKey && e.code === 'KeyV') {
-        window.api.sendInput(ptyId, '\x1b[200~\x1b[201~')
+        window.api.sendInput(ptyId, agent === 'codex' ? '\x16' : '\x1b[200~\x1b[201~')
         return false
       }
       return true
@@ -237,8 +235,7 @@ export default function TerminalView({ ptyId, sessionId, visible, focusKey, them
       const files = Array.from(e.dataTransfer?.files ?? [])
       if (files.length === 0) return
       const paths = files.map((f) => escapePath(window.api.getPathForFile(f))).join(' ')
-      // Deliver as a bracketed paste (not typed text) so claude detects the image
-      // path(s) and renders [Image #N], matching native-terminal drag-and-drop.
+      // Both agents recognize an image path delivered as a paste and attach it to the prompt.
       window.api.sendInput(ptyId, `\x1b[200~${paths}\x1b[201~`)
     }
     host.addEventListener('dragover', onDragOver)
@@ -247,7 +244,7 @@ export default function TerminalView({ ptyId, sessionId, visible, focusKey, them
     // Cmd+V is text-only. macOS fires a DOM 'paste' event for Cmd+V (but not for
     // Ctrl+V), separate from the keydown above. If the clipboard carries no text
     // (e.g. a screenshot), block the event in capture — before xterm's own paste
-    // handler runs — so claude never sees the paste and can't grab the image.
+    // handler runs — so image attachment stays exclusively on Ctrl+V.
     // Text pastes fall through to xterm untouched, so multi-line paste still works.
     const onPaste = (e: ClipboardEvent): void => {
       const text = e.clipboardData?.getData('text/plain') ?? ''
@@ -284,7 +281,7 @@ export default function TerminalView({ ptyId, sessionId, visible, focusKey, them
       fitRef.current = null
       lastSentRef.current = null
     }
-  }, [ptyId, fitAndResize])
+  }, [ptyId, agent, fitAndResize])
 
   // Re-skin the terminal when the app theme flips. xterm applies term.options.theme live (re-reads
   // the palette and repaints), so a running claude session recolors in place — no remount. The
