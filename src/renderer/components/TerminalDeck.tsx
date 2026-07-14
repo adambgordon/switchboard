@@ -38,6 +38,7 @@ export default function TerminalDeck({ activePtys, visiblePtyId, deckVisible, fo
             <TerminalView
               ptyId={p.ptyId}
               sessionId={p.sessionId}
+              agent={p.agent}
               visible={isVisible}
               focusKey={focusKey}
               theme={theme}
