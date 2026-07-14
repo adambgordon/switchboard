@@ -2,14 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { Transcript } from '@shared/types'
 import MessageBlock from './MessageBlock'
 import { Arrow } from './icons'
-import { buildGroups, type MessageGroup } from '../lib/messageGroups'
+import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
 import { attachAutoHide } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
 
 const NOOP = (): void => {}
 
-/** A "You" (human) group — the section divider separates these from Claude/Result/Error turns. */
-const isHumanGroup = (g: MessageGroup): boolean => g.label === 'You'
+/** A "You" (human) section — the divider separates these from the agent sections. */
+const isHumanItem = (item: TranscriptItem): boolean => item.kind === 'section' && !item.isAssistant
 
 interface TranscriptViewProps {
   transcript: Transcript | null
@@ -246,14 +246,15 @@ export default function TranscriptView({
     scrollElRef.current?.focus({ preventScroll: true })
   }, [focusKey])
 
-  // Coalesce consecutive same-source messages into groups (one header per run). Memoized on the
-  // transcript so search-driven re-renders reuse the same group objects and MessageBlock's memo holds.
-  const groups = useMemo(
-    () => (transcript ? buildGroups(transcript.messages, transcript.agent) : []),
+  // Build the ordered render items — same-author sections, each bundling that author's prose beats +
+  // tool runs under one header. Memoized on the transcript so search-driven re-renders reuse the same
+  // item objects and MessageBlock's memo holds.
+  const items = useMemo(
+    () => (transcript ? buildTranscript(transcript.messages, transcript.agent) : []),
     [transcript]
   )
 
-  const total = groups.length
+  const total = items.length
   const searching = searchQuery.trim().length > 0
   // Mirror render values into refs for the stable scroll handler (reverse infinite-scroll trigger).
   visibleCountRef.current = visibleCount
@@ -343,9 +344,9 @@ export default function TranscriptView({
 
   const count = transcript.messages.length
   // The windowed tail to render (full set while searching — see the effect above). dividerBefore is
-  // computed against the absolute index into `groups`, so slicing never breaks the You↔non-You rule.
+  // computed against the absolute index into `items`, so slicing never breaks the You↔non-You rule.
   const start = Math.max(0, total - (searching ? total : visibleCount))
-  const visibleGroups = start > 0 ? groups.slice(start) : groups
+  const visibleItems = start > 0 ? items.slice(start) : items
   const jumpToEdge = (toTop: boolean): void => {
     const el = scrollElRef.current
     if (!el) return
@@ -371,13 +372,13 @@ export default function TranscriptView({
     <div className="transcript-wrap">
       <div className="transcript-scroll sb-autoscroll" ref={attachScroll} tabIndex={-1}>
         <div className="transcript-content" ref={contentRef}>
-          {visibleGroups.map((group, j) => {
+          {visibleItems.map((item, j) => {
             const idx = start + j
             return (
               <MessageBlock
-                key={group.key}
-                group={group}
-                dividerBefore={idx > 0 && isHumanGroup(group) !== isHumanGroup(groups[idx - 1])}
+                key={item.key}
+                item={item}
+                dividerBefore={idx > 0 && isHumanItem(item) !== isHumanItem(items[idx - 1])}
               />
             )
           })}
