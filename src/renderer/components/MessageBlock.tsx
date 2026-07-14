@@ -18,11 +18,13 @@ import xml from 'highlight.js/lib/languages/xml'
 import css from 'highlight.js/lib/languages/css'
 import markdown from 'highlight.js/lib/languages/markdown'
 import type { TranscriptBlock } from '@shared/types'
-import type { MessageGroup } from '../lib/messageGroups'
+import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, turnMarkdown } from '../lib/clipboard'
 import { langLabelFromClassName } from '../lib/codeLang'
 import CopyButton from './CopyButton'
+import AgentLogo from './AgentLogo'
+import { Arrow, Chevron, Person } from './icons'
 
 /* Syntax highlighting — a curated language subset (passed to rehype-highlight, which REPLACES lowlight's
  * default ~37 'common' grammars, keeping the bundle lean). Unknown languages are tolerated (a build-time
@@ -193,9 +195,6 @@ function AssistantMarkdown({ text }: { text: string }): ReactNode {
   )
 }
 
-/* ------------------------------------------------------------------ *
- * Tool use — compact secondary card; input is collapsed pretty JSON.
- * ------------------------------------------------------------------ */
 function safeStringify(input: unknown): string {
   try {
     return JSON.stringify(input, null, 2)
@@ -204,38 +203,10 @@ function safeStringify(input: unknown): string {
   }
 }
 
-function ToolUseBlock({ name, input }: { name: string; input: unknown }): ReactNode {
-  const hasInput = input !== undefined && input !== null
-  // No input → a static "⚙ Name" label. With input → the whole "⚙ Name" row IS the disclosure
-  // toggle (a rotating chevron via CSS); clicking it expands the JSON. No separate "Input" row.
-  if (!hasInput) {
-    return (
-      <div className="tool-card">
-        <div className="tool-head mono">
-          <span aria-hidden="true">⚙</span>
-          <span className="tool-name">{name}</span>
-        </div>
-      </div>
-    )
-  }
-  return (
-    <details className="tool-card">
-      <summary className="tool-head tool-toggle mono">
-        <span aria-hidden="true">⚙</span>
-        <span className="tool-name">{name}</span>
-      </summary>
-      <div className="tool-json-wrap">
-        <pre className="tool-json">{safeStringify(input)}</pre>
-        <CopyButton className="copy-block" tip="Copy JSON" getText={() => safeStringify(input)} />
-      </div>
-    </details>
-  )
-}
-
 /* ------------------------------------------------------------------ *
- * Tool result — neutral card; danger red (border + wash) when isError.
- * The Result/Error attribution lives in the message header now, so the
- * card carries no internal label.
+ * Tool result — the output block: a sunken card, danger red (border +
+ * wash) when isError, clamped to 12 lines with a Show more toggle.
+ * Rendered inside a tool run (below its call), never standalone.
  * ------------------------------------------------------------------ */
 function ToolResultBlock({ text, isError }: { text: string; isError: boolean }): ReactNode {
   const [expanded, setExpanded] = useState(false)
@@ -267,27 +238,35 @@ function ToolResultBlock({ text, isError }: { text: string; isError: boolean }):
     clip.addEventListener('sb-reveal', onReveal)
     return () => clip.removeEventListener('sb-reveal', onReveal)
   }, [])
+  // The whole block toggles when there's more to show/hide — unless the user is drag-selecting text
+  // (that leaves a non-empty selection; a plain click doesn't). CopyButton stops its own propagation,
+  // so copy clicks never reach here.
+  const cardClass = ['tool-card', 'result-card', isError ? 'is-error' : ''].filter(Boolean).join(' ')
+  const clipClass = ['tool-result-clip', expanded ? 'is-expanded' : 'is-clamped', overflowing ? 'has-more' : '']
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <div className={isError ? 'tool-card result-card is-error' : 'tool-card result-card'}>
+    <div className={cardClass}>
       <CopyButton className="copy-block" tip="Copy result" getText={() => text} />
       <div className="tool-result-body">
-        <div
-          ref={clipRef}
-          className={`tool-result-clip${expanded ? '' : ' is-clamped'}${!expanded && overflowing ? ' is-faded' : ''}`}
-        >
+        <div ref={clipRef} className={clipClass}>
           <pre ref={textRef} className="tool-result-text">
             {text}
           </pre>
         </div>
       </div>
       {overflowing ? (
-        <button
-          type="button"
-          className="show-more label-caps"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
+        <>
+          {/* Only the bottom strip (≈ the fade zone) toggles — the rest of the block keeps its normal
+              text-selection / I-beam. This zone owns the hover (revealing the label + the expanded fade)
+              and the click; a drag-select starting above it still works. */}
+          <div className="tool-result-toggle" onClick={() => setExpanded((v) => !v)} aria-hidden="true" />
+          <span className="show-more">
+            {expanded ? 'Collapse' : 'Expand'}
+            <Arrow size={12} className={expanded ? 'show-more-arrow' : 'show-more-arrow is-down'} />
+          </span>
+        </>
       ) : null}
     </div>
   )
@@ -302,42 +281,113 @@ function ImageBlock({ alt }: { alt: string }): ReactNode {
   )
 }
 
-function renderBlock(block: TranscriptBlock, role: 'user' | 'assistant', key: string): ReactNode {
-  switch (block.kind) {
-    case 'text':
-      if (role === 'assistant') {
-        return <AssistantMarkdown key={key} text={block.text} />
-      }
-      return (
-        <pre key={key} className="user-text">
-          {block.text}
-        </pre>
-      )
-    case 'tool_use':
-      return <ToolUseBlock key={key} name={block.name} input={block.input} />
-    case 'tool_result':
-      return <ToolResultBlock key={key} text={block.text} isError={block.isError} />
-    case 'image':
-      return <ImageBlock key={key} alt={block.alt} />
-    default:
-      return null
-  }
+/** One tool call inside an expanded run: a static "⚙ Name" head over its (always-shown) input JSON.
+ *  Non-collapsing — the run's disclosure is the only toggle, so one click reveals everything. */
+function ToolCallView({ call }: { call: ToolCall }): ReactNode {
+  const hasInput = call.input !== undefined && call.input !== null
+  return (
+    <div className="tool-call">
+      <div className="tool-head mono">
+        <span aria-hidden="true">⚙</span>
+        <span className="tool-name">{call.name}</span>
+      </div>
+      {hasInput ? (
+        <div className="tool-json-wrap">
+          <pre className="tool-json">{safeStringify(call.input)}</pre>
+          <CopyButton className="copy-block" tip="Copy JSON" getText={() => safeStringify(call.input)} />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** A call paired with its output: the "⚙ Name" call, then a quiet ↳ marker over the result block.
+ *  A pending call (live turn / blocking tool) shows an "Awaiting output…" note; an orphan result
+ *  (call truncated/compacted away) shows on its own. */
+function ToolPairView({ pair }: { pair: ToolPair }): ReactNode {
+  return (
+    <div className="tool-pair">
+      {pair.call ? <ToolCallView call={pair.call} /> : null}
+      {pair.result ? (
+        <div className="tool-result">
+          <div className="tool-head mono result-head">
+            <span aria-hidden="true">↳</span>
+            <span className={pair.result.isError ? 'tool-name is-error' : 'tool-name'}>
+              {pair.result.isError ? 'Error' : 'Result'}
+            </span>
+          </div>
+          <ToolResultBlock text={pair.result.text} isError={pair.result.isError} />
+        </div>
+      ) : pair.call ? (
+        <div className="tool-pending label-caps">Awaiting output…</div>
+      ) : null}
+    </div>
+  )
 }
 
 /* ------------------------------------------------------------------ *
- * One coalesced group: a run of consecutive same-source messages shown
- * under a single header (Claude / You / Result / Error). The interrupt
- * sentinel renders as a standalone muted divider instead. (The component
- * keeps the name MessageBlock — it's the unit the transcript maps over.)
+ * Tool run — a maximal stretch of consecutive tool activity collapses
+ * behind ONE "⚙ N tool calls" disclosure (sibling of the earlier tool
+ * head grammar). Native (uncontrolled) <details>: browser-instant
+ * toggle, find-in-conversation opens it for free, open-state tracked
+ * only to word the tooltip. Expanding shows every call + its result.
+ * ------------------------------------------------------------------ */
+function ToolRun({ item }: { item: ToolRunItem }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const noun = item.count === 1 ? 'tool call' : 'tool calls'
+  return (
+    <details className="tool-run" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="tool-head tool-toggle mono">
+        {/* No gear on the run header itself — the individual calls inside keep theirs. data-tip rides
+            the label cluster (not the full-width summary) so the tooltip anchors beside the cursor. The
+            noun matches the count so a single-call run reads "tool call" (label + tooltip). */}
+        <span className="disclosure-label" data-tip={`${open ? 'Collapse' : 'Expand'} ${noun}`}>
+          <Chevron className="run-chevron" size={13} />
+          <span className="tool-name">
+            <span className="tool-count">{item.count}</span>
+            {` ${noun}`}
+          </span>
+        </span>
+      </summary>
+      <div className="tool-run-body">
+        {item.pairs.map((pair) => (
+          <ToolPairView key={pair.key} pair={pair} />
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function renderBlock(block: TranscriptBlock, role: 'user' | 'assistant', key: string): ReactNode {
+  if (block.kind === 'text') {
+    return role === 'assistant' ? (
+      <AssistantMarkdown key={key} text={block.text} />
+    ) : (
+      <pre key={key} className="user-text">
+        {block.text}
+      </pre>
+    )
+  }
+  if (block.kind === 'image') return <ImageBlock key={key} alt={block.alt} />
+  // tool_use / tool_result are consumed by a tool run, never rendered inside a prose turn.
+  return null
+}
+
+/* ------------------------------------------------------------------ *
+ * One TranscriptItem — a same-author SECTION (one header for a whole
+ * stretch: the agent's prose beats + tool runs, or the human turn), or
+ * the interrupt sentinel (a standalone muted note). Consecutive same-
+ * author content shares the single header; the You↔agent divider marks
+ * the section break. (Keeps the name MessageBlock — the map unit.)
  * ------------------------------------------------------------------ */
 function MessageBlock({
-  group,
+  item,
   dividerBefore
 }: {
-  group: MessageGroup
+  item: TranscriptItem
   dividerBefore: boolean
 }): ReactNode {
-  if (group.interrupted) {
+  if (item.kind === 'interrupt') {
     return (
       <div className="message message-interrupt">
         <span className="interrupt-note label-caps">Interrupted</span>
@@ -345,42 +395,47 @@ function MessageBlock({
     )
   }
 
-  // A hairline above this group when it crosses the You↔non-You boundary (computed in TranscriptView).
-  const classes = `message${group.isSidechain ? ' is-sidechain' : ''}${
-    dividerBefore ? ' has-divider' : ''
-  }`
-  const ts = group.messages[0]?.timestamp ?? null
+  // A hairline above this section when it crosses the You↔agent boundary (computed in TranscriptView).
+  const classes = `message${item.isSidechain ? ' is-sidechain' : ''}${dividerBefore ? ' has-divider' : ''}`
+  const ts = item.timestamp
   const time = clockTime(ts)
-  // The turn-copy icon is for narrative turns only: You / Claude groups that actually carry prose
-  // (a text block). Result / Error / Interrupted and pure-tool-call turns have no prose — their
-  // content is reachable via the per-block copy buttons instead.
-  const isProseTurn =
-    (group.label === 'You' || group.isAssistant) &&
-    group.messages.some((m) => m.blocks.some((b) => b.kind === 'text'))
+  // Copy-turn grabs all narration across the section's prose beats (turnMarkdown skips non-text, so
+  // tool runs never land in the copy); shown only when the section carries prose text.
+  const proseMessages = item.items.flatMap((it) => (it.kind === 'turn' ? it.messages : []))
+  const hasProse = proseMessages.some((m) => m.blocks.some((b) => b.kind === 'text'))
 
   return (
     <article className={classes}>
       <header className="message-meta">
-        <span className={group.isError ? 'role-label label-caps is-error' : 'role-label label-caps'}>
-          {group.label}
+        <span className="role-label label-caps">
+          {item.isAssistant ? (
+            <AgentLogo agent={item.agent} size={12} />
+          ) : (
+            <Person className="role-icon" size={12} />
+          )}
+          <span className="role-name">{item.label}</span>
         </span>
-        {group.isSidechain ? <span className="sidechain-tag label-caps">Sub-agent</span> : null}
-        {isProseTurn ? (
-          <CopyButton
-            className="copy-turn"
-            tip="Copy turn"
-            getText={() => turnMarkdown(group.messages)}
-          />
+        {item.isSidechain ? <span className="sidechain-tag label-caps">Sub-agent</span> : null}
+        {hasProse ? (
+          <CopyButton className="copy-turn" tip="Copy turn" getText={() => turnMarkdown(proseMessages)} />
         ) : null}
         {time ? (
-          <span className="message-time mono" data-tip={fullDateTime(ts)}>
+          <span className="message-time" data-tip={fullDateTime(ts)}>
             {time}
           </span>
         ) : null}
       </header>
       <div className="message-body">
-        {group.messages.flatMap((m) =>
-          m.blocks.map((block, bi) => renderBlock(block, m.role, `${m.uuid}:${bi}`))
+        {item.items.map((it) =>
+          it.kind === 'turn' ? (
+            <div className="prose-beat" key={it.key}>
+              {it.messages.flatMap((m) =>
+                m.blocks.map((block, bi) => renderBlock(block, m.role, `${m.uuid}:${bi}`))
+              )}
+            </div>
+          ) : (
+            <ToolRun key={it.key} item={it} />
+          )
         )}
       </div>
     </article>

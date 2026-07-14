@@ -86,6 +86,33 @@
   color: var(--danger-ink);
 }
 
+/* Section headers (You / Claude / Codex) as a subtle filled TAG: Hanken 12px, Title case (the
+   .label-caps uppercase is dropped), ink text on a soft gray chip. --paper-hover reads as a light gray
+   on the white pane AND a lighter gray on the dark canvas — one token, both themes — staying grayscale
+   per the two-accent rule. Scoped to .message-meta to win over .label-caps. Result/Error heads are
+   unaffected (they use the tool-head grammar, not .role-label). */
+.message-meta .role-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  letter-spacing: normal;
+  text-transform: none;
+  font-weight: 400;
+  color: var(--ink-soft);
+  background: var(--paper-hover);
+  padding: 2px var(--s2);
+  border-radius: var(--r-sm);
+}
+
+/* The tag's leading mark — the agent logo (assistant) or a person glyph (You) — paints in the tag's
+   ink via currentColor and never squishes. */
+.message-meta .role-label .sb-agent-logo,
+.message-meta .role-label .role-icon {
+  flex-shrink: 0;
+}
+
 .sidechain-tag {
   color: var(--ink-ghost);
   padding: 1px var(--s2);
@@ -96,6 +123,7 @@
 /* per-group timestamp, pushed to the right of the header — tasteful + quiet */
 .message-time {
   margin-left: auto;
+  font-family: var(--font-ui);
   color: var(--ink-ghost);
   font-size: var(--text-2xs);
   letter-spacing: var(--tracking-wide);
@@ -125,6 +153,23 @@
 .message.is-sidechain .message-body {
   font-size: var(--text-sm);
   color: var(--ink-soft);
+}
+
+/* Spacing WITHIN a section (one header for a whole same-author stretch): a tool run tucks tight under
+   the narration beat that introduces it ("Now applying the edits." → its "N tool calls"), and a
+   following narration beat gets a bit more room. Section↔section spacing (the You↔agent gap) stays the
+   article's own padding + divider. */
+.message-body > * + .tool-run {
+  margin-top: var(--s3);
+}
+
+.message-body > .tool-run + * {
+  margin-top: var(--s5);
+}
+
+/* Stacked blocks inside a single prose beat (coalesced streaming fragments / an image). */
+.prose-beat > * + * {
+  margin-top: var(--s5);
 }
 
 /* ---- user message: plain prose, no box. Reads like Claude's text (same font / size /
@@ -612,13 +657,24 @@
   align-items: center;
   gap: var(--s2);
   font-size: var(--text-xs);
-  color: var(--ink-faint);
+  /* Rest one step lighter than before (ghost icon / faint name) so hovering — which darkens to
+     soft / ink below — reads as a bigger strengthening. */
+  color: var(--ink-ghost);
   /* the tool name is a click target (toggle) — never let repeated clicks select its text */
   user-select: none;
 }
 
 .tool-name {
-  color: var(--ink-soft);
+  color: var(--ink-faint);
+}
+
+/* The icon+label cluster inside a disclosure summary — the tooltip host (carries data-tip), so the
+   label anchors beside the cursor rather than centering on the full-width summary. Inline-flex keeps
+   the icon↔label gap the summary's own flex used to provide. */
+.disclosure-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
 }
 
 /* The tool head IS the disclosure toggle (no separate "Input" row, no chevron — just the gear):
@@ -683,11 +739,12 @@
   overflow: hidden;
 }
 
-/* Tasteful fade: when a clamped result actually overflows, the last ~1.5 lines dissolve into the card
-   so the 12-line cut reads soft instead of a hard edge. The mask fades the content to transparent
-   (theme-agnostic — the sunken card shows through). Gated on `is-faded` (set only when overflowing),
-   so a short result that happens to fit never gets a spurious fade, and the expanded view is full. */
-.tool-result-clip.is-faded {
+/* Tasteful fade: the last ~1.5 lines dissolve into the card so the cut reads soft. `has-more` gates it
+   (set only when overflowing), so a short result never gets a spurious fade. Two cases: a COLLAPSED
+   result fades always (softening the 12-line clamp); an EXPANDED result fades on block hover too (with
+   the scrim) — so "Collapse ↑" reads clearly and the block echoes the collapsed look. */
+.tool-result-clip.is-clamped.has-more,
+.tool-card:has(.tool-result-toggle:hover) .tool-result-clip.is-expanded.has-more {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5em), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5em), transparent);
 }
@@ -698,21 +755,83 @@
   overflow-wrap: anywhere;
 }
 
+/* Centered toggle at the block's bottom — plain Hanken text + an arrow (no chip), legible because the
+   block's own text fades out behind it (the mask above). Hidden at rest, revealed on block hover;
+   pointer-events off so the click falls through to the whole-block toggle. */
 .show-more {
-  display: inline-block;
-  margin-top: var(--s2);
-  padding: var(--s1) var(--s2);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-pill);
-  color: var(--ink-faint);
-  transition:
-    color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease);
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
 }
 
-.show-more:hover {
-  color: var(--ink-soft);
-  border-color: var(--rule-strong);
+/* The toggle hot-zone: ONLY the bottom strip (≈ the fade height) is clickable / hoverable — the rest of
+   the block keeps normal text selection + I-beam. Sits over the faded tail and carries the pointer. */
+.tool-result-toggle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(3.5 * var(--text-xs));
+  z-index: 1;
+  cursor: pointer;
+}
+
+/* On hover, a soft scrim shades the strip behind the label — transparent at the top edge fading to a
+   tint at the bottom, so the hot-zone highlights and the label pops. A pseudo-element carries it so it
+   fades in smoothly on opacity (gradients don't transition). Theme-aware: an INK tint — dark in light
+   mode (darkens), light in dark mode (lightens), since a dark scrim would vanish on the dark canvas. */
+.tool-result-toggle::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Round the bottom corners to match the sunken block (--r-sm); the top edge sits mid-block, so its
+     corners stay square. */
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  background: linear-gradient(to bottom, transparent, rgba(26, 26, 26, 0.14));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.tool-result-toggle:hover::before {
+  opacity: 1;
+}
+
+:root[data-theme='dark'] .tool-result-toggle::before {
+  background: linear-gradient(to bottom, transparent, rgba(242, 242, 242, 0.16));
+}
+
+/* Reveal the label only while the hot-zone is hovered — not the whole block (the expanded-view fade is
+   gated the same way; see the mask rule above). */
+.tool-card:has(.tool-result-toggle:hover) .show-more {
+  opacity: 1;
+}
+
+/* Expand points down, Collapse up — the Arrow icon is an up-arrow, rotated for the down case. */
+.show-more-arrow.is-down {
+  transform: rotate(180deg);
+}
+
+/* An error result insets its body by the red card's --s3 padding, so lift both the hot-zone and the
+   centered text to sit at the body's bottom rather than in the red padding. */
+.result-card.is-error .tool-result-toggle {
+  left: var(--s3);
+  right: var(--s3);
+  bottom: var(--s3);
+}
+.result-card.is-error .show-more {
+  bottom: calc(var(--s3) + 1px);
 }
 
 /* ---- the one boxed exception: a tool_result error keeps its red box (border + wash + padding) ---- */
@@ -721,6 +840,70 @@
   border-radius: var(--r-md);
   background: var(--danger-wash);
   padding: var(--s3);
+}
+
+/* ============================================================ *
+ * Tool run — a run of consecutive tool activity collapses behind ONE
+ * "⚙ N tool calls" disclosure. The summary reuses `.tool-head
+ * .tool-toggle` (size / weight / ink / hover / marker-hide / cursor);
+ * expanding lists each call (⚙ Name + input) then its result (↳ + the
+ * sunken output block). The ↳ result head is a bare mono glyph mirroring
+ * the ⚙ call head, inheriting the same quiet ink — no dedicated icon CSS.
+ * ============================================================ */
+/* Open: a gap below the summary before the first call — mirrors the ⚙ head → JSON gap (--s2). */
+.tool-run[open] > .tool-run-body {
+  margin-top: var(--s2);
+}
+
+/* Disclosure caret — a down-chevron pointing right when collapsed, rotating down on open. Inherits the
+   head's ink via currentColor (quiet at rest, strengthens on hover) and tracks the text size (1em). */
+.run-chevron {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.tool-run[open] .run-chevron {
+  transform: rotate(0deg);
+}
+
+/* Only the count is bold; the "tool call(s)" noun stays regular weight. */
+.tool-count {
+  font-weight: 600;
+}
+
+/* The run header shrinks to its content, so ONLY the chevron + label (+ time) is the click / hover
+   target — not the full-width row out to the pane edge. */
+.tool-run > summary {
+  width: fit-content;
+}
+
+/* Successive call+result pairs in a multi-call run get clear separation. */
+.tool-run-body > .tool-pair + .tool-pair {
+  margin-top: var(--s4);
+}
+
+/* Within a pair: the output sits a step below the call's input; the sunken block a hair under its ↳. */
+.tool-pair .tool-result {
+  margin-top: var(--s2);
+}
+
+.tool-result > .result-card {
+  margin-top: var(--s1);
+}
+
+/* A still-pending call (live turn / blocking tool): a quiet note where the output will land. */
+.tool-pending {
+  margin-top: var(--s2);
+  color: var(--ink-ghost);
+}
+
+/* The ↳ output head reads "Result", or "Error" in danger-red when the tool failed (mirrors the red
+   result box below it — the one place color appears, per the two-accent rule). */
+.result-head .tool-name.is-error {
+  color: var(--danger-ink);
 }
 
 /* ============================================================ *
@@ -881,6 +1064,9 @@
 .md-pre-wrap:hover .copy-block,
 .md-table-outer:hover .copy-block,
 .tool-card:hover .copy-block,
+/* A call's input block has no .tool-card ancestor (the run is the only <details> now), so reveal its
+   copy button on the json wrapper directly. */
+.tool-json-wrap:hover .copy-block,
 .copy-btn.copied {
   opacity: 1;
   transition: opacity var(--dur-fast) var(--ease);
