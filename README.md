@@ -8,6 +8,8 @@ A **switchboard** for your AI coding-agent conversations — **Claude Code and C
 
 ![Switchboard in dark mode](docs/screenshot-dark.png)
 
+<img src="docs/converstation-states.webp" width="400">
+
 ## Set up
 
 Clone the repo and navigate to the root directory:
