@@ -205,7 +205,7 @@ function safeStringify(input: unknown): string {
 
 /* ------------------------------------------------------------------ *
  * Tool result — the output block: a sunken card, danger red (border +
- * wash) when isError, clamped to 12 lines with a Show more toggle.
+ * wash) when isError, clamped to 6 lines with a Show more toggle.
  * Rendered inside a tool run (below its call), never standalone.
  * ------------------------------------------------------------------ */
 function ToolResultBlock({ text, isError }: { text: string; isError: boolean }): ReactNode {
