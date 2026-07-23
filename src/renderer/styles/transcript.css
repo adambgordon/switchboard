@@ -994,6 +994,22 @@
 .transcript-foot-label {
   color: var(--ink-ghost);
 }
+.transcript-foot-meta,
+.transcript-foot-copy-tip {
+  display: inline-flex;
+  align-items: center;
+}
+.transcript-foot-meta {
+  gap: var(--s1);
+}
+.copy-btn.transcript-copy {
+  color: var(--ink-ghost);
+  opacity: 1;
+}
+.copy-btn.transcript-copy:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
+}
 
 /* ---- copy affordances — hover-revealed icon buttons that flash a check on click (the
    TallyRail.copySessionId pattern). Neutral ink only (two-accent invariant). Absent at rest; the

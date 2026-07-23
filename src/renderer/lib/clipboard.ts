@@ -1,5 +1,6 @@
-// Relative import (not the @shared alias) so this stays unit-testable under vitest. Same as messageGroups.ts.
-import type { TranscriptMessage } from '../../shared/types'
+// Relative imports (not the @shared alias) so this stays unit-testable under vitest.
+import type { AgentKind, TranscriptMessage } from '../../shared/types'
+import { buildTranscript } from './messageGroups'
 
 /**
  * Pure clipboard text builders for the Formatted view's copy affordances. Kept DOM-free so they're
@@ -42,4 +43,21 @@ export function turnMarkdown(messages: TranscriptMessage[]): string {
     }
   }
   return parts.join('\n\n').trim()
+}
+
+/**
+ * A readable Markdown export of the whole Formatted conversation. Reusing the render sections keeps
+ * attribution identical to the UI; turnMarkdown deliberately drops tool I/O and images.
+ */
+export function conversationMarkdown(messages: TranscriptMessage[], agent: AgentKind): string {
+  const sections: string[] = []
+  for (const item of buildTranscript(messages, agent)) {
+    if (item.kind !== 'section') continue
+    const proseMessages = item.items.flatMap((part) => (part.kind === 'turn' ? part.messages : []))
+    const body = turnMarkdown(proseMessages)
+    if (!body) continue
+    const label = item.isSidechain ? `${item.label} (Sub-agent)` : item.label
+    sections.push(`**${label}:**\n\n${body}`)
+  }
+  return sections.join('\n\n---\n\n')
 }

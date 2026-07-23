@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import type { Transcript } from '@shared/types'
+import CopyButton from './CopyButton'
 import MessageBlock from './MessageBlock'
 import { Arrow } from './icons'
+import { conversationMarkdown } from '../lib/clipboard'
 import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
 import { attachAutoHide } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
@@ -385,8 +387,17 @@ export default function TranscriptView({
           {count > 0 ? (
             <footer className="transcript-foot">
               <span className="transcript-foot-rule" aria-hidden="true" />
-              <span className="transcript-foot-label label-caps">
-                End of transcript · {count} {count === 1 ? 'message' : 'messages'}
+              <span className="transcript-foot-meta">
+                <span className="transcript-foot-label label-caps">
+                  End of transcript · {count} {count === 1 ? 'message' : 'messages'}
+                </span>
+                <span className="transcript-foot-copy-tip" data-tip="Copy entire conversation">
+                  <CopyButton
+                    className="transcript-copy"
+                    tip="Copy entire conversation"
+                    getText={() => conversationMarkdown(transcript.messages, transcript.agent)}
+                  />
+                </span>
               </span>
             </footer>
           ) : null}
