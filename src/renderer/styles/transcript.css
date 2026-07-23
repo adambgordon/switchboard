@@ -721,27 +721,27 @@
 
 /* the result body sits alone now (the Result/Error label moved to the header). Padding is symmetric
    top/bottom (the shared --s3 above) so a short result reads evenly boxed; the clamped-tail case
-   relies on the .is-faded gradient mask below to soften the 12th-line cut. */
+   relies on the .is-faded gradient mask below to soften the 6th-line cut. */
 .tool-result-body {
   margin-top: 0;
 }
 
-/* Clamp the collapsed result to 12 RENDERED (wrapped) lines. content-box so max-height bounds the
-   CONTENT at 12 line-heights (1.55em each — matches the line-height above); overflow:hidden clips
+/* Clamp the collapsed result to 6 RENDERED (wrapped) lines. content-box so max-height bounds the
+   CONTENT at 6 line-heights (1.55em each — matches the line-height above); overflow:hidden clips
    the rest. (line-clamp was dropped: with white-space:pre-wrap it cut mid-line AND made scrollHeight
    report the clamped height, which broke the overflow check that gates "Show more".) */
-/* The collapsed result is clamped to 12 RENDERED (wrapped) lines by an inner clip element that has
-   NO padding of its own — so the cut lands exactly on the 12th line boundary, and the panel's own
+/* The collapsed result is clamped to 6 RENDERED (wrapped) lines by an inner clip element that has
+   NO padding of its own — so the cut lands exactly on the 6th line boundary, and the panel's own
    bottom padding sits below it as breathing room. (line-clamp was dropped: with pre-wrap it cut
    mid-line AND broke the scrollHeight check that gates "Show more".) */
 .tool-result-clip.is-clamped {
-  max-height: calc(12 * 1.55em);
+  max-height: calc(6 * 1.55em);
   overflow: hidden;
 }
 
 /* Tasteful fade: the last ~1.5 lines dissolve into the card so the cut reads soft. `has-more` gates it
    (set only when overflowing), so a short result never gets a spurious fade. Two cases: a COLLAPSED
-   result fades always (softening the 12-line clamp); an EXPANDED result fades on block hover too (with
+   result fades always (softening the 6-line clamp); an EXPANDED result fades on block hover too (with
    the scrim) — so "Collapse ↑" reads clearly and the block echoes the collapsed look. */
 .tool-result-clip.is-clamped.has-more,
 .tool-card:has(.tool-result-toggle:hover) .tool-result-clip.is-expanded.has-more {
