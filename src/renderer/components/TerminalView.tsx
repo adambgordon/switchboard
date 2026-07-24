@@ -99,11 +99,29 @@ function escapePath(p: string): string {
   return p.replace(/([\s'"\\$`!&;|*?<>(){}[\]#~])/g, '\\$1')
 }
 
+// Force xterm to recompute its scroll-area height from the CURRENT buffer length, so the scrollbar
+// range tracks Codex's scrollback growth. Codex renders to the normal buffer with scrollback; after a
+// resize/replay — or after the buffer grew while this terminal was hidden (display:none) — xterm's own
+// scroll-area sync can lag, leaving the range short (at worst collapsed to a single screen). The newest
+// rows then sit BELOW what the wheel/drag can reach: you can only get to the bottom via Enter or a
+// resize (the reported "can't scroll to the bottom" on a live Codex session). This is Codex-only —
+// claude runs on the alternate screen (no scrollback), so its range never grows. `true` recomputes
+// synchronously; it re-syncs scrollTop to the CURRENT ydisp, so it never moves the view (no yank).
+// `_core.viewport` is private xterm API, guarded with optional chaining like the _renderService unpause.
+function syncScrollArea(term: Terminal): void {
+  const vp = (
+    term as unknown as { _core?: { viewport?: { syncScrollArea?: (immediate?: boolean) => void } } }
+  )._core?.viewport
+  vp?.syncScrollArea?.(true)
+}
+
 export default function TerminalView({ ptyId, sessionId, agent, visible, focusKey, theme, onMarkUnread }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const lastSentRef = useRef<{ cols: number; rows: number } | null>(null)
+  // rAF handle coalescing the post-output scroll-area recompute to one call per frame (see syncScrollArea).
+  const syncRafRef = useRef<number | null>(null)
 
   // Fit the terminal to its host and push the new size to the PTY — but ONLY when the host is
   // genuinely measurable, and only when the size actually changed. A hidden deck item
@@ -218,7 +236,22 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
     // for when the host isn't measurable yet (created while hidden) and for later/window resizes.
     fitAndResize()
 
-    const detach = attachPty(ptyId, (d) => term.write(d))
+    // After Codex output, recompute the scrollbar range so the newest rows stay reachable (see
+    // syncScrollArea) — coalesced to one call per frame regardless of how many chunks arrived. Claude
+    // is alternate-screen (no scrollback), so it keeps the plain write with zero added per-output work.
+    const detach =
+      agent === 'codex'
+        ? attachPty(ptyId, (d) =>
+            term.write(d, () => {
+              if (syncRafRef.current != null) return
+              syncRafRef.current = requestAnimationFrame(() => {
+                syncRafRef.current = null
+                const t = termRef.current
+                if (t) syncScrollArea(t)
+              })
+            })
+          )
+        : attachPty(ptyId, (d) => term.write(d))
     const onInput = term.onData((d) => window.api.sendInput(ptyId, d))
 
     // Image input is agent-specific. Claude reads the clipboard after an empty bracketed paste;
@@ -274,6 +307,8 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
 
     return () => {
       cancelAnimationFrame(raf)
+      if (syncRafRef.current != null) cancelAnimationFrame(syncRafRef.current)
+      syncRafRef.current = null
       ro.disconnect()
       host.removeEventListener('dragover', onDragOver)
       host.removeEventListener('drop', onDrop)
@@ -355,18 +390,22 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       unpause()
       fitAndResize()
       term.refresh(0, term.rows - 1)
+      // The buffer may have grown while this terminal was hidden; recompute the scrollbar range now
+      // that it's visible + sized so the newest rows are reachable (Codex scrollback only).
+      if (agent === 'codex') syncScrollArea(term)
       raf2 = requestAnimationFrame(() => {
         const t = termRef.current
         if (!t) return
         unpause()
         t.refresh(0, t.rows - 1)
+        if (agent === 'codex') syncScrollArea(t)
       })
     })
     return () => {
       cancelAnimationFrame(raf1)
       cancelAnimationFrame(raf2)
     }
-  }, [visible, ptyId, fitAndResize])
+  }, [visible, ptyId, agent, fitAndResize])
 
   // Focus only on an explicit, session-targeted request (click / Enter / resume / new /
   // go-live), tracked by a bump counter so re-focusing the same terminal still fires. A change
