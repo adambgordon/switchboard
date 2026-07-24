@@ -713,14 +713,10 @@
   margin-top: 0;
 }
 
-/* Clamp the collapsed result to 6 RENDERED (wrapped) lines. content-box so max-height bounds the
-   CONTENT at 6 line-heights (1.55em each — matches the line-height above); overflow:hidden clips
-   the rest. (line-clamp was dropped: with white-space:pre-wrap it cut mid-line AND made scrollHeight
-   report the clamped height, which broke the overflow check that gates "Show more".) */
 /* The collapsed result is clamped to 6 RENDERED (wrapped) lines by an inner clip element that has
    NO padding of its own — so the cut lands exactly on the 6th line boundary, and the panel's own
    bottom padding sits below it as breathing room. (line-clamp was dropped: with pre-wrap it cut
-   mid-line AND broke the scrollHeight check that gates "Show more".) */
+   mid-line AND broke the scrollHeight check that gates "Expand".) */
 .tool-result-clip.is-clamped {
   max-height: calc(6 * 1.55em);
   overflow: hidden;
