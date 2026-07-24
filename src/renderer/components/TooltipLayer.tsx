@@ -9,6 +9,8 @@ interface Tip {
   placement: 'top' | 'bottom'
   /** Host opted into a wrapping, max-width label (for paragraph-length copy) via `data-tip-wide`. */
   wide: boolean
+  /** Host opted into the tighter padding variant via `data-tip-compact`. */
+  compact: boolean
 }
 
 const SHOW_DELAY = 450
@@ -46,7 +48,8 @@ export default function TooltipLayer() {
         x: r.left + r.width / 2,
         y: below ? r.bottom + GAP : r.top - GAP,
         placement: below ? 'bottom' : 'top',
-        wide: el.hasAttribute('data-tip-wide')
+        wide: el.hasAttribute('data-tip-wide'),
+        compact: el.hasAttribute('data-tip-compact')
       })
     }
     const onOver = (e: MouseEvent): void => {
@@ -95,7 +98,7 @@ export default function TooltipLayer() {
   return (
     <div
       ref={elRef}
-      className={`sb-tip sb-tip-${tip.placement}${tip.wide ? ' sb-tip-wide' : ''}`}
+      className={`sb-tip sb-tip-${tip.placement}${tip.wide ? ' sb-tip-wide' : ''}${tip.compact ? ' sb-tip-compact' : ''}`}
       style={{ left: tip.x, top: tip.y }}
       role="tooltip"
     >

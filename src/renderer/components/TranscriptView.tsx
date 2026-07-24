@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import type { Transcript } from '@shared/types'
+import CopyButton from './CopyButton'
 import MessageBlock from './MessageBlock'
 import { Arrow } from './icons'
+import { conversationMarkdown } from '../lib/clipboard'
 import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
 import { attachAutoHide } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
@@ -196,7 +198,7 @@ export default function TranscriptView({
     measureEdges(el)
     if (!opened) return
     // On open, KEEP re-asserting the bottom for the next frames: the content height changes AFTER this
-    // first pin (tool results measuring overflow + adding "Show more" via ResizeObserver), so a one-shot
+    // first pin (tool results measuring overflow + adding "Expand" via ResizeObserver), so a one-shot
     // pin can get stranded. Re-snap each frame (cheap; a no-op once we're already at the bottom) until
     // the height holds steady for a few frames or we hit the cap. Bails immediately if the user scrolls
     // up (nearBottomRef flips in handleScroll). The content ResizeObserver below also covers later
@@ -310,7 +312,7 @@ export default function TranscriptView({
   }, [visibleCount, total, measureEdges])
 
   // Keep the bottom pinned through ASYNC content-height changes while pinned — a tool-result's
-  // "Show more" affordance settling in via its own ResizeObserver, font/markdown reflow — that don't
+  // "Expand" affordance settling in via its own ResizeObserver, font/markdown reflow — that don't
   // flow through the grow/compensation path. A ResizeObserver fires after layout but BEFORE paint, so
   // re-pinning here corrects the change in the same frame, no flash. Only while pinned (near bottom);
   // scrolled-up history reading is the compensation effect's job and must not be yanked down.
@@ -385,8 +387,17 @@ export default function TranscriptView({
           {count > 0 ? (
             <footer className="transcript-foot">
               <span className="transcript-foot-rule" aria-hidden="true" />
-              <span className="transcript-foot-label label-caps">
-                End of transcript · {count} {count === 1 ? 'message' : 'messages'}
+              <span className="transcript-foot-meta">
+                <span className="transcript-foot-label label-caps">
+                  End of transcript · {count} {count === 1 ? 'message' : 'messages'}
+                </span>
+                <span className="transcript-foot-copy-tip" data-tip="Copy entire conversation">
+                  <CopyButton
+                    className="transcript-copy"
+                    tip="Copy entire conversation"
+                    getText={() => conversationMarkdown(transcript.messages, transcript.agent)}
+                  />
+                </span>
               </span>
             </footer>
           ) : null}

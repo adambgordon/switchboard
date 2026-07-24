@@ -163,14 +163,19 @@ input::placeholder {
 .sb-tip-top {
   transform: translate(-50%, -100%);
 }
-/* Wide variant (data-tip-wide): wraps to a readable column for paragraph-length copy — e.g. the
-   live-sessions info tooltip. Overrides the nowrap default; the JS clamp still keeps it on-screen. */
+/* Wide variant (data-tip-wide): wraps to a readable column for paragraph-length copy or long URLs.
+   Overrides the nowrap default; the JS clamp still keeps it on-screen. */
 .sb-tip-wide {
   white-space: normal;
+  overflow-wrap: anywhere;
   width: max-content;
   max-width: 260px;
   padding: 8px 10px;
   line-height: 1.45;
+}
+
+.sb-tip-compact {
+  padding: 5px 8px;
 }
 
 /* ---- the live breath: a working session swells and contracts, in place ---- */
