@@ -173,7 +173,7 @@ function sliceSource(text: string, node: unknown): string {
   return typeof start === 'number' && typeof end === 'number' ? text.slice(start, end) : ''
 }
 
-function AssistantMarkdown({ text }: { text: string }): ReactNode {
+function MarkdownBlock({ text }: { text: string }): ReactNode {
   // Override `table` with a closure over the source so its copy button yields the exact markdown
   // (cell formatting / alignment preserved) sliced via the node's position offsets — the same source
   // the turn copy uses. Everything else stays the shared module-level components.
@@ -358,15 +358,9 @@ function ToolRun({ item }: { item: ToolRunItem }): ReactNode {
   )
 }
 
-function renderBlock(block: TranscriptBlock, role: 'user' | 'assistant', key: string): ReactNode {
+function renderBlock(block: TranscriptBlock, key: string): ReactNode {
   if (block.kind === 'text') {
-    return role === 'assistant' ? (
-      <AssistantMarkdown key={key} text={block.text} />
-    ) : (
-      <pre key={key} className="user-text">
-        {block.text}
-      </pre>
-    )
+    return <MarkdownBlock key={key} text={block.text} />
   }
   if (block.kind === 'image') return <ImageBlock key={key} alt={block.alt} />
   // tool_use / tool_result are consumed by a tool run, never rendered inside a prose turn.
@@ -430,7 +424,7 @@ function MessageBlock({
           it.kind === 'turn' ? (
             <div className="prose-beat" key={it.key}>
               {it.messages.flatMap((m) =>
-                m.blocks.map((block, bi) => renderBlock(block, m.role, `${m.uuid}:${bi}`))
+                m.blocks.map((block, bi) => renderBlock(block, `${m.uuid}:${bi}`))
               )}
             </div>
           ) : (
