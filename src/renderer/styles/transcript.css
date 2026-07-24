@@ -48,11 +48,15 @@
 
 .transcript-content {
   /* fill the pane width with comfortable side padding (no centered max-width cap) */
-  padding: var(--s6) var(--s7) var(--s7);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s6) var(--s7) 0;
 }
 
 /* ---- message rhythm ---- */
 .message {
+  flex-shrink: 0;
   padding: var(--s4) 0;
   animation: sb-fade-up var(--dur) var(--ease) both;
 }
@@ -961,11 +965,15 @@
 }
 
 .transcript-foot {
+  /* Grow through any unused scroll-viewport height so the copy reveal target reaches the pane's
+     bottom on short transcripts. On long transcripts there is no free space, so sizing is unchanged. */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--s4);
   margin-top: var(--s4);
+  padding-bottom: var(--s7);
 }
 
 .transcript-foot-rule {
@@ -987,7 +995,6 @@
 }
 .copy-btn.transcript-copy {
   color: var(--ink-ghost);
-  opacity: 1;
 }
 .copy-btn.transcript-copy:hover {
   color: var(--ink);
@@ -1060,6 +1067,7 @@
 /* reveal — fade IN on hover; the opacity transition lives here (not on the base), so hide is instant.
    .copied keeps the button shown through the check-flash even once the pointer leaves. */
 .message:hover .copy-turn,
+.transcript-foot:hover .transcript-copy,
 .md-pre-wrap:hover .copy-block,
 .md-table-outer:hover .copy-block,
 .tool-card:hover .copy-block,
