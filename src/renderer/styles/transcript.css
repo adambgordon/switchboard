@@ -48,11 +48,15 @@
 
 .transcript-content {
   /* fill the pane width with comfortable side padding (no centered max-width cap) */
-  padding: var(--s6) var(--s7) var(--s7);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s6) var(--s7) 0;
 }
 
 /* ---- message rhythm ---- */
 .message {
+  flex-shrink: 0;
   padding: var(--s4) 0;
   animation: sb-fade-up var(--dur) var(--ease) both;
 }
@@ -172,20 +176,6 @@
   margin-top: var(--s5);
 }
 
-/* ---- user message: plain prose, no box. Reads like Claude's text (same font / size /
-   color), distinguished only by the "You" header and the section divider above it. We do NOT
-   markdown-parse a human prompt, so white-space:pre-wrap preserves its typed line breaks. ---- */
-.user-text {
-  margin: 0;
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  line-height: 1.6;
-  color: var(--ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 /* ---- interrupt sentinel: a quiet centered divider, not a turn ---- */
 .message-interrupt {
   display: flex;
@@ -197,7 +187,7 @@
 }
 
 /* ============================================================ *
- * Assistant markdown
+ * Markdown
  * ============================================================ */
 .md {
   font-size: var(--text-base);
@@ -556,18 +546,18 @@
 }
 
 .md-h1 {
-  font-size: var(--text-lg);
+  font-size: calc(var(--text-lg) + 1px);
 }
 
 .md-h2 {
-  font-size: var(--text-md);
+  font-size: calc(var(--text-md) + 1px);
 }
 
 .md-h3,
 .md-h4,
 .md-h5,
 .md-h6 {
-  font-size: var(--text-base);
+  font-size: calc(var(--text-base) + 1px);
 }
 
 .md-h4,
@@ -633,13 +623,14 @@
 
 /* Block-rhythm owl — MUST stay after the per-element rules above, so its margin-top wins the
    specificity tie against their `margin: 0` resets (equal specificity ⇒ later source order wins).
-   This is what puts air between paragraph text and adjacent code blocks / tables / headings.
-   Consecutive paragraphs use the tighter --s4 (two classes → higher specificity, order-independent). */
+   Paragraph sequences run slightly tighter; other top-level markdown transitions keep more air. */
 .md > * + * {
   margin-top: var(--s5);
 }
 
-.md-p + .md-p {
+.md-p + .md-p,
+.md-p + :is(.md-ul, .md-ol),
+:is(.md-ul, .md-ol) + .md-p {
   margin-top: var(--s4);
 }
 
@@ -721,27 +712,23 @@
 
 /* the result body sits alone now (the Result/Error label moved to the header). Padding is symmetric
    top/bottom (the shared --s3 above) so a short result reads evenly boxed; the clamped-tail case
-   relies on the .is-faded gradient mask below to soften the 12th-line cut. */
+   relies on the .is-faded gradient mask below to soften the 6th-line cut. */
 .tool-result-body {
   margin-top: 0;
 }
 
-/* Clamp the collapsed result to 12 RENDERED (wrapped) lines. content-box so max-height bounds the
-   CONTENT at 12 line-heights (1.55em each — matches the line-height above); overflow:hidden clips
-   the rest. (line-clamp was dropped: with white-space:pre-wrap it cut mid-line AND made scrollHeight
-   report the clamped height, which broke the overflow check that gates "Show more".) */
-/* The collapsed result is clamped to 12 RENDERED (wrapped) lines by an inner clip element that has
-   NO padding of its own — so the cut lands exactly on the 12th line boundary, and the panel's own
+/* The collapsed result is clamped to 6 RENDERED (wrapped) lines by an inner clip element that has
+   NO padding of its own — so the cut lands exactly on the 6th line boundary, and the panel's own
    bottom padding sits below it as breathing room. (line-clamp was dropped: with pre-wrap it cut
-   mid-line AND broke the scrollHeight check that gates "Show more".) */
+   mid-line AND broke the scrollHeight check that gates "Expand".) */
 .tool-result-clip.is-clamped {
-  max-height: calc(12 * 1.55em);
+  max-height: calc(6 * 1.55em);
   overflow: hidden;
 }
 
 /* Tasteful fade: the last ~1.5 lines dissolve into the card so the cut reads soft. `has-more` gates it
    (set only when overflowing), so a short result never gets a spurious fade. Two cases: a COLLAPSED
-   result fades always (softening the 12-line clamp); an EXPANDED result fades on block hover too (with
+   result fades always (softening the 6-line clamp); an EXPANDED result fades on block hover too (with
    the scrim) — so "Collapse ↑" reads clearly and the block echoes the collapsed look. */
 .tool-result-clip.is-clamped.has-more,
 .tool-card:has(.tool-result-toggle:hover) .tool-result-clip.is-expanded.has-more {
@@ -978,11 +965,15 @@
 }
 
 .transcript-foot {
+  /* Grow through any unused scroll-viewport height so the copy reveal target reaches the pane's
+     bottom on short transcripts. On long transcripts there is no free space, so sizing is unchanged. */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--s4);
   margin-top: var(--s4);
+  padding-bottom: var(--s7);
 }
 
 .transcript-foot-rule {
@@ -993,6 +984,21 @@
 
 .transcript-foot-label {
   color: var(--ink-ghost);
+}
+.transcript-foot-meta,
+.transcript-foot-copy-tip {
+  display: inline-flex;
+  align-items: center;
+}
+.transcript-foot-meta {
+  gap: var(--s1);
+}
+.copy-btn.transcript-copy {
+  color: var(--ink-ghost);
+}
+.copy-btn.transcript-copy:hover {
+  color: var(--ink);
+  background: var(--paper-hover);
 }
 
 /* ---- copy affordances — hover-revealed icon buttons that flash a check on click (the
@@ -1061,6 +1067,7 @@
 /* reveal — fade IN on hover; the opacity transition lives here (not on the base), so hide is instant.
    .copied keeps the button shown through the check-flash even once the pointer leaves. */
 .message:hover .copy-turn,
+.transcript-foot:hover .transcript-copy,
 .md-pre-wrap:hover .copy-block,
 .md-table-outer:hover .copy-block,
 .tool-card:hover .copy-block,

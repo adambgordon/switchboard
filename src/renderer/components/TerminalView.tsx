@@ -88,6 +88,10 @@ const DARK_THEME = {
 
 const THEMES = { light: LIGHT_THEME, dark: DARK_THEME }
 
+function openExternalLink(_event: MouseEvent, uri: string): void {
+  window.api.openExternal(uri)
+}
+
 // Escape a filesystem path for insertion into the prompt line the way a real
 // terminal does on drag-drop: backslash-escape spaces + shell metacharacters so
 // paths resolve correctly. (Native drag-drop uses this escaping and "never fails".)
@@ -173,11 +177,12 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       allowProposedApi: true,
       macOptionIsMeta: true,
       scrollback: 8000,
+      linkHandler: { activate: openExternalLink },
       theme: THEMES[theme]
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon((_e, uri) => window.api.openExternal(uri)))
+    term.loadAddon(new WebLinksAddon(openExternalLink))
     term.open(host)
     // claude renders tables / box-art using Unicode-11 (emoji-aware) cell widths,
     // where emoji like ✅/❌ occupy 2 cells. xterm defaults to the Unicode V6 width
