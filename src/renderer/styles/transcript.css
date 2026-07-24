@@ -172,20 +172,6 @@
   margin-top: var(--s5);
 }
 
-/* ---- user message: plain prose, no box. Reads like Claude's text (same font / size /
-   color), distinguished only by the "You" header and the section divider above it. We do NOT
-   markdown-parse a human prompt, so white-space:pre-wrap preserves its typed line breaks. ---- */
-.user-text {
-  margin: 0;
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  line-height: 1.6;
-  color: var(--ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 /* ---- interrupt sentinel: a quiet centered divider, not a turn ---- */
 .message-interrupt {
   display: flex;
@@ -197,7 +183,7 @@
 }
 
 /* ============================================================ *
- * Assistant markdown
+ * Markdown
  * ============================================================ */
 .md {
   font-size: var(--text-base);
@@ -556,18 +542,18 @@
 }
 
 .md-h1 {
-  font-size: var(--text-lg);
+  font-size: calc(var(--text-lg) + 1px);
 }
 
 .md-h2 {
-  font-size: var(--text-md);
+  font-size: calc(var(--text-md) + 1px);
 }
 
 .md-h3,
 .md-h4,
 .md-h5,
 .md-h6 {
-  font-size: var(--text-base);
+  font-size: calc(var(--text-base) + 1px);
 }
 
 .md-h4,
@@ -633,13 +619,14 @@
 
 /* Block-rhythm owl — MUST stay after the per-element rules above, so its margin-top wins the
    specificity tie against their `margin: 0` resets (equal specificity ⇒ later source order wins).
-   This is what puts air between paragraph text and adjacent code blocks / tables / headings.
-   Consecutive paragraphs use the tighter --s4 (two classes → higher specificity, order-independent). */
+   Paragraph sequences run slightly tighter; other top-level markdown transitions keep more air. */
 .md > * + * {
   margin-top: var(--s5);
 }
 
-.md-p + .md-p {
+.md-p + .md-p,
+.md-p + :is(.md-ul, .md-ol),
+:is(.md-ul, .md-ol) + .md-p {
   margin-top: var(--s4);
 }
 
