@@ -135,6 +135,12 @@ export interface ConversationMeta {
    * Undefined for normal interactive sessions (the field is absent on disk).
    */
   sessionKind?: string
+  /**
+   * Codex thread class, read verbatim from `session_meta.payload.thread_source`. 'subagent' marks a
+   * delegated agent thread; the indexer drops those so only the parent conversation surfaces.
+   * Undefined for Claude and older Codex rollouts that predate the field.
+   */
+  threadSource?: string
   /** true when this is a freshly-started session with no persisted history yet. */
   provisional?: boolean
 }

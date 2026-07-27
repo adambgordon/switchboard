@@ -53,6 +53,50 @@ async function writeSession(
   return { id, file }
 }
 
+async function writeCodexRollout(
+  root: string,
+  cwd: string,
+  threadSource: 'user' | 'subagent',
+  mtimeMs: number
+): Promise<string> {
+  const dir = path.join(root, '2026', '07', '27')
+  await mkdir(dir, { recursive: true })
+  const id = randomUUID()
+  const file = path.join(dir, `rollout-2026-07-27T12-00-00-${id}.jsonl`)
+  await writeFile(
+    file,
+    jsonl([
+      {
+        timestamp: '2026-07-27T12:00:00.000Z',
+        type: 'session_meta',
+        payload: {
+          id,
+          session_id: threadSource === 'subagent' ? randomUUID() : id,
+          cwd,
+          originator: 'codex-tui',
+          source: threadSource === 'subagent' ? { subagent: { other: 'guardian' } } : 'cli',
+          thread_source: threadSource,
+          cli_version: '0.145.0'
+        }
+      },
+      {
+        timestamp: '2026-07-27T12:00:01.000Z',
+        type: 'event_msg',
+        payload: { type: 'user_message', message: `${threadSource} prompt` }
+      },
+      {
+        timestamp: '2026-07-27T12:00:02.000Z',
+        type: 'event_msg',
+        payload: { type: 'agent_message', message: `${threadSource} reply` }
+      }
+    ]),
+    'utf8'
+  )
+  const seconds = mtimeMs / 1000
+  await utimes(file, seconds, seconds)
+  return id
+}
+
 const CWD_A = '/home/user/project-one'
 const CWD_B = '/home/user/project-two'
 
@@ -209,6 +253,24 @@ describe('indexConversations background-job filtering', () => {
     expect(a).toBeDefined()
     const ids = a!.conversations.map((c) => c.sessionId)
     expect(ids).toEqual([interactive]) // the bg session is absent
+  })
+})
+
+describe('indexConversations Codex subagent filtering', () => {
+  it('keeps the parent conversation and drops its subagent thread', async () => {
+    const root = await mkdtemp(path.join(TMP_BASE, 'indexer-codex-subagent-test-'))
+    const codexRoot = path.join(root, 'sessions')
+    try {
+      const parent = await writeCodexRollout(codexRoot, CWD_A, 'user', 1_000_000_000_000)
+      await writeCodexRollout(codexRoot, CWD_A, 'subagent', 2_000_000_000_000)
+
+      const groups = await indexConversations(path.join(root, 'no-claude'), codexRoot)
+
+      expect(groups).toHaveLength(1)
+      expect(groups[0].conversations.map((conversation) => conversation.sessionId)).toEqual([parent])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 
