@@ -365,9 +365,11 @@ export default function App() {
     if (selectedId && focused) markRead(selectedId)
   }, [selectedId, focused, selectedMeta?.turnEndedAt, markRead])
 
-  // The view this conversation last had (default: Formatted). Terminal only
-  // applies while the session is live; otherwise fall back to its transcript.
-  const requestedView: View = selectedId ? viewBySession[selectedId] ?? 'transcript' : 'transcript'
+  // The view this conversation last had. A never-opened live session defaults to Terminal; everything
+  // else defaults to Formatted. Terminal only applies while live, otherwise fall back to the transcript.
+  const requestedView: View = selectedId
+    ? viewBySession[selectedId] ?? (selectedPty ? 'terminal' : 'transcript')
+    : 'transcript'
   const effectiveView: View = requestedView === 'terminal' && selectedPty ? 'terminal' : 'transcript'
   const { transcript, loading: tLoading } = useTranscript(selectedId, effectiveView === 'transcript')
 
@@ -510,27 +512,23 @@ export default function App() {
     setSessionView(target, 'terminal')
     requestFocus(target)
   }, [selectedId, open, setSessionView, requestFocus])
-  // A live-row CLICK (and the ⌥⌘↑/↓ switch target): open it, switch to its Terminal view, and focus
-  // the terminal so you can type immediately. No focus toggle — the main pane always owns the keyboard.
-  const clickLive = useCallback((id: string) => enterLive(id), [enterLive])
-  // A not-live row CLICK (and the ⌥⌘↑/↓ switch target): open it and hand the keyboard to the
-  // Formatted view — parallel to clickLive focusing a live row's terminal. No focus toggle. The
-  // synchronous paneRef.focus() lands focus in the pane immediately even before TranscriptView
-  // mounts (it then refines focus onto its scroll container) and covers the no-transcript case.
-  const clickConversation = useCallback(
+  // Navigation restores each conversation's remembered surface. A live conversation with no choice
+  // yet defaults to Terminal; explicit actions (Resume / New / Enter / Go live) still force Terminal.
+  const openRemembered = useCallback(
     (id: string) => {
       open(id)
       requestFocus(id)
-      paneRef.current?.focus({ preventScroll: true })
+      if (!ptys.bySession.has(id) || viewBySession[id] === 'transcript') {
+        // Land focus synchronously while the cached/new transcript is resolving; TranscriptView
+        // refines this onto its scroll container once mounted.
+        paneRef.current?.focus({ preventScroll: true })
+      }
     },
-    [open, requestFocus]
+    [open, requestFocus, ptys.bySession, viewBySession]
   )
-  // ⌥⌘↑/↓ lands on a conversation exactly like a click: a live one drops into its terminal, a
-  // not-live one into its Formatted transcript.
-  const switchTo = useCallback(
-    (id: string) => (ptys.bySession.has(id) ? enterLive(id) : clickConversation(id)),
-    [ptys.bySession, enterLive, clickConversation]
-  )
+  const clickLive = useCallback((id: string) => openRemembered(id), [openRemembered])
+  const clickConversation = useCallback((id: string) => openRemembered(id), [openRemembered])
+  const switchTo = useCallback((id: string) => openRemembered(id), [openRemembered])
   const showHistory = useCallback(() => {
     if (selectedId) setSessionView(selectedId, 'transcript')
   }, [selectedId, setSessionView])
@@ -721,10 +719,10 @@ export default function App() {
         togglePane()
       } else if (mod && e.altKey && (e.code === 'ArrowDown' || e.code === 'ArrowUp')) {
         // ⌥⌘↓ / ⌥⌘↑ — switch to the next / previous conversation (Chrome-tab style) and focus the
-        // main pane on it: a live one drops into its terminal (type immediately), a not-live one
-        // into its Formatted transcript (⏎ resumes). e.code (not e.key) per the ⌘⌥ Option-key
-        // gotcha. Works from inside a live terminal too — Cmd-combos bubble past xterm. Clamps at
-        // the ends; from "nothing selected" both directions seed the first row.
+        // main pane on its remembered surface (a never-opened live session defaults to Terminal;
+        // not-live always resolves to Formatted). e.code (not e.key) per the ⌘⌥ Option-key gotcha.
+        // Works from inside a live terminal too — Cmd-combos bubble past xterm. Clamps at the ends;
+        // from "nothing selected" both directions seed the first row.
         e.preventDefault()
         if (orderedIds.length > 0) {
           const idx = selectedId ? orderedIds.indexOf(selectedId) : -1

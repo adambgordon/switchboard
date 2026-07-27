@@ -11,11 +11,15 @@ describe('bootCommandFor', () => {
   it('claude resume uses --resume', () => {
     expect(bootCommandFor('claude', 'resume', ID)).toBe(`claude --resume ${ID}`)
   })
-  it('codex new is a bare codex (it mints its own id)', () => {
-    expect(bootCommandFor('codex', 'new', ID)).toBe('codex')
+  it('codex new caps terminal history replay without assigning an id', () => {
+    expect(bootCommandFor('codex', 'new', ID)).toBe(
+      'codex -c tui.terminal_resize_reflow_max_rows=2000'
+    )
   })
-  it('codex resume uses codex resume <id>', () => {
-    expect(bootCommandFor('codex', 'resume', ID)).toBe(`codex resume ${ID}`)
+  it('codex resume caps terminal history replay', () => {
+    expect(bootCommandFor('codex', 'resume', ID)).toBe(
+      `codex -c tui.terminal_resize_reflow_max_rows=2000 resume ${ID}`
+    )
   })
 })
 

@@ -2,7 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useRef, useState, type RefObj
 import type { ConversationMeta, PtyState, Transcript } from '@shared/types'
 import type { ResolvedTheme } from '../lib/theme'
 import PaneHeader from './PaneHeader'
-import TranscriptView from './TranscriptView'
+import TranscriptView, { type TranscriptScrollState } from './TranscriptView'
 import TerminalDeck from './TerminalDeck'
 import { Play } from './icons'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
@@ -136,6 +136,10 @@ export default function MainPane(props: Props) {
   // the dedup and a stale focusReq re-grabs focus on return — switching back to a previously-focused
   // not-live conversation would re-pull focus on each remount.
   const transcriptFocusKeyRef = useRef<number | null>(null)
+  // Compact per-conversation Formatted state. MainPane stays mounted while TranscriptView comes and
+  // goes, so positions survive both conversation switches and Formatted↔Terminal toggles without
+  // retaining every Markdown tree in the DOM.
+  const transcriptScrollStateRef = useRef(new Map<string, TranscriptScrollState>())
 
   // --- find in conversation (the main-pane search; distinct from the rail's cross-conversation
   // search). Query state is local so keystrokes re-render only the pane, not App / the rail. ---
@@ -235,6 +239,7 @@ export default function MainPane(props: Props) {
               <TranscriptView
                 transcript={transcript}
                 loading={transcriptLoading}
+                scrollStateRef={transcriptScrollStateRef}
                 focusKey={transcriptFocusKey}
                 lastFocusedKeyRef={transcriptFocusKeyRef}
                 searchQuery={deferredQuery}
