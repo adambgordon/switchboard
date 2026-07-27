@@ -82,7 +82,7 @@ Then quit (⌘Q) (if already running) and reopen the app.
 - **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped together by folder so a repo's conversations from both agents sit side by side; titles and previews update live as a file watcher re-indexes. Switchboard owns no data of its own.
 - **Preview without disturbing** — click any conversation to render its transcript instantly from disk. **No `claude` process is started**, so you can click through dozens to find the one you want.
 - **Resume / start, explicitly** — the only way to spawn a live process is **Resume** or **New**, each dropping you into a real terminal running the right agent (`claude --resume` / `codex resume`, and so on). **New** lets you pick the agent when more than one is installed.
-- **Formatted ⇄ Terminal** — for a live conversation, toggle between the raw **Terminal** (where you type) and a **Formatted** view that renders both your prompts and the agent's replies as Markdown — with syntax-highlighted code blocks — and stays pinned to the latest message. The choice sticks per conversation; hovering a link reveals its URL.
+- **Formatted ⇄ Terminal** — for a live conversation, toggle between the raw **Terminal** (where you type) and a **Formatted** view that renders both your prompts and the agent's replies as Markdown — with syntax-highlighted code blocks — and stays pinned to the latest message. The chosen view and each Formatted reading position stick per conversation while the app is open; hovering a link reveals its URL.
 - **Copy from the transcript** — in the **Formatted** view, hover a turn (beside its timestamp), a code block, a table, or a tool call/result for a copy button: a turn copies as Markdown (tool I/O excluded); code and tables copy their raw source. At the end of the transcript, another copy button exports the whole conversation as speaker-labeled Markdown with dividers, again excluding tool I/O and images. Each flashes a check when copied.
 - **Pin & organize** — the left pane has three collapsible sections: **Pinned**, **Live** (running now), and **Recent**. Pins persist across restarts; live and pinned rows drag to reorder; a cobalt dot tracks each live conversation's turn-state — working, waiting on your reply, finished-unread, or seen.
 - **Row menu (⋮)** — each row's **⋮** button (or a right-click) opens a quick menu to pin/unpin, open **Session details**, resume or stop a session, and mark it read or unread. **⌥-click** a live row (or its terminal) to mark it unread directly.
@@ -112,7 +112,7 @@ _For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUD
 | `Esc` | Close the find bar / clear the query and close search / close menu / close Preferences |
 | `⌘Q` | Quit — ends all live sessions |
 | `⌘+` / `⌘−` / `⌘0` | Zoom in / out / reset |
-| `⌘R` | Refresh the terminal — forces a clean redraw (does **not** reload) |
+| `⌘R` | Refresh the current view — forces a clean redraw without reloading; Codex Terminal returns to the latest output |
 
 ## Develop
 
@@ -186,5 +186,6 @@ A GUI Electron app inherits a minimal `PATH` (no `~/.local/bin`, no Homebrew), s
 - `node-pty` is a native module; `npm run rebuild` matches it to Electron's ABI.
 - **Concurrent resume:** resuming a conversation that is *also* live in an external terminal is not guarded — two processes appending to one JSONL will interleave. For now, avoid it.
 - The Formatted view is read-only and updates at message granularity (when Claude flushes to disk), not keystroke-by-keystroke. A find match must fall within a single rendered text node, so a phrase split across styled runs (e.g. a bold word) won't match.
+- Codex rebuilds terminal scrollback after a resize. Switchboard caps that replay at 2,000 rows to keep refresh responsive; use the Formatted view for reliable full-history reading in longer conversations.
 - **Liveness is derived from the transcript turn-state** (not terminal output): the live dot reads working / waiting-on-you / finished-unread / finished-seen. A couple of states can't be told apart from what's on disk (a turn blocked on a permission prompt, or `claude` crashing while its shell survives) and still read as *working*.
 - The renderer bundle is ~1 MB (react-markdown + xterm.js).

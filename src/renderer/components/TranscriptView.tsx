@@ -16,6 +16,8 @@ const isHumanItem = (item: TranscriptItem): boolean => item.kind === 'section' &
 interface TranscriptViewProps {
   transcript: Transcript | null
   loading: boolean
+  /** Session-local position cache owned above this component so it survives Formatted unmounting. */
+  scrollStateRef: MutableRefObject<Map<string, TranscriptScrollState>>
   /** A focus key: a bump counter that changes when the main pane should take the keyboard for the
    *  selected conversation (the Formatted-view twin of TerminalView's focusKey). MainPane derives it
    *  from selectedId — known instantly, before the transcript loads — so the focus lands immediately
@@ -34,6 +36,13 @@ interface TranscriptViewProps {
   onSearchCount?: (n: number) => void
 }
 
+export interface TranscriptScrollState {
+  scrollTop: number
+  pinned: boolean
+  visibleCount: number
+  total: number
+}
+
 /** Distance from the bottom (px) within which we keep the view pinned to latest. */
 const NEAR_BOTTOM_PX = 120
 
@@ -43,6 +52,7 @@ const NEAR_BOTTOM_PX = 120
  *  up (handleScroll, reverse infinite-scroll), or all at once for search / jump-to-top. */
 const WINDOW = 60
 const GROW_STEP = 120
+const REFRESH_SCROLL_SETTLE_MS = 100
 // Reverse infinite-scroll: start mounting the next-older chunk once the user scrolls within this many
 // px of the top, so it's in place before they reach it. Replaces the old eager idle-grow, which
 // prepended while pinned to the bottom and caused the open-time shake.
@@ -65,6 +75,7 @@ function LoadingState(): ReactNode {
 export default function TranscriptView({
   transcript,
   loading,
+  scrollStateRef,
   focusKey = null,
   lastFocusedKeyRef,
   searchQuery = '',
@@ -84,6 +95,9 @@ export default function TranscriptView({
   const detachAutoHideRef = useRef<(() => void) | null>(null)
   // rAF handle for the on-open "keep snapping to the bottom until the height settles" loop.
   const repinRafRef = useRef<number | null>(null)
+  // The refresh zoom temporarily changes the viewport's CSS-pixel geometry. Preserve the logical
+  // reading position while those browser-generated scroll events pass through.
+  const refreshScrollRef = useRef<{ scrollTop: number; pinned: boolean } | null>(null)
 
   // Jump-to-edge affordance — reactive flags for whether the scroll sits near the top / bottom, driving
   // the floating buttons (shown only when scrolled away from that edge). nearBottomRef below stays the
@@ -104,6 +118,32 @@ export default function TranscriptView({
   const totalRef = useRef(0)
   const searchingRef = useRef(false)
   const growPendingRef = useRef(false)
+  // Cache writes belong to the transcript represented by the committed DOM. During a cache-cold load
+  // there is no rendered session, so the loading container must not inherit the previous session's key.
+  const renderedSessionRef = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    renderedSessionRef.current = transcript?.sessionId ?? null
+  }, [transcript?.sessionId])
+  const rememberPosition = useCallback(
+    (el: HTMLDivElement, sessionId = renderedSessionRef.current): void => {
+      if (!sessionId) return
+      const saved = scrollStateRef.current.get(sessionId)
+      if (saved) {
+        saved.scrollTop = el.scrollTop
+        saved.pinned = nearBottomRef.current
+        saved.visibleCount = visibleCountRef.current
+        saved.total = totalRef.current
+      } else {
+        scrollStateRef.current.set(sessionId, {
+          scrollTop: el.scrollTop,
+          pinned: nearBottomRef.current,
+          visibleCount: visibleCountRef.current,
+          total: totalRef.current
+        })
+      }
+    },
+    [scrollStateRef]
+  )
   const measureEdges = useCallback((el: HTMLDivElement): void => {
     const top = el.scrollTop <= NEAR_BOTTOM_PX
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
@@ -128,6 +168,7 @@ export default function TranscriptView({
     const dist = el.scrollHeight - top - el.clientHeight
     const prev = lastTopRef.current
     lastTopRef.current = top
+    if (refreshScrollRef.current) return
     if (nearBottomRef.current) {
       // Pinned to the bottom. A gap to the bottom can open for two very different reasons:
       //  • the user scrolled UP — scrollTop DECREASES — which releases the pin; vs
@@ -161,12 +202,14 @@ export default function TranscriptView({
       setVisibleCount((c) => Math.min(totalRef.current, c + GROW_STEP))
     }
     measureEdges(el)
-  }, [measureEdges])
+    rememberPosition(el)
+  }, [measureEdges, rememberPosition])
 
   // Callback ref: attach/detach the scroll listener + the auto-hiding scrollbar as the container mounts.
   const attachScroll = useCallback(
     (node: HTMLDivElement | null): void => {
       if (scrollElRef.current) {
+        rememberPosition(scrollElRef.current)
         scrollElRef.current.removeEventListener('scroll', handleScroll)
         detachAutoHideRef.current?.()
         detachAutoHideRef.current = null
@@ -177,8 +220,66 @@ export default function TranscriptView({
         detachAutoHideRef.current = attachAutoHide(node)
       }
     },
-    [handleScroll]
+    [handleScroll, rememberPosition]
   )
+
+  useEffect(() => {
+    let settleTimer: number | undefined
+    let settleRaf: number | undefined
+    const clearPending = (): void => {
+      window.clearTimeout(settleTimer)
+      if (settleRaf != null) cancelAnimationFrame(settleRaf)
+      settleTimer = undefined
+      settleRaf = undefined
+    }
+    const offStart = window.api.onRefreshStart(() => {
+      clearPending()
+      const el = scrollElRef.current
+      if (!el) return
+      refreshScrollRef.current = {
+        scrollTop: el.scrollTop,
+        pinned: nearBottomRef.current
+      }
+      // Match AppVeil's missed-end failsafe: never leave ordinary user scrolling suppressed.
+      settleTimer = window.setTimeout(() => {
+        refreshScrollRef.current = null
+      }, 1200)
+    })
+    const offEnd = window.api.onRefreshEnd(() => {
+      clearPending()
+      const snapshot = refreshScrollRef.current
+      const el = scrollElRef.current
+      if (!snapshot || !el) {
+        refreshScrollRef.current = null
+        return
+      }
+      const restore = (): void => {
+        const node = scrollElRef.current
+        if (!node) return
+        nearBottomRef.current = snapshot.pinned
+        node.scrollTop = snapshot.pinned ? node.scrollHeight : snapshot.scrollTop
+        lastTopRef.current = node.scrollTop
+        measureEdges(node)
+        rememberPosition(node)
+      }
+      restore()
+      // Chromium dispatches the restored zoom's final scroll event after `appRefreshEnd`. Reassert once
+      // it has settled, still well inside the opaque veil, then release the scroll-classification guard.
+      settleTimer = window.setTimeout(() => {
+        if (refreshScrollRef.current !== snapshot) return
+        restore()
+        settleRaf = requestAnimationFrame(() => {
+          if (refreshScrollRef.current === snapshot) refreshScrollRef.current = null
+        })
+      }, REFRESH_SCROLL_SETTLE_MS)
+    })
+    return () => {
+      clearPending()
+      refreshScrollRef.current = null
+      offStart()
+      offEnd()
+    }
+  }, [measureEdges, rememberPosition])
 
   // Pin to latest: jump to the bottom when a conversation opens; on new content
   // stick to the bottom only if the user is already near it (don't yank them
@@ -187,15 +288,20 @@ export default function TranscriptView({
     const el = scrollElRef.current
     if (!el || !transcript) return
     const opened = lastSessionRef.current !== transcript.sessionId
+    const saved = opened ? scrollStateRef.current.get(transcript.sessionId) : null
     if (opened) {
       lastSessionRef.current = transcript.sessionId
-      nearBottomRef.current = true
+      nearBottomRef.current = saved?.pinned ?? true
     }
-    if (opened || nearBottomRef.current) {
+    if (opened) {
+      el.scrollTop = saved && !saved.pinned ? saved.scrollTop : el.scrollHeight
+      lastTopRef.current = el.scrollTop
+    } else if (nearBottomRef.current) {
       el.scrollTop = el.scrollHeight
       lastTopRef.current = el.scrollTop
     }
     measureEdges(el)
+    rememberPosition(el)
     if (!opened) return
     // On open, KEEP re-asserting the bottom for the next frames: the content height changes AFTER this
     // first pin (tool results measuring overflow + adding "Expand" via ResizeObserver), so a one-shot
@@ -215,6 +321,7 @@ export default function TranscriptView({
       }
       node.scrollTop = node.scrollHeight
       lastTopRef.current = node.scrollTop
+      rememberPosition(node)
       const h = node.scrollHeight
       stable = h === lastHeight ? stable + 1 : 0
       lastHeight = h
@@ -230,7 +337,7 @@ export default function TranscriptView({
     return () => {
       if (repinRafRef.current != null) cancelAnimationFrame(repinRafRef.current)
     }
-  }, [transcript, measureEdges])
+  }, [transcript, measureEdges, rememberPosition, scrollStateRef])
 
   // Focus the scroll container when the main pane should take the keyboard for this conversation —
   // the Formatted-view counterpart to TerminalView grabbing focus on its focusKey. Selecting a
@@ -266,7 +373,12 @@ export default function TranscriptView({
   const winSessionRef = useRef<string | null>(null)
   if (transcript && winSessionRef.current !== transcript.sessionId) {
     winSessionRef.current = transcript.sessionId
-    setVisibleCount(WINDOW)
+    const saved = scrollStateRef.current.get(transcript.sessionId)
+    const appended = saved ? Math.max(0, total - saved.total) : 0
+    const restoredCount = saved && !saved.pinned
+      ? Math.min(total, Math.max(WINDOW, saved.visibleCount + appended))
+      : WINDOW
+    setVisibleCount(restoredCount)
     // Drop any pending scroll-grow bookkeeping from the previous conversation.
     growPendingRef.current = false
     growHeightRef.current = null
@@ -291,10 +403,14 @@ export default function TranscriptView({
       el.scrollTop = 0
       lastTopRef.current = el.scrollTop
       measureEdges(el)
+      rememberPosition(el)
       return
     }
     const prev = growHeightRef.current
-    if (prev == null) return
+    if (prev == null) {
+      rememberPosition(el)
+      return
+    }
     growHeightRef.current = null
     growPendingRef.current = false // chunk mounted + about to be position-compensated; allow the next
     if (nearBottomRef.current) {
@@ -309,7 +425,8 @@ export default function TranscriptView({
       lastTopRef.current = el.scrollTop
     }
     measureEdges(el)
-  }, [visibleCount, total, measureEdges])
+    rememberPosition(el)
+  }, [visibleCount, total, measureEdges, rememberPosition])
 
   // Keep the bottom pinned through ASYNC content-height changes while pinned — a tool-result's
   // "Expand" affordance settling in via its own ResizeObserver, font/markdown reflow — that don't
@@ -325,10 +442,11 @@ export default function TranscriptView({
       if (el.scrollHeight - el.scrollTop - el.clientHeight < 1) return
       el.scrollTop = el.scrollHeight
       lastTopRef.current = el.scrollTop
+      rememberPosition(el)
     })
     ro.observe(content)
     return () => ro.disconnect()
-  }, [transcript])
+  }, [transcript, rememberPosition])
 
   if (loading && !transcript) {
     return (
@@ -368,6 +486,7 @@ export default function TranscriptView({
     // full transcript has mounted).
     el.scrollTop = toTop ? 0 : el.scrollHeight
     lastTopRef.current = el.scrollTop
+    rememberPosition(el)
   }
 
   return (

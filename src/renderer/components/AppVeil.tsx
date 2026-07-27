@@ -1,4 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+
+const REFRESH_MIN_OPAQUE_MS = 300
 
 /**
  * A white cover that fades out on launch (a soft fade-in from white) and brackets the ⌘R refresh: the
@@ -13,6 +15,7 @@ type VeilState = 'opaque' | 'fading' | 'hidden'
 
 export default function AppVeil(): ReactNode {
   const [state, setState] = useState<VeilState>('opaque')
+  const refreshStartedAtRef = useRef(0)
 
   // Startup: reveal the app on the frame after the first (white) paint.
   useEffect(() => {
@@ -23,17 +26,25 @@ export default function AppVeil(): ReactNode {
   // Refresh: cover instantly on start, fade out on end. The failsafe fades even if `end` never arrives.
   useEffect(() => {
     let failsafe: number | undefined
+    let reveal: number | undefined
     const offStart = window.api.onRefreshStart(() => {
       window.clearTimeout(failsafe)
+      window.clearTimeout(reveal)
+      refreshStartedAtRef.current = performance.now()
       setState('opaque')
       failsafe = window.setTimeout(() => setState('fading'), 1200)
     })
     const offEnd = window.api.onRefreshEnd(() => {
       window.clearTimeout(failsafe)
-      setState('fading')
+      const elapsed = performance.now() - refreshStartedAtRef.current
+      reveal = window.setTimeout(
+        () => setState('fading'),
+        Math.max(0, REFRESH_MIN_OPAQUE_MS - elapsed)
+      )
     })
     return () => {
       window.clearTimeout(failsafe)
+      window.clearTimeout(reveal)
       offStart()
       offEnd()
     }
