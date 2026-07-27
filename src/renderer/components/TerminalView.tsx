@@ -115,6 +115,8 @@ function syncScrollArea(term: Terminal): void {
   vp?.syncScrollArea?.(true)
 }
 
+const CODEX_REFRESH_FOLLOW_MS = 1000
+
 export default function TerminalView({ ptyId, sessionId, agent, visible, focusKey, theme, onMarkUnread }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -122,6 +124,7 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
   const lastSentRef = useRef<{ cols: number; rows: number } | null>(null)
   // rAF handle coalescing the post-output scroll-area recompute to one call per frame (see syncScrollArea).
   const syncRafRef = useRef<number | null>(null)
+  const refreshFollowUntilRef = useRef(0)
 
   // Fit the terminal to its host and push the new size to the PTY — but ONLY when the host is
   // genuinely measurable, and only when the size actually changed. A hidden deck item
@@ -241,8 +244,13 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
     // is alternate-screen (no scrollback), so it keeps the plain write with zero added per-output work.
     const detach =
       agent === 'codex'
-        ? attachPty(ptyId, (d) =>
+        ? attachPty(ptyId, (d) => {
             term.write(d, () => {
+              if (performance.now() < refreshFollowUntilRef.current) {
+                term.scrollToBottom()
+                syncScrollArea(term)
+                return
+              }
               if (syncRafRef.current != null) return
               syncRafRef.current = requestAnimationFrame(() => {
                 syncRafRef.current = null
@@ -250,8 +258,17 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
                 if (t) syncScrollArea(t)
               })
             })
-          )
+          })
         : attachPty(ptyId, (d) => term.write(d))
+    const followRefreshScroll =
+      agent === 'codex'
+        ? term.onScroll((viewportY) => {
+            if (performance.now() >= refreshFollowUntilRef.current) return
+            if (viewportY === term.buffer.active.baseY) return
+            term.scrollToBottom()
+            syncScrollArea(term)
+          })
+        : null
     const onInput = term.onData((d) => window.api.sendInput(ptyId, d))
 
     // Image input is agent-specific. Claude reads the clipboard after an empty bracketed paste;
@@ -315,6 +332,7 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       host.removeEventListener('paste', onPaste, true)
       offExit()
       onInput.dispose()
+      followRefreshScroll?.dispose()
       detach()
       term.dispose()
       termRef.current = null
@@ -330,6 +348,20 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
     const term = termRef.current
     if (term) term.options.theme = THEMES[theme]
   }, [theme])
+
+  // Codex clears and rebuilds its scrollback on the resize-driven refresh. Snap before the zoom
+  // wiggle starts so xterm enters that replay in follow-output mode and finishes at the bottom.
+  // Only the visible Codex terminal moves; Claude and hidden live sessions keep their positions.
+  useEffect(() => {
+    if (agent !== 'codex' || !visible) return
+    return window.api.onRefreshStart(() => {
+      const term = termRef.current
+      if (!term) return
+      refreshFollowUntilRef.current = performance.now() + CODEX_REFRESH_FOLLOW_MS
+      term.scrollToBottom()
+      syncScrollArea(term)
+    })
+  }, [agent, visible, ptyId])
 
   // Option+click anywhere in the terminal marks this conversation unread (the in-terminal twin of
   // the left-pane row gesture). Capture phase + stopPropagation is load-bearing on BOTH sides: it

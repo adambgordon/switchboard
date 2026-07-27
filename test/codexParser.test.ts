@@ -4,6 +4,7 @@ import {
   extractCodexMetaFromText,
   matchProvisionalCodex
 } from '../src/main/sessions/codexParser'
+import { countConversationalMessages } from '../src/shared/messageCount'
 
 const TS = '2026-06-23T14:36:56.000Z'
 const TS2 = '2026-06-23T14:37:10.000Z'
@@ -104,8 +105,12 @@ describe('extractCodexMetaFromText', () => {
     expect(meta!.reasoningTokens).toBe(50)
     expect(meta!.contextWindow).toBe(258400)
     expect(meta!.contextTokens).toBe(600) // last_token_usage.input_tokens
-    // user_message(1) + agent_message(1)
-    expect(meta!.messageCount).toBe(2)
+    // Human prompt + both visible assistant prose messages; tool plumbing and the duplicate final
+    // agent_message event are excluded.
+    expect(meta!.messageCount).toBe(3)
+    expect(meta!.messageCount).toBe(
+      countConversationalMessages(parseCodexTranscriptText(jsonl(interactiveLines()), 'abc').messages)
+    )
     // task_complete is the last boundary → awaiting
     expect(meta!.turnState).toBe('awaiting')
     expect(meta!.mtime).toBe(123)
