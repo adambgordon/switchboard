@@ -71,7 +71,7 @@ export interface ConversationMeta {
   gitBranch: string | null
   /** ms epoch of last activity (file mtime). */
   mtime: number
-  /** Count of visible human/agent prose messages; excludes tool plumbing and internal records. */
+  /** Count of visible human/agent prose or image messages; excludes tool plumbing and internal records. */
   messageCount: number
   /** claude version that last wrote the file. */
   version: string | null
