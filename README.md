@@ -79,7 +79,7 @@ Then quit (⌘Q) (if already running) and reopen the app.
 
 ## What it does
 
-- **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped together by folder so a repo's conversations from both agents sit side by side; titles and previews update live as a file watcher re-indexes. Switchboard owns no data of its own.
+- **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped together by folder so a repo's conversations from both agents sit side by side; titles and previews update live as a file watcher re-indexes. Delegated Codex subagent threads are omitted from the conversation list. Switchboard owns no data of its own.
 - **Preview without disturbing** — click any conversation to render its transcript instantly from disk. **No `claude` process is started**, so you can click through dozens to find the one you want.
 - **Resume / start, explicitly** — the only way to spawn a live process is **Resume** or **New**, each dropping you into a real terminal running the right agent (`claude --resume` / `codex resume`, and so on). **New** lets you pick the agent when more than one is installed.
 - **Formatted ⇄ Terminal** — for a live conversation, toggle between the raw **Terminal** (where you type) and a **Formatted** view that renders both your prompts and the agent's replies as Markdown — with syntax-highlighted code blocks — and stays pinned to the latest message. The choice sticks per conversation; hovering a link reveals its URL.
