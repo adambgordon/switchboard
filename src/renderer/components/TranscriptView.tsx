@@ -16,6 +16,8 @@ const isHumanItem = (item: TranscriptItem): boolean => item.kind === 'section' &
 interface TranscriptViewProps {
   transcript: Transcript | null
   loading: boolean
+  /** Canonical user-facing count from the metadata index; shared with every other count display. */
+  messageCount: number
   /** Session-local position cache owned above this component so it survives Formatted unmounting. */
   scrollStateRef: MutableRefObject<Map<string, TranscriptScrollState>>
   /** A focus key: a bump counter that changes when the main pane should take the keyboard for the
@@ -75,6 +77,7 @@ function LoadingState(): ReactNode {
 export default function TranscriptView({
   transcript,
   loading,
+  messageCount,
   scrollStateRef,
   focusKey = null,
   lastFocusedKeyRef,
@@ -462,7 +465,7 @@ export default function TranscriptView({
 
   if (!transcript) return null
 
-  const count = transcript.messages.length
+  const count = messageCount
   // The windowed tail to render (full set while searching — see the effect above). dividerBefore is
   // computed against the absolute index into `items`, so slicing never breaks the You↔non-You rule.
   const start = Math.max(0, total - (searching ? total : visibleCount))
