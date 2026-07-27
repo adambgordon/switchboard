@@ -17,13 +17,22 @@ function jsonl(lines: object[]): string {
  * message (which must be skipped), the clean human prompt (event_msg/user_message), assistant text,
  * a tool call + output, the final agent_message (dup, skipped), token_count, then task_complete.
  */
-function interactiveLines(opts: { originator?: string; cwd?: string } = {}): object[] {
-  const { originator = 'codex-tui', cwd = '/Volumes/git/foo' } = opts
+function interactiveLines(
+  opts: { originator?: string; cwd?: string; threadSource?: string } = {}
+): object[] {
+  const { originator = 'codex-tui', cwd = '/Volumes/git/foo', threadSource } = opts
   return [
     {
       timestamp: TS,
       type: 'session_meta',
-      payload: { session_id: 'abc', cwd, originator, cli_version: '0.142.0', base_instructions: { text: 'you are codex' } }
+      payload: {
+        session_id: 'abc',
+        cwd,
+        originator,
+        thread_source: threadSource,
+        cli_version: '0.142.0',
+        base_instructions: { text: 'you are codex' }
+      }
     },
     { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1', model_context_window: 258400 } },
     { timestamp: TS, type: 'turn_context', payload: { turn_id: 't1', cwd, model: 'gpt-5.5' } },
@@ -101,10 +110,22 @@ describe('extractCodexMetaFromText', () => {
     expect(meta!.turnState).toBe('awaiting')
     expect(meta!.mtime).toBe(123)
     expect(meta!.sizeBytes).toBe(456)
+    expect(meta!.threadSource).toBeUndefined()
   })
 
   it('drops non-interactive (codex exec) rollouts', () => {
     expect(extractCodexMetaFromText(jsonl(interactiveLines({ originator: 'codex_exec' })), 'abc', 1, 1)).toBeNull()
+  })
+
+  it('surfaces the subagent thread source for index filtering', () => {
+    const meta = extractCodexMetaFromText(
+      jsonl(interactiveLines({ threadSource: 'subagent' })),
+      'abc',
+      1,
+      1
+    )
+    expect(meta).not.toBeNull()
+    expect(meta!.threadSource).toBe('subagent')
   })
 
   it('returns null when there is no cwd', () => {

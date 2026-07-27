@@ -17,9 +17,9 @@
  * calls/results from function_call(+custom/web)/function_call_output. These map onto the same
  * normalized tool_use/tool_result block shapes as the Claude parser, so the renderer is shared.
  *
- * Only INTERACTIVE sessions (`session_meta.originator === 'codex-tui'`) are surfaced; `codex exec` /
- * non-interactive rollouts (originator `codex_exec`) are dropped — the same set `codex resume` hides
- * by default.
+ * Only INTERACTIVE sessions (`session_meta.originator === 'codex-tui'`) are parsed into metadata;
+ * `codex exec` / non-interactive rollouts (originator `codex_exec`) are dropped. The indexer then
+ * removes interactive subagent threads using `session_meta.thread_source`.
  *
  * Pure Node — no Electron, no DOM. Malformed lines are skipped, never thrown. The `*FromText`
  * functions are pure (string in, value out) so they're unit-testable without the filesystem.
@@ -243,6 +243,7 @@ export function extractCodexMetaFromText(
 ): ConversationMeta | null {
   let cwd: string | null = null
   let originator: string | null = null
+  let threadSource: string | null = null
   let version: string | null = null
   let model: string | null = null
   let firstUser: string | null = null
@@ -274,6 +275,9 @@ export function extractCodexMetaFromText(
     if (obj.type === 'session_meta') {
       if (cwd == null && typeof payload.cwd === 'string' && payload.cwd.length > 0) cwd = payload.cwd
       if (originator == null && typeof payload.originator === 'string') originator = payload.originator
+      if (threadSource == null && typeof payload.thread_source === 'string') {
+        threadSource = payload.thread_source
+      }
       if (version == null && typeof payload.cli_version === 'string') version = payload.cli_version
       continue
     }
@@ -387,6 +391,7 @@ export function extractCodexMetaFromText(
     turnState,
     turnEndedAt,
     lastActivityAt,
+    threadSource: threadSource ?? undefined,
     provisional: false
   }
 }
