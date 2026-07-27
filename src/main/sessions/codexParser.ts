@@ -35,6 +35,7 @@ import type {
   TranscriptBlock,
   TranscriptMessage
 } from '../../shared/types'
+import { isConversationalMessage } from '../../shared/messageCount'
 import { cleanTitle } from './parser'
 
 /** Default Codex sessions root: `~/.codex/sessions`. */
@@ -290,7 +291,15 @@ export function extractCodexMetaFromText(
         if (m.trim().length > 0) {
           if (firstUser == null) firstUser = m
           lastUser = m
-          messageCount += 1
+          if (
+            isConversationalMessage({
+              role: 'user',
+              userKind: 'human',
+              blocks: [{ kind: 'text', text: m }]
+            })
+          ) {
+            messageCount += 1
+          }
           if (!Number.isNaN(at)) {
             if (firstActivityAt == null) firstActivityAt = at
             lastActivityAt = at
@@ -299,7 +308,6 @@ export function extractCodexMetaFromText(
         continue
       }
       if (pt === 'agent_message') {
-        messageCount += 1
         if (!Number.isNaN(at)) lastActivityAt = at
         continue
       }
@@ -337,10 +345,22 @@ export function extractCodexMetaFromText(
     }
 
     if (obj.type === 'response_item') {
+      const pt = payload.type
+      if (pt === 'message' && payload.role === 'assistant') {
+        const assistantText = contentText(payload.content)
+        if (
+          isConversationalMessage({
+            role: 'assistant',
+            blocks: [{ kind: 'text', text: assistantText }]
+          })
+        ) {
+          messageCount += 1
+        }
+      }
+
       // Detect a pending request_user_input: a function_call with no matching output yet ⇒ the
       // turn is parked on the user (the "asking" state). (Approval events — exec_approval_request /
       // apply_patch_approval_request — are also persisted; folding those in is a Phase 2 refinement.)
-      const pt = payload.type
       if (pt === 'function_call' && payload.name === 'request_user_input') {
         const callId = typeof payload.call_id === 'string' ? payload.call_id : ''
         openUserInputCalls.add(callId)

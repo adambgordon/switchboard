@@ -239,6 +239,7 @@ export default function MainPane(props: Props) {
               <TranscriptView
                 transcript={transcript}
                 loading={transcriptLoading}
+                messageCount={meta?.messageCount ?? 0}
                 scrollStateRef={transcriptScrollStateRef}
                 focusKey={transcriptFocusKey}
                 lastFocusedKeyRef={transcriptFocusKeyRef}
