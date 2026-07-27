@@ -24,7 +24,7 @@
 }
 .sb-app-veil.fading {
   opacity: 0;
-  transition: opacity 800ms var(--ease);
+  transition: opacity 500ms var(--ease);
 }
 
 .sb-body {

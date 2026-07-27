@@ -19,6 +19,7 @@ import type {
   TranscriptBlock,
   TranscriptMessage
 } from '../../shared/types'
+import { isConversationalMessage } from '../../shared/messageCount'
 
 /** Max characters for a cleaned title before we truncate. */
 const TITLE_MAX = 80
@@ -121,6 +122,25 @@ function blocksFromMessage(message: Record<string, unknown>): TranscriptBlock[] 
     return blocks
   }
   return []
+}
+
+/** Normalize only prose/image blocks for the cheap user-facing count; never touch large tool output. */
+function conversationalBlocksFromMessage(message: Record<string, unknown>): TranscriptBlock[] {
+  const content = message.content
+  if (typeof content === 'string') {
+    return content.length > 0 ? [{ kind: 'text', text: content }] : []
+  }
+  if (!Array.isArray(content)) return []
+
+  const blocks: TranscriptBlock[] = []
+  for (const raw of content) {
+    if (!raw || typeof raw !== 'object') continue
+    const type = (raw as Record<string, unknown>).type
+    if (type !== 'text' && type !== 'image') continue
+    const block = normalizeBlock(raw)
+    if (block) blocks.push(block)
+  }
+  return blocks
 }
 
 /** Is this a user/assistant message line we should turn into a TranscriptMessage? */
@@ -592,13 +612,36 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
         continue
     }
 
-    messageCount += 1
-
     // First/last message timestamps bound the conversation's elapsed span (Duration in the info modal).
     const ts = typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN
     if (!Number.isNaN(ts) && firstActivityAt == null) firstActivityAt = ts
 
     const message = obj.message
+    if (message && typeof message === 'object') {
+      const msg = message as Record<string, unknown>
+      const role: MessageRole = msg.role === 'assistant' ? 'assistant' : 'user'
+      const kind = role === 'user' ? classifyUserLine(obj) : null
+      const userKind =
+        role !== 'user'
+          ? undefined
+          : hasToolResult(msg)
+            ? 'tool_result'
+            : kind === 'interrupted'
+              ? 'interrupted'
+              : kind === 'real'
+                ? 'human'
+                : undefined
+      if (
+        isConversationalMessage({
+          role,
+          userKind,
+          blocks: conversationalBlocksFromMessage(msg)
+        })
+      ) {
+        messageCount += 1
+      }
+    }
+
     if (obj.type === 'user' && firstUserText == null && message && typeof message === 'object') {
       const t = userMessageText(message as Record<string, unknown>)
       if (t.trim().length > 0) firstUserText = t

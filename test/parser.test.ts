@@ -4,6 +4,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { cleanTitle, extractMeta, extractTurnState, parseTranscript } from '../src/main/sessions/parser'
+import { countConversationalMessages } from '../src/shared/messageCount'
 import type { TranscriptBlock } from '../src/shared/types'
 
 /** Base for vitest temp dirs; honors CLAUDE_CODE_TMPDIR if set, else the system temp. */
@@ -363,8 +364,10 @@ describe('extractMeta', () => {
     expect(m.preview).toBe('Now also add an indexer test, please')
     expect(m.gitBranch).toBe('develop')
     expect(m.version).toBe('2.1.156')
-    // 5 user/assistant lines counted; attachment/ai-title/last-prompt/malformed excluded.
-    expect(m.messageCount).toBe(5)
+    // Human prompt + two prose/image-bearing assistant messages. Command echo and tool output
+    // are transcript plumbing, not conversational messages.
+    expect(m.messageCount).toBe(3)
+    expect(m.messageCount).toBe(countConversationalMessages((await parseTranscript(filePath)).messages))
     expect(m.provisional).toBe(false)
     expect(typeof m.mtime).toBe('number')
     expect(m.mtime).toBeGreaterThan(0)
