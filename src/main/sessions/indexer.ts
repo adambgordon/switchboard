@@ -177,8 +177,8 @@ async function indexClaudeMetas(root: string, cache: MetaCache): Promise<Convers
 
 /**
  * Gather Codex conversation metadata from the sessions root. `extractCodexMeta` already returns null
- * for non-interactive (`codex exec`) rollouts; here we additionally drop zero-message ones. [] if
- * the root is missing.
+ * for non-interactive (`codex exec`) rollouts; here we additionally drop zero-message and subagent
+ * threads. [] if the root is missing.
  */
 async function indexCodexMetas(root: string, cache: MetaCache): Promise<ConversationMeta[]> {
   const files = await listCodexRollouts(root)
@@ -200,6 +200,7 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<Conversa
   for (const meta of metas) {
     if (!meta) continue
     if (meta.messageCount === 0) continue
+    if (meta.threadSource === 'subagent') continue
     const row = threads.get(meta.sessionId)
     if (row?.archived) continue
     const title = resolveCodexTitle({
