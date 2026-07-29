@@ -531,6 +531,63 @@ describe('extractTurnState', () => {
     expect(r.turnEndedAt).toBe(Date.parse(T2))
   })
 
+  it('ends the original turn when Claude hands it to a background transcript', () => {
+    const handoffAt = '2026-06-01T17:00:31.000Z'
+    const r = extractTurnState(
+      jsonl([
+        {
+          type: 'assistant',
+          isSidechain: false,
+          timestamp: T1,
+          message: {
+            role: 'assistant',
+            stop_reason: 'tool_use',
+            content: [{ type: 'tool_use', id: 't', name: 'Bash', input: {} }]
+          }
+        },
+        {
+          type: 'user',
+          isSidechain: false,
+          timestamp: T2,
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] }
+        },
+        {
+          type: 'system',
+          subtype: 'informational',
+          isSidechain: false,
+          timestamp: handoffAt,
+          content: 'Backgrounding after the current tool finishes…'
+        }
+      ])
+    )
+    expect(r.turnState).toBe('awaiting')
+    expect(r.turnEndedAt).toBe(Date.parse(handoffAt))
+    expect(r.lastActivityAt).toBe(Date.parse(T2))
+  })
+
+  it('does not treat unrelated system notices as a background handoff', () => {
+    const r = extractTurnState(
+      jsonl([
+        {
+          type: 'user',
+          isSidechain: false,
+          timestamp: T1,
+          message: { role: 'user', content: 'keep working' }
+        },
+        {
+          type: 'system',
+          subtype: 'informational',
+          isSidechain: false,
+          timestamp: T2,
+          content: 'Background task completed'
+        }
+      ])
+    )
+    expect(r.turnState).toBe('in_progress')
+    expect(r.turnEndedAt).toBeNull()
+    expect(r.lastActivityAt).toBe(Date.parse(T1))
+  })
+
   it('in_progress when the last main line is a dangling tool_use', () => {
     const r = extractTurnState(
       jsonl([

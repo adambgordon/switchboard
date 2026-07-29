@@ -327,6 +327,12 @@ export async function parseTranscript(filePath: string): Promise<Transcript> {
 
 /** Built-in tools that PARK the turn waiting for the user's reply (rather than just running). */
 const BLOCKING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+/**
+ * Fragile by necessity: the original transcript has no structured turn-boundary for this handoff.
+ * This persisted English informational prefix is the only on-disk signal that this file's turn
+ * ended, so a wording change upstream must be reflected here.
+ */
+const BACKGROUND_HANDOFF = 'Backgrounding after the current tool finishes'
 
 /**
  * Name of the LAST `tool_use` block in an assistant message's content, or null if it has
@@ -401,7 +407,7 @@ function classifyUserLine(obj: Record<string, unknown>): 'real' | 'interrupted' 
  * main chain — sidechain / sub-agent lines are skipped, since a sub-agent finishing
  * must not look like the parent turn ending. Trailing metadata (mode, ai-title,
  * last-prompt, attachment, …) is ignored for free: it is neither a user/assistant
- * message nor a `turn_duration` system event, so it never advances the signals below.
+ * message nor a recognized turn-boundary system event, so it never advances the signals below.
  * Non-conversational USER lines are skipped the same way (see {@link classifyUserLine}):
  * slash-command echo/output (`/model`), `!` bash I/O, task notifications, and injected
  * caveats are not a turn, so e.g. running `/model` after a finished turn leaves the turn
@@ -422,6 +428,8 @@ function classifyUserLine(obj: Record<string, unknown>): 'real' | 'interrupted' 
  *     (compaction REPLACES history and leaves the session idle at the prompt; modeled as a
  *     terminal turn so a manual /compact does not read as in-progress and breathe forever — an
  *     auto-compact's continuation assistant line that follows flips it back to in-progress)
+ *   - last meaningful event is Claude's background-handoff notice -> 'awaiting' (the original
+ *     transcript ends at the handoff; all continuation events land in a separate `bg` transcript)
  *   - last main line is an assistant that otherwise ended (end_turn / max_tokens /
  *     an interrupted turn with no stop_reason) -> 'awaiting'
  *   - no messages at all -> undefined
@@ -447,11 +455,25 @@ export function extractTurnState(text: string): {
     const obj = parseLine(line)
     if (!obj || obj.isSidechain === true) continue
 
-    // A `turn_duration` system event marks a turn boundary — record its time, then skip.
     if (obj.type === 'system') {
       if (obj.subtype === 'turn_duration' && typeof obj.timestamp === 'string') {
         const t = Date.parse(obj.timestamp)
         if (!Number.isNaN(t)) lastTurnDurationAt = t
+      }
+      if (
+        obj.subtype === 'informational' &&
+        typeof obj.content === 'string' &&
+        obj.content.startsWith(BACKGROUND_HANDOFF)
+      ) {
+        // The original transcript stops here; all continuation events land in a distinct `bg`
+        // transcript. Model this file's final turn as ended without borrowing state from that child.
+        lastRole = 'assistant'
+        lastAssistantStop = 'end_turn'
+        lastAssistantBlockingTool = null
+        if (typeof obj.timestamp === 'string') {
+          const t = Date.parse(obj.timestamp)
+          if (!Number.isNaN(t)) lastAssistantAt = t
+        }
       }
       continue
     }
@@ -589,7 +611,7 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     if (typeof obj.version === 'string') version = obj.version
     // Read the structured top-level field (NOT a substring of the raw text): a conversation that
     // merely quotes `"sessionKind":"bg"` in message content has no such top-level key, so it won't
-    // be mistaken for a background session. 'bg' marks a `/bg` daemon job; the indexer drops it.
+    // be mistaken for a background session. 'bg' marks an independently resumable background row.
     if (sessionKind == null && typeof obj.sessionKind === 'string') sessionKind = obj.sessionKind
 
     switch (obj.type) {
