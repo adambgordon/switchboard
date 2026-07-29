@@ -207,9 +207,10 @@ describe('indexConversations', () => {
   })
 })
 
-describe('indexConversations background-job filtering', () => {
+describe('indexConversations Claude session-kind filtering', () => {
   let root: string
   let interactive: string
+  let background: string
 
   beforeAll(async () => {
     root = await mkdtemp(path.join(TMP_BASE, 'indexer-bg-test-'))
@@ -223,9 +224,7 @@ describe('indexConversations background-job filtering', () => {
     )
     interactive = ok.id
 
-    // A background-job session in the SAME cwd (top-level sessionKind:'bg') — must be DROPPED,
-    // even though it has messages and a later mtime.
-    await writeSession(
+    const bg = await writeSession(
       root,
       '-home-user-project-one',
       [
@@ -241,18 +240,42 @@ describe('indexConversations background-job filtering', () => {
       ],
       2_000_000_000_000
     )
+    background = bg.id
+
+    for (const [sessionKind, mtime] of [
+      ['daemon', 3_000_000_000_000],
+      ['daemon-worker', 4_000_000_000_000]
+    ] as const) {
+      await writeSession(
+        root,
+        '-home-user-project-one',
+        [
+          {
+            type: 'user',
+            uuid: randomUUID(),
+            isSidechain: false,
+            timestamp: '2026-05-29T20:02:00.000Z',
+            cwd: CWD_A,
+            sessionKind,
+            message: { role: 'user', content: `${sessionKind} internal process` }
+          }
+        ],
+        mtime
+      )
+    }
   })
 
   afterAll(async () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  it('drops sessionKind:"bg" sessions but keeps the interactive sibling', async () => {
+  it('keeps bg transcripts as independent rows and drops daemon internals', async () => {
     const groups = await indexConversations(root, NO_CODEX)
     const a = groups.find((g) => g.cwd === CWD_A)
     expect(a).toBeDefined()
     const ids = a!.conversations.map((c) => c.sessionId)
-    expect(ids).toEqual([interactive]) // the bg session is absent
+    expect(ids).toEqual([background, interactive])
+    expect(a!.conversations[0].sessionKind).toBe('bg')
   })
 })
 

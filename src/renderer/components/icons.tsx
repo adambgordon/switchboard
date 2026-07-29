@@ -53,6 +53,12 @@ export const Copy = (p: IconProps) =>
     </>,
     p
   )
+// Eight rounded segments forming a quiet ring around a background session's agent mark.
+export const DashedCircle = (p: IconProps) =>
+  svg(
+    <circle cx="12" cy="12" r="9.5" strokeDasharray="3.6 3.86" strokeDashoffset="1.8" />,
+    { ...p, strokeWidth: p.strokeWidth ?? 1.8 }
+  )
 export const Search = (p: IconProps) =>
   svg(
     <>
