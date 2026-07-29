@@ -129,10 +129,9 @@ export interface ConversationMeta {
    */
   awaitingTool?: 'AskUserQuestion' | 'ExitPlanMode' | null
   /**
-   * Claude Code session class, read verbatim from the on-disk `sessionKind` field. 'bg' marks a
-   * background-job (daemon) session created by `/bg` / `claude --bg`; Claude Code hides those from
-   * `/resume`, and the indexer drops them so they never surface as ordinary conversations.
-   * Undefined for normal interactive sessions (the field is absent on disk).
+   * Claude Code session class, read verbatim from the on-disk `sessionKind` field. 'bg' marks an
+   * independently resumable background transcript and surfaces as its own labeled row; internal
+   * 'daemon' / 'daemon-worker' sessions are omitted. Undefined for normal interactive sessions.
    */
   sessionKind?: string
   /**
@@ -183,7 +182,7 @@ export type LiveState = 'working' | 'asking' | 'awaiting' | 'quiet'
 export interface PtyState {
   /** Stable handle for this live process (distinct from sessionId). */
   ptyId: string
-  /** The agent session id this PTY is driving. */
+  /** The conversation Switchboard associated with this PTY at launch (or Codex late-bind). */
   sessionId: string
   /** Which agent this PTY is running (drives the boot command). */
   agent: AgentKind

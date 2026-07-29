@@ -146,9 +146,10 @@ function labelForCwd(cwd: string): string {
 }
 
 /**
- * Gather Claude Code conversation metadata from the projects root. Drops zero-message sessions and
- * `/bg` daemon sessions (Claude Code itself hides those from `/resume`; surfacing them produces a
- * phantom duplicate of the interactive conversation they forked from). [] if the root is missing.
+ * Gather Claude Code conversation metadata from the projects root. Background (`bg`) transcripts are
+ * independently resumable conversations and remain visible, matching Claude Code's `/resume` picker;
+ * internal `daemon` / `daemon-worker` sessions do not. Drops zero-message sessions. [] if the root is
+ * missing.
  */
 async function indexClaudeMetas(root: string, cache: MetaCache): Promise<ConversationMeta[]> {
   try {
@@ -169,7 +170,7 @@ async function indexClaudeMetas(root: string, cache: MetaCache): Promise<Convers
   for (const meta of metas) {
     if (!meta) continue
     if (meta.messageCount === 0) continue
-    if (meta.sessionKind === 'bg') continue
+    if (meta.sessionKind === 'daemon' || meta.sessionKind === 'daemon-worker') continue
     out.push(meta)
   }
   return out

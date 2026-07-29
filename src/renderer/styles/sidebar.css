@@ -79,6 +79,27 @@
   color: var(--ink-ghost);
   margin-top: 1px;
 }
+.sb-bg-agent-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-right: 0.5ch;
+}
+.sb-bg-agent-ring {
+  position: absolute;
+  inset: 0;
+}
+.sb-bg-agent-logo {
+  display: inline-flex;
+  pointer-events: none;
+}
+.sb-row-meta .sb-bg-agent-mark .sb-agent-logo {
+  margin-right: 0;
+}
 .sb-row-cwd {
   max-width: 130px;
 }

@@ -528,6 +528,10 @@
   margin: var(--s1) 0;
 }
 
+.md-ol > .md-li + .md-li {
+  margin-top: var(--s4);
+}
+
 .md-li::marker {
   color: var(--ink-faint);
 }
