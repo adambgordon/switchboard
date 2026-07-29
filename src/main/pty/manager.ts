@@ -3,32 +3,8 @@ import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
 import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
 import { matchProvisionalCodex, type CodexBindCandidate } from '../sessions/codexParser'
+import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
-
-/**
- * A clean environment for a spawned agent. Switchboard launches each agent as an INDEPENDENT session,
- * but if Switchboard itself was started from inside a Claude Code session (e.g. `npm run dev` from a
- * Claude Code terminal, or `open`ed from one), its own process.env carries that parent session's
- * runtime markers: CLAUDECODE, CLAUDE_CODE_* (notably CLAUDE_CODE_CHILD_SESSION=1), the effort
- * overrides, the ANTHROPIC_* auth/base-url/model redirection, and Codex's NO_COLOR tool-host marker.
- * Inherited by a spawned `claude`, the Claude markers make it behave as a nested CHILD —
- * CLAUDE_CODE_CHILD_SESSION=1 SUPPRESSES interactive transcript persistence, so a new/resumed
- * conversation writes no JSONL, never lands in the index, and shows no liveness. Inherited by either
- * agent, NO_COLOR suppresses the ANSI palette even though this is a real xterm-256color PTY. Strip
- * them so every agent starts in a clean environment, identical to a normal terminal launch. The
- * login shell re-sources the user's profile, restoring anything legitimately set there; only the
- * leaked runtime markers are removed. A no-op for the packaged app, where none of these are set.
- */
-function cleanAgentEnv(): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = {}
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k === 'CLAUDECODE' || k === 'CLAUDE_EFFORT' || k === 'NO_COLOR') continue
-    if (k.startsWith('CLAUDE_CODE_')) continue
-    if (k.startsWith('ANTHROPIC_')) continue
-    out[k] = v
-  }
-  return out
-}
 
 interface Live {
   ptyId: string

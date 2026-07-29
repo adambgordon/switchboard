@@ -2,7 +2,7 @@ import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
-import { Dots } from './icons'
+import { DashedCircle, Dots } from './icons'
 import AgentLogo from './AgentLogo'
 
 interface Props {
@@ -88,7 +88,21 @@ function ConversationRowImpl({
           </span>
         )}
         <span className="sb-row-meta">
-          <AgentLogo agent={meta.agent} />
+          {meta.agent === 'claude' && meta.sessionKind === 'bg' ? (
+            <span
+              className="sb-bg-agent-mark"
+              data-tip="Claude Code background session"
+              role="img"
+              aria-label="Claude Code background session"
+            >
+              <DashedCircle size={16} className="sb-bg-agent-ring" />
+              <span className="sb-bg-agent-logo" aria-hidden="true">
+                <AgentLogo agent="claude" size={9} />
+              </span>
+            </span>
+          ) : (
+            <AgentLogo agent={meta.agent} />
+          )}
           <span className="mono" data-tip={absShort(meta.lastActivityAt ?? meta.mtime)}>
             {relTime(meta.lastActivityAt ?? meta.mtime)}
           </span>
