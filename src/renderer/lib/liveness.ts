@@ -41,8 +41,26 @@ export function isManualUnread(markedAt: number | undefined, meta: ConversationM
 }
 
 /**
+ * Timestamp of the current user-input request, if any. A structured transcript question remains
+ * authoritative; otherwise a Codex OSC notification is current only until newer rollout activity
+ * appears. This deliberately ignores generic PTY activity and user keystrokes.
+ */
+export function currentInputRequestedAt(
+  meta: ConversationMeta | undefined,
+  runtimeInputRequestedAt: number | null
+): number | null {
+  if (meta?.turnState === 'awaiting_input') {
+    return Math.max(meta.lastActivityAt ?? 0, runtimeInputRequestedAt ?? 0)
+  }
+  const parsedActivityAt = meta?.lastActivityAt ?? 0
+  return runtimeInputRequestedAt != null && runtimeInputRequestedAt > parsedActivityAt
+    ? runtimeInputRequestedAt
+    : null
+}
+
+/**
  * Resolve a live session's liveness from the transcript's turn-state plus the local "seen"
- * marker — NOT from PTY output activity. A live `claude` TUI repaints constantly (every
+ * marker — NOT from PTY output activity. A live agent TUI repaints constantly (every
  * keystroke echoes as output), so `pty.status === 'busy'` is ~always true and is not a turn
  * signal — it never drives the dot. A session with no turn-state yet (freshly spawned, sitting
  * at an empty prompt before its first real message) is therefore `quiet`, not `working`: there
@@ -60,19 +78,20 @@ export function resolveLiveState(
   lastSeenAt: number,
   lookingNow: boolean,
   manualUnread: boolean,
-  liveStartedAt: number | null
+  liveStartedAt: number | null,
+  runtimeInputRequestedAt: number | null = null
 ): LiveState {
   // Carryover from a dead process → treat as a finished (aborted) turn.
   const turn = isStaleCarryover(meta, liveStartedAt) ? 'awaiting' : meta?.turnState
-  if (turn === 'awaiting_input') {
-    // Claude is blocked on your reply (AskUserQuestion / ExitPlanMode). A manual "mark unread"
+  const askedAt = currentInputRequestedAt(meta, runtimeInputRequestedAt)
+  if (askedAt != null) {
+    // The agent is blocked on your reply. A manual "mark unread"
     // forces the pulse back — the asking counterpart to the `awaiting` override below — even while
     // looked-at / seen, so marking a question state unread (⇧⌘U / Option+click / the menu) returns
     // it to pulsing. Otherwise the same clear-when-looking rule as `awaiting`: looking counts as
     // seen, so the dot drops to quiet even if you haven't actually answered yet.
     if (manualUnread) return 'asking'
     if (lookingNow) return 'quiet'
-    const askedAt = meta?.lastActivityAt ?? 0
     return askedAt > lastSeenAt ? 'asking' : 'quiet'
   }
   if (turn === 'in_progress') return 'working'

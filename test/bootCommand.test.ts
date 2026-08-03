@@ -3,6 +3,10 @@ import { bootCommandFor, bootPayloadFor } from '../src/main/pty/bootCommand'
 
 const ID = 'eb583f11-9020-45a7-af51-b23f2e2cb3cc'
 const CLEAR = '\x05\x15' // Ctrl-E + Ctrl-U — kill whatever is on the input line
+const CODEX =
+  "codex -c 'tui.terminal_resize_reflow_max_rows=2000' " +
+  "-c 'tui.notifications=[\"approval-requested\",\"plan-mode-prompt\"]' " +
+  "-c 'tui.notification_method=\"osc9\"' -c 'tui.notification_condition=\"always\"'"
 
 describe('bootCommandFor', () => {
   it('claude new uses a pre-assigned --session-id', () => {
@@ -12,14 +16,24 @@ describe('bootCommandFor', () => {
     expect(bootCommandFor('claude', 'resume', ID)).toBe(`claude --resume ${ID}`)
   })
   it('codex new caps terminal history replay without assigning an id', () => {
-    expect(bootCommandFor('codex', 'new', ID)).toBe(
-      'codex -c tui.terminal_resize_reflow_max_rows=2000'
-    )
+    expect(bootCommandFor('codex', 'new', ID)).toBe(CODEX)
   })
   it('codex resume caps terminal history replay', () => {
-    expect(bootCommandFor('codex', 'resume', ID)).toBe(
-      `codex -c tui.terminal_resize_reflow_max_rows=2000 resume ${ID}`
+    expect(bootCommandFor('codex', 'resume', ID)).toBe(`${CODEX} resume ${ID}`)
+  })
+  it('codex enables only process-local OSC input notifications', () => {
+    const command = bootCommandFor('codex', 'new', ID)
+    expect(command).toContain(
+      "-c 'tui.notifications=[\"approval-requested\",\"plan-mode-prompt\"]'"
     )
+    expect(command).toContain("-c 'tui.notification_method=\"osc9\"'")
+    expect(command).toContain("-c 'tui.notification_condition=\"always\"'")
+  })
+
+  it('codex excludes turn-complete previews that can resemble input notifications', () => {
+    const command = bootCommandFor('codex', 'new', ID)
+    expect(command).not.toContain("-c 'tui.notifications=true'")
+    expect(command).not.toContain('agent-turn-complete')
   })
 })
 

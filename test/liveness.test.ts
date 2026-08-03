@@ -94,9 +94,81 @@ describe('resolveLiveState — non-in_progress states (startedAt is inert)', () 
     expect(resolveLiveState(m, SPAWN, false, true, SPAWN)).toBe('asking')
   })
 
+  it('awaiting_input + manual unread still pulses when its timestamp is malformed', () => {
+    const m = meta({ turnState: 'awaiting_input', lastActivityAt: null })
+    expect(resolveLiveState(m, 0, false, true, SPAWN, null)).toBe('asking')
+  })
+
   it('no turn-state yet (freshly spawned / provisional) is quiet, never working', () => {
     expect(resolveLiveState(meta({ provisional: true }), 0, false, false, SPAWN)).toBe('quiet')
     expect(resolveLiveState(undefined, 0, false, false, SPAWN)).toBe('quiet')
+  })
+})
+
+describe('resolveLiveState — runtime Codex input notifications', () => {
+  const approvalAt = AFTER
+  const codexWorking = meta({
+    agent: 'codex',
+    turnState: 'in_progress',
+    lastActivityAt: SPAWN
+  })
+
+  it('pulses for an unseen OSC-only approval', () => {
+    expect(resolveLiveState(codexWorking, 0, false, false, SPAWN, approvalAt)).toBe('asking')
+  })
+
+  it('clears immediately while the conversation is selected in the focused window', () => {
+    expect(resolveLiveState(codexWorking, 0, true, false, SPAWN, approvalAt)).toBe('quiet')
+  })
+
+  it('stays clear after leaving once navigation recorded it as seen', () => {
+    expect(resolveLiveState(codexWorking, approvalAt + 1, false, false, SPAWN, approvalAt)).toBe(
+      'quiet'
+    )
+  })
+
+  it('manual unread restores the approval pulse', () => {
+    expect(
+      resolveLiveState(codexWorking, approvalAt + 1, false, true, SPAWN, approvalAt)
+    ).toBe('asking')
+  })
+
+  it('newer rollout activity supersedes a stale runtime approval', () => {
+    const continued = meta({
+      agent: 'codex',
+      turnState: 'in_progress',
+      lastActivityAt: approvalAt + 1
+    })
+    expect(resolveLiveState(continued, 0, false, false, SPAWN, approvalAt)).toBe('working')
+  })
+
+  it('turn completion supersedes a stale runtime approval', () => {
+    const completed = meta({
+      agent: 'codex',
+      turnState: 'awaiting',
+      turnEndedAt: approvalAt + 1,
+      lastActivityAt: approvalAt + 1
+    })
+    expect(resolveLiveState(completed, 0, false, false, SPAWN, approvalAt)).toBe('awaiting')
+  })
+
+  it('keeps structured rollout questions authoritative without an OSC signal', () => {
+    const question = meta({
+      agent: 'codex',
+      turnState: 'awaiting_input',
+      lastActivityAt: approvalAt
+    })
+    expect(resolveLiveState(question, 0, false, false, SPAWN, null)).toBe('asking')
+  })
+
+  it('keeps a default-mode plain-English question as a completed unread turn', () => {
+    const plainQuestion = meta({
+      agent: 'codex',
+      turnState: 'awaiting',
+      turnEndedAt: approvalAt,
+      lastActivityAt: approvalAt
+    })
+    expect(resolveLiveState(plainQuestion, 0, false, false, SPAWN, null)).toBe('awaiting')
   })
 })
 
