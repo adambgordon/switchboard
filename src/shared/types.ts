@@ -172,8 +172,8 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  * Renderer-derived liveness of a live session, from the transcript's turn-state plus a local
  * "seen" marker — NOT PTY output activity (a live TUI repaints constantly, so it isn't a turn
  * signal):
- *   working  = Claude is actively producing output / mid-turn
- *   asking   = Claude is blocked on the user's reply (AskUserQuestion / ExitPlanMode), unread
+ *   working  = the agent is actively producing output / mid-turn
+ *   asking   = the agent is blocked on the user's reply, unread
  *   awaiting = the turn finished and the user hasn't looked since
  *   quiet    = live but idle — finished and already seen, or not yet started (nothing happening)
  */
@@ -193,6 +193,11 @@ export interface PtyState {
   lastActivity: number
   /** ms epoch when the process was spawned. */
   startedAt: number
+  /**
+   * ms epoch of the newest explicit Codex OSC notification that requests user input, or null.
+   * Transcript activity newer than this supersedes it; generic PTY output never sets it.
+   */
+  inputRequestedAt: number | null
   origin: 'resume' | 'new'
   exitCode?: number | null
 }

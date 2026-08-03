@@ -116,6 +116,10 @@ function syncScrollArea(term: Terminal): void {
 }
 
 const CODEX_REFRESH_FOLLOW_MS = 1000
+// Independent ceiling; matching the refresh window is incidental, not a shared tuning parameter.
+const CODEX_REPLAY_FOLLOW_MS = 1000
+const CODEX_REPLAY_FOLLOW_IDLE_MS = 250
+const CODEX_BOTTOM_PIN_TOLERANCE_ROWS = 1
 
 export default function TerminalView({ ptyId, sessionId, agent, visible, focusKey, theme, onMarkUnread }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -125,6 +129,9 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
   // rAF handle coalescing the post-output scroll-area recompute to one call per frame (see syncScrollArea).
   const syncRafRef = useRef<number | null>(null)
   const refreshFollowUntilRef = useRef(0)
+  const replayFollowRef = useRef(false)
+  const replayFollowUntilRef = useRef(0)
+  const replayFollowTimerRef = useRef<number | null>(null)
 
   // Fit the terminal to its host and push the new size to the PTY — but ONLY when the host is
   // genuinely measurable, and only when the size actually changed. A hidden deck item
@@ -231,6 +238,49 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
     termRef.current = term
     fitRef.current = fit
 
+    const stopReplayFollow = (): void => {
+      if (replayFollowTimerRef.current != null) {
+        window.clearTimeout(replayFollowTimerRef.current)
+        replayFollowTimerRef.current = null
+      }
+      replayFollowRef.current = false
+      replayFollowUntilRef.current = 0
+    }
+
+    const scheduleReplayFollowEnd = (): void => {
+      if (replayFollowTimerRef.current != null) {
+        window.clearTimeout(replayFollowTimerRef.current)
+      }
+      const remainingMs = replayFollowUntilRef.current - performance.now()
+      replayFollowTimerRef.current = window.setTimeout(() => {
+        replayFollowTimerRef.current = null
+        replayFollowRef.current = false
+        replayFollowUntilRef.current = 0
+      }, Math.max(0, Math.min(CODEX_REPLAY_FOLLOW_IDLE_MS, remainingMs)))
+    }
+
+    // Codex sometimes replaces its terminal history with ED2 + ED3 followed by a bounded replay
+    // (not only on resize — plan completion does this too). xterm preserves its user-scrolling flag
+    // across ED3, so a viewport that lagged even one row behind the bottom stays at replay row zero.
+    // Observe ED3 before xterm's built-in handler runs; returning false preserves normal handling.
+    // A one-row tolerance absorbs that transient lag, while a genuinely scrolled-up viewport stays
+    // detached from the bottom. The write callback below follows only the ensuing replay burst,
+    // bounded by both output idle time and an absolute deadline.
+    const scrollbackReset =
+      agent === 'codex'
+        ? term.parser.registerCsiHandler({ final: 'J' }, (params) => {
+            if (params[0] !== 3) return false
+            stopReplayFollow()
+            const buffer = term.buffer.active
+            replayFollowRef.current =
+              buffer.baseY - buffer.viewportY <= CODEX_BOTTOM_PIN_TOLERANCE_ROWS
+            if (replayFollowRef.current) {
+              replayFollowUntilRef.current = performance.now() + CODEX_REPLAY_FOLLOW_MS
+            }
+            return false
+          })
+        : null
+
     // Size the terminal to its container BEFORE the PTY backlog floods in. On resume the host is
     // already visible (display:block) and measurable, so this synchronous fit resizes the still-
     // empty renderer once, up front — instead of letting claude's replay flood paint at the
@@ -246,9 +296,14 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       agent === 'codex'
         ? attachPty(ptyId, (d) => {
             term.write(d, () => {
-              if (performance.now() < refreshFollowUntilRef.current) {
+              const now = performance.now()
+              const followingReplay =
+                replayFollowRef.current && now < replayFollowUntilRef.current
+              if (replayFollowRef.current && !followingReplay) stopReplayFollow()
+              if (now < refreshFollowUntilRef.current || followingReplay) {
                 term.scrollToBottom()
                 syncScrollArea(term)
+                if (followingReplay) scheduleReplayFollowEnd()
                 return
               }
               if (syncRafRef.current != null) return
@@ -326,6 +381,7 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       cancelAnimationFrame(raf)
       if (syncRafRef.current != null) cancelAnimationFrame(syncRafRef.current)
       syncRafRef.current = null
+      stopReplayFollow()
       ro.disconnect()
       host.removeEventListener('dragover', onDragOver)
       host.removeEventListener('drop', onDrop)
@@ -333,6 +389,7 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       offExit()
       onInput.dispose()
       followRefreshScroll?.dispose()
+      scrollbackReset?.dispose()
       detach()
       term.dispose()
       termRef.current = null
