@@ -487,8 +487,12 @@ export async function resolveCodexFile(
 export interface ProvisionalCodexPty {
   ptyId: string
   cwd: string
-  /** ms epoch the PTY was spawned. */
-  startedAt: number
+  /**
+   * ms epoch of the FIRST submit (Enter) the user typed into this PTY; null if they have not
+   * submitted anything yet, in which case this PTY cannot own any rollout. Deliberately NOT the
+   * spawn time — see matchProvisionalCodex.
+   */
+  firstSubmitAt: number | null
 }
 
 /** A just-indexed Codex conversation a provisional PTY might bind to. */
@@ -499,9 +503,9 @@ export interface CodexBindCandidate {
   firstActivityAt: number | null
 }
 
-/** Tolerance (ms) on the start-time gate. A bound rollout's first turn lands a beat after the PTY
- *  spawn, but allow slack for clock skew. Small on purpose: this gate distinguishes the brand-new
- *  rollout from OLD ones in the same cwd. */
+/** Tolerance (ms) on the submit-time gate. A rollout's first turn is written essentially AT the
+ *  submit, but allow slack for clock skew and for the indexer observing the two a beat apart. Small
+ *  on purpose: this gate distinguishes the brand-new rollout from OLD ones in the same cwd. */
 const BIND_SKEW_MS = 2000
 
 /**
@@ -509,9 +513,21 @@ const BIND_SKEW_MS = 2000
  * only hits disk at its FIRST turn (verified: the file's birthtime is the first-turn time, ~tens of
  * seconds after the session logically starts), so a time-boxed file poll from spawn can't catch it —
  * instead we bind when the rollout is indexed (which the live-turn re-index already does the moment
- * the session goes active). We match on (same cwd, first-activity at/after spawn), excluding ids
- * already driven by a live PTY. FIFO: the oldest PTY takes the earliest qualifying rollout, and each
- * rollout binds at most one PTY. Pure — returns the (ptyId, sessionId) pairs to bind.
+ * the session goes active).
+ *
+ * The correlation key is each PTY's FIRST SUBMIT, not its spawn time, because that keystroke is what
+ * CREATES the rollout — spawn time has no causal link to it. Keying on spawn produced two real
+ * mispairings, both of which put a row's terminal on a different conversation than its transcript:
+ *   - an idle tab stealing a typed tab's rollout (a never-typed-in PTY still passed the gate, and
+ *     being older it was served first), and
+ *   - two tabs typed in the opposite order to their spawn swapping rollouts outright.
+ * So: a PTY that has not submitted (`firstSubmitAt == null`) can own no rollout and is dropped, and
+ * the remaining PTYs take rollouts in submit order. We additionally match on same cwd, exclude ids
+ * already driven by a live PTY, and bind each rollout to at most one PTY.
+ *
+ * This is a heuristic, not an identity: Codex mints its own id, offers no flag to impose one, and
+ * records no pid, so timing is the only signal available in-process. Pure — returns the
+ * (ptyId, sessionId) pairs to bind.
  */
 export function matchProvisionalCodex(
   provisional: ProvisionalCodexPty[],
@@ -519,16 +535,19 @@ export function matchProvisionalCodex(
   liveIds: ReadonlySet<string>,
   skewMs: number = BIND_SKEW_MS
 ): { ptyId: string; sessionId: string }[] {
-  const oldestFirst = [...provisional].sort((a, b) => a.startedAt - b.startedAt)
+  const submitters = provisional.filter(
+    (p): p is ProvisionalCodexPty & { firstSubmitAt: number } => p.firstSubmitAt != null
+  )
+  const earliestSubmitFirst = [...submitters].sort((a, b) => a.firstSubmitAt - b.firstSubmitAt)
   const used = new Set<string>()
   const out: { ptyId: string; sessionId: string }[] = []
-  for (const pty of oldestFirst) {
+  for (const pty of earliestSubmitFirst) {
     const match = candidates
       .filter(
         (c) =>
           c.cwd === pty.cwd &&
           c.firstActivityAt != null &&
-          c.firstActivityAt >= pty.startedAt - skewMs &&
+          c.firstActivityAt >= pty.firstSubmitAt - skewMs &&
           !liveIds.has(c.sessionId) &&
           !used.has(c.sessionId)
       )
