@@ -8,6 +8,7 @@ import { countConversationalMessages } from '../src/shared/messageCount'
 
 const TS = '2026-06-23T14:36:56.000Z'
 const TS2 = '2026-06-23T14:37:10.000Z'
+const TS3 = '2026-06-23T14:37:20.000Z'
 
 function jsonl(lines: object[]): string {
   return lines.map((l) => JSON.stringify(l)).join('\n')
@@ -152,9 +153,11 @@ describe('extractCodexMetaFromText', () => {
       { timestamp: TS, type: 'session_meta', payload: { cwd: '/x', originator: 'codex-tui' } },
       { timestamp: TS, type: 'event_msg', payload: { type: 'user_message', message: 'go' } },
       { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
-      { timestamp: TS, type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'q1', arguments: '{}' } }
+      { timestamp: TS2, type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'q1', arguments: '{}' } }
     ]
-    expect(extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!.turnState).toBe('awaiting_input')
+    const meta = extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!
+    expect(meta.turnState).toBe('awaiting_input')
+    expect(meta.lastActivityAt).toBe(Date.parse(TS2))
   })
 
   it('clears awaiting_input once the user answers (matching function_call_output)', () => {
@@ -162,11 +165,13 @@ describe('extractCodexMetaFromText', () => {
       { timestamp: TS, type: 'session_meta', payload: { cwd: '/x', originator: 'codex-tui' } },
       { timestamp: TS, type: 'event_msg', payload: { type: 'user_message', message: 'go' } },
       { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
-      { timestamp: TS, type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'q1', arguments: '{}' } },
-      { timestamp: TS, type: 'response_item', payload: { type: 'function_call_output', call_id: 'q1', output: 'yes' } }
+      { timestamp: TS2, type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'q1', arguments: '{}' } },
+      { timestamp: TS3, type: 'response_item', payload: { type: 'function_call_output', call_id: 'q1', output: 'yes' } }
     ]
     // No pending input, but still inside the turn (no task_complete yet) → in_progress.
-    expect(extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!.turnState).toBe('in_progress')
+    const meta = extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!
+    expect(meta.turnState).toBe('in_progress')
+    expect(meta.lastActivityAt).toBe(Date.parse(TS3))
   })
 
   it('reports awaiting after a turn_aborted (interrupt)', () => {

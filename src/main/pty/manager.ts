@@ -5,6 +5,7 @@ import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../sha
 import { matchProvisionalCodex, type CodexBindCandidate } from '../sessions/codexParser'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
+import { CodexInputNotificationScanner } from './codexInputNotifications'
 
 interface Live {
   ptyId: string
@@ -17,6 +18,7 @@ interface Live {
   status: PtyStatus
   lastActivity: number
   startedAt: number
+  inputRequestedAt: number | null
   idleTimer: ReturnType<typeof setTimeout> | null
   bootTimer: ReturnType<typeof setTimeout> | null
   // A new Codex session has no real id at spawn (Codex mints its own), so the PTY carries a
@@ -35,7 +37,7 @@ interface Live {
 }
 
 /**
- * Owns every live PTY-backed claude session.
+ * Owns every live PTY-backed agent session.
  *
  * Design notes:
  * - We spawn the user's LOGIN + INTERACTIVE shell as the PTY program, then type the
@@ -44,9 +46,10 @@ interface Live {
  *   ENOENT. A login shell sources the user's profile and gets the real PATH — and
  *   it gives a genuine terminal: when claude exits, you're back at a prompt.
  * - Busy vs idle is inferred from output activity (debounced). It does NOT drive the
- *   liveness dot (a live claude TUI repaints constantly — every keystroke echoes as output —
- *   so a PTY is ~always "busy"; the transcript turn-state drives the dot, see parser.ts /
- *   App.tsx). Here it ONLY gates LRU eviction (we never kill busy work).
+ *   liveness dot (a live agent TUI repaints constantly — every keystroke echoes as output —
+ *   so a PTY is ~always "busy"; transcript state drives the dot, with explicit Codex OSC input
+ *   notifications as the narrow exception). Here it ONLY gates LRU eviction (we never kill busy
+ *   work).
  */
 export class PtyManager extends EventEmitter {
   private live = new Map<string, Live>()
@@ -225,6 +228,7 @@ export class PtyManager extends EventEmitter {
       status: 'busy',
       lastActivity: now,
       startedAt: now,
+      inputRequestedAt: null,
       idleTimer: null,
       bootTimer: null,
       provisional: o.provisional ?? false,
@@ -257,14 +261,20 @@ export class PtyManager extends EventEmitter {
     // Fallback: a terminal created while hidden may never send a resize — boot anyway so claude
     // always starts. Generous, since a visible terminal sends its first resize within a frame.
     entry.bootTimer = setTimeout(boot, 2500)
+    const inputNotifications =
+      o.agent === 'codex' ? new CodexInputNotificationScanner() : null
 
     proc.onData((data) => {
       if (!entry.shellReady) {
         entry.shellReady = true
         bootWhenReady()
       }
-      entry.lastActivity = Date.now()
-      this.markBusy(entry)
+      const now = Date.now()
+      const inputRequested = inputNotifications?.push(data) ?? false
+      entry.lastActivity = now
+      if (inputRequested) entry.inputRequestedAt = now
+      const activeEmitted = this.markBusy(entry)
+      if (inputRequested && !activeEmitted) this.emitActive()
       this.emit('data', ptyId, data)
     })
 
@@ -282,7 +292,7 @@ export class PtyManager extends EventEmitter {
     return this.toState(entry)
   }
 
-  private markBusy(e: Live): void {
+  private markBusy(e: Live): boolean {
     const wasBusy = e.status === 'busy'
     e.status = 'busy'
     if (e.idleTimer) clearTimeout(e.idleTimer)
@@ -292,6 +302,7 @@ export class PtyManager extends EventEmitter {
       this.emitActive()
     }, CONFIG.busyWindowMs)
     if (!wasBusy) this.emitActive()
+    return !wasBusy
   }
 
   /**
@@ -316,6 +327,7 @@ export class PtyManager extends EventEmitter {
       status: e.status,
       lastActivity: e.lastActivity,
       startedAt: e.startedAt,
+      inputRequestedAt: e.inputRequestedAt,
       origin: e.origin,
       exitCode: e.exitCode
     }
