@@ -19,6 +19,12 @@ interface Live {
   lastActivity: number
   startedAt: number
   inputRequestedAt: number | null
+  // ms epoch of the FIRST submit (Enter) the renderer typed into this PTY, or null if the user has
+  // not submitted anything yet. This — not `startedAt` — is what correlates a provisional new-Codex
+  // PTY to the rollout it produced: Codex writes a rollout at its first TURN, and that turn is
+  // created by this keystroke. Only the first submit is recorded, so it stays monotonic and is
+  // unaffected by later Enters (approval dialogs, follow-up turns). See matchProvisionalCodex.
+  firstSubmitAt: number | null
   idleTimer: ReturnType<typeof setTimeout> | null
   bootTimer: ReturnType<typeof setTimeout> | null
   // A new Codex session has no real id at spawn (Codex mints its own), so the PTY carries a
@@ -99,8 +105,18 @@ export class PtyManager extends EventEmitter {
     })
   }
 
+  /**
+   * Type renderer input into a PTY. This is the ONLY path for user keystrokes — the boot command is
+   * written straight to `proc` inside spawn() — so a submit seen here is genuinely the user's, which
+   * is what makes it a sound correlation signal for a provisional new-Codex PTY (see firstSubmitAt).
+   */
   write(ptyId: string, data: string): void {
-    this.live.get(ptyId)?.proc.write(data)
+    const e = this.live.get(ptyId)
+    if (!e) return
+    if (e.firstSubmitAt == null && (data.includes('\r') || data.includes('\n'))) {
+      e.firstSubmitAt = Date.now()
+    }
+    e.proc.write(data)
   }
 
   resize(ptyId: string, cols: number, rows: number): void {
@@ -162,7 +178,7 @@ export class PtyManager extends EventEmitter {
   bindProvisionalCodex(candidates: CodexBindCandidate[]): void {
     const provisional = [...this.live.values()]
       .filter((e) => e.agent === 'codex' && e.provisional)
-      .map((e) => ({ ptyId: e.ptyId, cwd: e.cwd, startedAt: e.startedAt }))
+      .map((e) => ({ ptyId: e.ptyId, cwd: e.cwd, firstSubmitAt: e.firstSubmitAt }))
     if (provisional.length === 0) return
     const liveIds = new Set([...this.live.values()].map((e) => e.sessionId))
     for (const { ptyId, sessionId } of matchProvisionalCodex(provisional, candidates, liveIds)) {
@@ -229,6 +245,7 @@ export class PtyManager extends EventEmitter {
       lastActivity: now,
       startedAt: now,
       inputRequestedAt: null,
+      firstSubmitAt: null,
       idleTimer: null,
       bootTimer: null,
       provisional: o.provisional ?? false,

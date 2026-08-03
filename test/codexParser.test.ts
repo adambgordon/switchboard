@@ -210,12 +210,14 @@ describe('parseCodexTranscriptText', () => {
 
 // --- new-session binding (Phase 3): matchProvisionalCodex (pure correlation) ---
 
-const T = 1_000_000 // a PTY spawn time
-const pty = (ptyId: string, cwd: string, startedAt: number) => ({ ptyId, cwd, startedAt })
+const T = 1_000_000 // a PTY submit time
+// The third arg is firstSubmitAt (when the user pressed Enter), NOT the spawn time — that
+// distinction IS the correlation rule. null = the user never submitted in this PTY.
+const pty = (ptyId: string, cwd: string, firstSubmitAt: number | null) => ({ ptyId, cwd, firstSubmitAt })
 const cand = (sessionId: string, cwd: string, firstActivityAt: number | null) => ({ sessionId, cwd, firstActivityAt })
 
 describe('matchProvisionalCodex', () => {
-  it('binds a new rollout (same cwd, first activity after spawn) to the provisional PTY', () => {
+  it('binds a new rollout (same cwd, first activity after the submit) to the provisional PTY', () => {
     expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/x', T + 5000)], new Set())).toEqual([
       { ptyId: 'p1', sessionId: 's1' }
     ])
@@ -225,7 +227,7 @@ describe('matchProvisionalCodex', () => {
     expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/y', T + 5000)], new Set())).toEqual([])
   })
 
-  it('ignores an OLD rollout whose first activity predates the spawn (the time gate)', () => {
+  it('ignores an OLD rollout whose first activity predates the submit (the time gate)', () => {
     expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('old', '/x', T - 600000)], new Set())).toEqual([])
   })
 
@@ -241,24 +243,55 @@ describe('matchProvisionalCodex', () => {
     expect(matchProvisionalCodex([], [cand('s1', '/x', T + 5000)], new Set())).toEqual([])
   })
 
-  it('FIFO: the oldest PTY takes the earliest rollout in the same cwd', () => {
+  it('the earliest submitter takes the earliest rollout in the same cwd', () => {
     const r = matchProvisionalCodex(
-      [pty('pNew', '/x', T + 100), pty('pOld', '/x', T)],
+      [pty('pLateSubmit', '/x', T + 100), pty('pEarlySubmit', '/x', T)],
       [cand('sLate', '/x', T + 9000), cand('sEarly', '/x', T + 3000)],
       new Set()
     )
     expect(r).toEqual([
-      { ptyId: 'pOld', sessionId: 'sEarly' },
-      { ptyId: 'pNew', sessionId: 'sLate' }
+      { ptyId: 'pEarlySubmit', sessionId: 'sEarly' },
+      { ptyId: 'pLateSubmit', sessionId: 'sLate' }
     ])
   })
 
   it('binds each rollout to at most one PTY', () => {
     const r = matchProvisionalCodex(
-      [pty('pOld', '/x', T), pty('pNew', '/x', T + 100)],
+      [pty('pEarlySubmit', '/x', T), pty('pLateSubmit', '/x', T + 100)],
       [cand('s1', '/x', T + 5000)],
       new Set()
     )
-    expect(r).toEqual([{ ptyId: 'pOld', sessionId: 's1' }])
+    expect(r).toEqual([{ ptyId: 'pEarlySubmit', sessionId: 's1' }])
+  })
+
+  // --- regressions: the two mispairings the spawn-time rule produced ---
+
+  it('an idle tab cannot steal the rollout of a typed tab', () => {
+    // pIdle was opened FIRST but never submitted, so it can own nothing. Under the old spawn-time
+    // rule it was served first and took pUsed's rollout, leaving the real row unbound.
+    const r = matchProvisionalCodex(
+      [pty('pIdle', '/x', null), pty('pUsed', '/x', T)],
+      [cand('s1', '/x', T + 4000)],
+      new Set()
+    )
+    expect(r).toEqual([{ ptyId: 'pUsed', sessionId: 's1' }])
+  })
+
+  it('pairs by submit order even when it is the reverse of spawn order', () => {
+    // pSpawnedFirst was spawned first but submitted LAST; the rollouts must follow the submits.
+    // The old rule sorted by spawn and swapped these two outright.
+    const r = matchProvisionalCodex(
+      [pty('pSpawnedFirst', '/x', T + 9000), pty('pSpawnedSecond', '/x', T + 3000)],
+      [cand('sEarly', '/x', T + 3000), cand('sLate', '/x', T + 9000)],
+      new Set()
+    )
+    expect(r).toEqual([
+      { ptyId: 'pSpawnedSecond', sessionId: 'sEarly' },
+      { ptyId: 'pSpawnedFirst', sessionId: 'sLate' }
+    ])
+  })
+
+  it('binds nothing while no provisional PTY has submitted', () => {
+    expect(matchProvisionalCodex([pty('p1', '/x', null)], [cand('s1', '/x', T)], new Set())).toEqual([])
   })
 })
