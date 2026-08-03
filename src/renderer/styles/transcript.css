@@ -528,6 +528,12 @@
   margin: var(--s1) 0;
 }
 
+.md-li > .md-pre-wrap,
+.md-li > .md-quote,
+.md-li > .md-table-outer {
+  margin: var(--s2) 0;
+}
+
 .md-ol > .md-li + .md-li {
   margin-top: var(--s4);
 }
