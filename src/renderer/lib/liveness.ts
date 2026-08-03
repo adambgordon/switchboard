@@ -50,7 +50,7 @@ export function currentInputRequestedAt(
   runtimeInputRequestedAt: number | null
 ): number | null {
   if (meta?.turnState === 'awaiting_input') {
-    return Math.max(meta.lastActivityAt ?? 0, runtimeInputRequestedAt ?? 0) || null
+    return Math.max(meta.lastActivityAt ?? 0, runtimeInputRequestedAt ?? 0)
   }
   const parsedActivityAt = meta?.lastActivityAt ?? 0
   return runtimeInputRequestedAt != null && runtimeInputRequestedAt > parsedActivityAt

@@ -94,6 +94,11 @@ describe('resolveLiveState — non-in_progress states (startedAt is inert)', () 
     expect(resolveLiveState(m, SPAWN, false, true, SPAWN)).toBe('asking')
   })
 
+  it('awaiting_input + manual unread still pulses when its timestamp is malformed', () => {
+    const m = meta({ turnState: 'awaiting_input', lastActivityAt: null })
+    expect(resolveLiveState(m, 0, false, true, SPAWN, null)).toBe('asking')
+  })
+
   it('no turn-state yet (freshly spawned / provisional) is quiet, never working', () => {
     expect(resolveLiveState(meta({ provisional: true }), 0, false, false, SPAWN)).toBe('quiet')
     expect(resolveLiveState(undefined, 0, false, false, SPAWN)).toBe('quiet')
