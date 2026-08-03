@@ -2,6 +2,13 @@ import { type AgentKind } from '../../shared/types'
 
 const CODEX_REPLAY_ROWS = 2000
 
+const CODEX_OVERRIDES = [
+  `tui.terminal_resize_reflow_max_rows=${CODEX_REPLAY_ROWS}`,
+  'tui.notifications=true',
+  'tui.notification_method="osc9"',
+  'tui.notification_condition="always"'
+]
+
 /**
  * The shell command to type to boot an agent. Claude resumes by id (`--resume`) or starts a fresh
  * session with a PRE-ASSIGNED id (`--session-id`). Codex resumes by id (`codex resume <id>`) but
@@ -15,7 +22,8 @@ export function bootCommandFor(
   sessionId: string
 ): string {
   if (agent === 'codex') {
-    const command = `codex -c tui.terminal_resize_reflow_max_rows=${CODEX_REPLAY_ROWS}`
+    const overrides = CODEX_OVERRIDES.map((value) => `-c '${value}'`).join(' ')
+    const command = `codex ${overrides}`
     return origin === 'resume' ? `${command} resume ${sessionId}` : command
   }
   return origin === 'resume' ? `claude --resume ${sessionId}` : `claude --session-id ${sessionId}`

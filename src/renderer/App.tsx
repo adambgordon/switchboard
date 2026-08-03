@@ -19,7 +19,7 @@ import { useUpdates } from './lib/useUpdates'
 import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
-import { resolveLiveState, isManualUnread } from './lib/liveness'
+import { currentInputRequestedAt, resolveLiveState, isManualUnread } from './lib/liveness'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
 import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
@@ -268,7 +268,14 @@ export default function App() {
     // Resolve a live row's three-state liveness; null for rows with no live process.
     const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null =>
       pty
-        ? resolveLiveState(meta, seen[id] ?? 0, focused && selectedId === id, isManualUnread(unread[id], meta), pty.startedAt)
+        ? resolveLiveState(
+            meta,
+            seen[id] ?? 0,
+            focused && selectedId === id,
+            isManualUnread(unread[id], meta),
+            pty.startedAt,
+            pty.inputRequestedAt
+          )
         : null
 
     const pinnedEntries: RailEntry[] = pinnedOrder
@@ -328,7 +335,8 @@ export default function App() {
         seen[p.sessionId] ?? 0,
         focused && selectedId === p.sessionId,
         isManualUnread(unread[p.sessionId], meta),
-        p.startedAt
+        p.startedAt,
+        p.inputRequestedAt
       )
       if (st === 'working') working++
       else if (st === 'asking') asking++
@@ -357,13 +365,16 @@ export default function App() {
 
   const selectedMeta = selectedId ? metaById.get(selectedId) ?? null : null
   const selectedPty = selectedId ? ptys.bySession.get(selectedId) ?? null : null
+  const selectedInputRequestedAt = selectedPty
+    ? currentInputRequestedAt(selectedMeta ?? synthMeta(selectedPty), selectedPty.inputRequestedAt)
+    : null
 
   // Looking at a conversation (selected + focused) marks it read: it advances the seen marker
   // AND clears any manual-unread override — so selecting/clicking a conversation (or a turn
   // finishing under your eyes) drops the dot to quiet. Re-fires when a new turn lands.
   useEffect(() => {
     if (selectedId && focused) markRead(selectedId)
-  }, [selectedId, focused, selectedMeta?.turnEndedAt, markRead])
+  }, [selectedId, focused, selectedMeta?.turnEndedAt, selectedInputRequestedAt, markRead])
 
   // The view this conversation last had. A never-opened live session defaults to Terminal; everything
   // else defaults to Formatted. Terminal only applies while live, otherwise fall back to the transcript.
@@ -600,7 +611,14 @@ export default function App() {
       const pty = ptys.bySession.get(id)
       if (!pty) return null
       const meta = metaById.get(id) ?? synthMeta(pty)
-      return resolveLiveState(meta, seen[id] ?? 0, focused && selectedId === id, isManualUnread(unread[id], meta), pty.startedAt)
+      return resolveLiveState(
+        meta,
+        seen[id] ?? 0,
+        focused && selectedId === id,
+        isManualUnread(unread[id], meta),
+        pty.startedAt,
+        pty.inputRequestedAt
+      )
     },
     [ptys.bySession, metaById, seen, unread, focused, selectedId]
   )

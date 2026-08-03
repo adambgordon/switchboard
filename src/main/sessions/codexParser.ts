@@ -363,14 +363,15 @@ export function extractCodexMetaFromText(
       }
 
       // Detect a pending request_user_input: a function_call with no matching output yet ⇒ the
-      // turn is parked on the user (the "asking" state). (Approval events — exec_approval_request /
-      // apply_patch_approval_request — are also persisted; folding those in is a Phase 2 refinement.)
+      // turn is parked on the user (the "asking" state). Approval requests are intentionally not
+      // persisted in rollouts; the live PTY's explicit OSC notification covers that narrow gap.
       if (pt === 'function_call' && payload.name === 'request_user_input') {
         const callId = typeof payload.call_id === 'string' ? payload.call_id : ''
         openUserInputCalls.add(callId)
+        if (!Number.isNaN(at)) lastActivityAt = at
       } else if (pt === 'function_call_output') {
         const callId = typeof payload.call_id === 'string' ? payload.call_id : ''
-        openUserInputCalls.delete(callId)
+        if (openUserInputCalls.delete(callId) && !Number.isNaN(at)) lastActivityAt = at
       }
       continue
     }

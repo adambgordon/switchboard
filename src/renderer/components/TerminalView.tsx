@@ -116,6 +116,8 @@ function syncScrollArea(term: Terminal): void {
 }
 
 const CODEX_REFRESH_FOLLOW_MS = 1000
+const CODEX_REPLAY_FOLLOW_IDLE_MS = 250
+const CODEX_BOTTOM_PIN_TOLERANCE_ROWS = 1
 
 export default function TerminalView({ ptyId, sessionId, agent, visible, focusKey, theme, onMarkUnread }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -125,6 +127,8 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
   // rAF handle coalescing the post-output scroll-area recompute to one call per frame (see syncScrollArea).
   const syncRafRef = useRef<number | null>(null)
   const refreshFollowUntilRef = useRef(0)
+  const replayFollowRef = useRef(false)
+  const replayFollowTimerRef = useRef<number | null>(null)
 
   // Fit the terminal to its host and push the new size to the PTY — but ONLY when the host is
   // genuinely measurable, and only when the size actually changed. A hidden deck item
@@ -231,6 +235,37 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
     termRef.current = term
     fitRef.current = fit
 
+    const endReplayFollowAfterIdle = (): void => {
+      if (replayFollowTimerRef.current != null) {
+        window.clearTimeout(replayFollowTimerRef.current)
+      }
+      replayFollowTimerRef.current = window.setTimeout(() => {
+        replayFollowRef.current = false
+        replayFollowTimerRef.current = null
+      }, CODEX_REPLAY_FOLLOW_IDLE_MS)
+    }
+
+    // Codex sometimes replaces its terminal history with ED2 + ED3 followed by a bounded replay
+    // (not only on resize — plan completion does this too). xterm preserves its user-scrolling flag
+    // across ED3, so a viewport that lagged even one row behind the bottom stays at replay row zero.
+    // Observe ED3 before xterm's built-in handler runs; returning false preserves normal handling.
+    // A one-row tolerance absorbs that transient lag, while a genuinely scrolled-up viewport stays
+    // detached from the bottom. The write callback below follows only the ensuing replay burst.
+    const scrollbackReset =
+      agent === 'codex'
+        ? term.parser.registerCsiHandler({ final: 'J' }, (params) => {
+            if (params[0] !== 3) return false
+            if (replayFollowTimerRef.current != null) {
+              window.clearTimeout(replayFollowTimerRef.current)
+              replayFollowTimerRef.current = null
+            }
+            const buffer = term.buffer.active
+            replayFollowRef.current =
+              buffer.baseY - buffer.viewportY <= CODEX_BOTTOM_PIN_TOLERANCE_ROWS
+            return false
+          })
+        : null
+
     // Size the terminal to its container BEFORE the PTY backlog floods in. On resume the host is
     // already visible (display:block) and measurable, so this synchronous fit resizes the still-
     // empty renderer once, up front — instead of letting claude's replay flood paint at the
@@ -246,9 +281,11 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       agent === 'codex'
         ? attachPty(ptyId, (d) => {
             term.write(d, () => {
-              if (performance.now() < refreshFollowUntilRef.current) {
+              const followingReplay = replayFollowRef.current
+              if (performance.now() < refreshFollowUntilRef.current || followingReplay) {
                 term.scrollToBottom()
                 syncScrollArea(term)
+                if (followingReplay) endReplayFollowAfterIdle()
                 return
               }
               if (syncRafRef.current != null) return
@@ -326,6 +363,11 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       cancelAnimationFrame(raf)
       if (syncRafRef.current != null) cancelAnimationFrame(syncRafRef.current)
       syncRafRef.current = null
+      if (replayFollowTimerRef.current != null) {
+        window.clearTimeout(replayFollowTimerRef.current)
+        replayFollowTimerRef.current = null
+      }
+      replayFollowRef.current = false
       ro.disconnect()
       host.removeEventListener('dragover', onDragOver)
       host.removeEventListener('drop', onDrop)
@@ -333,6 +375,7 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       offExit()
       onInput.dispose()
       followRefreshScroll?.dispose()
+      scrollbackReset?.dispose()
       detach()
       term.dispose()
       termRef.current = null

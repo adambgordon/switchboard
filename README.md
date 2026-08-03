@@ -156,6 +156,7 @@ src/
     updater.ts             self-update: git ls-remote check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
     sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexSessionIndex · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
     pty/manager.ts         spawns login shells, types the agent command; output activity → LRU eviction (configurable cap, default 8)
+    pty/codexInputNotifications.ts  scans explicit Codex OSC 9 question/approval notifications for live-dot liveness
     pty/agentEnv.ts        removes inherited agent runtime identity while preserving explicit configuration (pure, unit-tested)
     pty/bootCommand.ts     per-agent boot command + Ctrl-E/Ctrl-U line-clear so stray prompt content can't fuse onto it (pure, unit-tested)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
@@ -188,5 +189,5 @@ A GUI Electron app inherits a minimal `PATH` (no `~/.local/bin`, no Homebrew), s
 - **Concurrent resume:** resuming a conversation that is *also* live in an external terminal is not guarded — two processes appending to one JSONL will interleave. For now, avoid it.
 - The Formatted view is read-only and updates at message granularity (when Claude flushes to disk), not keystroke-by-keystroke. A find match must fall within a single rendered text node, so a phrase split across styled runs (e.g. a bold word) won't match.
 - Codex rebuilds terminal scrollback after a resize. Switchboard caps that replay at 2,000 rows to keep refresh responsive; use the Formatted view for reliable full-history reading in longer conversations.
-- **Liveness is derived from the transcript turn-state** (not terminal output): the live dot reads working / waiting-on-you / finished-unread / finished-seen. A couple of states can't be told apart from what's on disk (a turn blocked on a permission prompt, or `claude` crashing while its shell survives) and still read as *working*.
+- **Liveness is derived primarily from transcript turn-state**, not generic terminal output: the live dot reads working / waiting-on-you / finished-unread / finished-seen. Explicit Codex OSC notifications are the narrow exception, covering questions and approvals in Switchboard-owned terminals that are absent from the rollout. Claude permission prompts and a `claude` crash whose shell survives still cannot be distinguished from working state.
 - The renderer bundle is ~1 MB (react-markdown + xterm.js).
