@@ -4,7 +4,9 @@ const CODEX_REPLAY_ROWS = 2000
 
 const CODEX_OVERRIDES = [
   `tui.terminal_resize_reflow_max_rows=${CODEX_REPLAY_ROWS}`,
-  'tui.notifications=true',
+  // OSC 9 carries only display text, so exclude turn-complete previews before the prefix-only
+  // input scanner sees them.
+  'tui.notifications=["approval-requested","plan-mode-prompt"]',
   'tui.notification_method="osc9"',
   'tui.notification_condition="always"'
 ]
