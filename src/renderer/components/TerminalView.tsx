@@ -116,7 +116,8 @@ function syncScrollArea(term: Terminal): void {
 }
 
 const CODEX_REFRESH_FOLLOW_MS = 1000
-const CODEX_REPLAY_FOLLOW_MS = CODEX_REFRESH_FOLLOW_MS
+// Independent ceiling; matching the refresh window is incidental, not a shared tuning parameter.
+const CODEX_REPLAY_FOLLOW_MS = 1000
 const CODEX_REPLAY_FOLLOW_IDLE_MS = 250
 const CODEX_BOTTOM_PIN_TOLERANCE_ROWS = 1
 
