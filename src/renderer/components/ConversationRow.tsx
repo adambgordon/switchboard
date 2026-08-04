@@ -44,8 +44,8 @@ function ConversationRowImpl({
   // A live terminal whose conversation identity was never proven (a new Codex session Switchboard
   // could not match to a rollout — see PtyState.provisional). It deliberately gets NONE of the four
   // liveness states: they're read off a transcript, and this terminal has no transcript known to be
-  // its, so any dot would be describing someone else's conversation. Neutral marker + explicit copy
-  // instead, because failing closed silently reads as a duplicated or broken row.
+  // its, so it remains distinct as `unlinked`. Visually it shares the hollow marker with `quiet`
+  // because there are no linked messages to be unread, plus the ordinary empty-row placeholder.
   const unlinked = live?.provisional === true
   // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe).
   const liveDotState: LiveState | null =
@@ -84,15 +84,7 @@ function ConversationRowImpl({
     >
       <span className="sb-row-main">
         <span className="sb-row-title truncate">{meta.title}</span>
-        {unlinked ? (
-          // Say plainly what this row is, in the slot a preview would occupy. Without this the row
-          // looks like an empty duplicate of a real conversation sitting in Recent — the two rows are
-          // a terminal whose transcript is unknown and a transcript whose terminal is unknown, and
-          // that only makes sense if the terminal admits it.
-          <span className="sb-row-preview sb-row-unlinked truncate">
-            Terminal only — transcript not linked
-          </span>
-        ) : meta.preview ? (
+        {meta.preview ? (
           <span className="sb-row-preview truncate">{meta.preview}</span>
         ) : (
           // No preview (a just-spawned session has no transcript yet) — render a muted
@@ -137,9 +129,10 @@ function ConversationRowImpl({
           <span
             ref={dotRef}
             className={`sb-dot ${dotClass}`}
-            // No data-tip, matching the other four states: hovering the gutter fades the dot out to
+            // No data-tip, matching the other markers: hovering the gutter fades the dot out to
             // reveal the ⋮ button, so a tooltip anchored here would point at an invisible element.
-            // The row's own preview line carries the explanation in visible text instead.
+            // The visible row uses the shared empty placeholder; this label preserves the exact
+            // unlinked meaning for assistive technology.
             aria-label={
               unlinked
                 ? 'live terminal, transcript not linked'
