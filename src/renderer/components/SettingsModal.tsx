@@ -134,6 +134,16 @@ const FAQ: Faq[] = [
               <strong>Hollow</strong>: finished and read
             </span>
           </li>
+          <li>
+            <span className="sb-faq-dot">
+              <span className="sb-dot unlinked" />
+            </span>
+            <span>
+              <strong>Grey dash</strong>: terminal only — Switchboard could not confirm which
+              conversation this terminal is running, so it reports no turn rather than guessing. The
+              terminal still works; the conversation may also appear under Recent.
+            </span>
+          </li>
         </ul>
       </>
     )

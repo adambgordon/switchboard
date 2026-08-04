@@ -49,8 +49,17 @@ export function visibleEntries(
 interface Props {
   /** Ordered, non-empty sections (Pinned / Live / Recent), built in App. */
   sections: RailSection[]
-  /** Live tally over ALL sessions (not the search-filtered set) — drives the count + status line. */
-  live: { count: number; working: number; asking: number; unread: number; idle: number }
+  /** Live tally over ALL sessions (not the search-filtered set) — drives the count + status line.
+   *  `unlinked` is its own bucket, not part of `idle`: those terminals have no proven conversation, so
+   *  they have no turn-state to be counted as anything. The five must still sum to `count`. */
+  live: {
+    count: number
+    working: number
+    asking: number
+    unread: number
+    idle: number
+    unlinked: number
+  }
   /** True during the initial conversation index, before sections are populated. */
   loading: boolean
   selectedSessionId: string | null
@@ -166,12 +175,15 @@ export default function TallyRail({
   liveOrder,
   reorderTick
 }: Props) {
-  const { count, working, asking, unread, idle } = live
+  const { count, working, asking, unread, idle, unlinked } = live
   const empty = sections.length === 0
 
   // The status sub-label, shown when something is live (the search field replaces it).
   // working = mid-turn · asking = blocked on your reply · unread = finished, not yet seen ·
-  // idle = finished and seen.
+  // idle = finished and seen · unlinked = a terminal with no conversation identity, which is NOT any
+  // of the other four. It gets its own word so the line stays honest: describing a terminal the user
+  // may be actively typing in as "idle" is the misreport this state exists to avoid. The `all idle`
+  // fallback can only be reached when every bucket is zero, i.e. never while `count > 0`.
   let subLabel = ''
   if (count > 0) {
     const parts: string[] = []
@@ -179,6 +191,7 @@ export default function TallyRail({
     if (asking > 0) parts.push(`${asking} waiting on you`)
     if (unread > 0) parts.push(`${unread} unread`)
     if (idle > 0) parts.push(`${idle} idle`)
+    if (unlinked > 0) parts.push(`${unlinked} unlinked`)
     subLabel = parts.length > 0 ? parts.join(' · ') : 'all idle'
   }
 
