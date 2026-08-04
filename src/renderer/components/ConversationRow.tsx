@@ -41,12 +41,18 @@ function ConversationRowImpl({
   onOpenMenu,
   onContextMenu
 }: Props) {
+  // A live terminal whose conversation identity was never proven (a new Codex session Switchboard
+  // could not match to a rollout — see PtyState.provisional). It deliberately gets NONE of the four
+  // liveness states: they're read off a transcript, and this terminal has no transcript known to be
+  // its, so any dot would be describing someone else's conversation. Neutral marker + explicit copy
+  // instead, because failing closed silently reads as a duplicated or broken row.
+  const unlinked = live?.provisional === true
   // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe).
-  const liveDotState: LiveState | null = live
-    ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting')
-    : null
-  const dotClass =
-    liveDotState === 'working'
+  const liveDotState: LiveState | null =
+    live && !unlinked ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting') : null
+  const dotClass = unlinked
+    ? 'unlinked'
+    : liveDotState === 'working'
       ? 'busy'
       : liveDotState === 'asking'
         ? 'asking'
@@ -78,7 +84,15 @@ function ConversationRowImpl({
     >
       <span className="sb-row-main">
         <span className="sb-row-title truncate">{meta.title}</span>
-        {meta.preview ? (
+        {unlinked ? (
+          // Say plainly what this row is, in the slot a preview would occupy. Without this the row
+          // looks like an empty duplicate of a real conversation sitting in Recent — the two rows are
+          // a terminal whose transcript is unknown and a transcript whose terminal is unknown, and
+          // that only makes sense if the terminal admits it.
+          <span className="sb-row-preview sb-row-unlinked truncate">
+            Terminal only — transcript not linked
+          </span>
+        ) : meta.preview ? (
           <span className="sb-row-preview truncate">{meta.preview}</span>
         ) : (
           // No preview (a just-spawned session has no transcript yet) — render a muted
@@ -123,14 +137,19 @@ function ConversationRowImpl({
           <span
             ref={dotRef}
             className={`sb-dot ${dotClass}`}
+            // No data-tip, matching the other four states: hovering the gutter fades the dot out to
+            // reveal the ⋮ button, so a tooltip anchored here would point at an invisible element.
+            // The row's own preview line carries the explanation in visible text instead.
             aria-label={
-              liveDotState === 'working'
-                ? 'live, working'
-                : liveDotState === 'asking'
-                  ? 'live, waiting for your reply'
-                  : liveDotState === 'quiet'
-                    ? 'live, idle'
-                    : 'live, finished — not yet seen'
+              unlinked
+                ? 'live terminal, transcript not linked'
+                : liveDotState === 'working'
+                  ? 'live, working'
+                  : liveDotState === 'asking'
+                    ? 'live, waiting for your reply'
+                    : liveDotState === 'quiet'
+                      ? 'live, idle'
+                      : 'live, finished — not yet seen'
             }
           />
         )}
