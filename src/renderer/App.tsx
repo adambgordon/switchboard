@@ -265,9 +265,12 @@ export default function App() {
   //   3. Recent — everything else (not live, not pinned), most-recent first.
   // When a search is active, each section is filtered to the matching sessions.
   const railSections = useMemo<RailSection[]>(() => {
-    // Resolve a live row's three-state liveness; null for rows with no live process.
+    // Resolve a live row's liveness; null for rows with no live process — and null for a PROVISIONAL
+    // one, whose conversation identity was never proven. Liveness is read off the transcript, so for
+    // an unlinked terminal there is no transcript that is known to be its: any state resolved here
+    // would describe some other conversation. It renders a neutral terminal-only marker instead.
     const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null =>
-      pty
+      pty && !pty.provisional
         ? resolveLiveState(
             meta,
             seen[id] ?? 0,
@@ -328,7 +331,16 @@ export default function App() {
     // referenced as `unread[p.sessionId]` just below. Surfaced as the tally's `unread` field.
     let unreadCount = 0
     let idle = 0
+    // Terminals with no proven conversation identity get their OWN count rather than being folded
+    // into `idle`. Calling an unlinked terminal idle would be a claim about a conversation we can't
+    // identify — and "1 idle" over a terminal the user is actively typing in is exactly the kind of
+    // wrong-dot report this work exists to fix.
+    let unlinked = 0
     for (const p of ptys.active) {
+      if (p.provisional) {
+        unlinked++
+        continue
+      }
       const meta = metaById.get(p.sessionId) ?? synthMeta(p)
       const st = resolveLiveState(
         meta,
@@ -343,7 +355,7 @@ export default function App() {
       else if (st === 'awaiting') unreadCount++
       else idle++
     }
-    return { count: ptys.active.length, working, asking, unread: unreadCount, idle }
+    return { count: ptys.active.length, working, asking, unread: unreadCount, idle, unlinked }
   }, [ptys.active, metaById, seen, unread, focused, selectedId])
 
   // Capacity modal: warn once the live set reaches the configured cap (maxLive). `capWarnDismissed`
@@ -468,7 +480,7 @@ export default function App() {
 
   // The "+" / ⌘N primary action. Spawn straight away only when BOTH axes are settled — a usable
   // default directory AND a resolved agent (a usable default-agent, or the sole installed one). A
-  // failed spawn (stale default dir, or the Codex serialize lock) falls back to the menu. Otherwise
+  // failed spawn (e.g. a stale default dir) falls back to the menu. Otherwise
   // toggle the menu, which presents exactly the unresolved choice(s): the agent segment and/or the
   // directory list.
   const newConversation = useCallback(() => {
@@ -574,6 +586,18 @@ export default function App() {
     [isProvisional, togglePin]
   )
 
+  // Option+click marks a live row unread. Gated for the same reason pins are: `useSeen` persists to
+  // localStorage, and an unlinked terminal's id is a placeholder that may never become a real
+  // conversation — so the entry would be a permanent orphan under an id nothing can ever match. It
+  // would also be marking a row that deliberately shows no read/unread state at all.
+  const markUnreadGated = useCallback(
+    (id: string) => {
+      if (ptys.bySession.get(id)?.provisional) return
+      markUnread(id)
+    },
+    [ptys.bySession, markUnread]
+  )
+
   // Open the conversation-info modal for a row/title. `edit` starts it in title-edit mode (the
   // right-click "Rename" entry point); clicking the pane title opens it in view mode. Opening the
   // modal does NOT select or navigate — it's an overlay over the current view. Gated off while
@@ -605,11 +629,13 @@ export default function App() {
     setExpandedSections((s) => new Set(s).add(key))
   }, [])
 
-  // Resolve the current dot state for any session id (used by the read/unread toggle).
+  // Resolve the current dot state for any session id (used by the read/unread toggle). Null for a
+  // provisional PTY, which has no dot to toggle — its seen state is keyed to a placeholder id that
+  // may never become a real conversation, so read/unread would be marking nothing.
   const liveStateOf = useCallback(
     (id: string): LiveState | null => {
       const pty = ptys.bySession.get(id)
-      if (!pty) return null
+      if (!pty || pty.provisional) return null
       const meta = metaById.get(id) ?? synthMeta(pty)
       return resolveLiveState(
         meta,
@@ -863,7 +889,7 @@ export default function App() {
             defaultDirActive={!!defaultDir}
             defaultDirLabel={defaultDir ? basename(defaultDir) : ''}
             onToggleUnread={toggleUnread}
-            onMarkUnread={markUnread}
+            onMarkUnread={markUnreadGated}
             onResumeSession={resumeSession}
             onStopSession={stopSession}
             onShowInfo={showInfo}
@@ -912,7 +938,7 @@ export default function App() {
             if (selectedId) showInfo(selectedId, false)
           }}
           onEngage={onEngage}
-          onMarkUnread={markUnread}
+          onMarkUnread={markUnreadGated}
           paneRef={paneRef}
           findOpen={findOpen}
           findFocusReq={findFocusReq}

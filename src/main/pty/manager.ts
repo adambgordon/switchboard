@@ -2,10 +2,42 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
 import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
-import { matchProvisionalCodex, type CodexBindCandidate } from '../sessions/codexParser'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
+import {
+  resolveCodexBindings,
+  type CodexBinding,
+  type ProvisionalPty
+} from './codexIdentity'
 import { CodexInputNotificationScanner } from './codexInputNotifications'
+
+/** The resolver seam, so tests can drive the orchestration without spawning `lsof`. */
+export type CodexBindingResolver = (
+  provisional: readonly ProvisionalPty[],
+  eligibleSessionIds: ReadonlySet<string>
+) => Promise<readonly CodexBinding[]>
+
+/**
+ * How many times one UNCHANGED state — the same provisional PTYs and the same eligible rollouts — is
+ * probed EAGERLY, i.e. on every re-index. Three absorbs the ordinary race where a rollout is indexed a
+ * beat before Codex has it open.
+ */
+const MAX_EAGER_PROBES_PER_STATE = 3
+
+/**
+ * How long to wait between probes once the eager budget for a state is spent.
+ *
+ * There MUST still be a retry, because the signature is built from Switchboard's inputs while the
+ * answer depends on OS state that isn't in it — so "same inputs" does NOT imply "same answer". Two
+ * real cases: a run of `lsof` timeouts inside the eager window burns it on transient failure; and if
+ * the user Ctrl-Cs a new Codex terminal and types `codex resume <id>` by hand, that rollout was
+ * ALREADY eligible at spawn, so its arrival changes nothing about the signature and cannot reset the
+ * budget. A hard cap would leave both permanently unlinked with no way back.
+ *
+ * Ten seconds keeps the sustained cost near nothing (~0.1 probes/sec against a 2/sec re-index) while
+ * still recovering on its own. Still no timer of its own — it only ever rides an existing re-index.
+ */
+const PROBE_RETRY_INTERVAL_MS = 10_000
 
 interface Live {
   ptyId: string
@@ -22,8 +54,10 @@ interface Live {
   idleTimer: ReturnType<typeof setTimeout> | null
   bootTimer: ReturnType<typeof setTimeout> | null
   // A new Codex session has no real id at spawn (Codex mints its own), so the PTY carries a
-  // placeholder sessionId and stays `provisional` until its rollout is indexed and bindProvisionalCodex
-  // swaps in the real id. Cleared on bind (or when the PTY exits).
+  // placeholder sessionId and stays `provisional` until an lsof probe PROVES which rollout the Codex
+  // process in this terminal has open (see codexIdentity + probeCodexIdentity). Cleared on bind (or
+  // when the PTY exits). While set, the row is a terminal with no known transcript — the renderer
+  // surfaces that rather than guessing, so this crosses IPC on PtyState.
   provisional: boolean
   booted: boolean
   // Claude boots (the `claude` command is typed) only once the shell is ready AND the renderer
@@ -53,6 +87,27 @@ interface Live {
  */
 export class PtyManager extends EventEmitter {
   private live = new Map<string, Live>()
+  /** Injected only by tests; production always observes the real OS. */
+  private resolveBindings: CodexBindingResolver
+  // Probe budget state. `probeSig` is the (provisional PTYs × eligible rollouts) state the current
+  // attempt count belongs to; `probeInFlight` collapses overlapping re-indexes onto one `lsof`;
+  // `lastProbeAt` paces the slow retries that continue after the eager budget is spent.
+  private probeSig: string | null = null
+  private probeAttempts = 0
+  private probeInFlight = false
+  private lastProbeAt = 0
+
+  constructor(opts: { resolveBindings?: CodexBindingResolver } = {}) {
+    super()
+    // Dev/QA: SWITCHBOARD_FAKE_UNBOUND=1 makes every probe prove nothing, so the fail-closed
+    // terminal-only state can actually be looked at. It is otherwise rare by design — binding
+    // normally succeeds — which would leave the one state that must NOT be mistaken for liveness as
+    // the one state nobody ever sees. Inert unless explicitly set.
+    const fakeUnbound = process.env.SWITCHBOARD_FAKE_UNBOUND === '1'
+    this.resolveBindings =
+      opts.resolveBindings ?? (fakeUnbound ? async () => [] : resolveCodexBindings)
+  }
+
   // The live-PTY cap (CONFIG.maxLivePtys is the default). User-configurable at runtime via
   // setMaxLive, pushed from the renderer's Preferences over IPC.ptySetMaxLive. Read only at spawn
   // time (enforceCap), never on the per-output hot path.
@@ -85,8 +140,9 @@ export class PtyManager extends EventEmitter {
 
   /**
    * Start a new Codex session. Codex mints its OWN rollout id (and only writes the rollout at the
-   * first turn), so we spawn with a placeholder sessionId and mark the PTY `provisional`. The real
-   * id is swapped in later by bindProvisionalCodex, when the rollout is first indexed.
+   * first turn), so we spawn with a placeholder sessionId and mark the PTY `provisional`. The real id
+   * is swapped in later by probeCodexIdentity, once the OS can prove which rollout the Codex process
+   * in this terminal has open — and stays a placeholder if it never can.
    */
   private startNewCodex(cwd: string): PtyState {
     return this.spawn({
@@ -99,6 +155,13 @@ export class PtyManager extends EventEmitter {
     })
   }
 
+  /**
+   * Type renderer input into a PTY. Deliberately a transparent passthrough with NO identity
+   * bookkeeping: keystrokes were once inspected here to time-correlate a new Codex PTY to its
+   * rollout, and every variant of that (a bare `\r`, a discrete post-boot Enter, nearest-timestamp
+   * pairing) was defeated by a real counterexample. Identity now comes from the OS instead — see
+   * codexIdentity — so this is back to being the hot path it should be.
+   */
   write(ptyId: string, data: string): void {
     this.live.get(ptyId)?.proc.write(data)
   }
@@ -152,20 +215,119 @@ export class PtyManager extends EventEmitter {
     return null
   }
 
+  /** Is any live PTY still waiting to learn its conversation? Lets the re-index path skip building the
+   *  eligible-id set entirely in the common case — that runs on the live poll, twice a second. */
+  hasProvisionalCodex(): boolean {
+    for (const e of this.live.values()) {
+      if (e.agent === 'codex' && e.provisional) return true
+    }
+    return false
+  }
+
   /**
-   * Correlate any unbound provisional new-Codex PTYs to their now-indexed rollouts and bind them.
-   * Called from the re-index path (a new Codex rollout only lands on disk at its first turn, which is
-   * exactly when the live-turn re-index fires), so binding rides the indexing that already happens —
-   * no separate file poll. `candidates` is the freshly-indexed Codex conversation set. Cheap: returns
-   * immediately when nothing is provisional.
+   * Ask the OS which rollout each unbound provisional new-Codex PTY is actually running, and bind the
+   * ones it can prove. Driven by the re-index path rather than a timer of its own: a new Codex rollout
+   * only reaches disk at its first turn, and that write is exactly what wakes both the file watcher
+   * and the live poll — so the probe rides indexing that already happens.
+   *
+   * `eligibleSessionIds` must be the FULLY FILTERED indexed set, so archived, non-interactive,
+   * zero-message and `thread_source:"subagent"` rollouts can never become bind targets even while
+   * Codex holds their files open (it really does hold subagent rollouts open alongside its own).
+   * Sessions a live PTY already drives are subtracted here.
+   *
+   * Never throws and never blocks its caller's own work — callers should not await it. Costs nothing
+   * when nothing is provisional, which is the overwhelmingly common case.
    */
-  bindProvisionalCodex(candidates: CodexBindCandidate[]): void {
-    const provisional = [...this.live.values()]
-      .filter((e) => e.agent === 'codex' && e.provisional)
-      .map((e) => ({ ptyId: e.ptyId, cwd: e.cwd, startedAt: e.startedAt }))
+  async probeCodexIdentity(eligibleSessionIds: ReadonlySet<string>): Promise<void> {
+    const provisional: ProvisionalPty[] = []
+    for (const e of this.live.values()) {
+      if (e.agent === 'codex' && e.provisional) {
+        provisional.push({ ptyId: e.ptyId, shellPid: e.proc.pid })
+      }
+    }
+    // Nothing to identify. No budget reset is needed on the way out: a PTY never returns to
+    // provisional, so the next one carries a fresh ptyId and pid and its signature differs anyway —
+    // and at most one stale signature is ever held, since the next probe overwrites it.
     if (provisional.length === 0) return
-    const liveIds = new Set([...this.live.values()].map((e) => e.sessionId))
-    for (const { ptyId, sessionId } of matchProvisionalCodex(provisional, candidates, liveIds)) {
+
+    const owned = this.ownedSessionIds()
+    const candidates = new Set<string>()
+    for (const id of eligibleSessionIds) {
+      if (!owned.has(id)) candidates.add(id)
+    }
+    // No unclaimed rollout exists yet — typically the window between opening a Codex tab and sending
+    // its first prompt. There is nothing to bind to, so don't spend an attempt looking.
+    if (candidates.size === 0) return
+
+    const sig = probeSignature(provisional, candidates)
+    if (sig !== this.probeSig) {
+      this.probeSig = sig
+      this.probeAttempts = 0
+    }
+    // Coalesce: an overlapping re-index joins the in-flight probe instead of starting a second one,
+    // and does NOT consume an attempt (only a launched probe does).
+    if (this.probeInFlight) return
+    // Eager for the first few attempts on a state, then paced — never permanently abandoned, because
+    // the answer can change while the inputs don't (see PROBE_RETRY_INTERVAL_MS).
+    const now = Date.now()
+    if (
+      this.probeAttempts >= MAX_EAGER_PROBES_PER_STATE &&
+      now - this.lastProbeAt < PROBE_RETRY_INTERVAL_MS
+    ) {
+      return
+    }
+
+    this.probeAttempts += 1
+    this.lastProbeAt = now
+    this.probeInFlight = true
+    try {
+      const bindings = await this.resolveBindings(provisional, candidates)
+      // Cleared BEFORE applying: bindCodex emits `bound` / `active-changed` into the renderer
+      // broadcast, and a throwing listener must not leave this flag stuck true, which would wedge
+      // binding for the rest of the PTY's life.
+      this.probeInFlight = false
+      this.applyBindings(bindings, provisional, candidates)
+    } catch {
+      // The resolver is contracted to fail closed rather than reject. This also absorbs a throw from
+      // a broadcast listener, which would otherwise escape as an unhandled rejection (callers invoke
+      // this with `void`).
+    } finally {
+      this.probeInFlight = false
+    }
+  }
+
+  /** Every sessionId a live PTY currently claims, including provisional placeholders — harmless,
+   *  since a placeholder is a random UUID that cannot collide with a real rollout id. */
+  private ownedSessionIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const e of this.live.values()) ids.add(e.sessionId)
+    return ids
+  }
+
+  /**
+   * Apply a probe result, re-checking that the world it described still exists. `lsof` runs
+   * asynchronously, so between the snapshot and here a PTY can exit or be replaced, and the user can
+   * have resumed the very conversation the result names — and applying a stale identity is the exact
+   * failure this whole rewrite exists to prevent.
+   *
+   * Only checks `bindCodex` CANNOT make are made here. Ownership and still-provisional are its job, so
+   * they live there once rather than in two places that could drift apart — and a duplicate guard is
+   * unreachable, which means untestable, which is how a suite goes green over a rule it never
+   * exercises. A ptyId that was never probed is likewise caught by the pid check, since it has no
+   * snapshot to match.
+   */
+  private applyBindings(
+    bindings: readonly CodexBinding[],
+    probed: readonly ProvisionalPty[],
+    probedCandidates: ReadonlySet<string>
+  ): void {
+    if (bindings.length === 0) return
+    const pidAtProbe = new Map(probed.map((p) => [p.ptyId, p.shellPid]))
+    for (const { ptyId, sessionId } of bindings) {
+      const e = this.live.get(ptyId)
+      if (!e) continue // exited while the probe ran
+      if (e.proc.pid !== pidAtProbe.get(ptyId)) continue // replaced, or never probed at all
+      if (!probedCandidates.has(sessionId)) continue // not the set this result was computed against
       this.bindCodex(ptyId, sessionId)
     }
   }
@@ -329,6 +491,7 @@ export class PtyManager extends EventEmitter {
       startedAt: e.startedAt,
       inputRequestedAt: e.inputRequestedAt,
       origin: e.origin,
+      provisional: e.provisional,
       exitCode: e.exitCode
     }
   }
@@ -336,4 +499,20 @@ export class PtyManager extends EventEmitter {
   private emitActive(): void {
     this.emit('active-changed', this.list())
   }
+}
+
+/**
+ * Identity of one probe's INPUTS, so an unchanged state isn't probed forever. Order-independent (both
+ * sides sorted), because neither the live-PTY map's iteration order nor the index's ordering is
+ * meaningful — only membership is.
+ */
+function probeSignature(
+  provisional: readonly ProvisionalPty[],
+  candidates: ReadonlySet<string>
+): string {
+  const ptys = provisional
+    .map((p) => `${p.ptyId}:${p.shellPid}`)
+    .sort()
+    .join(',')
+  return `${ptys}|${[...candidates].sort().join(',')}`
 }
