@@ -789,10 +789,14 @@ export default function App() {
   // would also be marking a row that deliberately shows no read/unread state at all.
   const markUnreadGated = useCallback(
     (id: string) => {
-      if (ptys.bySession.get(id)?.provisional) return
+      // Looked up by SURFACE, not session: an Agent View viewer has no conversation id at all, so a
+      // bySession miss would read as "not provisional" and write an unread marker against a synthetic
+      // `agent-view:` key. Both it and an unbound terminal key their row off something that is not a
+      // conversation, and neither can carry a read state.
+      if (!hasProvenConversation(ptys.bySurface.get(id))) return
       markUnread(id)
     },
-    [ptys.bySession, markUnread]
+    [ptys.bySurface, markUnread]
   )
 
   // Open the conversation-info modal for a row/title. `edit` starts it in title-edit mode (the

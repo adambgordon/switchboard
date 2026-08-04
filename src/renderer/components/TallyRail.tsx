@@ -229,7 +229,7 @@ export default function TallyRail({
     .flatMap((r) =>
       r.shown.map(
         (e) =>
-          `${e.sessionId}:${e.pty?.ptyId ?? ''}:${e.host ? 1 : 0}:${e.agentView ? 1 : 0}:${e.pinned ? 1 : 0}:${e.liveState ?? ''}`
+          `${e.sessionId}:${e.pty?.ptyId ?? ''}:${e.host ? 1 : 0}:${e.pty?.provisional ? 1 : 0}:${e.agentView ? 1 : 0}:${e.pinned ? 1 : 0}:${e.liveState ?? ''}`
       )
     )
     .join('|')
@@ -280,10 +280,18 @@ export default function TallyRail({
     pinned: boolean
     agentView: boolean
     host: boolean
+    unlinked: boolean
   } | null>(null)
   const menuStateFor = (
     id: string
-  ): { live: boolean; unread: boolean; pinned: boolean; agentView: boolean; host: boolean } | null => {
+  ): {
+    live: boolean
+    unread: boolean
+    pinned: boolean
+    agentView: boolean
+    host: boolean
+    unlinked: boolean
+  } | null => {
     const entry = entryById(id)
     if (!entry) return null
     return {
@@ -291,7 +299,11 @@ export default function TallyRail({
       unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
       pinned: entry.pinned,
       agentView: entry.agentView,
-      host: entry.host
+      host: entry.host,
+      // Pin, read state, and session details are all keyed to a conversation. A viewer has none, and
+      // an unbound terminal's key is a placeholder that may never become one — so for both, those
+      // items would silently do nothing. Hide them rather than offer a no-op.
+      unlinked: entry.host || entry.pty?.provisional === true
     }
   }
   // `closing` drives the fade-out: the menu stays mounted with a `.closing` class for one fade, then
@@ -342,7 +354,8 @@ export default function TallyRail({
       current.unread !== ctxMenu.unread ||
       current.pinned !== ctxMenu.pinned ||
       current.agentView !== ctxMenu.agentView ||
-      current.host !== ctxMenu.host
+      current.host !== ctxMenu.host ||
+      current.unlinked !== ctxMenu.unlinked
     ) {
       closeMenu()
     }
@@ -545,7 +558,7 @@ export default function TallyRail({
           onMouseEnter={cancelAutoClose}
           onMouseLeave={armAutoClose}
         >
-          {!ctxMenu.host && (
+          {!ctxMenu.unlinked && (
             <button
               className="sb-ctxmenu-item"
               onClick={() => {
@@ -557,7 +570,7 @@ export default function TallyRail({
               <span>{ctxMenu.pinned ? 'Unpin' : 'Pin'}</span>
             </button>
           )}
-          {ctxMenu.live && !ctxMenu.host && (
+          {ctxMenu.live && !ctxMenu.unlinked && (
             <button
               className="sb-ctxmenu-item"
               onClick={() => {
@@ -569,7 +582,7 @@ export default function TallyRail({
               <span>{ctxMenu.unread ? 'Mark as read' : 'Mark as unread'}</span>
             </button>
           )}
-          {!ctxMenu.host && (
+          {!ctxMenu.unlinked && (
             <button
               className="sb-ctxmenu-item"
               onClick={() => {
@@ -583,7 +596,7 @@ export default function TallyRail({
           )}
           {/* The session action sits at the bottom behind a divider — Stop when live, Resume when
               stopped, or Go to Agent View when this transcript owns that transport. */}
-          {!ctxMenu.host && <div className="sb-ctxmenu-sep" />}
+          {!ctxMenu.unlinked && <div className="sb-ctxmenu-sep" />}
           {ctxMenu.live ? (
             <button
               className="sb-ctxmenu-item danger"
