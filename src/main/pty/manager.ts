@@ -6,6 +6,7 @@ import { matchProvisionalCodex, type CodexBindCandidate } from '../sessions/code
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
 import { CodexInputNotificationScanner } from './codexInputNotifications'
+import { scanForSubmit } from './submitDetect'
 
 interface Live {
   ptyId: string
@@ -25,6 +26,9 @@ interface Live {
   // created by this keystroke. Only the first submit is recorded, so it stays monotonic and is
   // unaffected by later Enters (approval dialogs, follow-up turns). See matchProvisionalCodex.
   firstSubmitAt: number | null
+  // Mid-bracketed-paste, carried across write() payloads because a paste can arrive in chunks. Only
+  // used to keep a paste's rewritten newlines from being mistaken for a submit.
+  inPaste: boolean
   idleTimer: ReturnType<typeof setTimeout> | null
   bootTimer: ReturnType<typeof setTimeout> | null
   // A new Codex session has no real id at spawn (Codex mints its own), so the PTY carries a
@@ -109,13 +113,19 @@ export class PtyManager extends EventEmitter {
    * Type renderer input into a PTY. This is the ONLY path for user keystrokes — the boot command is
    * written straight to `proc` inside spawn() — so a submit seen here is genuinely the user's, which
    * is what makes it a sound correlation signal for a provisional new-Codex PTY (see firstSubmitAt).
+   *
+   * Two kinds of payload reach here that must NOT count as a submit, because neither creates a
+   * rollout: bracketed pastes (xterm rewrites their newlines to `\r`, and the user may still be
+   * composing) and anything typed BEFORE boot, while the bare shell prompt is up and no agent is
+   * running — the same pre-boot window CLEAR_LINE in bootCommand.ts exists to defend against.
+   * `scanForSubmit` handles the first (carrying paste state across chunks); `booted` gates the second.
    */
   write(ptyId: string, data: string): void {
     const e = this.live.get(ptyId)
     if (!e) return
-    if (e.firstSubmitAt == null && (data.includes('\r') || data.includes('\n'))) {
-      e.firstSubmitAt = Date.now()
-    }
+    const scan = scanForSubmit(data, e.inPaste)
+    e.inPaste = scan.inPaste
+    if (scan.submitted && e.booted && e.firstSubmitAt == null) e.firstSubmitAt = Date.now()
     e.proc.write(data)
   }
 
@@ -246,6 +256,7 @@ export class PtyManager extends EventEmitter {
       startedAt: now,
       inputRequestedAt: null,
       firstSubmitAt: null,
+      inPaste: false,
       idleTimer: null,
       bootTimer: null,
       provisional: o.provisional ?? false,

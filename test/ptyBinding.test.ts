@@ -40,6 +40,15 @@ describe('PtyManager new-Codex binding', () => {
   let mgr: PtyManager
   let bound: string[]
 
+  /**
+   * Type a prompt and press Enter the way xterm actually delivers it: `onData` fires per keystroke,
+   * so the Enter is always its own payload — never batched onto the text before it.
+   */
+  const submit = (ptyId: string, text = 'go'): void => {
+    mgr.write(ptyId, text)
+    mgr.write(ptyId, '\r')
+  }
+
   beforeEach(() => {
     vi.useFakeTimers()
     mgr = new PtyManager()
@@ -74,7 +83,7 @@ describe('PtyManager new-Codex binding', () => {
   it('binds once the user submits', () => {
     const a = mgr.startNew(CWD, 'codex')
     vi.advanceTimersByTime(PAST_BOOT)
-    mgr.write(a.ptyId, 'summarize this repo\r')
+    submit(a.ptyId, 'summarize this repo')
     mgr.bindProvisionalCodex([cand('s1', Date.now())])
     expect(bound).toEqual([`${a.ptyId}->s1`])
     expect(mgr.findBySession('s1')?.ptyId).toBe(a.ptyId)
@@ -85,7 +94,7 @@ describe('PtyManager new-Codex binding', () => {
     vi.advanceTimersByTime(100)
     const used = mgr.startNew(CWD, 'codex')
     vi.advanceTimersByTime(PAST_BOOT)
-    mgr.write(used.ptyId, 'go\r')
+    submit(used.ptyId)
 
     mgr.bindProvisionalCodex([cand('s1', Date.now())])
 
@@ -101,10 +110,10 @@ describe('PtyManager new-Codex binding', () => {
     vi.advanceTimersByTime(PAST_BOOT)
 
     // ...but the user submits in the second tab first.
-    mgr.write(second.ptyId, 'go\r')
+    submit(second.ptyId)
     const secondSubmit = Date.now()
     vi.advanceTimersByTime(5000)
-    mgr.write(first.ptyId, 'go\r')
+    submit(first.ptyId)
     const firstSubmit = Date.now()
 
     mgr.bindProvisionalCodex([
@@ -119,16 +128,76 @@ describe('PtyManager new-Codex binding', () => {
   it('leaves Claude sessions alone — their id is pre-assigned, never correlated', () => {
     const c = mgr.startNew(CWD, 'claude')
     vi.advanceTimersByTime(PAST_BOOT)
-    mgr.write(c.ptyId, 'go\r')
+    submit(c.ptyId)
     mgr.bindProvisionalCodex([cand('s1', Date.now())])
     expect(bound).toEqual([])
     expect(mgr.findBySession(c.sessionId)?.ptyId).toBe(c.ptyId)
   })
 
+  it('a bracketed multi-line paste is not a submit', () => {
+    // xterm normalizes every newline in a multi-line paste to \r and wraps it in bracketed-paste
+    // markers before term.onData forwards it here — so "contains \r" would call this a submit even
+    // though the user is still composing and no rollout results.
+    const pasted = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(100)
+    const typed = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(PAST_BOOT)
+
+    mgr.write(pasted.ptyId, '\x1b[200~first line\rsecond line\x1b[201~')
+    vi.advanceTimersByTime(1000)
+    submit(typed.ptyId) // the only real submit
+
+    mgr.bindProvisionalCodex([cand('s1', Date.now())])
+
+    expect(bound).toEqual([`${typed.ptyId}->s1`])
+  })
+
+  it('a paste split across chunks does not leak a submit from its inner newline', () => {
+    const pasted = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(100)
+    const typed = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(PAST_BOOT)
+
+    mgr.write(pasted.ptyId, '\x1b[200~first line')
+    mgr.write(pasted.ptyId, '\rsecond line') // still inside the paste
+    mgr.write(pasted.ptyId, '\x1b[201~')
+    vi.advanceTimersByTime(1000)
+    submit(typed.ptyId)
+
+    mgr.bindProvisionalCodex([cand('s1', Date.now())])
+
+    expect(bound).toEqual([`${typed.ptyId}->s1`])
+  })
+
+  it('an Enter typed before the agent boots is not a submit', () => {
+    // The pre-boot window is real — CLEAR_LINE in bootCommand.ts exists because keystrokes land at
+    // the bare shell prompt before the agent command is typed. Such an Enter creates no rollout.
+    const early = mgr.startNew(CWD, 'codex')
+    mgr.write(early.ptyId, '\r') // at the shell prompt, before boot
+    vi.advanceTimersByTime(100)
+    const real = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(PAST_BOOT)
+    submit(real.ptyId)
+
+    mgr.bindProvisionalCodex([cand('s1', Date.now())])
+
+    expect(bound).toEqual([`${real.ptyId}->s1`])
+  })
+
+  it('still binds a submit that follows a completed paste', () => {
+    // The tightened rule must not lose the ordinary case: paste a prompt, then press Enter.
+    const a = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(PAST_BOOT)
+    mgr.write(a.ptyId, '\x1b[200~a pasted prompt\x1b[201~')
+    mgr.write(a.ptyId, '\r')
+    mgr.bindProvisionalCodex([cand('s1', Date.now())])
+    expect(bound).toEqual([`${a.ptyId}->s1`])
+  })
+
   it('ignores a rollout from a different cwd', () => {
     const a = mgr.startNew(CWD, 'codex')
     vi.advanceTimersByTime(PAST_BOOT)
-    mgr.write(a.ptyId, 'go\r')
+    submit(a.ptyId)
     mgr.bindProvisionalCodex([cand('s1', Date.now(), '/elsewhere')])
     expect(bound).toEqual([])
   })
