@@ -60,10 +60,13 @@ export class SessionWatcher {
   start(): void {
     if (this.watcher) return
 
-    // Watch both agents' roots in one watcher (chokidar accepts an array of globs).
+    // Watch both agents' roots in one watcher (chokidar accepts an array of globs). The Claude jobs
+    // root is watched too: a background job starting or finishing writes only its own state file and
+    // nothing to any transcript, so without this a bg conversation's dot would never settle.
     const globs = [
       path.join(this.claudeRoot, '**', '*.jsonl'),
-      path.join(this.codexRoot, '**', '*.jsonl')
+      path.join(this.codexRoot, '**', '*.jsonl'),
+      path.join(path.dirname(this.claudeRoot), 'jobs', '*', 'state.json')
     ]
     const watcher = watch(globs, {
       ignoreInitial: true,

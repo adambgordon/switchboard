@@ -135,6 +135,14 @@ export interface ConversationMeta {
    */
   sessionKind?: string
   /**
+   * [Claude, `sessionKind:"bg"` only] The daemon is still running this background job. Such a
+   * conversation is genuinely alive with no Switchboard PTY behind it, so it earns a liveness dot
+   * that no live-process check would ever give it. Read from `~/.claude/jobs/<short>/state.json`.
+   */
+  bgRunning?: boolean
+  /** ms epoch the running background job was created — its stand-in for a process start time. */
+  bgStartedAt?: number | null
+  /**
    * Codex thread class, read verbatim from `session_meta.payload.thread_source`. 'subagent' marks a
    * delegated agent thread; the indexer drops those so only the parent conversation surfaces.
    * Undefined for Claude and older Codex rollouts that predate the field.

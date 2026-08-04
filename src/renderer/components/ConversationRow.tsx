@@ -54,9 +54,15 @@ function ConversationRowImpl({
   // be its, so any dot would describe someone else's conversation. Neutral marker + explicit copy
   // instead, because failing closed silently reads as a duplicated or broken row.
   const unlinked = host || live?.provisional === true
-  // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe).
-  const liveDotState: LiveState | null =
-    live && !unlinked ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting') : null
+  // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe). A
+  // running background job has no PTY to fall back on, so its dot rests on the transcript alone.
+  const liveDotState: LiveState | null = unlinked
+    ? null
+    : live
+      ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting')
+      : meta?.bgRunning
+        ? liveState ?? 'quiet'
+        : null
   const dotClass = unlinked
     ? 'unlinked'
     : liveDotState === 'working'
@@ -150,7 +156,7 @@ function ConversationRowImpl({
         </span>
       </span>
       <span className="sb-row-gutter">
-        {live && (
+        {(live || meta?.bgRunning) && (
           <span
             ref={dotRef}
             className={`sb-dot ${dotClass}`}

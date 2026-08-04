@@ -16,6 +16,7 @@ import { extractMeta } from './parser'
 import { defaultCodexRoot, extractCodexMeta, listCodexRollouts } from './codexParser'
 import { readCodexThreads } from './codexThreadsDb'
 import { readCodexSessionNames, resolveCodexTitle } from './codexSessionIndex'
+import { readRunningBgJobs, runningBgJobFor } from './claudeJobs'
 
 /** Default projects root: `~/.claude/projects`. */
 function defaultProjectsRoot(): string {
@@ -166,12 +167,19 @@ async function indexClaudeMetas(root: string, cache: MetaCache): Promise<Convers
     extractWithCache(f, cache, safeExtractMeta)
   )
 
+  // Consult the daemon's job state once per pass (a handful of tiny files). A `sessionKind:"bg"`
+  // transcript runs under Claude's own daemon rather than a Switchboard PTY, so nothing in the file
+  // itself can say whether it is still working or finished months ago — only the job state can.
+  // Spread so the overlay doesn't mutate the cached meta (the cache keys on file mtime/size).
+  const runningJobs = readRunningBgJobs(path.join(path.dirname(root), 'jobs'))
+
   const out: ConversationMeta[] = []
   for (const meta of metas) {
     if (!meta) continue
     if (meta.messageCount === 0) continue
     if (meta.sessionKind === 'daemon' || meta.sessionKind === 'daemon-worker') continue
-    out.push(meta)
+    const job = meta.sessionKind === 'bg' ? runningBgJobFor(runningJobs, meta.sessionId) : null
+    out.push(job ? { ...meta, bgRunning: true, bgStartedAt: job.startedAt } : meta)
   }
   return out
 }

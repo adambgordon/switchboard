@@ -366,21 +366,36 @@ export default function App() {
   //   3. Recent — everything else (not live, not pinned), most-recent first.
   // When a search is active, each section is filtered to the matching sessions.
   const railSections = useMemo<RailSection[]>(() => {
-    // Resolve a live row's liveness; null for rows with no live process — and null for a PROVISIONAL
-    // one, whose conversation identity was never proven. Liveness is read off the transcript, so for
-    // an unlinked terminal there is no transcript that is known to be its: any state resolved here
-    // would describe some other conversation. It renders a neutral terminal-only marker instead.
-    const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null =>
-      hasProvenConversation(pty) && pty
-        ? resolveLiveState(
-            meta,
-            seen[id] ?? 0,
-            focused && selectedId === id,
-            isManualUnread(unread[id], meta),
-            liveStartedAtForPty(pty),
-            pty.inputRequestedAt
-          )
-        : null
+    // Resolve a row's liveness. Null for a PROVISIONAL PTY, whose conversation identity was never
+    // proven: liveness is read off the transcript, and for an unlinked terminal there is no
+    // transcript known to be its, so any state resolved here would describe some other conversation.
+    // It renders a neutral terminal-only marker instead.
+    //
+    // A running background job resolves too, with NO PTY: Claude's daemon owns it, so it is alive
+    // without Switchboard holding a terminal. Its liveness comes from the same transcript read, with
+    // the job's own start time standing in for a process spawn.
+    const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null => {
+      if (hasProvenConversation(pty) && pty) {
+        return resolveLiveState(
+          meta,
+          seen[id] ?? 0,
+          focused && selectedId === id,
+          isManualUnread(unread[id], meta),
+          liveStartedAtForPty(pty),
+          pty.inputRequestedAt
+        )
+      }
+      if (!pty && meta?.bgRunning) {
+        return resolveLiveState(
+          meta,
+          seen[id] ?? 0,
+          focused && selectedId === id,
+          isManualUnread(unread[id], meta),
+          meta.bgStartedAt ?? null
+        )
+      }
+      return null
+    }
 
     const pinnedEntries: RailEntry[] = pinnedOrder
       .map((id): RailEntry | null => {
