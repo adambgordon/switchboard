@@ -12,21 +12,13 @@ const CODEX_REPLAY_ROWS = 2000
 export function bootCommandFor(
   agent: AgentKind,
   origin: 'resume' | 'new',
-  sessionId: string,
-  claudeDebugFile?: string
+  sessionId: string
 ): string {
   if (agent === 'codex') {
     const command = `codex -c tui.terminal_resize_reflow_max_rows=${CODEX_REPLAY_ROWS}`
     return origin === 'resume' ? `${command} resume ${sessionId}` : command
   }
-  const identity = origin === 'resume' ? `--resume ${sessionId}` : `--session-id ${sessionId}`
-  return claudeDebugFile
-    ? `claude --debug=fv-attach --debug-file ${shellQuote(claudeDebugFile)} ${identity}`
-    : `claude ${identity}`
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
+  return origin === 'resume' ? `claude --resume ${sessionId}` : `claude --session-id ${sessionId}`
 }
 
 /**
@@ -49,8 +41,7 @@ const CLEAR_LINE = '\x05\x15'
 export function bootPayloadFor(
   agent: AgentKind,
   origin: 'resume' | 'new',
-  sessionId: string,
-  claudeDebugFile?: string
+  sessionId: string
 ): string {
-  return `${CLEAR_LINE}${bootCommandFor(agent, origin, sessionId, claudeDebugFile)}\r`
+  return `${CLEAR_LINE}${bootCommandFor(agent, origin, sessionId)}\r`
 }

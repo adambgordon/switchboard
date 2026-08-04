@@ -22,7 +22,7 @@ import { initPtyStream } from './lib/ptyStream'
 import {
   conversationIdForPty,
   isAgentViewSurfaceKey,
-  isUnattachedAgentView,
+  isAgentViewHost,
   liveStartedAtForPty,
   shouldFollowPtySurfaceChange,
   surfaceKeyForPty
@@ -261,7 +261,7 @@ export default function App() {
       if (shouldFollowPtySurfaceChange(priorKey, nextKey, selectedId, priorWasTerminal)) {
         follow(nextKey)
         setFollowedPtyId(pty.ptyId)
-        if (isUnattachedAgentView(pty)) {
+        if (isAgentViewHost(pty)) {
           setFindOpen(false)
           restoreFindPriorView()
         }
@@ -518,7 +518,7 @@ export default function App() {
 
   const selectedMeta = selectedId ? metaById.get(selectedId) ?? null : null
   const selectedPty = selectedId ? ptys.bySurface.get(selectedId) ?? null : null
-  const selectedHost = isUnattachedAgentView(selectedPty)
+  const selectedHost = isAgentViewHost(selectedPty)
   const selectedController = !!selectedId && ptys.byController.has(selectedId)
 
   // Looking at a conversation (selected + focused) marks it read: it advances the seen marker
@@ -710,7 +710,7 @@ export default function App() {
   const openRemembered = useCallback(
     (id: string) => {
       setFollowedPtyId(null)
-      if (isUnattachedAgentView(ptys.bySurface.get(id))) follow(id)
+      if (isAgentViewHost(ptys.bySurface.get(id))) follow(id)
       else open(id)
       requestFocus(id)
       if (!ptys.bySession.has(id) || viewBySession[id] === 'transcript') {

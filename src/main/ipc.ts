@@ -130,16 +130,7 @@ export function openExternalUrl(url: string): void {
 
 export function registerIpc(): void {
   mgr = new PtyManager({
-    claudeAgentView: {
-      debugRoot: join(app.getPath('userData'), 'agent-view-debug'),
-      sessionsRoot: join(CLAUDE_ROOT, 'sessions'),
-      jobsRoot: join(CLAUDE_ROOT, 'jobs'),
-      hasTranscript: async (sessionId) => {
-        const filePath = await resolveSessionFile(sessionId)
-        if (!filePath) return false
-        return (await extractMeta(filePath))?.sessionId === sessionId
-      }
-    }
+    claudeAgentView: { sessionsRoot: join(CLAUDE_ROOT, 'sessions') }
   })
   mgr.on('data', (ptyId: string, data: string) => broadcast(IPC.ptyData, ptyId, data))
   mgr.on('exit', (ptyId: string, code: number | null) => broadcast(IPC.ptyExit, ptyId, code))

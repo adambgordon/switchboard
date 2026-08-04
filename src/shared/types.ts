@@ -179,15 +179,19 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  */
 export type LiveState = 'working' | 'asking' | 'awaiting' | 'quiet'
 
-/** The user-facing surface currently carried by a stable PTY transport. */
+/**
+ * The user-facing surface currently carried by a stable PTY transport. A Claude terminal sitting in
+ * Agent View is a viewer for background agents, not a conversation: it has no transcript of its own,
+ * so presenting it as one invents an empty conversation that never gains a message. Which agent it is
+ * viewing is deliberately NOT modelled — Claude only reports that through a debug mode that prints a
+ * banner into every terminal, which is not worth the one interaction it would buy.
+ */
 export type PtySurface =
   | { kind: 'conversation'; sessionId: string }
   | {
       kind: 'agent-view-host'
       /** The Claude session that entered Agent View. It remains independent if it has a transcript. */
       controllerSessionId: string
-      /** Exact current attachment, when Claude's private per-PTY attach signal resolves successfully. */
-      attachedSessionId?: string
     }
 
 export interface PtyState {

@@ -13,11 +13,9 @@ import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
 import {
   ClaudeAgentViewMonitor,
-  attachClaudeAgentView,
-  detachClaudeAgentView,
   enterClaudeAgentView,
-  type ClaudeAgentViewMonitorOptions,
-  type ResolvedClaudeJob
+  exitClaudeAgentView,
+  type ClaudeAgentViewMonitorOptions
 } from './claudeAgentView'
 
 interface Live {
@@ -26,7 +24,9 @@ interface Live {
   agent: AgentKind
   cwd: string
   title: string
+  // What this PTY shows when it is NOT in Agent View, kept so leaving Agent View restores it.
   controllerCwd: string
+  controllerTitle: string
   origin: 'resume' | 'new'
   proc: pty.IPty
   status: PtyStatus
@@ -49,15 +49,10 @@ interface Live {
   exitCode: number | null
 }
 
-type AgentViewOptions = Omit<
-  ClaudeAgentViewMonitorOptions,
-  'onHost' | 'onAttach' | 'onDetach'
->
+type AgentViewOptions = Omit<ClaudeAgentViewMonitorOptions, 'onHost' | 'onExit'>
 
 function conversationId(surface: PtySurface): string | null {
-  return surface.kind === 'conversation'
-    ? surface.sessionId
-    : surface.attachedSessionId ?? null
+  return surface.kind === 'conversation' ? surface.sessionId : null
 }
 
 /**
@@ -88,8 +83,7 @@ export class PtyManager extends EventEmitter {
       ? new ClaudeAgentViewMonitor({
           ...opts.claudeAgentView,
           onHost: (ptyId) => this.enterAgentView(ptyId),
-          onAttach: (ptyId, session) => this.attachAgentView(ptyId, session),
-          onDetach: (ptyId) => this.detachAgentView(ptyId)
+          onExit: (ptyId) => this.exitAgentView(ptyId)
         })
       : null
   }
@@ -270,6 +264,7 @@ export class PtyManager extends EventEmitter {
       cwd: o.cwd,
       title: o.title,
       controllerCwd: o.cwd,
+      controllerTitle: o.title,
       origin: o.origin,
       proc,
       status: 'busy',
@@ -285,8 +280,7 @@ export class PtyManager extends EventEmitter {
       exitCode: null
     }
     this.live.set(ptyId, entry)
-    const claudeDebugFile =
-      o.agent === 'claude' ? this.agentView?.register(ptyId, o.sessionId) : undefined
+    if (o.agent === 'claude') this.agentView?.register(ptyId, o.sessionId)
 
     const boot = (): void => {
       if (entry.booted) return
@@ -295,7 +289,7 @@ export class PtyManager extends EventEmitter {
       // Clear any stray content on the shell's input line (a recalled-history line from an up-arrow,
       // or a keystroke typed in the brief window before boot) before typing the command, so nothing
       // fuses onto it; the trailing \r submits. See bootPayloadFor.
-      proc.write(bootPayloadFor(o.agent, o.origin, o.sessionId, claudeDebugFile))
+      proc.write(bootPayloadFor(o.agent, o.origin, o.sessionId))
     }
     // Boot claude only once the shell is ready (first output) AND the renderer has sized the PTY
     // (first resize). Booting earlier starts claude's resume replay at the 80×30 spawn default; the
@@ -387,31 +381,12 @@ export class PtyManager extends EventEmitter {
     this.emitSurfaceChanged()
   }
 
-  private attachAgentView(ptyId: string, session: ResolvedClaudeJob): void {
-    const entry = this.live.get(ptyId)
-    if (!entry || entry.agent !== 'claude') return
-    this.enterAgentView(ptyId)
-    if (entry.surface.kind !== 'agent-view-host') return
-    for (const other of this.live.values()) {
-      if (other.ptyId !== ptyId && conversationId(other.surface) === session.sessionId) {
-        this.detachAgentView(ptyId)
-        return
-      }
-    }
-    if (entry.surface.attachedSessionId === session.sessionId) return
-    entry.surface = attachClaudeAgentView(entry.surface, session.sessionId)
-    entry.cwd = session.cwd
-    entry.title = session.title
-    this.emitSurfaceChanged()
-  }
-
-  private detachAgentView(ptyId: string): void {
+  private exitAgentView(ptyId: string): void {
     const entry = this.live.get(ptyId)
     if (!entry || entry.surface.kind !== 'agent-view-host') return
-    if (entry.surface.attachedSessionId == null) return
-    entry.surface = detachClaudeAgentView(entry.surface)
+    entry.surface = exitClaudeAgentView(entry.surface)
     entry.cwd = entry.controllerCwd
-    entry.title = 'Claude Agent View'
+    entry.title = entry.controllerTitle
     this.emitSurfaceChanged()
   }
 

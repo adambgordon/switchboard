@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { PtyState } from '../src/shared/types'
 import {
   conversationIdForPty,
+  isAgentViewHost,
   isAgentViewSurfaceKey,
-  isUnattachedAgentView,
   liveStartedAtForPty,
   shouldFollowPtySurfaceChange,
   surfaceKeyForPty
@@ -31,26 +31,19 @@ describe('PTY surface projection', () => {
     expect(liveStartedAtForPty(value)).toBe(10)
   })
 
-  it('gives an unattached host a stable PTY key but no conversation identity', () => {
+  it('gives a host a stable PTY key but no conversation identity', () => {
     const value = pty({ kind: 'agent-view-host', controllerSessionId: 'a' })
     expect(conversationIdForPty(value)).toBeNull()
     expect(surfaceKeyForPty(value)).toBe('agent-view:pty-1')
     expect(isAgentViewSurfaceKey(surfaceKeyForPty(value))).toBe(true)
-    expect(isUnattachedAgentView(value)).toBe(true)
+    expect(isAgentViewHost(value)).toBe(true)
     expect(liveStartedAtForPty(value)).toBeNull()
   })
 
-  it('projects an exact attachment without borrowing the controller start time', () => {
-    const value = pty({
-      kind: 'agent-view-host',
-      controllerSessionId: 'a',
-      attachedSessionId: 'b'
-    })
-    expect(conversationIdForPty(value)).toBe('b')
-    expect(surfaceKeyForPty(value)).toBe('b')
-    expect(isAgentViewSurfaceKey(surfaceKeyForPty(value))).toBe(false)
-    expect(isUnattachedAgentView(value)).toBe(false)
-    expect(liveStartedAtForPty(value)).toBeNull()
+  it('never projects the controller itself as the conversation on screen', () => {
+    const value = pty({ kind: 'agent-view-host', controllerSessionId: 'a' })
+    expect(conversationIdForPty(value)).not.toBe('a')
+    expect(surfaceKeyForPty(value)).not.toBe('a')
   })
 
   it('follows only a changed surface whose terminal is currently selected', () => {
