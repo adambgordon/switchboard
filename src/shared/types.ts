@@ -172,8 +172,8 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  * Renderer-derived liveness of a live session, from the transcript's turn-state plus a local
  * "seen" marker — NOT PTY output activity (a live TUI repaints constantly, so it isn't a turn
  * signal):
- *   working  = Claude is actively producing output / mid-turn
- *   asking   = Claude is blocked on the user's reply (AskUserQuestion / ExitPlanMode), unread
+ *   working  = the agent is actively producing output / mid-turn
+ *   asking   = the agent is blocked on the user's reply, unread
  *   awaiting = the turn finished and the user hasn't looked since
  *   quiet    = live but idle — finished and already seen, or not yet started (nothing happening)
  */
@@ -208,7 +208,23 @@ export interface PtyState {
   lastActivity: number
   /** ms epoch when the process was spawned. */
   startedAt: number
+  /**
+   * ms epoch of the newest explicit Codex OSC notification that requests user input, or null.
+   * Transcript activity newer than this supersedes it; generic PTY output never sets it.
+   */
+  inputRequestedAt: number | null
   origin: 'resume' | 'new'
+  /**
+   * True while this PTY has no PROVEN conversation identity: a new Codex session whose rollout hasn't
+   * been matched to it yet (Codex mints its own id, so `sessionId` is still a placeholder). Codex-only
+   * — Claude sessions are launched with an id Switchboard chose, so they are never provisional.
+   *
+   * The renderer must not present a provisional row's transcript, title, or liveness as known: binding
+   * requires exact OS evidence and deliberately fails closed, so this can stay true for the life of
+   * the terminal. Distinct from the renderer's own `isProvisional` (meta-absence), which also covers a
+   * new Claude session in the ~1s before its JSONL indexes.
+   */
+  provisional: boolean
   exitCode?: number | null
 }
 
@@ -293,8 +309,10 @@ export interface SwitchboardApi {
   /**
    * Start a NEW session for `agent` in `cwd`. Claude gets a pre-assigned id and is live immediately;
    * Codex mints its own rollout id, so the returned PtyState is `provisional` (placeholder id) until
-   * the binding poller correlates the rollout and fires `onPtyBound`. Rejects if `cwd` is gone, or
-   * (Codex only) if another new-Codex session is still unbound (the serialize lock).
+   * the OS can prove which rollout that terminal is running, at which point `onPtyBound` fires. That
+   * proof may never arrive — binding requires exact evidence and fails closed — so a PTY can stay
+   * provisional for its whole life. Rejects if `cwd` is gone. Several unbound new-Codex sessions may
+   * coexist: each is identified independently, so there is no serialization between them.
    */
   startNew(cwd: string, agent: AgentKind): Promise<PtyState>
   sendInput(ptyId: string, data: string): void

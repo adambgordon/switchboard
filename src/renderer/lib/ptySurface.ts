@@ -19,6 +19,16 @@ export function isAgentViewHost(pty: PtyState | null | undefined): boolean {
   return !!pty && pty.surface.kind === 'agent-view-host'
 }
 
+/**
+ * Whether this PTY stands for a conversation whose transcript is known to be its — the one question
+ * liveness, the Live tally, and the row menu all actually ask. Deliberately NOT the same as having a
+ * conversation key: an unbound Codex PTY still keys its row off a placeholder id (that is how the row
+ * survives until binding), but nothing about a transcript is proven for it yet.
+ */
+export function hasProvenConversation(pty: PtyState | null | undefined): boolean {
+  return !!pty && pty.surface.kind === 'conversation' && !pty.provisional
+}
+
 export function shouldFollowPtySurfaceChange(
   priorKey: string | undefined,
   nextKey: string,

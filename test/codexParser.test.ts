@@ -1,13 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import {
-  parseCodexTranscriptText,
-  extractCodexMetaFromText,
-  matchProvisionalCodex
-} from '../src/main/sessions/codexParser'
+import { parseCodexTranscriptText, extractCodexMetaFromText } from '../src/main/sessions/codexParser'
 import { countConversationalMessages } from '../src/shared/messageCount'
 
 const TS = '2026-06-23T14:36:56.000Z'
 const TS2 = '2026-06-23T14:37:10.000Z'
+const TS3 = '2026-06-23T14:37:20.000Z'
 
 function jsonl(lines: object[]): string {
   return lines.map((l) => JSON.stringify(l)).join('\n')
@@ -152,9 +149,11 @@ describe('extractCodexMetaFromText', () => {
       { timestamp: TS, type: 'session_meta', payload: { cwd: '/x', originator: 'codex-tui' } },
       { timestamp: TS, type: 'event_msg', payload: { type: 'user_message', message: 'go' } },
       { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
-      { timestamp: TS, type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'q1', arguments: '{}' } }
+      { timestamp: TS2, type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'q1', arguments: '{}' } }
     ]
-    expect(extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!.turnState).toBe('awaiting_input')
+    const meta = extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!
+    expect(meta.turnState).toBe('awaiting_input')
+    expect(meta.lastActivityAt).toBe(Date.parse(TS2))
   })
 
   it('clears awaiting_input once the user answers (matching function_call_output)', () => {
@@ -162,11 +161,13 @@ describe('extractCodexMetaFromText', () => {
       { timestamp: TS, type: 'session_meta', payload: { cwd: '/x', originator: 'codex-tui' } },
       { timestamp: TS, type: 'event_msg', payload: { type: 'user_message', message: 'go' } },
       { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
-      { timestamp: TS, type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'q1', arguments: '{}' } },
-      { timestamp: TS, type: 'response_item', payload: { type: 'function_call_output', call_id: 'q1', output: 'yes' } }
+      { timestamp: TS2, type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'q1', arguments: '{}' } },
+      { timestamp: TS3, type: 'response_item', payload: { type: 'function_call_output', call_id: 'q1', output: 'yes' } }
     ]
     // No pending input, but still inside the turn (no task_complete yet) → in_progress.
-    expect(extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!.turnState).toBe('in_progress')
+    const meta = extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!
+    expect(meta.turnState).toBe('in_progress')
+    expect(meta.lastActivityAt).toBe(Date.parse(TS3))
   })
 
   it('reports awaiting after a turn_aborted (interrupt)', () => {
@@ -200,60 +201,5 @@ describe('parseCodexTranscriptText', () => {
     const dump = JSON.stringify(t.messages)
     expect(dump).not.toContain('permissions instructions')
     expect(dump).not.toContain('environment_context')
-  })
-})
-
-// --- new-session binding (Phase 3): matchProvisionalCodex (pure correlation) ---
-
-const T = 1_000_000 // a PTY spawn time
-const pty = (ptyId: string, cwd: string, startedAt: number) => ({ ptyId, cwd, startedAt })
-const cand = (sessionId: string, cwd: string, firstActivityAt: number | null) => ({ sessionId, cwd, firstActivityAt })
-
-describe('matchProvisionalCodex', () => {
-  it('binds a new rollout (same cwd, first activity after spawn) to the provisional PTY', () => {
-    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/x', T + 5000)], new Set())).toEqual([
-      { ptyId: 'p1', sessionId: 's1' }
-    ])
-  })
-
-  it('ignores rollouts in a different cwd', () => {
-    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/y', T + 5000)], new Set())).toEqual([])
-  })
-
-  it('ignores an OLD rollout whose first activity predates the spawn (the time gate)', () => {
-    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('old', '/x', T - 600000)], new Set())).toEqual([])
-  })
-
-  it('ignores rollouts with no activity yet', () => {
-    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/x', null)], new Set())).toEqual([])
-  })
-
-  it('excludes ids already driven by a live PTY', () => {
-    expect(matchProvisionalCodex([pty('p1', '/x', T)], [cand('s1', '/x', T + 5000)], new Set(['s1']))).toEqual([])
-  })
-
-  it('returns nothing when there are no provisional PTYs', () => {
-    expect(matchProvisionalCodex([], [cand('s1', '/x', T + 5000)], new Set())).toEqual([])
-  })
-
-  it('FIFO: the oldest PTY takes the earliest rollout in the same cwd', () => {
-    const r = matchProvisionalCodex(
-      [pty('pNew', '/x', T + 100), pty('pOld', '/x', T)],
-      [cand('sLate', '/x', T + 9000), cand('sEarly', '/x', T + 3000)],
-      new Set()
-    )
-    expect(r).toEqual([
-      { ptyId: 'pOld', sessionId: 'sEarly' },
-      { ptyId: 'pNew', sessionId: 'sLate' }
-    ])
-  })
-
-  it('binds each rollout to at most one PTY', () => {
-    const r = matchProvisionalCodex(
-      [pty('pOld', '/x', T), pty('pNew', '/x', T + 100)],
-      [cand('s1', '/x', T + 5000)],
-      new Set()
-    )
-    expect(r).toEqual([{ ptyId: 'pOld', sessionId: 's1' }])
   })
 })

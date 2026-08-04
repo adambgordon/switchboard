@@ -363,14 +363,15 @@ export function extractCodexMetaFromText(
       }
 
       // Detect a pending request_user_input: a function_call with no matching output yet ⇒ the
-      // turn is parked on the user (the "asking" state). (Approval events — exec_approval_request /
-      // apply_patch_approval_request — are also persisted; folding those in is a Phase 2 refinement.)
+      // turn is parked on the user (the "asking" state). Approval requests are intentionally not
+      // persisted in rollouts; the live PTY's explicit OSC notification covers that narrow gap.
       if (pt === 'function_call' && payload.name === 'request_user_input') {
         const callId = typeof payload.call_id === 'string' ? payload.call_id : ''
         openUserInputCalls.add(callId)
+        if (!Number.isNaN(at)) lastActivityAt = at
       } else if (pt === 'function_call_output') {
         const callId = typeof payload.call_id === 'string' ? payload.call_id : ''
-        openUserInputCalls.delete(callId)
+        if (openUserInputCalls.delete(callId) && !Number.isNaN(at)) lastActivityAt = at
       }
       continue
     }
@@ -480,62 +481,4 @@ export async function resolveCodexFile(
     if (f.endsWith(suffix)) return f
   }
   return null
-}
-
-/** An unbound, freshly-spawned new-Codex PTY awaiting correlation to its rollout. */
-export interface ProvisionalCodexPty {
-  ptyId: string
-  cwd: string
-  /** ms epoch the PTY was spawned. */
-  startedAt: number
-}
-
-/** A just-indexed Codex conversation a provisional PTY might bind to. */
-export interface CodexBindCandidate {
-  sessionId: string
-  cwd: string
-  /** ms epoch of the rollout's first message; null when it has none yet. */
-  firstActivityAt: number | null
-}
-
-/** Tolerance (ms) on the start-time gate. A bound rollout's first turn lands a beat after the PTY
- *  spawn, but allow slack for clock skew. Small on purpose: this gate distinguishes the brand-new
- *  rollout from OLD ones in the same cwd. */
-const BIND_SKEW_MS = 2000
-
-/**
- * Correlate unbound provisional new-Codex PTYs to their freshly-indexed rollouts. A new Codex rollout
- * only hits disk at its FIRST turn (verified: the file's birthtime is the first-turn time, ~tens of
- * seconds after the session logically starts), so a time-boxed file poll from spawn can't catch it —
- * instead we bind when the rollout is indexed (which the live-turn re-index already does the moment
- * the session goes active). We match on (same cwd, first-activity at/after spawn), excluding ids
- * already driven by a live PTY. FIFO: the oldest PTY takes the earliest qualifying rollout, and each
- * rollout binds at most one PTY. Pure — returns the (ptyId, sessionId) pairs to bind.
- */
-export function matchProvisionalCodex(
-  provisional: ProvisionalCodexPty[],
-  candidates: CodexBindCandidate[],
-  liveIds: ReadonlySet<string>,
-  skewMs: number = BIND_SKEW_MS
-): { ptyId: string; sessionId: string }[] {
-  const oldestFirst = [...provisional].sort((a, b) => a.startedAt - b.startedAt)
-  const used = new Set<string>()
-  const out: { ptyId: string; sessionId: string }[] = []
-  for (const pty of oldestFirst) {
-    const match = candidates
-      .filter(
-        (c) =>
-          c.cwd === pty.cwd &&
-          c.firstActivityAt != null &&
-          c.firstActivityAt >= pty.startedAt - skewMs &&
-          !liveIds.has(c.sessionId) &&
-          !used.has(c.sessionId)
-      )
-      .sort((a, b) => (a.firstActivityAt as number) - (b.firstActivityAt as number))[0]
-    if (match) {
-      used.add(match.sessionId)
-      out.push({ ptyId: pty.ptyId, sessionId: match.sessionId })
-    }
-  }
-  return out
 }

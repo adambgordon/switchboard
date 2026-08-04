@@ -56,16 +56,26 @@ async function reindexAndBroadcast(): Promise<void> {
   try {
     const groups = await indexConversations(PROJECTS_ROOT, undefined, metaCache)
     // Late-bind new Codex sessions: a new Codex rollout only lands on disk at its first turn, which is
-    // exactly when this re-index fires (the live session goes active). Correlate any unbound provisional
-    // Codex PTY to its freshly-indexed rollout here, rather than racing a time-boxed file poll that the
-    // lazy flush outruns. Binding emits `bound` + `active-changed`, so the row upgrades in place and the
-    // rollout isn't also shown as a separate Recent conversation.
-    if (mgr) {
-      const codexCandidates = groups
-        .flatMap((g) => g.conversations)
-        .filter((c) => c.agent === 'codex')
-        .map((c) => ({ sessionId: c.sessionId, cwd: c.cwd, firstActivityAt: c.firstActivityAt ?? null }))
-      mgr.bindProvisionalCodex(codexCandidates)
+    // exactly when this re-index fires (the live session goes active). Hand the manager the eligible
+    // rollout ids so it can ask the OS which one the Codex process in each unbound terminal actually
+    // has open. `groups` is already fully filtered, so archived / non-interactive / zero-message /
+    // subagent rollouts can never be bind targets. Binding emits `bound` + `active-changed`, so the
+    // row upgrades in place and the rollout isn't also shown as a separate Recent conversation.
+    //
+    // Deliberately NOT awaited, and deliberately ABOVE the identical-groups early return: the probe
+    // shells out to lsof, which must never delay the session-list broadcast, and a pass whose groups
+    // are byte-identical to the last one is still a pass where a rollout may have just become
+    // observable — returning early before scheduling it would strand exactly the case this fixes.
+    // The hasProvisionalCodex() gate keeps the id set from being built at all in the common case: this
+    // function runs twice a second while anything is live, and nothing is usually unbound.
+    if (mgr?.hasProvisionalCodex()) {
+      const eligibleCodexIds = new Set(
+        groups
+          .flatMap((g) => g.conversations)
+          .filter((c) => c.agent === 'codex')
+          .map((c) => c.sessionId)
+      )
+      void mgr.probeCodexIdentity(eligibleCodexIds)
     }
     const sig = JSON.stringify(groups)
     if (sig === lastBroadcastSig) return
