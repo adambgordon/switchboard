@@ -488,11 +488,16 @@ export interface ProvisionalCodexPty {
   ptyId: string
   cwd: string
   /**
-   * ms epoch of the FIRST submit (Enter) the user typed into this PTY; null if they have not
-   * submitted anything yet, in which case this PTY cannot own any rollout. Deliberately NOT the
-   * spawn time — see matchProvisionalCodex.
+   * ms epochs of every submit (Enter) the user has made in this PTY, oldest first. Empty when they
+   * have submitted nothing, in which case this PTY can own no rollout. Deliberately NOT the spawn
+   * time — see matchProvisionalCodex.
+   *
+   * Several are kept because a submit does not always produce a turn: Enter on an empty composer
+   * writes nothing, and neither does one typed while Codex is still launching. Keeping only the
+   * first would anchor the PTY to a keystroke that produced nothing, so its real rollout would never
+   * look close enough to match.
    */
-  firstSubmitAt: number | null
+  submitAts: number[]
 }
 
 /** A just-indexed Codex conversation a provisional PTY might bind to. */
@@ -503,10 +508,16 @@ export interface CodexBindCandidate {
   firstActivityAt: number | null
 }
 
-/** Tolerance (ms) on the submit-time gate. A rollout's first turn is written essentially AT the
- *  submit, but allow slack for clock skew and for the indexer observing the two a beat apart. Small
- *  on purpose: this gate distinguishes the brand-new rollout from OLD ones in the same cwd. */
+/** How far BEFORE a submit a rollout's first activity may sit and still be that submit's. Covers
+ *  clock/ordering jitter only — a rollout can't really precede the keystroke that created it. */
 const BIND_SKEW_MS = 2000
+
+/** How far AFTER a submit a rollout's first activity may sit and still be that submit's. Codex
+ *  timestamps `user_message` when it PROCESSES the submit, so the true gap is milliseconds; this is a
+ *  generous backstop for a loaded machine, not a typical value. It must stay finite: an unbounded
+ *  upper edge is what let a PTY whose Enter produced no turn reach forward and claim a rollout some
+ *  other terminal created much later. */
+const BIND_MAX_LAG_MS = 30_000
 
 /**
  * Correlate unbound provisional new-Codex PTYs to their freshly-indexed rollouts. A new Codex rollout
@@ -515,47 +526,75 @@ const BIND_SKEW_MS = 2000
  * instead we bind when the rollout is indexed (which the live-turn re-index already does the moment
  * the session goes active).
  *
- * The correlation key is each PTY's FIRST SUBMIT, not its spawn time, because that keystroke is what
- * CREATES the rollout — spawn time has no causal link to it. Keying on spawn produced two real
- * mispairings, both of which put a row's terminal on a different conversation than its transcript:
- *   - an idle tab stealing a typed tab's rollout (a never-typed-in PTY still passed the gate, and
- *     being older it was served first), and
- *   - two tabs typed in the opposite order to their spawn swapping rollouts outright.
- * So: a PTY that has not submitted (`firstSubmitAt == null`) can own no rollout and is dropped, and
- * the remaining PTYs take rollouts in submit order. We additionally match on same cwd, exclude ids
- * already driven by a live PTY, and bind each rollout to at most one PTY.
+ * The correlation key is a PTY's SUBMIT, not its spawn time, because that keystroke is what CREATES
+ * the rollout — spawn time has no causal link to it. Keying on spawn produced two real mispairings,
+ * both of which put a row's terminal on a different conversation than its transcript: an idle tab
+ * stealing a typed tab's rollout (a never-typed-in PTY still passed the gate, and being older it was
+ * served first), and two tabs typed in the opposite order to their spawn swapping outright.
+ *
+ * Matching is by PROXIMITY, not by order. Serving PTYs in submit order and handing each the earliest
+ * rollout that merely came *after* its submit reproduced the same class of theft one step in: a PTY
+ * whose Enter produced no turn at all (an empty composer, or one typed while Codex was still
+ * launching) still competed, and being earliest it won — permanently, since a bound id then sits in
+ * `liveIds`. So instead every (submit, rollout) pair inside a BOUNDED window becomes a candidate
+ * pairing, the closest pairings are taken first, and each PTY and each rollout is used at most once.
+ * A stray keystroke can no longer outrank the terminal that actually produced the rollout, because
+ * that terminal's submit sits nearer to it. Same cwd is still required, and ids already driven by a
+ * live PTY are still excluded.
  *
  * This is a heuristic, not an identity: Codex mints its own id, offers no flag to impose one, and
- * records no pid, so timing is the only signal available in-process. Pure — returns the
- * (ptyId, sessionId) pairs to bind.
+ * records no pid, so timing is the only signal available in-process. Ambiguity therefore fails
+ * CLOSED — an unbound PTY is a terminal that works but isn't linked to its row, a far smaller harm
+ * than a row wired to someone else's conversation. Pure — returns the (ptyId, sessionId) pairs to
+ * bind, ordered by submit time.
  */
 export function matchProvisionalCodex(
   provisional: ProvisionalCodexPty[],
   candidates: CodexBindCandidate[],
   liveIds: ReadonlySet<string>,
-  skewMs: number = BIND_SKEW_MS
+  skewMs: number = BIND_SKEW_MS,
+  maxLagMs: number = BIND_MAX_LAG_MS
 ): { ptyId: string; sessionId: string }[] {
-  const submitters = provisional.filter(
-    (p): p is ProvisionalCodexPty & { firstSubmitAt: number } => p.firstSubmitAt != null
-  )
-  const earliestSubmitFirst = [...submitters].sort((a, b) => a.firstSubmitAt - b.firstSubmitAt)
-  const used = new Set<string>()
-  const out: { ptyId: string; sessionId: string }[] = []
-  for (const pty of earliestSubmitFirst) {
-    const match = candidates
-      .filter(
-        (c) =>
-          c.cwd === pty.cwd &&
-          c.firstActivityAt != null &&
-          c.firstActivityAt >= pty.firstSubmitAt - skewMs &&
-          !liveIds.has(c.sessionId) &&
-          !used.has(c.sessionId)
-      )
-      .sort((a, b) => (a.firstActivityAt as number) - (b.firstActivityAt as number))[0]
-    if (match) {
-      used.add(match.sessionId)
-      out.push({ ptyId: pty.ptyId, sessionId: match.sessionId })
+  interface Pairing {
+    ptyId: string
+    sessionId: string
+    /** |rollout activity − submit|; smaller is a better explanation of who created the rollout. */
+    distance: number
+    submitAt: number
+  }
+
+  const pairings: Pairing[] = []
+  for (const pty of provisional) {
+    for (const c of candidates) {
+      if (c.cwd !== pty.cwd) continue
+      if (c.firstActivityAt == null) continue
+      if (liveIds.has(c.sessionId)) continue
+      for (const submitAt of pty.submitAts) {
+        const lag = c.firstActivityAt - submitAt
+        if (lag < -skewMs || lag > maxLagMs) continue
+        pairings.push({ ptyId: pty.ptyId, sessionId: c.sessionId, distance: Math.abs(lag), submitAt })
+      }
     }
   }
-  return out
+
+  // Closest first, with deterministic tie-breaks so the result never depends on input order.
+  pairings.sort(
+    (a, b) =>
+      a.distance - b.distance ||
+      a.submitAt - b.submitAt ||
+      (a.ptyId === b.ptyId ? 0 : a.ptyId < b.ptyId ? -1 : 1)
+  )
+
+  const takenPtys = new Set<string>()
+  const takenSessions = new Set<string>()
+  const chosen: Pairing[] = []
+  for (const p of pairings) {
+    if (takenPtys.has(p.ptyId) || takenSessions.has(p.sessionId)) continue
+    takenPtys.add(p.ptyId)
+    takenSessions.add(p.sessionId)
+    chosen.push(p)
+  }
+
+  chosen.sort((a, b) => a.submitAt - b.submitAt)
+  return chosen.map(({ ptyId, sessionId }) => ({ ptyId, sessionId }))
 }

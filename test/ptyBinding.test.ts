@@ -194,6 +194,59 @@ describe('PtyManager new-Codex binding', () => {
     expect(bound).toEqual([`${a.ptyId}->s1`])
   })
 
+  it('an Enter that produced no turn does not steal the other tab rollout', () => {
+    // Tab 1 hits Enter on an empty composer: a real submit that Codex never turns into a rollout,
+    // because firstActivityAt is only set for a non-empty message. Tab 2 then sends a real prompt.
+    const empty = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(100)
+    const real = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(PAST_BOOT)
+
+    mgr.write(empty.ptyId, '\r') // empty prompt — no rollout will ever exist for this
+    vi.advanceTimersByTime(60_000)
+    submit(real.ptyId)
+
+    mgr.bindProvisionalCodex([cand('sReal', Date.now())])
+
+    expect(bound).toEqual([`${real.ptyId}->sReal`])
+    expect(mgr.findBySession('sReal')?.ptyId).not.toBe(empty.ptyId)
+  })
+
+  it('an Enter during the agent launch window does not mis-anchor the PTY', () => {
+    // `booted` flips when the boot command is TYPED, so there is a window where the shell is still
+    // exec-ing codex and it has not read stdin. An Enter there is recorded, but the real prompt comes
+    // later — the PTY must still bind its own rollout rather than being stranded on the stray one.
+    const a = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(PAST_BOOT)
+    mgr.write(a.ptyId, '\r') // during launch: nothing is listening yet
+    // Comfortably past BIND_MAX_LAG_MS, so the stray keystroke cannot explain this rollout and only
+    // keeping the later submit as well can bind it. (30_000 exactly would sit ON the bound and pass
+    // for the wrong reason.)
+    vi.advanceTimersByTime(45_000)
+    submit(a.ptyId) // the real first prompt
+    const realSubmit = Date.now()
+
+    mgr.bindProvisionalCodex([cand('s1', realSubmit)])
+
+    expect(bound).toEqual([`${a.ptyId}->s1`])
+  })
+
+  it('does not track submits once bound, so later Enters cannot re-bind', () => {
+    const a = mgr.startNew(CWD, 'codex')
+    vi.advanceTimersByTime(PAST_BOOT)
+    submit(a.ptyId)
+    mgr.bindProvisionalCodex([cand('s1', Date.now())])
+    expect(bound).toEqual([`${a.ptyId}->s1`])
+
+    // Answering an approval prompt with Enter, long after the bind.
+    vi.advanceTimersByTime(60_000)
+    submit(a.ptyId)
+    mgr.bindProvisionalCodex([cand('s2', Date.now())])
+
+    expect(bound).toEqual([`${a.ptyId}->s1`])
+    expect(mgr.findBySession('s2')).toBeNull()
+  })
+
   it('ignores a rollout from a different cwd', () => {
     const a = mgr.startNew(CWD, 'codex')
     vi.advanceTimersByTime(PAST_BOOT)

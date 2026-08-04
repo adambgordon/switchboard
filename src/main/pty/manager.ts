@@ -8,6 +8,12 @@ import { bootPayloadFor } from './bootCommand'
 import { CodexInputNotificationScanner } from './codexInputNotifications'
 import { scanForSubmit } from './submitDetect'
 
+/**
+ * Cap on the submit timestamps tracked per provisional PTY. The list is only alive between spawn and
+ * the first rollout being indexed — seconds — so this is a runaway guard, not a working limit.
+ */
+const MAX_TRACKED_SUBMITS = 32
+
 interface Live {
   ptyId: string
   sessionId: string
@@ -20,12 +26,14 @@ interface Live {
   lastActivity: number
   startedAt: number
   inputRequestedAt: number | null
-  // ms epoch of the FIRST submit (Enter) the renderer typed into this PTY, or null if the user has
-  // not submitted anything yet. This — not `startedAt` — is what correlates a provisional new-Codex
-  // PTY to the rollout it produced: Codex writes a rollout at its first TURN, and that turn is
-  // created by this keystroke. Only the first submit is recorded, so it stays monotonic and is
-  // unaffected by later Enters (approval dialogs, follow-up turns). See matchProvisionalCodex.
-  firstSubmitAt: number | null
+  // ms epochs of the submits (Enter) the renderer typed into this PTY, oldest first. These — not
+  // `startedAt` — correlate a provisional new-Codex PTY to the rollout it produced: Codex writes a
+  // rollout at its first TURN, and that turn is created by such a keystroke. Recorded ONLY while
+  // `provisional`, so Claude PTYs and already-bound ones never accumulate any (and skip the scan
+  // entirely). Several are kept because not every submit yields a turn — Enter on an empty composer
+  // writes nothing, and neither does one typed while Codex is still launching — so anchoring to just
+  // the first would strand the PTY on a keystroke that produced nothing. See matchProvisionalCodex.
+  submitAts: number[]
   // Mid-bracketed-paste, carried across write() payloads because a paste can arrive in chunks. Only
   // used to keep a paste's rewritten newlines from being mistaken for a submit.
   inPaste: boolean
@@ -112,20 +120,31 @@ export class PtyManager extends EventEmitter {
   /**
    * Type renderer input into a PTY. This is the ONLY path for user keystrokes — the boot command is
    * written straight to `proc` inside spawn() — so a submit seen here is genuinely the user's, which
-   * is what makes it a sound correlation signal for a provisional new-Codex PTY (see firstSubmitAt).
+   * is what makes it a sound correlation signal for a provisional new-Codex PTY (see submitAts).
    *
    * Two kinds of payload reach here that must NOT count as a submit, because neither creates a
    * rollout: bracketed pastes (xterm rewrites their newlines to `\r`, and the user may still be
    * composing) and anything typed BEFORE boot, while the bare shell prompt is up and no agent is
    * running — the same pre-boot window CLEAR_LINE in bootCommand.ts exists to defend against.
    * `scanForSubmit` handles the first (carrying paste state across chunks); `booted` gates the second.
+   *
+   * Bookkeeping runs only while `provisional`, i.e. for a new Codex session that has not yet been
+   * correlated. Nothing else needs it, so Claude keystrokes and every keystroke after a bind skip the
+   * scan outright.
    */
   write(ptyId: string, data: string): void {
     const e = this.live.get(ptyId)
     if (!e) return
-    const scan = scanForSubmit(data, e.inPaste)
-    e.inPaste = scan.inPaste
-    if (scan.submitted && e.booted && e.firstSubmitAt == null) e.firstSubmitAt = Date.now()
+    if (e.provisional) {
+      const scan = scanForSubmit(data, e.inPaste)
+      e.inPaste = scan.inPaste
+      if (scan.submitted && e.booted) {
+        e.submitAts.push(Date.now())
+        // Bounded so hammering Enter can't grow this without limit. The newest entries matter most —
+        // a real prompt follows any stray keystrokes — so the oldest is what gets dropped.
+        if (e.submitAts.length > MAX_TRACKED_SUBMITS) e.submitAts.shift()
+      }
+    }
     e.proc.write(data)
   }
 
@@ -188,7 +207,7 @@ export class PtyManager extends EventEmitter {
   bindProvisionalCodex(candidates: CodexBindCandidate[]): void {
     const provisional = [...this.live.values()]
       .filter((e) => e.agent === 'codex' && e.provisional)
-      .map((e) => ({ ptyId: e.ptyId, cwd: e.cwd, firstSubmitAt: e.firstSubmitAt }))
+      .map((e) => ({ ptyId: e.ptyId, cwd: e.cwd, submitAts: e.submitAts }))
     if (provisional.length === 0) return
     const liveIds = new Set([...this.live.values()].map((e) => e.sessionId))
     for (const { ptyId, sessionId } of matchProvisionalCodex(provisional, candidates, liveIds)) {
@@ -255,7 +274,7 @@ export class PtyManager extends EventEmitter {
       lastActivity: now,
       startedAt: now,
       inputRequestedAt: null,
-      firstSubmitAt: null,
+      submitAts: [],
       inPaste: false,
       idleTimer: null,
       bootTimer: null,
