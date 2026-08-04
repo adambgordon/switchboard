@@ -268,7 +268,8 @@ export default function App() {
     // Resolve a live row's liveness; null for rows with no live process — and null for a PROVISIONAL
     // one, whose conversation identity was never proven. Liveness is read off the transcript, so for
     // an unlinked terminal there is no transcript that is known to be its: any state resolved here
-    // would describe some other conversation. It renders a neutral terminal-only marker instead.
+    // would describe some other conversation. It shares the hollow nothing-unread marker with
+    // `quiet`, while remaining a distinct unlinked state in behavior and the Live tally.
     const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null =>
       pty && !pty.provisional
         ? resolveLiveState(
@@ -334,7 +335,7 @@ export default function App() {
     // Terminals with no proven conversation identity get their OWN count rather than being folded
     // into `idle`. Calling an unlinked terminal idle would be a claim about a conversation we can't
     // identify — and "1 idle" over a terminal the user is actively typing in is exactly the kind of
-    // wrong-dot report this work exists to fix.
+    // wrong-dot report this work exists to fix. Sharing the hollow visual does not fold it into idle.
     let unlinked = 0
     for (const p of ptys.active) {
       if (p.provisional) {

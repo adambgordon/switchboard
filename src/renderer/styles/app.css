@@ -325,22 +325,13 @@
 .sb-dot.awaiting {
   background: var(--live);
 }
-/* finished and seen: a hollow cobalt ring — alive, but nothing new to look at */
-.sb-dot.quiet {
+/* Nothing unread: either a finished turn the user has seen, or a new unlinked terminal with no
+   messages yet. The unlinked state remains distinct in behavior and the Live tally, but shares the
+   exact hollow treatment because neither row has unseen conversation content. */
+.sb-dot.quiet,
+.sb-dot.unlinked {
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--live);
-}
-/* "unlinked": a live terminal whose conversation identity was never proven, so it has no turn-state
-   to report. A short INK dash, not a dot: cobalt is reserved for "alive" and every circular variant
-   is already spoken for, so a dash reads as "not applicable" and can't be mistaken for breathing
-   `busy`, solid `awaiting`, hollow `quiet`, or the `asking` ripple. `--ink-faint` sits at almost the
-   same luminance in both themes, which matters here — a subtler treatment would survive one theme and
-   vanish in the other. Static, so the reduced-motion block needs nothing for it. */
-.sb-dot.unlinked {
-  width: 7px;
-  height: 1.5px;
-  border-radius: 1px;
-  background: var(--ink-faint);
 }
 /* "asking": blocked on the user's reply (AskUserQuestion / ExitPlanMode). A cobalt ripple —
    one pebble-in-a-puddle pulse throwing two concentric rings — reads as "needs you" while

@@ -71,12 +71,6 @@
   color: var(--ink-ghost);
   font-style: italic;
 }
-/* "Terminal only — transcript not linked": a factual statement about the row, not absent content, so
-   it keeps the ordinary preview colour and stays upright rather than borrowing the ghosted italic
-   placeholder above. It is the only thing telling the user why this row has no transcript. */
-.sb-row-unlinked {
-  color: var(--ink-faint);
-}
 .sb-row-meta {
   display: flex;
   align-items: center;
