@@ -6,7 +6,10 @@ import { DashedCircle, Dots } from './icons'
 import AgentLogo from './AgentLogo'
 
 interface Props {
-  meta: ConversationMeta
+  sessionId: string
+  orderKey: string
+  meta: ConversationMeta | null
+  host: boolean
   selected: boolean
   live: PtyState | null
   /** Resolved liveness for the dot (working / asking / awaiting / quiet); null when not live. */
@@ -28,7 +31,10 @@ interface Props {
 }
 
 function ConversationRowImpl({
+  sessionId,
+  orderKey,
   meta,
+  host,
   selected,
   live,
   liveState,
@@ -62,33 +68,38 @@ function ConversationRowImpl({
         if (e.altKey) {
           // Option+click = mark unread only; never navigate (selecting/engaging would trip the
           // seen-effect / MainPane's engage listener → markRead, instantly self-clearing it).
-          if (live && onMarkUnread) onMarkUnread(meta.sessionId)
+          if (live && !host && onMarkUnread) onMarkUnread(sessionId)
           return
         }
-        live && onJump ? onJump(meta.sessionId) : onSelect(meta.sessionId)
+        live && onJump ? onJump(sessionId) : onSelect(sessionId)
       }}
       onContextMenu={(e) => {
         if (!onContextMenu) return
         e.preventDefault()
-        onContextMenu(e, meta.sessionId)
+        onContextMenu(e, sessionId)
       }}
       role="button"
       tabIndex={-1}
-      data-session={meta.sessionId}
+      data-row={live?.ptyId ?? sessionId}
+      data-order={orderKey}
     >
       <span className="sb-row-main">
-        <span className="sb-row-title truncate">{meta.title}</span>
-        {meta.preview ? (
+        <span className="sb-row-title truncate">{host ? 'Claude Agent View' : meta?.title}</span>
+        {host ? (
+          <span className="sb-row-preview sb-row-preview-empty truncate">
+            No conversation attached
+          </span>
+        ) : meta?.preview ? (
           <span className="sb-row-preview truncate">{meta.preview}</span>
         ) : (
           // No preview (a just-spawned session has no transcript yet) — render a muted
           // placeholder so the row keeps the same height as ones that carry a preview.
           <span className="sb-row-preview sb-row-preview-empty truncate">
-            {meta.messageCount === 0 ? 'No messages yet' : 'No preview'}
+            {meta?.messageCount === 0 ? 'No messages yet' : 'No preview'}
           </span>
         )}
         <span className="sb-row-meta">
-          {meta.agent === 'claude' && meta.sessionKind === 'bg' ? (
+          {!host && meta?.agent === 'claude' && meta.sessionKind === 'bg' ? (
             <span
               className="sb-bg-agent-mark"
               data-tip="Claude Code background session"
@@ -101,18 +112,24 @@ function ConversationRowImpl({
               </span>
             </span>
           ) : (
-            <AgentLogo agent={meta.agent} />
+            <AgentLogo agent={host ? 'claude' : (meta?.agent ?? 'claude')} />
           )}
-          <span className="mono" data-tip={absShort(meta.lastActivityAt ?? meta.mtime)}>
-            {relTime(meta.lastActivityAt ?? meta.mtime)}
-          </span>
-          <span className="sb-sep">·</span>
-          <span className="mono">{meta.messageCount} msg</span>
+          {host ? (
+            <span className="mono">terminal host</span>
+          ) : (
+            <>
+              <span className="mono" data-tip={absShort(meta?.lastActivityAt ?? meta?.mtime ?? 0)}>
+                {relTime(meta?.lastActivityAt ?? meta?.mtime ?? 0)}
+              </span>
+              <span className="sb-sep">·</span>
+              <span className="mono">{meta?.messageCount ?? 0} msg</span>
+            </>
+          )}
           {showCwd && (
             <>
               <span className="sb-sep">·</span>
-              <span className="sb-row-cwd mono truncate" data-tip={meta.cwd}>
-                {basename(meta.cwd)}
+              <span className="sb-row-cwd mono truncate" data-tip={meta?.cwd ?? live?.cwd ?? ''}>
+                {basename(meta?.cwd ?? live?.cwd ?? '')}
               </span>
             </>
           )}
@@ -140,7 +157,7 @@ function ConversationRowImpl({
           aria-haspopup="menu"
           onClick={(e) => {
             e.stopPropagation()
-            onOpenMenu?.(e, meta.sessionId)
+            onOpenMenu?.(e, sessionId)
           }}
         >
           <Dots size={15} />

@@ -8,6 +8,8 @@ import { useCallback, useReducer } from 'react'
  *                 history stop: truncates any forward entries, pushes, advances the cursor.
  *  - `home()`   — deselect entirely (back to the welcome screen). A drift to "nothing": history is
  *                 left intact, so the next `back()` re-centers on the last opened conversation.
+ *  - `follow(id)` — follow a live PTY onto a different surface without recording or rewriting any
+ *                   conversation stop. Agent View hosts therefore never enter conversation history.
  *
  * `back()` / `forward()` walk the recorded stops. If the selection has drifted off the current
  * stop — only `home()` does that now, by nulling the selection — the first `back()` re-centers on
@@ -29,6 +31,8 @@ export type NavAction =
   | { type: 'home' }
   | { type: 'back' }
   | { type: 'forward' }
+  | { type: 'follow'; id: string }
+  | { type: 'forget'; id: string }
   | { type: 'rekey'; from: string; to: string }
 
 const INITIAL: NavState = { selectedId: null, stack: [], cursor: -1 }
@@ -66,6 +70,25 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       if (state.cursor >= state.stack.length - 1) return state
       return { ...state, cursor: state.cursor + 1, selectedId: state.stack[state.cursor + 1] }
     }
+    case 'follow':
+      return state.selectedId === action.id ? state : { ...state, selectedId: action.id }
+    case 'forget': {
+      if (state.selectedId !== action.id && !state.stack.includes(action.id)) return state
+      const stack: string[] = []
+      let cursor = state.cursor
+      state.stack.forEach((id, index) => {
+        if (id === action.id) {
+          if (index <= state.cursor) cursor--
+        } else {
+          stack.push(id)
+        }
+      })
+      return {
+        selectedId: state.selectedId === action.id ? null : state.selectedId,
+        stack,
+        cursor: Math.min(cursor, stack.length - 1)
+      }
+    }
     case 'rekey': {
       // A provisional session's placeholder id was replaced by its real id (a new-Codex bind). Swap
       // it everywhere in the history so the current selection AND every back/forward stop keep
@@ -89,6 +112,8 @@ export function useNavHistory() {
   const home = useCallback(() => dispatch({ type: 'home' }), [])
   const back = useCallback(() => dispatch({ type: 'back' }), [])
   const forward = useCallback(() => dispatch({ type: 'forward' }), [])
+  const follow = useCallback((id: string) => dispatch({ type: 'follow', id }), [])
+  const forget = useCallback((id: string) => dispatch({ type: 'forget', id }), [])
   const rekey = useCallback((from: string, to: string) => dispatch({ type: 'rekey', from, to }), [])
-  return { selectedId: state.selectedId, open, home, back, forward, rekey }
+  return { selectedId: state.selectedId, open, follow, forget, home, back, forward, rekey }
 }

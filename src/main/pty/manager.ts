@@ -1,17 +1,32 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
-import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
+import {
+  CONFIG,
+  type AgentKind,
+  type PtyState,
+  type PtyStatus,
+  type PtySurface
+} from '../../shared/types'
 import { matchProvisionalCodex, type CodexBindCandidate } from '../sessions/codexParser'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
+import {
+  ClaudeAgentViewMonitor,
+  attachClaudeAgentView,
+  detachClaudeAgentView,
+  enterClaudeAgentView,
+  type ClaudeAgentViewMonitorOptions,
+  type ResolvedClaudeJob
+} from './claudeAgentView'
 
 interface Live {
   ptyId: string
-  sessionId: string
+  surface: PtySurface
   agent: AgentKind
   cwd: string
   title: string
+  controllerCwd: string
   origin: 'resume' | 'new'
   proc: pty.IPty
   status: PtyStatus
@@ -34,6 +49,17 @@ interface Live {
   exitCode: number | null
 }
 
+type AgentViewOptions = Omit<
+  ClaudeAgentViewMonitorOptions,
+  'onHost' | 'onAttach' | 'onDetach'
+>
+
+function conversationId(surface: PtySurface): string | null {
+  return surface.kind === 'conversation'
+    ? surface.sessionId
+    : surface.attachedSessionId ?? null
+}
+
 /**
  * Owns every live PTY-backed claude session.
  *
@@ -50,10 +76,23 @@ interface Live {
  */
 export class PtyManager extends EventEmitter {
   private live = new Map<string, Live>()
+  private readonly agentView: ClaudeAgentViewMonitor | null
   // The live-PTY cap (CONFIG.maxLivePtys is the default). User-configurable at runtime via
   // setMaxLive, pushed from the renderer's Preferences over IPC.ptySetMaxLive. Read only at spawn
   // time (enforceCap), never on the per-output hot path.
   private maxLive: number = CONFIG.maxLivePtys
+
+  constructor(opts: { claudeAgentView?: AgentViewOptions } = {}) {
+    super()
+    this.agentView = opts.claudeAgentView
+      ? new ClaudeAgentViewMonitor({
+          ...opts.claudeAgentView,
+          onHost: (ptyId) => this.enterAgentView(ptyId),
+          onAttach: (ptyId, session) => this.attachAgentView(ptyId, session),
+          onDetach: (ptyId) => this.detachAgentView(ptyId)
+        })
+      : null
+  }
 
   /**
    * Update the live-PTY cap, clamped to the shared bounds (a bad value can't disable the cap or
@@ -135,6 +174,7 @@ export class PtyManager extends EventEmitter {
       }
     }
     this.live.clear()
+    this.agentView?.dispose()
   }
 
   list(): PtyState[] {
@@ -144,7 +184,12 @@ export class PtyManager extends EventEmitter {
   /** Find a live PTY already driving a session, if any. */
   findBySession(sessionId: string): PtyState | null {
     for (const e of this.live.values()) {
-      if (e.sessionId === sessionId) return this.toState(e)
+      if (
+        conversationId(e.surface) === sessionId ||
+        (e.surface.kind === 'agent-view-host' && e.surface.controllerSessionId === sessionId)
+      ) {
+        return this.toState(e)
+      }
     }
     return null
   }
@@ -161,7 +206,11 @@ export class PtyManager extends EventEmitter {
       .filter((e) => e.agent === 'codex' && e.provisional)
       .map((e) => ({ ptyId: e.ptyId, cwd: e.cwd, startedAt: e.startedAt }))
     if (provisional.length === 0) return
-    const liveIds = new Set([...this.live.values()].map((e) => e.sessionId))
+    const liveIds = new Set(
+      [...this.live.values()]
+        .map((e) => conversationId(e.surface))
+        .filter((id): id is string => id != null)
+    )
     for (const { ptyId, sessionId } of matchProvisionalCodex(provisional, candidates, liveIds)) {
       this.bindCodex(ptyId, sessionId)
     }
@@ -171,13 +220,13 @@ export class PtyManager extends EventEmitter {
    *  `bound` event (so the renderer re-keys its session-keyed state) followed by `active-changed`. */
   private bindCodex(ptyId: string, realSessionId: string): void {
     const entry = this.live.get(ptyId)
-    if (!entry || !entry.provisional) return
+    if (!entry || !entry.provisional || entry.surface.kind !== 'conversation') return
     // Defensive: never bind onto an id another live PTY already owns.
     for (const e of this.live.values()) {
-      if (e.ptyId !== ptyId && e.sessionId === realSessionId) return
+      if (e.ptyId !== ptyId && conversationId(e.surface) === realSessionId) return
     }
-    const oldSessionId = entry.sessionId
-    entry.sessionId = realSessionId
+    const oldSessionId = entry.surface.sessionId
+    entry.surface = { kind: 'conversation', sessionId: realSessionId }
     entry.provisional = false
     this.emit('bound', ptyId, oldSessionId, realSessionId)
     this.emitActive()
@@ -216,10 +265,11 @@ export class PtyManager extends EventEmitter {
     const now = Date.now()
     const entry: Live = {
       ptyId,
-      sessionId: o.sessionId,
+      surface: { kind: 'conversation', sessionId: o.sessionId },
       agent: o.agent,
       cwd: o.cwd,
       title: o.title,
+      controllerCwd: o.cwd,
       origin: o.origin,
       proc,
       status: 'busy',
@@ -235,6 +285,8 @@ export class PtyManager extends EventEmitter {
       exitCode: null
     }
     this.live.set(ptyId, entry)
+    const claudeDebugFile =
+      o.agent === 'claude' ? this.agentView?.register(ptyId, o.sessionId) : undefined
 
     const boot = (): void => {
       if (entry.booted) return
@@ -243,7 +295,7 @@ export class PtyManager extends EventEmitter {
       // Clear any stray content on the shell's input line (a recalled-history line from an up-arrow,
       // or a keystroke typed in the brief window before boot) before typing the command, so nothing
       // fuses onto it; the trailing \r submits. See bootPayloadFor.
-      proc.write(bootPayloadFor(o.agent, o.origin, o.sessionId))
+      proc.write(bootPayloadFor(o.agent, o.origin, o.sessionId, claudeDebugFile))
     }
     // Boot claude only once the shell is ready (first output) AND the renderer has sized the PTY
     // (first resize). Booting earlier starts claude's resume replay at the 80×30 spawn default; the
@@ -273,6 +325,7 @@ export class PtyManager extends EventEmitter {
       entry.exitCode = exitCode ?? 0
       if (entry.idleTimer) clearTimeout(entry.idleTimer)
       if (entry.bootTimer) clearTimeout(entry.bootTimer)
+      this.agentView?.unregister(ptyId)
       this.live.delete(ptyId)
       this.emit('exit', ptyId, entry.exitCode)
       this.emitActive()
@@ -309,7 +362,7 @@ export class PtyManager extends EventEmitter {
   private toState(e: Live): PtyState {
     return {
       ptyId: e.ptyId,
-      sessionId: e.sessionId,
+      surface: e.surface,
       agent: e.agent,
       cwd: e.cwd,
       title: e.title,
@@ -323,5 +376,47 @@ export class PtyManager extends EventEmitter {
 
   private emitActive(): void {
     this.emit('active-changed', this.list())
+  }
+
+  private enterAgentView(ptyId: string): void {
+    const entry = this.live.get(ptyId)
+    if (!entry || entry.agent !== 'claude' || entry.surface.kind === 'agent-view-host') return
+    entry.surface = enterClaudeAgentView(entry.surface)
+    entry.cwd = entry.controllerCwd
+    entry.title = 'Claude Agent View'
+    this.emitSurfaceChanged()
+  }
+
+  private attachAgentView(ptyId: string, session: ResolvedClaudeJob): void {
+    const entry = this.live.get(ptyId)
+    if (!entry || entry.agent !== 'claude') return
+    this.enterAgentView(ptyId)
+    if (entry.surface.kind !== 'agent-view-host') return
+    for (const other of this.live.values()) {
+      if (other.ptyId !== ptyId && conversationId(other.surface) === session.sessionId) {
+        this.detachAgentView(ptyId)
+        return
+      }
+    }
+    if (entry.surface.attachedSessionId === session.sessionId) return
+    entry.surface = attachClaudeAgentView(entry.surface, session.sessionId)
+    entry.cwd = session.cwd
+    entry.title = session.title
+    this.emitSurfaceChanged()
+  }
+
+  private detachAgentView(ptyId: string): void {
+    const entry = this.live.get(ptyId)
+    if (!entry || entry.surface.kind !== 'agent-view-host') return
+    if (entry.surface.attachedSessionId == null) return
+    entry.surface = detachClaudeAgentView(entry.surface)
+    entry.cwd = entry.controllerCwd
+    entry.title = 'Claude Agent View'
+    this.emitSurfaceChanged()
+  }
+
+  private emitSurfaceChanged(): void {
+    this.emit('surface-changed')
+    this.emitActive()
   }
 }

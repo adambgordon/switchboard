@@ -179,11 +179,22 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  */
 export type LiveState = 'working' | 'asking' | 'awaiting' | 'quiet'
 
+/** The user-facing surface currently carried by a stable PTY transport. */
+export type PtySurface =
+  | { kind: 'conversation'; sessionId: string }
+  | {
+      kind: 'agent-view-host'
+      /** The Claude session that entered Agent View. It remains independent if it has a transcript. */
+      controllerSessionId: string
+      /** Exact current attachment, when Claude's private per-PTY attach signal resolves successfully. */
+      attachedSessionId?: string
+    }
+
 export interface PtyState {
-  /** Stable handle for this live process (distinct from sessionId). */
+  /** Stable handle for this live process. Terminal mounting and PTY I/O always use this identity. */
   ptyId: string
-  /** The conversation Switchboard associated with this PTY at launch (or Codex late-bind). */
-  sessionId: string
+  /** The conversation or terminal-only Agent View surface currently projected from this PTY. */
+  surface: PtySurface
   /** Which agent this PTY is running (drives the boot command). */
   agent: AgentKind
   cwd: string

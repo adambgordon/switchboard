@@ -1,5 +1,6 @@
 import type { PtyState } from '@shared/types'
 import type { ResolvedTheme } from '../lib/theme'
+import { conversationIdForPty, surfaceKeyForPty } from '../lib/ptySurface'
 import TerminalView from './TerminalView'
 
 interface Props {
@@ -28,7 +29,8 @@ export default function TerminalDeck({ activePtys, visiblePtyId, deckVisible, fo
         const isVisible = deckVisible && p.ptyId === visiblePtyId
         // A focus request aimed at this session passes its bump counter down; every other
         // terminal gets null and so never auto-focuses just from becoming visible.
-        const focusKey = focusReq && focusReq.sessionId === p.sessionId ? focusReq.n : null
+        const surfaceKey = surfaceKeyForPty(p)
+        const focusKey = focusReq && focusReq.sessionId === surfaceKey ? focusReq.n : null
         return (
           <div
             key={p.ptyId}
@@ -37,7 +39,7 @@ export default function TerminalDeck({ activePtys, visiblePtyId, deckVisible, fo
           >
             <TerminalView
               ptyId={p.ptyId}
-              sessionId={p.sessionId}
+              sessionId={conversationIdForPty(p)}
               agent={p.agent}
               visible={isVisible}
               focusKey={focusKey}

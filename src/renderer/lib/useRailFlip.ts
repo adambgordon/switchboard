@@ -45,7 +45,7 @@ export function useRailFlip(
   useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
-    const rows = container.querySelectorAll<HTMLElement>('.sb-row[data-session]')
+    const rows = container.querySelectorAll<HTMLElement>('.sb-row[data-row]')
 
     // Cancel our own in-flight slides so getBoundingClientRect reads settled positions, not
     // mid-animation transformed ones — keeps rapid pin/unpin from compounding offsets.
@@ -58,7 +58,7 @@ export function useRailFlip(
     // continuous slide (all rows share the same scroll container).
     const tops = new Map<string, number>()
     for (const el of rows) {
-      const id = el.dataset.session
+      const id = el.dataset.row
       if (id) tops.set(id, el.getBoundingClientRect().top)
     }
 
@@ -68,7 +68,7 @@ export function useRailFlip(
 
     if (animate) {
       for (const el of rows) {
-        const id = el.dataset.session
+        const id = el.dataset.row
         if (!id) continue
         const prev = prevTops.current.get(id)
         let anim: Animation | undefined

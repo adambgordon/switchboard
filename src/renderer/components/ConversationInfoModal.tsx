@@ -11,6 +11,8 @@ interface Props {
   open: boolean
   meta: ConversationMeta | null
   pty: PtyState | null
+  /** Spawn time only when this PTY directly owns the conversation; null for Agent View attachments. */
+  liveStartedAt: number | null
   /** Open with the title field focused — the right-click "Rename…" entry point. */
   startInEdit: boolean
   onClose: () => void
@@ -67,8 +69,16 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
  * (App → window.api.renameConversation) is dispatched per agent in main: Claude appends its own
  * `custom-title` line; Codex calls the app-server `thread/name/set` RPC.
  */
-export default function ConversationInfoModal({ open, meta, pty, startInEdit, onClose, onRename }: Props) {
-  const sessionId = meta?.sessionId ?? pty?.sessionId ?? ''
+export default function ConversationInfoModal({
+  open,
+  meta,
+  pty,
+  liveStartedAt,
+  startInEdit,
+  onClose,
+  onRename
+}: Props) {
+  const sessionId = meta?.sessionId ?? ''
   const title = meta?.title ?? pty?.title ?? 'Untitled'
   const cwd = meta?.cwd ?? pty?.cwd ?? ''
   const branch = meta?.gitBranch && meta.gitBranch !== 'HEAD' ? meta.gitBranch : null
@@ -295,7 +305,7 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
                     Live
                   </span>
                 </Row>
-                <Row label="Started">{absShort(pty.startedAt)}</Row>
+                {liveStartedAt != null && <Row label="Started">{absShort(liveStartedAt)}</Row>}
               </>
             )}
             {lastActivity != null && <Row label="Last active">{absShort(lastActivity)}</Row>}

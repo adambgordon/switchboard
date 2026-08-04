@@ -11,11 +11,19 @@ import { Chevron, Close, Plus, Search, Pin, Info, Stop, Play } from './icons'
 
 /** One row in the pane: a conversation that may be live, pinned, both, or neither. */
 export interface RailEntry {
+  /** Stable render/FLIP identity: ptyId while live, sessionId otherwise. */
+  rowKey: string
+  /** Section-specific drag identity: pinned sessionId or live ptyId. */
+  orderKey: string
   sessionId: string
   /** The live process, when this conversation is currently running. */
   pty: PtyState | null
   /** Display metadata — indexed, or synthesized from the live process if not yet on disk. */
-  meta: ConversationMeta
+  meta: ConversationMeta | null
+  /** This row's process/action targets Claude Agent View, whether attached, at its host, or controller-owned. */
+  agentView: boolean
+  /** Terminal-only Claude Agent View host; never enters conversation-keyed actions or stores. */
+  host: boolean
   pinned: boolean
   /** Resolved liveness (working / asking / awaiting / quiet); null when not live. */
   liveState: LiveState | null
@@ -98,7 +106,7 @@ interface Props {
   onToggleUnread: (id: string) => void
   /** Option+click a live row — always mark it unread (never toggles). */
   onMarkUnread: (id: string) => void
-  /** Resume a not-live conversation from its right-click menu (spawns + focuses its terminal). */
+  /** Resume a not-live conversation, or return a controller-owned transcript to its Agent View. */
   onResumeSession: (id: string) => void
   /** Stop (kill) a live session from its right-click menu. No-op on a not-live row. */
   onStopSession: (id: string) => void
@@ -203,7 +211,15 @@ export default function TallyRail({
   // Glide rows that change position (pinned / resumed / unpinned) to their new section instead of
   // teleporting. orderSig (the visible ids, in order) drives a slide; controlSig (search query +
   // collapse + show-more) marks a layout change we deliberately keep instant — see useRailFlip.
-  const orderSig = rendered.flatMap((r) => r.shown.map((e) => e.sessionId)).join('|')
+  const orderSig = rendered.flatMap((r) => r.shown.map((e) => e.rowKey)).join('|')
+  const menuSig = rendered
+    .flatMap((r) =>
+      r.shown.map(
+        (e) =>
+          `${e.sessionId}:${e.pty?.ptyId ?? ''}:${e.host ? 1 : 0}:${e.agentView ? 1 : 0}:${e.pinned ? 1 : 0}:${e.liveState ?? ''}`
+      )
+    )
+    .join('|')
   const controlSig = JSON.stringify([query, [...expandedSections].sort(), collapsedSections, reorderTick])
   useRailFlip(listRef, orderSig, controlSig)
 
@@ -228,13 +244,13 @@ export default function TallyRail({
     enabled: !searching,
     order: pinnedOrder,
     onReorder: onReorderPins,
-    selector: '.sb-row.pinned[data-session]'
+    selector: '.sb-row.pinned[data-order]'
   })
   useRowReorder(listRef, {
     enabled: !searching,
     order: liveOrder,
     onReorder: onReorderLive,
-    selector: '.sb-row.live:not(.pinned)[data-session]'
+    selector: '.sb-row.live:not(.pinned)[data-order]'
   })
 
   // Row actions menu, on any row (live or not): Pin/Unpin, plus — live — mark read/unread + Stop, or —
@@ -249,14 +265,20 @@ export default function TallyRail({
     live: boolean
     unread: boolean
     pinned: boolean
+    agentView: boolean
+    host: boolean
   } | null>(null)
-  const menuStateFor = (id: string): { live: boolean; unread: boolean; pinned: boolean } | null => {
+  const menuStateFor = (
+    id: string
+  ): { live: boolean; unread: boolean; pinned: boolean; agentView: boolean; host: boolean } | null => {
     const entry = entryById(id)
     if (!entry) return null
     return {
       live: !!entry.pty,
       unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
-      pinned: entry.pinned
+      pinned: entry.pinned,
+      agentView: entry.agentView,
+      host: entry.host
     }
   }
   // `closing` drives the fade-out: the menu stays mounted with a `.closing` class for one fade, then
@@ -298,6 +320,20 @@ export default function TallyRail({
     setCtxMenu(data)
     armAutoClose()
   }
+  useEffect(() => {
+    if (!ctxMenu) return
+    const current = menuStateFor(ctxMenu.id)
+    if (
+      !current ||
+      current.live !== ctxMenu.live ||
+      current.unread !== ctxMenu.unread ||
+      current.pinned !== ctxMenu.pinned ||
+      current.agentView !== ctxMenu.agentView ||
+      current.host !== ctxMenu.host
+    ) {
+      closeMenu()
+    }
+  }, [menuSig, ctxMenu?.id])
   // Right-click / two-finger: open at the cursor.
   const openRowMenu = (e: MouseEvent, id: string): void => {
     const s = menuStateFor(id)
@@ -459,8 +495,11 @@ export default function TallyRail({
                 </div>
                 {shown.map((entry) => (
                   <ConversationRow
-                    key={entry.sessionId}
+                    key={entry.rowKey}
+                    sessionId={entry.sessionId}
+                    orderKey={entry.orderKey}
                     meta={entry.meta}
+                    host={entry.host}
                     selected={entry.sessionId === selectedSessionId}
                     live={entry.pty}
                     liveState={entry.liveState}
@@ -493,17 +532,19 @@ export default function TallyRail({
           onMouseEnter={cancelAutoClose}
           onMouseLeave={armAutoClose}
         >
-          <button
-            className="sb-ctxmenu-item"
-            onClick={() => {
-              onTogglePin(ctxMenu.id)
-              closeMenu()
-            }}
-          >
-            <Pin size={13} filled={!ctxMenu.pinned} />
-            <span>{ctxMenu.pinned ? 'Unpin' : 'Pin'}</span>
-          </button>
-          {ctxMenu.live && (
+          {!ctxMenu.host && (
+            <button
+              className="sb-ctxmenu-item"
+              onClick={() => {
+                onTogglePin(ctxMenu.id)
+                closeMenu()
+              }}
+            >
+              <Pin size={13} filled={!ctxMenu.pinned} />
+              <span>{ctxMenu.pinned ? 'Unpin' : 'Pin'}</span>
+            </button>
+          )}
+          {ctxMenu.live && !ctxMenu.host && (
             <button
               className="sb-ctxmenu-item"
               onClick={() => {
@@ -515,19 +556,21 @@ export default function TallyRail({
               <span>{ctxMenu.unread ? 'Mark as read' : 'Mark as unread'}</span>
             </button>
           )}
-          <button
-            className="sb-ctxmenu-item"
-            onClick={() => {
-              onShowInfo(ctxMenu.id, false)
-              closeMenu()
-            }}
-          >
-            <Info size={14} />
-            <span>Session details…</span>
-          </button>
-          {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**
-              (not-live) — so the two always occupy the same slot. Separated from the benign items above. */}
-          <div className="sb-ctxmenu-sep" />
+          {!ctxMenu.host && (
+            <button
+              className="sb-ctxmenu-item"
+              onClick={() => {
+                onShowInfo(ctxMenu.id, false)
+                closeMenu()
+              }}
+            >
+              <Info size={14} />
+              <span>Session details…</span>
+            </button>
+          )}
+          {/* The session action sits at the bottom behind a divider — Stop when live, Resume when
+              stopped, or Go to Agent View when this transcript owns that transport. */}
+          {!ctxMenu.host && <div className="sb-ctxmenu-sep" />}
           {ctxMenu.live ? (
             <button
               className="sb-ctxmenu-item danger"
@@ -537,7 +580,7 @@ export default function TallyRail({
               }}
             >
               <Stop size={14} />
-              <span>Stop session</span>
+              <span>{ctxMenu.agentView ? 'Stop Agent View' : 'Stop session'}</span>
             </button>
           ) : (
             <button
@@ -548,7 +591,7 @@ export default function TallyRail({
               }}
             >
               <Play size={14} />
-              <span>Resume</span>
+              <span>{ctxMenu.agentView ? 'Go to Agent View' : 'Resume'}</span>
             </button>
           )}
         </div>

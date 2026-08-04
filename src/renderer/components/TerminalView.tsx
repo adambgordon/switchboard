@@ -12,7 +12,7 @@ import type { ResolvedTheme } from '../lib/theme'
 interface Props {
   ptyId: string
   /** The conversation this terminal hosts — needed so Option+click can mark it unread. */
-  sessionId: string
+  sessionId: string | null
   /** Which agent owns this terminal — image paste uses each TUI's native input protocol. */
   agent: AgentKind
   visible: boolean
@@ -379,7 +379,7 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       if (e.altKey && e.button === 0) {
         e.preventDefault()
         e.stopPropagation()
-        onMarkUnread(sessionId)
+        if (sessionId) onMarkUnread(sessionId)
       }
     }
     host.addEventListener('mousedown', onDown, true)
