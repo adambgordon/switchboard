@@ -19,8 +19,8 @@ import { useUpdates } from './lib/useUpdates'
 import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
-import { currentInputRequestedAt, resolveLiveState, isManualUnread } from './lib/liveness'
-import { displayTitleForRow, isUnlinkedRow } from './lib/rowIdentity'
+import { currentInputRequestedAt } from './lib/liveness'
+import { displayTitleForRow, isUnlinkedRow, resolveRowLiveState } from './lib/rowIdentity'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
 import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
@@ -266,30 +266,12 @@ export default function App() {
   //   3. Recent — everything else (not live, not pinned), most-recent first.
   // When a search is active, each section is filtered to the matching sessions.
   const railSections = useMemo<RailSection[]>(() => {
-    // Resolve a live row's liveness; null for rows with no live process — and null for a PROVISIONAL
-    // one, whose conversation identity was never proven. Liveness is read off the transcript, so for
-    // an unlinked terminal there is no transcript that is known to be its: any state resolved here
-    // would describe some other conversation. It shares the hollow nothing-unread marker with
-    // `quiet`, while remaining a distinct unlinked state in behavior and the Live tally.
-    const stateFor = (
-      pty: PtyState | null,
-      meta: ConversationMeta | undefined,
-      id: string
-    ): LiveState | null => {
-      if (!pty) return null
-      // The same predicate the row, the ⋮ menu, and liveStateOf use. Gating on `provisional` alone
-      // would let a parked-agent row store a resolved state here that only downstream masking keeps
-      // out of sight — a value the next consumer of `RailEntry.liveState` would reasonably trust.
-      if (meta && isUnlinkedRow(pty, meta)) return null
-      return resolveLiveState(
-        meta,
-        seen[id] ?? 0,
-        focused && selectedId === id,
-        isManualUnread(unread[id], meta),
-        pty.startedAt,
-        pty.inputRequestedAt
-      )
-    }
+    // Resolve a live row's liveness — null for rows with no live process, and null for an unlinked
+    // one (see resolveRowLiveState, which both other call sites in this file share). Such a row wears
+    // the hollow nothing-unread marker alongside `quiet`, while staying a distinct unlinked state in
+    // behavior and in the Live tally.
+    const stateFor = (pty: PtyState | null, meta: ConversationMeta, id: string): LiveState | null =>
+      resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && selectedId === id, unread[id])
 
     const pinnedEntries: RailEntry[] = pinnedOrder
       .map((id) => {
@@ -347,20 +329,18 @@ export default function App() {
     // wrong-dot report this work exists to fix. Sharing the hollow visual does not fold it into idle.
     let unlinked = 0
     for (const p of ptys.active) {
-      const meta = metaById.get(p.sessionId) ?? synthMeta(p)
-      if (isUnlinkedRow(p, meta)) {
-        unlinked++
-        continue
-      }
-      const st = resolveLiveState(
-        meta,
+      const st = resolveRowLiveState(
+        p,
+        metaById.get(p.sessionId) ?? synthMeta(p),
         seen[p.sessionId] ?? 0,
         focused && selectedId === p.sessionId,
-        isManualUnread(unread[p.sessionId], meta),
-        p.startedAt,
-        p.inputRequestedAt
+        unread[p.sessionId]
       )
-      if (st === 'working') working++
+      // Every `p` here is live by construction, so the only way to get no state is the unlinked
+      // gate — which makes this bucket definitionally "the rows that were given no dot" rather
+      // than a second reading of the predicate that could drift from the first.
+      if (st === null) unlinked++
+      else if (st === 'working') working++
       else if (st === 'asking') asking++
       else if (st === 'awaiting') unreadCount++
       else idle++
@@ -646,21 +626,13 @@ export default function App() {
 
   // Resolve the current dot state for any session id (used by the read/unread toggle). Null for any
   // unlinked row — it has no dot to toggle, and ⇧⌘U would otherwise persist an override for a
-  // conversation the row isn't showing. Same predicate the row and the ⋮ menu use.
+  // conversation the row isn't showing.
   const liveStateOf = useCallback(
     (id: string): LiveState | null => {
       const pty = ptys.bySession.get(id) ?? null
       if (!pty) return null
       const meta = metaById.get(id) ?? synthMeta(pty)
-      if (isUnlinkedRow(pty, meta)) return null
-      return resolveLiveState(
-        meta,
-        seen[id] ?? 0,
-        focused && selectedId === id,
-        isManualUnread(unread[id], meta),
-        pty.startedAt,
-        pty.inputRequestedAt
-      )
+      return resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && selectedId === id, unread[id])
     },
     [ptys.bySession, metaById, seen, unread, focused, selectedId]
   )

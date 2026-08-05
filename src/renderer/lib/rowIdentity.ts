@@ -1,4 +1,5 @@
-import type { ConversationMeta, PtyState } from '../../shared/types'
+import type { ConversationMeta, LiveState, PtyState } from '../../shared/types'
+import { isManualUnread, resolveLiveState } from './liveness'
 
 /**
  * A live terminal whose work went into a Claude background agent rather than its own transcript. Such
@@ -34,4 +35,38 @@ export function isUnlinkedRow(pty: PtyState | null, meta: ConversationMeta): boo
  */
 export function displayTitleForRow(pty: PtyState | null, meta: ConversationMeta): string {
   return isParkedOnlyRow(pty, meta) && pty?.parkedJob?.name ? pty.parkedJob.name : meta.title
+}
+
+/**
+ * What dot this row gets, if any — the single derivation of liveness for a conversation row.
+ *
+ * `null` means "no dot": either the row isn't live, or it's live but {@link isUnlinkedRow unlinked},
+ * in which case any state resolved here would describe a conversation not known to be this
+ * terminal's. Callers that bucket rows can therefore read `null` as unlinked whenever they already
+ * know the pty is live, rather than re-testing the predicate.
+ *
+ * This composition — gate, then resolve — was previously hand-copied at three call sites in `App`,
+ * and one of them had been written without the gate, which is how a background-agent row came to
+ * show a liveness dot for someone else's transcript. It lives in `lib/` so it is reachable from the
+ * unit tests (`App` is not, being React), and in THIS module rather than `liveness` because the gate
+ * is the identity concern: the dependency runs one way, so liveness stays ignorant of identity.
+ */
+export function resolveRowLiveState(
+  pty: PtyState | null,
+  meta: ConversationMeta,
+  lastSeenAt: number,
+  lookingNow: boolean,
+  /** The raw `unread[id]` mark from useSeen; whether it still applies is decided here. */
+  manualUnreadAt: number | undefined
+): LiveState | null {
+  if (!pty) return null
+  if (isUnlinkedRow(pty, meta)) return null
+  return resolveLiveState(
+    meta,
+    lastSeenAt,
+    lookingNow,
+    isManualUnread(manualUnreadAt, meta),
+    pty.startedAt,
+    pty.inputRequestedAt
+  )
 }

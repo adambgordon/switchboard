@@ -3,7 +3,8 @@ import type { ConversationMeta, PtyState } from '../src/shared/types'
 import {
   displayTitleForRow,
   isParkedOnlyRow,
-  isUnlinkedRow
+  isUnlinkedRow,
+  resolveRowLiveState
 } from '../src/renderer/lib/rowIdentity'
 
 function pty(over: Partial<PtyState> = {}): PtyState {
@@ -111,5 +112,60 @@ describe('isUnlinkedRow', () => {
 
   it('does not cover a row with no live terminal', () => {
     expect(isUnlinkedRow(null, meta({ messageCount: 0 }))).toBe(false)
+  })
+})
+
+describe('resolveRowLiveState', () => {
+  // What an unindexed session's meta actually looks like: App synthesizes it from the live process,
+  // so it has no messages and no turn-state of its own.
+  const synth = { messageCount: 0, title: 'New conversation' }
+
+  it('gives a parked-only row no state, even when one would otherwise resolve', () => {
+    // The reported bug. A runtime input notification resolves to `asking` straight off the pty,
+    // without consulting the transcript at all — so an ungated parked row pulses for work that is
+    // not its own. Asserting `null` here is only meaningful because the same row WITHOUT the parked
+    // marker resolves to something (next assertion).
+    const parked = pty({ parkedJob: PARKED, inputRequestedAt: 500 })
+    expect(resolveRowLiveState(parked, meta(synth), 0, false, undefined)).toBe(null)
+    expect(resolveRowLiveState(pty({ inputRequestedAt: 500 }), meta(synth), 0, false, undefined)).toBe(
+      'asking'
+    )
+  })
+
+  it('gives an unbound Codex row no state, even when one would otherwise resolve', () => {
+    const unbound = pty({ agent: 'codex', provisional: true, inputRequestedAt: 500 })
+    expect(resolveRowLiveState(unbound, meta(synth), 0, false, undefined)).toBe(null)
+  })
+
+  it('still resolves normally for a conversation that merely launched an agent', () => {
+    // The regression this row exists to avoid re-introducing: the parked marker is never cleared, so
+    // an ordinary conversation keeps it for life and must go on getting a real dot.
+    const launcher = pty({ parkedJob: PARKED })
+    const working = meta({ messageCount: 3, turnState: 'in_progress', lastActivityAt: 50 })
+    expect(resolveRowLiveState(launcher, working, 0, false, undefined)).toBe('working')
+  })
+
+  it('resolves an ordinary live row', () => {
+    const working = meta({ turnState: 'in_progress', lastActivityAt: 50 })
+    expect(resolveRowLiveState(pty(), working, 0, false, undefined)).toBe('working')
+    // Looking at a finished turn counts as seeing it.
+    const finished = meta({ turnState: 'awaiting', turnEndedAt: 100 })
+    expect(resolveRowLiveState(pty(), finished, 0, false, undefined)).toBe('awaiting')
+    expect(resolveRowLiveState(pty(), finished, 0, true, undefined)).toBe('quiet')
+  })
+
+  it('has no state without a live terminal', () => {
+    expect(resolveRowLiveState(null, meta({ turnState: 'in_progress', lastActivityAt: 50 }), 0, false, undefined)).toBe(
+      null
+    )
+  })
+
+  it('applies a manual unread mark, and ignores one a later turn superseded', () => {
+    // Proves the fold-in is a real isManualUnread call and not a null-check on the timestamp: both
+    // marks below are non-null, and only the one AFTER the turn ended still applies.
+    const seen = meta({ turnState: 'awaiting', turnEndedAt: 100 })
+    expect(resolveRowLiveState(pty(), seen, 200, false, undefined)).toBe('quiet')
+    expect(resolveRowLiveState(pty(), seen, 200, false, 150)).toBe('awaiting')
+    expect(resolveRowLiveState(pty(), seen, 200, false, 50)).toBe('quiet')
   })
 })
