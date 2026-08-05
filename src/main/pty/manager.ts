@@ -107,11 +107,22 @@ export class PtyManager extends EventEmitter {
   private probeInFlight = false
   private lastProbeAt = 0
   private readonly parkedJobs: ClaudeParkedJobMonitor | null
+  /**
+   * Dev/QA: SWITCHBOARD_FAKE_PARKED=1 gives every new Claude PTY a background agent, so the
+   * work-went-to-an-agent row can actually be looked at. Same reasoning as SWITCHBOARD_FAKE_UNBOUND
+   * below — it needs a session that launches an agent and then writes NO transcript of its own, which
+   * cannot be produced on demand, leaving a row nobody can review before it ships. Inert unless set.
+   */
+  private readonly fakeParkedJob: ParkedJob | null
 
   constructor(
     opts: { resolveBindings?: CodexBindingResolver; claudeParkedJobs?: ParkedJobOptions } = {}
   ) {
     super()
+    this.fakeParkedJob =
+      process.env.SWITCHBOARD_FAKE_PARKED === '1'
+        ? { shortId: 'fa4e0000', name: 'Find canonical retrier in mio' }
+        : null
     // Dev/QA: SWITCHBOARD_FAKE_UNBOUND=1 makes every probe prove nothing, so the fail-closed
     // terminal-only state can actually be looked at. It is otherwise rare by design — binding
     // normally succeeds — which would leave the one state that must NOT be mistaken for liveness as
@@ -421,7 +432,7 @@ export class PtyManager extends EventEmitter {
       idleTimer: null,
       bootTimer: null,
       provisional: o.provisional ?? false,
-      parkedJob: null,
+      parkedJob: o.agent === 'claude' ? this.fakeParkedJob : null,
       booted: false,
       shellReady: false,
       sized: false,
