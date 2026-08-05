@@ -185,7 +185,9 @@ export class PtyManager extends EventEmitter {
     return this.spawn({
       sessionId: randomUUID(), // placeholder; swapped for the real rollout id on bind
       cwd,
-      title: 'New Codex conversation',
+      // Same wording as a new Claude session: at this point neither has done anything, and the row
+      // already carries the agent's logo — spelling the agent out here only made the two look unlike.
+      title: 'New conversation',
       origin: 'new',
       agent: 'codex',
       provisional: true

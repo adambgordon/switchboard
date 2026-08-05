@@ -56,15 +56,21 @@ function ConversationRowImpl({
   // even while its daemon runs. See the work-stream findings note on background liveness dots.
   const liveDotState: LiveState | null =
     live && !unlinked ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting') : null
-  const dotClass = unlinked
+  // An unbound Codex terminal reads as `quiet` — live, nothing happening — which is what is actually
+  // true of a session that has not had its first turn, and matches a brand-new Claude row beside it.
+  // The parked-agent row keeps the neutral dash: its emptiness is permanent rather than a pending
+  // first turn, and its preview line says so, where a hollow dot would read as an idle conversation.
+  const dotClass = parkedOnly
     ? 'unlinked'
-    : liveDotState === 'working'
-      ? 'busy'
-      : liveDotState === 'asking'
-        ? 'asking'
-        : liveDotState === 'quiet'
-          ? 'quiet'
-          : 'awaiting'
+    : unlinked
+      ? 'quiet'
+      : liveDotState === 'working'
+        ? 'busy'
+        : liveDotState === 'asking'
+          ? 'asking'
+          : liveDotState === 'quiet'
+            ? 'quiet'
+            : 'awaiting'
   // Phase-lock the breathing/ripple to the app-wide beat (a no-op for the static quiet/awaiting dots).
   const dotRef = useSyncedAnimation<HTMLSpanElement>(dotClass)
   return (
