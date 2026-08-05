@@ -942,6 +942,7 @@ export default function App() {
           transcriptLoading={tLoading}
           activePtys={ptys.active}
           pinned={selectedId ? pinned.has(selectedId) : false}
+          unlinked={selectedUnlinked}
           onTogglePin={() => {
             if (selectedId) togglePinGated(selectedId)
           }}

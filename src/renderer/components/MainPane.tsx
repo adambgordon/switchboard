@@ -23,6 +23,8 @@ interface Props {
   transcriptLoading: boolean
   activePtys: PtyState[]
   pinned: boolean
+  /** This row stands for no conversation — see PaneHeader, which hides its conversation-keyed controls. */
+  unlinked: boolean
   onTogglePin: () => void
   onResume: () => void
   onShowHistory: () => void
@@ -107,6 +109,7 @@ export default function MainPane(props: Props) {
     transcriptLoading,
     activePtys,
     pinned,
+    unlinked,
     onTogglePin,
     onResume,
     onShowHistory,
@@ -211,6 +214,7 @@ export default function MainPane(props: Props) {
           pty={pty}
           view={view}
           pinned={pinned}
+          unlinked={unlinked}
           onTogglePin={onTogglePin}
           onResume={onResume}
           onShowHistory={onShowHistory}

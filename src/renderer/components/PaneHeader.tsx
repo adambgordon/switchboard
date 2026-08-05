@@ -13,6 +13,12 @@ interface Props {
   pty: PtyState | null
   view: View
   pinned: boolean
+  /**
+   * This row stands for no conversation — an unbound Codex terminal, or a Claude terminal whose work
+   * went into a background agent. Pin and Session details are keyed to a conversation it doesn't have,
+   * so they are hidden rather than rendered as controls that quietly do nothing. Mirrors the ⋮ menu.
+   */
+  unlinked: boolean
   onTogglePin: () => void
   onResume: () => void
   onShowHistory: () => void
@@ -42,6 +48,7 @@ export default function PaneHeader({
   pty,
   view,
   pinned,
+  unlinked,
   onTogglePin,
   onResume,
   onShowHistory,
@@ -56,14 +63,21 @@ export default function PaneHeader({
   return (
     <header className="sb-pane-header">
       <div className="sb-pane-id">
-        <button
-          type="button"
-          className="sb-pane-title sb-pane-title-btn truncate"
-          aria-label={`Conversation info: ${title}`}
-          onClick={onShowInfo}
-        >
-          {title}
-        </button>
+        {unlinked ? (
+          // A div, not a span: `.truncate` only clips against a constrained width, which the button
+          // variant gets from its own `display:block`. Everything else it adds is button chrome, and
+          // its padding/negative-margin cancel out, so the text sits in the same place either way.
+          <div className="sb-pane-title truncate">{title}</div>
+        ) : (
+          <button
+            type="button"
+            className="sb-pane-title sb-pane-title-btn truncate"
+            aria-label={`Conversation info: ${title}`}
+            onClick={onShowInfo}
+          >
+            {title}
+          </button>
+        )}
         <div className="sb-pane-meta mono">
           {agent && <AgentLogo agent={agent} size={13} />}
           {meta ? (
@@ -122,15 +136,17 @@ export default function PaneHeader({
             <Search size={13} />
           </button>
         )}
-        <button
-          className={`sb-pane-pin${pinned ? ' pinned' : ''}`}
-          onClick={onTogglePin}
-          data-tip={pinned ? 'Unpin conversation' : 'Pin conversation'}
-          aria-label={pinned ? 'Unpin conversation' : 'Pin conversation'}
-          aria-pressed={pinned}
-        >
-          <Pin size={13} filled={pinned} />
-        </button>
+        {!unlinked && (
+          <button
+            className={`sb-pane-pin${pinned ? ' pinned' : ''}`}
+            onClick={onTogglePin}
+            data-tip={pinned ? 'Unpin conversation' : 'Pin conversation'}
+            aria-label={pinned ? 'Unpin conversation' : 'Pin conversation'}
+            aria-pressed={pinned}
+          >
+            <Pin size={13} filled={pinned} />
+          </button>
+        )}
         {live ? (
           <>
             <div className="sb-seg" role="tablist">
