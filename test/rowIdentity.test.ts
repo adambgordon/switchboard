@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationMeta, PtyState } from '../src/shared/types'
-import { isParkedOnlyRow, isUnlinkedRow } from '../src/renderer/lib/rowIdentity'
+import {
+  displayTitleForRow,
+  isParkedOnlyRow,
+  isUnlinkedRow
+} from '../src/renderer/lib/rowIdentity'
 
 function pty(over: Partial<PtyState> = {}): PtyState {
   return {
@@ -60,6 +64,29 @@ describe('isParkedOnlyRow', () => {
 
   it('is false with no live terminal at all', () => {
     expect(isParkedOnlyRow(null, meta({ messageCount: 0 }))).toBe(false)
+  })
+})
+
+describe('displayTitleForRow', () => {
+  it('names the background agent when the terminal has no conversation of its own', () => {
+    expect(displayTitleForRow(pty({ parkedJob: PARKED }), meta({ messageCount: 0 }))).toBe(
+      'Find retrier example in mio'
+    )
+  })
+
+  it('falls back to the row title when the agent has no name yet', () => {
+    const unnamed = { shortId: '6e76e54b', name: '' }
+    expect(
+      displayTitleForRow(pty({ parkedJob: unnamed }), meta({ messageCount: 0, title: 'New conversation' }))
+    ).toBe('New conversation')
+  })
+
+  it('leaves an ordinary conversation alone, even one that launched an agent', () => {
+    expect(displayTitleForRow(pty({ parkedJob: PARKED }), meta({ title: 'Real work' }))).toBe(
+      'Real work'
+    )
+    expect(displayTitleForRow(pty(), meta({ title: 'Real work' }))).toBe('Real work')
+    expect(displayTitleForRow(null, meta({ title: 'Real work' }))).toBe('Real work')
   })
 })
 

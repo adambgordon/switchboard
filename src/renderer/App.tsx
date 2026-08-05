@@ -20,7 +20,7 @@ import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
 import { currentInputRequestedAt, resolveLiveState, isManualUnread } from './lib/liveness'
-import { isUnlinkedRow } from './lib/rowIdentity'
+import { displayTitleForRow, isUnlinkedRow } from './lib/rowIdentity'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
 import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
@@ -271,17 +271,25 @@ export default function App() {
     // an unlinked terminal there is no transcript that is known to be its: any state resolved here
     // would describe some other conversation. It shares the hollow nothing-unread marker with
     // `quiet`, while remaining a distinct unlinked state in behavior and the Live tally.
-    const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null =>
-      pty && !pty.provisional
-        ? resolveLiveState(
-            meta,
-            seen[id] ?? 0,
-            focused && selectedId === id,
-            isManualUnread(unread[id], meta),
-            pty.startedAt,
-            pty.inputRequestedAt
-          )
-        : null
+    const stateFor = (
+      pty: PtyState | null,
+      meta: ConversationMeta | undefined,
+      id: string
+    ): LiveState | null => {
+      if (!pty) return null
+      // The same predicate the row, the ⋮ menu, and liveStateOf use. Gating on `provisional` alone
+      // would let a parked-agent row store a resolved state here that only downstream masking keeps
+      // out of sight — a value the next consumer of `RailEntry.liveState` would reasonably trust.
+      if (meta && isUnlinkedRow(pty, meta)) return null
+      return resolveLiveState(
+        meta,
+        seen[id] ?? 0,
+        focused && selectedId === id,
+        isManualUnread(unread[id], meta),
+        pty.startedAt,
+        pty.inputRequestedAt
+      )
+    }
 
     const pinnedEntries: RailEntry[] = pinnedOrder
       .map((id) => {
@@ -841,7 +849,10 @@ export default function App() {
     newConversation
   ])
 
-  const title = selectedMeta?.title ?? selectedPty?.title ?? 'Conversation'
+  // Same derivation the rail uses, so the header can't name one thing while the row names another.
+  const title = selectedPty
+    ? displayTitleForRow(selectedPty, selectedMeta ?? synthMeta(selectedPty))
+    : selectedMeta?.title ?? 'Conversation'
   const cwd = selectedMeta?.cwd ?? selectedPty?.cwd ?? ''
 
   // Resolve the info-modal target's meta + live process. A live-but-unindexed session still resolves

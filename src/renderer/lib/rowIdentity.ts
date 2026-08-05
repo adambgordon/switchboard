@@ -23,3 +23,15 @@ export function isParkedOnlyRow(pty: PtyState | null, meta: ConversationMeta): b
 export function isUnlinkedRow(pty: PtyState | null, meta: ConversationMeta): boolean {
   return !!pty && (pty.provisional || isParkedOnlyRow(pty, meta))
 }
+
+/**
+ * What to call this row. A parked-only terminal names the background agent its work went into, having
+ * no conversation of its own to name; everything else uses its own title.
+ *
+ * Shared by the rail and the main pane deliberately: deriving it twice is how the sidebar ends up
+ * naming the agent while the header still says "New conversation" — one thing described two ways,
+ * which is the whole failure this row exists to correct.
+ */
+export function displayTitleForRow(pty: PtyState | null, meta: ConversationMeta): string {
+  return isParkedOnlyRow(pty, meta) && pty?.parkedJob?.name ? pty.parkedJob.name : meta.title
+}
