@@ -100,7 +100,7 @@ const FAQ: Faq[] = [
     q: 'What do the dots next to live conversations mean?',
     a: (
       <>
-        The cobalt dot next to a live conversation tracks its turn:
+        The cobalt dot next to a live row shows whether anything needs your attention:
         <ul className="sb-faq-legend">
           <li>
             <span className="sb-faq-dot">
@@ -131,17 +131,8 @@ const FAQ: Faq[] = [
               <span className="sb-dot quiet" />
             </span>
             <span>
-              <strong>Hollow</strong>: finished and read
-            </span>
-          </li>
-          <li>
-            <span className="sb-faq-dot">
-              <span className="sb-dot unlinked" />
-            </span>
-            <span>
-              <strong>Grey dash</strong>: terminal only — Switchboard could not confirm which
-              conversation this terminal is running, so it reports no turn rather than guessing. The
-              terminal still works; the conversation may also appear under Recent.
+              <strong>Hollow</strong>: nothing unread — either the turn is read, or a new terminal has
+              no messages yet
             </span>
           </li>
         </ul>

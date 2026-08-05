@@ -51,26 +51,18 @@ function ConversationRowImpl({
   // unread, plus the ordinary empty-row placeholder.
   const parkedOnly = isParkedOnlyRow(live, meta)
   const unlinked = isUnlinkedRow(live, meta)
-  // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe). The dot
-  // means "Switchboard owns a terminal for this" — a Claude background agent deliberately gets none,
-  // even while its daemon runs. See the work-stream findings note on background liveness dots.
+  // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe).
   const liveDotState: LiveState | null =
     live && !unlinked ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting') : null
-  // An unbound Codex terminal reads as `quiet` — live, nothing happening — which is what is actually
-  // true of a session that has not had its first turn, and matches a brand-new Claude row beside it.
-  // The parked-agent row keeps the neutral dash: its emptiness is permanent rather than a pending
-  // first turn, and its preview line says so, where a hollow dot would read as an idle conversation.
-  const dotClass = parkedOnly
+  const dotClass = unlinked
     ? 'unlinked'
-    : unlinked
-      ? 'quiet'
-      : liveDotState === 'working'
-        ? 'busy'
-        : liveDotState === 'asking'
-          ? 'asking'
-          : liveDotState === 'quiet'
-            ? 'quiet'
-            : 'awaiting'
+    : liveDotState === 'working'
+      ? 'busy'
+      : liveDotState === 'asking'
+        ? 'asking'
+        : liveDotState === 'quiet'
+          ? 'quiet'
+          : 'awaiting'
   // Phase-lock the breathing/ripple to the app-wide beat (a no-op for the static quiet/awaiting dots).
   const dotRef = useSyncedAnimation<HTMLSpanElement>(dotClass)
   return (
@@ -101,8 +93,10 @@ function ConversationRowImpl({
         {parkedOnly ? (
           // This terminal has no conversation of its own — what it produced went into the background
           // agent named above. Without saying so the row reads as an empty, dead conversation while
-          // the user is actively working in it.
-          <span className="sb-row-preview sb-row-unlinked truncate">
+          // the user is actively working in it. Styled as the ordinary empty placeholder: the
+          // dedicated unlinked treatment was retired, and the row's distinction now lives in the
+          // title, the Live tally, and the accessibility label rather than in bespoke preview colour.
+          <span className="sb-row-preview sb-row-preview-empty truncate">
             Terminal only — work is in a background agent
           </span>
         ) : meta.preview ? (
