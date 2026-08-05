@@ -121,7 +121,7 @@ export class PtyManager extends EventEmitter {
     super()
     this.fakeParkedJob =
       process.env.SWITCHBOARD_FAKE_PARKED === '1'
-        ? { shortId: 'fa4e0000', name: 'Find canonical retrier in mio' }
+        ? { shortId: 'fa4e0000', name: 'Example background agent (fake)' }
         : null
     // Dev/QA: SWITCHBOARD_FAKE_UNBOUND=1 makes every probe prove nothing, so the fail-closed
     // terminal-only state can actually be looked at. It is otherwise rare by design — binding
