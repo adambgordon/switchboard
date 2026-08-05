@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  CONFIRM_AFTER_MS,
   ClaudeParkedJobMonitor,
   parkedJobFromRegistry,
   type ParkedJob
@@ -53,12 +54,16 @@ describe('ClaudeParkedJobMonitor', () => {
   let alive: Set<number>
   /** What `readBgJobName` would return right now — Claude writes the name after the fact. */
   let jobName: string
+  let clock: number
+  let nth: number
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'sb-parked-'))
     changes = []
     alive = new Set([4242])
     jobName = 'Find retrier example in mio'
+    clock = 1_000_000
+    nth = 0
     monitor = null
   })
 
@@ -72,31 +77,85 @@ describe('ClaudeParkedJobMonitor', () => {
       sessionsRoot: root,
       isProcessAlive: (pid) => alive.has(pid),
       resolveJobName: () => jobName,
+      now: () => clock,
       onChange: (ptyId, parked) => changes.push([ptyId, parked])
     })
     return monitor
   }
 
-  /** Each register() runs one refresh, which is how a second observation is driven synchronously. */
+  /**
+   * Drive one more refresh without moving the clock, the way production does when an unrelated Claude
+   * terminal registers. This is the path that used to satisfy the old two-observation counter
+   * instantly; a fresh id each time so it registers rather than replacing.
+   */
   function observeAgain(m: ClaudeParkedJobMonitor): void {
-    m.register('pty-other', B)
+    m.register(`pty-other-${nth++}`, B)
+  }
+
+  /** Let the confirmation window elapse, then observe — how a marker legitimately gets reported. */
+  function settle(m: ClaudeParkedJobMonitor): void {
+    clock += CONFIRM_AFTER_MS
+    observeAgain(m)
   }
 
   it('reports the parked agent, with its name, once confirmed', () => {
     writeFileSync(join(root, '4242.json'), record())
     const m = build()
     m.register('pty-1', A)
-    // One observation is deliberately not enough — see CONFIRM_OBSERVATIONS.
+    // The first sighting is deliberately not enough — see CONFIRM_AFTER_MS.
     expect(changes).toEqual([])
-    observeAgain(m)
+    settle(m)
     expect(changes).toEqual([['pty-1', { shortId: SHORT, name: 'Find retrier example in mio' }]])
+  })
+
+  it('does not confirm on a second observation that costs no time', () => {
+    // The regression. Confirmation used to be a COUNT of observations, and `refresh()` runs on every
+    // register(), so an unrelated Claude terminal opening in the same millisecond supplied the second
+    // observation for free — reporting the marker well inside the ~600 ms the transcript needs to be
+    // indexed, which is the flash the window exists to prevent.
+    writeFileSync(join(root, '4242.json'), record())
+    const m = build()
+    m.register('pty-1', A)
+    observeAgain(m)
+    observeAgain(m)
+    observeAgain(m)
+    expect(changes).toEqual([])
+  })
+
+  it('waits out the full window, to the millisecond', () => {
+    writeFileSync(join(root, '4242.json'), record())
+    const m = build()
+    m.register('pty-1', A)
+    clock += CONFIRM_AFTER_MS - 1
+    observeAgain(m)
+    expect(changes).toEqual([])
+    clock += 1
+    observeAgain(m)
+    expect(changes).toHaveLength(1)
+  })
+
+  it('restarts the window when the marker changes to a different agent', () => {
+    // A marker that has only just appeared has had no time to be contradicted, whatever the previous
+    // one had accrued — so the clock cannot be inherited across a change.
+    writeFileSync(join(root, '4242.json'), record())
+    const m = build()
+    m.register('pty-1', A)
+    clock += CONFIRM_AFTER_MS - 1
+    writeFileSync(join(root, '4242.json'), record({ parkedJobId: 'ab12cd34' }))
+    observeAgain(m)
+    expect(changes).toEqual([])
+    clock += 1
+    observeAgain(m)
+    expect(changes).toEqual([])
+    settle(m)
+    expect(changes).toEqual([['pty-1', { shortId: 'ab12cd34', name: 'Find retrier example in mio' }]])
   })
 
   it('never reports for a session that launched no background agent', () => {
     writeFileSync(join(root, '4242.json'), record({ parkedJobId: undefined }))
     const m = build()
     m.register('pty-1', A)
-    observeAgain(m)
+    settle(m)
     expect(changes).toEqual([])
   })
 
@@ -104,7 +163,7 @@ describe('ClaudeParkedJobMonitor', () => {
     writeFileSync(join(root, '4242.json'), record())
     const m = build()
     m.register('pty-1', B)
-    observeAgain(m)
+    settle(m)
     expect(changes.filter(([ptyId]) => ptyId === 'pty-1')).toEqual([])
   })
 
@@ -114,7 +173,7 @@ describe('ClaudeParkedJobMonitor', () => {
     writeFileSync(join(root, '4242.json'), record())
     const m = build()
     m.register('pty-1', A)
-    observeAgain(m)
+    settle(m)
     expect(changes).toEqual([])
   })
 
@@ -125,11 +184,11 @@ describe('ClaudeParkedJobMonitor', () => {
     writeFileSync(join(root, '4242.json'), record())
     const m = build()
     m.register('pty-1', A)
-    observeAgain(m)
+    settle(m)
     expect(changes).toEqual([['pty-1', { shortId: SHORT, name: '' }]])
 
     jobName = 'Named later'
-    m.register('pty-third', B)
+    observeAgain(m)
     expect(changes[1]).toEqual(['pty-1', { shortId: SHORT, name: 'Named later' }])
   })
 
@@ -137,11 +196,11 @@ describe('ClaudeParkedJobMonitor', () => {
     writeFileSync(join(root, '4242.json'), record())
     const m = build()
     m.register('pty-1', A)
-    observeAgain(m)
+    settle(m)
     expect(changes).toHaveLength(1)
 
     jobName = 'Renamed'
-    m.register('pty-third', B)
+    observeAgain(m)
     expect(changes).toHaveLength(1)
   })
 
@@ -149,9 +208,9 @@ describe('ClaudeParkedJobMonitor', () => {
     writeFileSync(join(root, '4242.json'), record())
     const m = build()
     m.register('pty-1', A)
-    observeAgain(m)
+    settle(m)
     expect(changes).toHaveLength(1)
-    m.register('pty-third', B)
+    observeAgain(m)
     expect(changes).toHaveLength(1)
   })
 
@@ -159,11 +218,11 @@ describe('ClaudeParkedJobMonitor', () => {
     writeFileSync(join(root, '4242.json'), record())
     const m = build()
     m.register('pty-1', A)
-    observeAgain(m)
+    settle(m)
     expect(changes).toHaveLength(1)
 
     rmSync(root, { recursive: true, force: true })
-    m.register('pty-fourth', B)
+    observeAgain(m)
     expect(changes).toHaveLength(1)
   })
 
@@ -172,7 +231,7 @@ describe('ClaudeParkedJobMonitor', () => {
     writeFileSync(join(root, '4242.json'), record())
     const m = build()
     m.register('pty-1', A)
-    observeAgain(m)
+    settle(m)
     expect(changes).toHaveLength(1)
   })
 
@@ -181,7 +240,7 @@ describe('ClaudeParkedJobMonitor', () => {
     const m = build()
     m.register('pty-1', A)
     m.unregister('pty-1')
-    observeAgain(m)
+    settle(m)
     expect(changes).toEqual([])
   })
 })

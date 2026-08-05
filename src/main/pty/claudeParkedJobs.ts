@@ -36,12 +36,24 @@ const SHORT_ID = /^[a-f0-9]{6,}$/i
 const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
 const REGISTRY_POLL_MS = 250
 /**
- * How many consecutive observations confirm a marker before it is reported. A session that launches
- * an agent as its very first action writes the marker and its own first transcript line at almost the
- * same moment; without this the row could flash the empty-terminal state before the transcript is
- * indexed.
+ * How long a marker must have been observed continuously before it is reported.
+ *
+ * A session that launches an agent as its very first action writes the marker and its own first
+ * transcript line at almost the same moment, but the two reach Switchboard by different paths: the
+ * marker through this poll, the transcript through the watcher's 200 ms write-stability window plus
+ * the indexer's 400 ms debounce. Report the marker first and the row shows the agent's name for the
+ * gap, then corrects to an ordinary conversation — the flash this exists to prevent.
+ *
+ * It is a WINDOW, not a count of observations. Counting was the first attempt and does not work:
+ * `refresh()` runs on registry-directory events AND on every `register()`, so an unrelated Claude
+ * terminal opening can supply a second observation in the same millisecond as the first, confirming
+ * nothing. Elapsed time is the only thing the index path can be outrun by.
+ *
+ * The window clears the ~600 ms index path with margin, and `REGISTRY_POLL_MS` schedules the recheck,
+ * so this needs no timer of its own. The cost is that a genuine parked-only row arrives about a second
+ * late — nothing against the row it replaces, which otherwise persists for the life of the terminal.
  */
-const CONFIRM_OBSERVATIONS = 2
+export const CONFIRM_AFTER_MS = 900
 
 export interface ParkedJob {
   shortId: string
@@ -78,6 +90,8 @@ export interface ClaudeParkedJobMonitorOptions {
   sessionsRoot?: string
   isProcessAlive?: (pid: number) => boolean
   resolveJobName?: (shortId: string) => string
+  /** Injectable clock — the confirmation window is the behavior, so tests must be able to drive it. */
+  now?: () => number
   onChange: (ptyId: string, parked: ParkedJob | null) => void
 }
 
@@ -85,7 +99,8 @@ interface Controller {
   sessionId: string
   reported: ParkedJob | null
   pendingShortId: string | null
-  pendingCount: number
+  /** When `pendingShortId` was first observed; the marker is reported CONFIRM_AFTER_MS later. */
+  pendingSince: number
 }
 
 /**
@@ -97,6 +112,7 @@ export class ClaudeParkedJobMonitor {
   private readonly sessionsRoot: string
   private readonly isProcessAlive: (pid: number) => boolean
   private readonly resolveJobName: (shortId: string) => string
+  private readonly now: () => number
   private readonly onChange: (ptyId: string, parked: ParkedJob | null) => void
   private readonly controllers = new Map<string, Controller>()
   private watcher: NodeFsWatcher | null = null
@@ -106,6 +122,7 @@ export class ClaudeParkedJobMonitor {
     this.sessionsRoot = opts.sessionsRoot ?? join(homedir(), '.claude', 'sessions')
     this.isProcessAlive = opts.isProcessAlive ?? defaultIsProcessAlive
     this.resolveJobName = opts.resolveJobName ?? ((shortId) => readBgJobName(shortId))
+    this.now = opts.now ?? (() => Date.now())
     this.onChange = opts.onChange
   }
 
@@ -114,7 +131,7 @@ export class ClaudeParkedJobMonitor {
       sessionId,
       reported: null,
       pendingShortId: null,
-      pendingCount: 0
+      pendingSince: 0
     })
     this.startWatching()
     this.refresh()
@@ -184,11 +201,12 @@ export class ClaudeParkedJobMonitor {
       return
     }
 
+    const now = this.now()
     for (const [ptyId, controller] of this.controllers) {
       const shortId = bySession.get(controller.sessionId) ?? null
       if (shortId === null) {
         controller.pendingShortId = null
-        controller.pendingCount = 0
+        controller.pendingSince = 0
         if (controller.reported) {
           controller.reported = null
           this.onChange(ptyId, null)
@@ -207,12 +225,12 @@ export class ClaudeParkedJobMonitor {
         this.onChange(ptyId, controller.reported)
         continue
       }
+      // A different marker restarts the window — the new one has had no time to be contradicted.
       if (controller.pendingShortId !== shortId) {
         controller.pendingShortId = shortId
-        controller.pendingCount = 0
+        controller.pendingSince = now
       }
-      controller.pendingCount++
-      if (controller.pendingCount < CONFIRM_OBSERVATIONS) continue
+      if (now - controller.pendingSince < CONFIRM_AFTER_MS) continue
       const parked: ParkedJob = { shortId, name: this.resolveJobName(shortId) }
       controller.reported = parked
       this.onChange(ptyId, parked)
