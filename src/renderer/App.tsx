@@ -382,13 +382,17 @@ export default function App() {
   const selectedInputRequestedAt = selectedPty
     ? currentInputRequestedAt(selectedMeta ?? synthMeta(selectedPty), selectedPty.inputRequestedAt)
     : null
+  // An unlinked row shows no read state, so it must not persist one either — see rowIdentity.
+  const selectedUnlinked = selectedPty
+    ? isUnlinkedRow(selectedPty, selectedMeta ?? synthMeta(selectedPty))
+    : false
 
   // Looking at a conversation (selected + focused) marks it read: it advances the seen marker
   // AND clears any manual-unread override — so selecting/clicking a conversation (or a turn
   // finishing under your eyes) drops the dot to quiet. Re-fires when a new turn lands.
   useEffect(() => {
-    if (selectedId && focused) markRead(selectedId)
-  }, [selectedId, focused, selectedMeta?.turnEndedAt, selectedInputRequestedAt, markRead])
+    if (selectedId && focused && !selectedUnlinked) markRead(selectedId)
+  }, [selectedId, focused, selectedUnlinked, selectedMeta?.turnEndedAt, selectedInputRequestedAt, markRead])
 
   // The view this conversation last had. A never-opened live session defaults to Terminal; everything
   // else defaults to Formatted. Terminal only applies while live, otherwise fall back to the transcript.
@@ -632,14 +636,15 @@ export default function App() {
     setExpandedSections((s) => new Set(s).add(key))
   }, [])
 
-  // Resolve the current dot state for any session id (used by the read/unread toggle). Null for a
-  // provisional PTY, which has no dot to toggle — its seen state is keyed to a placeholder id that
-  // may never become a real conversation, so read/unread would be marking nothing.
+  // Resolve the current dot state for any session id (used by the read/unread toggle). Null for any
+  // unlinked row — it has no dot to toggle, and ⇧⌘U would otherwise persist an override for a
+  // conversation the row isn't showing. Same predicate the row and the ⋮ menu use.
   const liveStateOf = useCallback(
     (id: string): LiveState | null => {
-      const pty = ptys.bySession.get(id)
-      if (!pty || pty.provisional) return null
+      const pty = ptys.bySession.get(id) ?? null
+      if (!pty) return null
       const meta = metaById.get(id) ?? synthMeta(pty)
+      if (isUnlinkedRow(pty, meta)) return null
       return resolveLiveState(
         meta,
         seen[id] ?? 0,

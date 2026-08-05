@@ -51,11 +51,14 @@ describe('ClaudeParkedJobMonitor', () => {
   let monitor: ClaudeParkedJobMonitor | null
   let changes: Array<[string, ParkedJob | null]>
   let alive: Set<number>
+  /** What `readBgJobName` would return right now — Claude writes the name after the fact. */
+  let jobName: string
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'sb-parked-'))
     changes = []
     alive = new Set([4242])
+    jobName = 'Find retrier example in mio'
     monitor = null
   })
 
@@ -68,7 +71,7 @@ describe('ClaudeParkedJobMonitor', () => {
     monitor = new ClaudeParkedJobMonitor({
       sessionsRoot: root,
       isProcessAlive: (pid) => alive.has(pid),
-      resolveJobName: () => 'Find retrier example in mio',
+      resolveJobName: () => jobName,
       onChange: (ptyId, parked) => changes.push([ptyId, parked])
     })
     return monitor
@@ -113,6 +116,33 @@ describe('ClaudeParkedJobMonitor', () => {
     m.register('pty-1', A)
     observeAgain(m)
     expect(changes).toEqual([])
+  })
+
+  it('keeps looking for a name Claude has not written yet, and re-emits when it appears', () => {
+    // `nameSource` is `auto`, so the name is generated after the fact and the first read is routinely
+    // empty. Resolving once would leave the row on its fallback title for the life of the terminal.
+    jobName = ''
+    writeFileSync(join(root, '4242.json'), record())
+    const m = build()
+    m.register('pty-1', A)
+    observeAgain(m)
+    expect(changes).toEqual([['pty-1', { shortId: SHORT, name: '' }]])
+
+    jobName = 'Named later'
+    m.register('pty-third', B)
+    expect(changes[1]).toEqual(['pty-1', { shortId: SHORT, name: 'Named later' }])
+  })
+
+  it('stops resolving once a name is known', () => {
+    writeFileSync(join(root, '4242.json'), record())
+    const m = build()
+    m.register('pty-1', A)
+    observeAgain(m)
+    expect(changes).toHaveLength(1)
+
+    jobName = 'Renamed'
+    m.register('pty-third', B)
+    expect(changes).toHaveLength(1)
   })
 
   it('reports a confirmed marker only once, not on every refresh', () => {

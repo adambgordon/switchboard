@@ -9,9 +9,15 @@
  * - It is NOT cleared when the agent finishes.
  *
  * So it cannot indicate Agent View, and treating it that way misreports every ordinary conversation
- * that happens to launch an agent — and, because it never clears, permanently. Switchboard has no
- * usable Agent View signal at all: the only one Claude offers is a `--debug=fv-attach` log, and that
- * flag prints a debug banner into every terminal it is passed to.
+ * that happens to launch an agent — and, because it never clears, permanently.
+ *
+ * Agent View IS separately detectable, just not from here: Claude writes
+ * `~/.claude/daemon/attach-journal/<gestureId>.json` on attach and unlinks it on detach, carrying
+ * `pid`, `procStart`, and `surface` (`"fleet"` = Agent View). No debug flag, no banner — but it
+ * records no job identifier, so it can say a terminal is in Agent View and never which agent is on
+ * screen. The `--debug=fv-attach` log does carry the job id, and is rejected because that flag prints
+ * a debug banner into every terminal it is passed to. Both are written up in the work-stream findings;
+ * nothing here needs either.
  *
  * What this IS good for: a terminal whose own transcript is empty because its work went into a
  * background agent. That row would otherwise read "New conversation · 0 msg" while the user is busy
@@ -189,7 +195,18 @@ export class ClaudeParkedJobMonitor {
         }
         continue
       }
-      if (controller.reported?.shortId === shortId) continue
+      if (controller.reported?.shortId === shortId) {
+        // Already reported AND named — nothing left to resolve.
+        if (controller.reported.name) continue
+        // Confirmed, but Claude had not written the agent's name yet. Its `nameSource` is `auto`, so
+        // the name is generated after the fact and the first read is routinely empty; without this
+        // the row would keep its fallback title for the life of the terminal.
+        const laterName = this.resolveJobName(shortId)
+        if (!laterName) continue
+        controller.reported = { shortId, name: laterName }
+        this.onChange(ptyId, controller.reported)
+        continue
+      }
       if (controller.pendingShortId !== shortId) {
         controller.pendingShortId = shortId
         controller.pendingCount = 0
