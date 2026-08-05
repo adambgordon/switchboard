@@ -51,18 +51,11 @@ function ConversationRowImpl({
   // unread, plus the ordinary empty-row placeholder.
   const parkedOnly = isParkedOnlyRow(live, meta)
   const unlinked = isUnlinkedRow(live, meta)
-  // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe). A
-  // running background job has no PTY at all, and only earns a dot while something is actually
-  // happening: its resting states describe a daemon being alive, which reads as false liveness on a
-  // row the user cannot type into.
-  const bgActive = !live && (liveState === 'working' || liveState === 'asking')
-  const liveDotState: LiveState | null = unlinked
-    ? null
-    : live
-      ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting')
-      : bgActive
-        ? liveState
-        : null
+  // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe). The dot
+  // means "Switchboard owns a terminal for this" — a Claude background agent deliberately gets none,
+  // even while its daemon runs. See the work-stream findings note on background liveness dots.
+  const liveDotState: LiveState | null =
+    live && !unlinked ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting') : null
   const dotClass = unlinked
     ? 'unlinked'
     : liveDotState === 'working'
@@ -147,7 +140,7 @@ function ConversationRowImpl({
         </span>
       </span>
       <span className="sb-row-gutter">
-        {(live || bgActive) && (
+        {live && (
           <span
             ref={dotRef}
             className={`sb-dot ${dotClass}`}

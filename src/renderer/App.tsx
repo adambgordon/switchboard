@@ -271,33 +271,17 @@ export default function App() {
     // an unlinked terminal there is no transcript that is known to be its: any state resolved here
     // would describe some other conversation. It shares the hollow nothing-unread marker with
     // `quiet`, while remaining a distinct unlinked state in behavior and the Live tally.
-    //
-    // A background job resolves too, with NO PTY: Claude's daemon owns it, so it is alive without
-    // Switchboard holding a terminal. Same transcript read, with the job's own start time standing in
-    // for a process spawn. ConversationRow shows a dot for it only while work is happening.
-    const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null => {
-      if (pty) {
-        return pty.provisional
-          ? null
-          : resolveLiveState(
-              meta,
-              seen[id] ?? 0,
-              focused && selectedId === id,
-              isManualUnread(unread[id], meta),
-              pty.startedAt,
-              pty.inputRequestedAt
-            )
-      }
-      return meta?.bgRunning
+    const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null =>
+      pty && !pty.provisional
         ? resolveLiveState(
             meta,
             seen[id] ?? 0,
             focused && selectedId === id,
             isManualUnread(unread[id], meta),
-            meta.bgStartedAt ?? null
+            pty.startedAt,
+            pty.inputRequestedAt
           )
         : null
-    }
 
     const pinnedEntries: RailEntry[] = pinnedOrder
       .map((id) => {
@@ -327,15 +311,7 @@ export default function App() {
     const recentEntries: RailEntry[] = allConversations
       .filter((c) => !pinned.has(c.sessionId) && !ptys.bySession.has(c.sessionId))
       .sort((a, b) => b.mtime - a.mtime)
-      // liveState is resolved even here: a running Claude background job is alive with no PTY, so
-      // Recent is exactly where it lands.
-      .map((c) => ({
-        sessionId: c.sessionId,
-        pty: null,
-        meta: c,
-        pinned: false,
-        liveState: stateFor(null, c, c.sessionId)
-      }))
+      .map((c) => ({ sessionId: c.sessionId, pty: null, meta: c, pinned: false, liveState: null }))
 
     const all: RailSection[] = [
       { key: 'pinned', label: 'Pinned', variant: 'card', entries: pinnedEntries },
