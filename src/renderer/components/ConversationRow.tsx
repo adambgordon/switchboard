@@ -2,14 +2,12 @@ import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
+import { isParkedOnlyRow, isUnlinkedRow } from '../lib/rowIdentity'
 import { DashedCircle, Dots } from './icons'
 import AgentLogo from './AgentLogo'
 
 interface Props {
-  sessionId: string
-  orderKey: string
-  meta: ConversationMeta | null
-  host: boolean
+  meta: ConversationMeta
   selected: boolean
   live: PtyState | null
   /** Resolved liveness for the dot (working / asking / awaiting / quiet); null when not live. */
@@ -31,10 +29,7 @@ interface Props {
 }
 
 function ConversationRowImpl({
-  sessionId,
-  orderKey,
   meta,
-  host,
   selected,
   live,
   liveState,
@@ -47,21 +42,26 @@ function ConversationRowImpl({
   onOpenMenu,
   onContextMenu
 }: Props) {
-  // A live terminal that stands for no conversation — either its identity was never proven (a new
-  // Codex session Switchboard could not match to a rollout, see PtyState.provisional) or it is a
-  // Claude Agent View viewer, which has no transcript by construction. Both deliberately get NONE of
-  // the four liveness states: those are read off a transcript, and neither terminal has one known to
-  // be its, so any dot would describe someone else's conversation. Neutral marker + explicit copy
-  // instead, because failing closed silently reads as a duplicated or broken row.
-  const unlinked = host || live?.provisional === true
+  // A live terminal Switchboard cannot show a transcript for. Two ways that happens: a new Codex
+  // session it could not match to a rollout (PtyState.provisional), or a Claude session whose work
+  // went into a background agent instead of its own transcript (`parkedJob` with nothing indexed —
+  // see claudeParkedJobs). Both deliberately get NONE of the four liveness states: they're read off a
+  // transcript, and neither terminal has one known to be its, so it remains distinct as `unlinked`.
+  // Visually it shares the hollow marker with `quiet` because there are no linked messages to be
+  // unread, plus the ordinary empty-row placeholder.
+  const parkedOnly = isParkedOnlyRow(live, meta)
+  const unlinked = isUnlinkedRow(live, meta)
   // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe). A
-  // running background job has no PTY to fall back on, so its dot rests on the transcript alone.
+  // running background job has no PTY at all, and only earns a dot while something is actually
+  // happening: its resting states describe a daemon being alive, which reads as false liveness on a
+  // row the user cannot type into.
+  const bgActive = !live && (liveState === 'working' || liveState === 'asking')
   const liveDotState: LiveState | null = unlinked
     ? null
     : live
       ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting')
-      : meta?.bgRunning
-        ? liveState ?? 'quiet'
+      : bgActive
+        ? liveState
         : null
   const dotClass = unlinked
     ? 'unlinked'
@@ -81,45 +81,42 @@ function ConversationRowImpl({
         if (e.altKey) {
           // Option+click = mark unread only; never navigate (selecting/engaging would trip the
           // seen-effect / MainPane's engage listener → markRead, instantly self-clearing it).
-          if (live && !host && onMarkUnread) onMarkUnread(sessionId)
+          if (live && onMarkUnread) onMarkUnread(meta.sessionId)
           return
         }
-        live && onJump ? onJump(sessionId) : onSelect(sessionId)
+        live && onJump ? onJump(meta.sessionId) : onSelect(meta.sessionId)
       }}
       onContextMenu={(e) => {
         if (!onContextMenu) return
         e.preventDefault()
-        onContextMenu(e, sessionId)
+        onContextMenu(e, meta.sessionId)
       }}
       role="button"
       tabIndex={-1}
-      data-row={live?.ptyId ?? sessionId}
-      data-order={orderKey}
+      data-session={meta.sessionId}
     >
       <span className="sb-row-main">
         <span className="sb-row-title truncate">
-          {host ? 'Claude Agent View' : meta?.title}
+          {parkedOnly && live?.parkedJob?.name ? live.parkedJob.name : meta.title}
         </span>
-        {unlinked ? (
-          // Say plainly what this row is, in the slot a preview would occupy. Without this the row
-          // looks like an empty duplicate of a real conversation sitting in Recent — the two rows are
-          // a terminal whose transcript is unknown and a transcript whose terminal is unknown, and
-          // that only makes sense if the terminal admits it. A viewer says which of the two it is,
-          // since its missing transcript is by design rather than a failed match.
+        {parkedOnly ? (
+          // This terminal has no conversation of its own — what it produced went into the background
+          // agent named above. Without saying so the row reads as an empty, dead conversation while
+          // the user is actively working in it.
           <span className="sb-row-preview sb-row-unlinked truncate">
-            {host ? 'Terminal only — viewing background agents' : 'Terminal only — transcript not linked'}
+            Terminal only — work is in a background agent
           </span>
-        ) : meta?.preview ? (
+        ) : meta.preview ? (
           <span className="sb-row-preview truncate">{meta.preview}</span>
         ) : (
           // No preview (a just-spawned session has no transcript yet) — render a muted
           // placeholder so the row keeps the same height as ones that carry a preview.
           <span className="sb-row-preview sb-row-preview-empty truncate">
-            {meta?.messageCount === 0 ? 'No messages yet' : 'No preview'}
+            {meta.messageCount === 0 ? 'No messages yet' : 'No preview'}
           </span>
         )}
         <span className="sb-row-meta">
-          {!host && meta?.agent === 'claude' && meta.sessionKind === 'bg' ? (
+          {meta.agent === 'claude' && meta.sessionKind === 'bg' ? (
             <span
               className="sb-bg-agent-mark"
               data-tip="Claude Code background session"
@@ -132,47 +129,44 @@ function ConversationRowImpl({
               </span>
             </span>
           ) : (
-            <AgentLogo agent={host ? 'claude' : (meta?.agent ?? 'claude')} />
+            <AgentLogo agent={meta.agent} />
           )}
-          {host ? (
-            <span className="mono">terminal host</span>
-          ) : (
-            <>
-              <span className="mono" data-tip={absShort(meta?.lastActivityAt ?? meta?.mtime ?? 0)}>
-                {relTime(meta?.lastActivityAt ?? meta?.mtime ?? 0)}
-              </span>
-              <span className="sb-sep">·</span>
-              <span className="mono">{meta?.messageCount ?? 0} msg</span>
-            </>
-          )}
+          <span className="mono" data-tip={absShort(meta.lastActivityAt ?? meta.mtime)}>
+            {relTime(meta.lastActivityAt ?? meta.mtime)}
+          </span>
+          <span className="sb-sep">·</span>
+          <span className="mono">{meta.messageCount} msg</span>
           {showCwd && (
             <>
               <span className="sb-sep">·</span>
-              <span className="sb-row-cwd mono truncate" data-tip={meta?.cwd ?? live?.cwd ?? ''}>
-                {basename(meta?.cwd ?? live?.cwd ?? '')}
+              <span className="sb-row-cwd mono truncate" data-tip={meta.cwd}>
+                {basename(meta.cwd)}
               </span>
             </>
           )}
         </span>
       </span>
       <span className="sb-row-gutter">
-        {(live || meta?.bgRunning) && (
+        {(live || bgActive) && (
           <span
             ref={dotRef}
             className={`sb-dot ${dotClass}`}
-            // No data-tip, matching the other four states: hovering the gutter fades the dot out to
+            // No data-tip, matching the other markers: hovering the gutter fades the dot out to
             // reveal the ⋮ button, so a tooltip anchored here would point at an invisible element.
-            // The row's own preview line carries the explanation in visible text instead.
+            // The visible row uses the shared empty placeholder; this label preserves the exact
+            // unlinked meaning for assistive technology.
             aria-label={
-              unlinked
-                ? 'live terminal, transcript not linked'
-                : liveDotState === 'working'
-                  ? 'live, working'
-                  : liveDotState === 'asking'
-                    ? 'live, waiting for your reply'
-                    : liveDotState === 'quiet'
-                      ? 'live, idle'
-                      : 'live, finished — not yet seen'
+              parkedOnly
+                ? 'live terminal, work is in a background agent'
+                : unlinked
+                  ? 'live terminal, transcript not linked'
+                  : liveDotState === 'working'
+                    ? 'live, working'
+                    : liveDotState === 'asking'
+                      ? 'live, waiting for your reply'
+                      : liveDotState === 'quiet'
+                        ? 'live, idle'
+                        : 'live, finished — not yet seen'
             }
           />
         )}
@@ -182,7 +176,7 @@ function ConversationRowImpl({
           aria-haspopup="menu"
           onClick={(e) => {
             e.stopPropagation()
-            onOpenMenu?.(e, sessionId)
+            onOpenMenu?.(e, meta.sessionId)
           }}
         >
           <Dots size={15} />

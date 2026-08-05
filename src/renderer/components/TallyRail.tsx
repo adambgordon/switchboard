@@ -6,24 +6,17 @@ import { useRowReorder } from '../lib/useRowReorder'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
+import { isUnlinkedRow } from '../lib/rowIdentity'
 import NewConversationMenu from './NewConversationMenu'
 import { Chevron, Close, Plus, Search, Pin, Info, Stop, Play } from './icons'
 
 /** One row in the pane: a conversation that may be live, pinned, both, or neither. */
 export interface RailEntry {
-  /** Stable render/FLIP identity: ptyId while live, sessionId otherwise. */
-  rowKey: string
-  /** Section-specific drag identity: pinned sessionId or live ptyId. */
-  orderKey: string
   sessionId: string
   /** The live process, when this conversation is currently running. */
   pty: PtyState | null
   /** Display metadata — indexed, or synthesized from the live process if not yet on disk. */
-  meta: ConversationMeta | null
-  /** This row's process/action targets Claude Agent View, whether attached, at its host, or controller-owned. */
-  agentView: boolean
-  /** Terminal-only Claude Agent View host; never enters conversation-keyed actions or stores. */
-  host: boolean
+  meta: ConversationMeta
   pinned: boolean
   /** Resolved liveness (working / asking / awaiting / quiet); null when not live. */
   liveState: LiveState | null
@@ -115,7 +108,7 @@ interface Props {
   onToggleUnread: (id: string) => void
   /** Option+click a live row — always mark it unread (never toggles). */
   onMarkUnread: (id: string) => void
-  /** Resume a not-live conversation, or return a controller-owned transcript to its Agent View. */
+  /** Resume a not-live conversation from its right-click menu (spawns + focuses its terminal). */
   onResumeSession: (id: string) => void
   /** Stop (kill) a live session from its right-click menu. No-op on a not-live row. */
   onStopSession: (id: string) => void
@@ -224,15 +217,7 @@ export default function TallyRail({
   // Glide rows that change position (pinned / resumed / unpinned) to their new section instead of
   // teleporting. orderSig (the visible ids, in order) drives a slide; controlSig (search query +
   // collapse + show-more) marks a layout change we deliberately keep instant — see useRailFlip.
-  const orderSig = rendered.flatMap((r) => r.shown.map((e) => e.rowKey)).join('|')
-  const menuSig = rendered
-    .flatMap((r) =>
-      r.shown.map(
-        (e) =>
-          `${e.sessionId}:${e.pty?.ptyId ?? ''}:${e.host ? 1 : 0}:${e.pty?.provisional ? 1 : 0}:${e.agentView ? 1 : 0}:${e.pinned ? 1 : 0}:${e.liveState ?? ''}`
-      )
-    )
-    .join('|')
+  const orderSig = rendered.flatMap((r) => r.shown.map((e) => e.sessionId)).join('|')
   const controlSig = JSON.stringify([query, [...expandedSections].sort(), collapsedSections, reorderTick])
   useRailFlip(listRef, orderSig, controlSig)
 
@@ -257,13 +242,13 @@ export default function TallyRail({
     enabled: !searching,
     order: pinnedOrder,
     onReorder: onReorderPins,
-    selector: '.sb-row.pinned[data-order]'
+    selector: '.sb-row.pinned[data-session]'
   })
   useRowReorder(listRef, {
     enabled: !searching,
     order: liveOrder,
     onReorder: onReorderLive,
-    selector: '.sb-row.live:not(.pinned)[data-order]'
+    selector: '.sb-row.live:not(.pinned)[data-session]'
   })
 
   // Row actions menu, on any row (live or not): Pin/Unpin, plus — live — mark read/unread + Stop, or —
@@ -278,32 +263,20 @@ export default function TallyRail({
     live: boolean
     unread: boolean
     pinned: boolean
-    agentView: boolean
-    host: boolean
     unlinked: boolean
   } | null>(null)
   const menuStateFor = (
     id: string
-  ): {
-    live: boolean
-    unread: boolean
-    pinned: boolean
-    agentView: boolean
-    host: boolean
-    unlinked: boolean
-  } | null => {
+  ): { live: boolean; unread: boolean; pinned: boolean; unlinked: boolean } | null => {
     const entry = entryById(id)
     if (!entry) return null
     return {
       live: !!entry.pty,
       unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
       pinned: entry.pinned,
-      agentView: entry.agentView,
-      host: entry.host,
-      // Pin, read state, and session details are all keyed to a conversation. A viewer has none, and
-      // an unbound terminal's key is a placeholder that may never become one — so for both, those
-      // items would silently do nothing. Hide them rather than offer a no-op.
-      unlinked: entry.host || entry.pty?.provisional === true
+      // Pin, read state, and session details are all keyed to a conversation this row does not have,
+      // so they would silently do nothing. Hide them rather than offer a no-op.
+      unlinked: isUnlinkedRow(entry.pty, entry.meta)
     }
   }
   // `closing` drives the fade-out: the menu stays mounted with a `.closing` class for one fade, then
@@ -345,21 +318,6 @@ export default function TallyRail({
     setCtxMenu(data)
     armAutoClose()
   }
-  useEffect(() => {
-    if (!ctxMenu) return
-    const current = menuStateFor(ctxMenu.id)
-    if (
-      !current ||
-      current.live !== ctxMenu.live ||
-      current.unread !== ctxMenu.unread ||
-      current.pinned !== ctxMenu.pinned ||
-      current.agentView !== ctxMenu.agentView ||
-      current.host !== ctxMenu.host ||
-      current.unlinked !== ctxMenu.unlinked
-    ) {
-      closeMenu()
-    }
-  }, [menuSig, ctxMenu?.id])
   // Right-click / two-finger: open at the cursor.
   const openRowMenu = (e: MouseEvent, id: string): void => {
     const s = menuStateFor(id)
@@ -521,11 +479,8 @@ export default function TallyRail({
                 </div>
                 {shown.map((entry) => (
                   <ConversationRow
-                    key={entry.rowKey}
-                    sessionId={entry.sessionId}
-                    orderKey={entry.orderKey}
+                    key={entry.sessionId}
                     meta={entry.meta}
-                    host={entry.host}
                     selected={entry.sessionId === selectedSessionId}
                     live={entry.pty}
                     liveState={entry.liveState}
@@ -594,8 +549,8 @@ export default function TallyRail({
               <span>Session details…</span>
             </button>
           )}
-          {/* The session action sits at the bottom behind a divider — Stop when live, Resume when
-              stopped, or Go to Agent View when this transcript owns that transport. */}
+          {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**
+              (not-live) — so the two always occupy the same slot. Separated from the benign items above. */}
           {!ctxMenu.unlinked && <div className="sb-ctxmenu-sep" />}
           {ctxMenu.live ? (
             <button
@@ -606,7 +561,7 @@ export default function TallyRail({
               }}
             >
               <Stop size={14} />
-              <span>{ctxMenu.agentView ? 'Stop Agent View' : 'Stop session'}</span>
+              <span>Stop session</span>
             </button>
           ) : (
             <button
@@ -617,7 +572,7 @@ export default function TallyRail({
               }}
             >
               <Play size={14} />
-              <span>{ctxMenu.agentView ? 'Go to Agent View' : 'Resume'}</span>
+              <span>Resume</span>
             </button>
           )}
         </div>

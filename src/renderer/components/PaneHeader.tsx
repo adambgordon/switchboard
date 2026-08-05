@@ -11,8 +11,6 @@ interface Props {
   cwd: string
   meta: ConversationMeta | null
   pty: PtyState | null
-  agentViewHost: boolean
-  agentViewController: boolean
   view: View
   pinned: boolean
   onTogglePin: () => void
@@ -42,8 +40,6 @@ export default function PaneHeader({
   cwd,
   meta,
   pty,
-  agentViewHost,
-  agentViewController,
   view,
   pinned,
   onTogglePin,
@@ -56,32 +52,21 @@ export default function PaneHeader({
 }: Props) {
   const live = !!pty
   const agent = meta?.agent ?? pty?.agent ?? null
-  const agentViewTransport = pty?.surface.kind === 'agent-view-host'
 
   return (
     <header className="sb-pane-header">
       <div className="sb-pane-id">
-        {agentViewHost ? (
-          <span className="sb-pane-title truncate">{title}</span>
-        ) : (
-          <button
-            type="button"
-            className="sb-pane-title sb-pane-title-btn truncate"
-            aria-label={`Conversation info: ${title}`}
-            onClick={onShowInfo}
-          >
-            {title}
-          </button>
-        )}
+        <button
+          type="button"
+          className="sb-pane-title sb-pane-title-btn truncate"
+          aria-label={`Conversation info: ${title}`}
+          onClick={onShowInfo}
+        >
+          {title}
+        </button>
         <div className="sb-pane-meta mono">
           {agent && <AgentLogo agent={agent} size={13} />}
-          {agentViewHost ? (
-            <>
-              <span>terminal host</span>
-              <span className="sb-sep">·</span>
-              <span className="sb-pane-cwd truncate">{cwd || '—'}</span>
-            </>
-          ) : meta ? (
+          {meta ? (
             <>
               <span data-tip={absShort(meta.lastActivityAt ?? meta.mtime)}>
                 {relTime(meta.lastActivityAt ?? meta.mtime)}
@@ -111,7 +96,7 @@ export default function PaneHeader({
         </div>
       </div>
 
-      {find.open && !agentViewHost && (
+      {find.open && (
         <TranscriptSearch
           query={find.query}
           focusReq={find.focusReq}
@@ -127,7 +112,7 @@ export default function PaneHeader({
       <div className="sb-pane-actions">
         {/* The magnifier opens find; once open it's hidden — the find bar's own ✕ closes it, sitting
             roughly where the magnifier was, so the two never both show. */}
-        {!agentViewHost && !find.open && (
+        {!find.open && (
           <button
             className="sb-pane-find"
             onClick={find.onToggle}
@@ -137,29 +122,25 @@ export default function PaneHeader({
             <Search size={13} />
           </button>
         )}
-        {!agentViewHost && (
-          <button
-            className={`sb-pane-pin${pinned ? ' pinned' : ''}`}
-            onClick={onTogglePin}
-            data-tip={pinned ? 'Unpin conversation' : 'Pin conversation'}
-            aria-label={pinned ? 'Unpin conversation' : 'Pin conversation'}
-            aria-pressed={pinned}
-          >
-            <Pin size={13} filled={pinned} />
-          </button>
-        )}
+        <button
+          className={`sb-pane-pin${pinned ? ' pinned' : ''}`}
+          onClick={onTogglePin}
+          data-tip={pinned ? 'Unpin conversation' : 'Pin conversation'}
+          aria-label={pinned ? 'Unpin conversation' : 'Pin conversation'}
+          aria-pressed={pinned}
+        >
+          <Pin size={13} filled={pinned} />
+        </button>
         {live ? (
           <>
             <div className="sb-seg" role="tablist">
-              {!agentViewHost && (
-                <button
-                  className={`sb-seg-btn${view === 'transcript' ? ' active' : ''}`}
-                  onClick={onShowHistory}
-                >
-                  <TranscriptIcon size={13} />
-                  Formatted
-                </button>
-              )}
+              <button
+                className={`sb-seg-btn${view === 'transcript' ? ' active' : ''}`}
+                onClick={onShowHistory}
+              >
+                <TranscriptIcon size={13} />
+                Formatted
+              </button>
               <button
                 className={`sb-seg-btn${view === 'terminal' ? ' active' : ''}`}
                 onClick={onGoLive}
@@ -170,23 +151,15 @@ export default function PaneHeader({
                 Terminal
               </button>
             </div>
-            <button
-              className="sb-btn-ghost danger"
-              onClick={onKill}
-              data-tip={agentViewTransport ? 'Stop Agent View' : 'Stop session'}
-            >
+            <button className="sb-btn-ghost danger" onClick={onKill} data-tip="Stop session">
               <Stop size={12} />
-              {agentViewTransport ? 'Stop Agent View' : 'Stop'}
+              Stop
             </button>
           </>
         ) : (
-          <button
-            className="sb-btn-resume"
-            onClick={onResume}
-            data-tip={agentViewController ? 'Go to Agent View (⏎)' : 'Resume session (⏎)'}
-          >
+          <button className="sb-btn-resume" onClick={onResume} data-tip="Resume session (⏎)">
             <Play size={12} />
-            {agentViewController ? 'Go to Agent View' : 'Resume'}
+            Resume
           </button>
         )}
       </div>

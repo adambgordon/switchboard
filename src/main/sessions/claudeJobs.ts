@@ -91,6 +91,23 @@ export function readRunningBgJobs(root: string = defaultClaudeJobsRoot()): Runni
 }
 
 /**
+ * A background agent's own name, whatever its lifecycle state. Used to label a terminal whose work
+ * went into that agent instead of into its own transcript, so the row can say what is running rather
+ * than just that something is.
+ */
+export function readBgJobName(shortId: string, root: string = defaultClaudeJobsRoot()): string {
+  if (!SHORT_ID.test(shortId)) return ''
+  try {
+    const raw = JSON.parse(
+      readFileSync(path.join(root, shortId, 'state.json'), 'utf8')
+    ) as Record<string, unknown>
+    return typeof raw.name === 'string' ? raw.name.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
  * The running job driving this conversation, if any.
  *
  * Matches on the full `sessionId` from state.json, falling back to the folder's short id as a prefix

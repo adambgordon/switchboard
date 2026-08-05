@@ -19,16 +19,8 @@ import { useUpdates } from './lib/useUpdates'
 import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
-import {
-  conversationIdForPty,
-  hasProvenConversation,
-  isAgentViewSurfaceKey,
-  isAgentViewHost,
-  liveStartedAtForPty,
-  shouldFollowPtySurfaceChange,
-  surfaceKeyForPty
-} from './lib/ptySurface'
 import { currentInputRequestedAt, resolveLiveState, isManualUnread } from './lib/liveness'
+import { isUnlinkedRow } from './lib/rowIdentity'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
 import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
@@ -41,19 +33,13 @@ import AppVeil from './components/AppVeil'
 
 type View = 'transcript' | 'terminal'
 
-interface FindPriorView {
-  sessionId: string
-  rememberedView: View | undefined
-  followedPtyId: string | null
-}
-
 /** Recent section: rows shown in 'recent' mode before toggling to 'all'. */
 const RECENT_CAP = 30
 
 /** Display-only meta for a live session the index hasn't caught yet (no preview until its JSONL is written). */
-function synthMeta(p: PtyState, sessionId: string): ConversationMeta {
+function synthMeta(p: PtyState): ConversationMeta {
   return {
-    sessionId,
+    sessionId: p.sessionId,
     agent: p.agent,
     cwd: p.cwd,
     title: p.title,
@@ -94,13 +80,7 @@ export default function App() {
   // order it makes Live rows drag-reorderable AND immune to any activity-driven re-sort: a row holds
   // its slot until you drag it. Every newly-live session (new or resumed) lands on top.
   const liveUnpinnedIds = useMemo(
-    () =>
-      ptys.active
-        .filter((p) => {
-          const sessionId = conversationIdForPty(p)
-          return sessionId == null || !pinned.has(sessionId)
-        })
-        .map((p) => p.ptyId),
+    () => ptys.active.filter((p) => !pinned.has(p.sessionId)).map((p) => p.sessionId),
     [ptys.active, pinned]
   )
   const { order: liveOrder, reorder: reorderLive } = useLiveOrder(liveUnpinnedIds)
@@ -147,7 +127,7 @@ export default function App() {
   } = useLayout()
   const dragStartRef = useRef(0)
 
-  const { selectedId, open, follow, forget, home, back, forward, rekey: rekeyNav } = useNavHistory()
+  const { selectedId, open, home, back, forward, rekey: rekeyNav } = useNavHistory()
   // Session-targeted focus request, bumped whenever you land on a conversation (a click, ⌥⌘↑/↓
   // switch, Enter, resume, new, go-live) — the main pane always takes the keyboard. A per-session
   // focusReq lets MainPane route focus to the right surface (a live terminal, else the Formatted
@@ -160,11 +140,6 @@ export default function App() {
   // Per-conversation view memory (Formatted vs Terminal). The choice sticks per
   // session, so leaving and returning to a live conversation restores its view.
   const [viewBySession, setViewBySession] = useState<Record<string, View>>({})
-  // Automatic Agent View surface changes keep the already-visible terminal on screen without
-  // overwriting B/C's remembered Formatted/Terminal choice. Any deliberate navigation or view
-  // toggle clears this transient override.
-  const [followedPtyId, setFollowedPtyId] = useState<string | null>(null)
-  const priorSurfaceByPtyRef = useRef(new Map<string, string>())
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -188,25 +163,7 @@ export default function App() {
   const [findFocusReq, setFindFocusReq] = useState(0)
   // If find opens over a live Terminal and we auto-switch to Formatted to search, remember the
   // prior view so closing find restores it.
-  const findPriorViewRef = useRef<FindPriorView | null>(null)
-
-  const restoreFindPriorView = useCallback((): FindPriorView | null => {
-    const prior = findPriorViewRef.current
-    findPriorViewRef.current = null
-    if (!prior) return null
-    setViewBySession((prev) => {
-      if (prior.rememberedView == null) {
-        if (!(prior.sessionId in prev)) return prev
-        const next = { ...prev }
-        delete next[prior.sessionId]
-        return next
-      }
-      return prev[prior.sessionId] === prior.rememberedView
-        ? prev
-        : { ...prev, [prior.sessionId]: prior.rememberedView }
-    })
-    return prior
-  }, [])
+  const findPriorViewRef = useRef<View | null>(null)
 
   // Begin buffering PTY output immediately, before any session is spawned.
   useEffect(() => {
@@ -233,63 +190,6 @@ export default function App() {
     })
     return off
   }, [rekeyNav, rekeySeen, requestFocus])
-
-  // A Claude Agent View controller can move A → host → B → host → C while the transport stays the
-  // same. Follow only when that exact PTY surface is selected; never steal selection from another
-  // row, and never rewrite conversation history/seen/view state like Codex provisional binding does.
-  useEffect(() => {
-    const previous = priorSurfaceByPtyRef.current
-    const current = new Map<string, string>()
-    for (const pty of ptys.active) {
-      const nextKey = surfaceKeyForPty(pty)
-      const priorKey = previous.get(pty.ptyId)
-      current.set(pty.ptyId, nextKey)
-      const priorWasTerminal =
-        priorKey != null &&
-        (isAgentViewSurfaceKey(priorKey) ||
-          followedPtyId === pty.ptyId ||
-          viewBySession[priorKey] !== 'transcript')
-      const priorWasFilelessController =
-        priorKey != null &&
-        pty.surface.kind === 'agent-view-host' &&
-        priorKey === pty.surface.controllerSessionId &&
-        !groups.some((group) =>
-          group.conversations.some((conversation) => conversation.sessionId === priorKey)
-        )
-      // A controller with no transcript was only a launch identity, never a conversation. Remove
-      // it even when its empty Formatted surface was selected; `forget` returns that case Home.
-      if (priorWasFilelessController) forget(priorKey)
-      if (shouldFollowPtySurfaceChange(priorKey, nextKey, selectedId, priorWasTerminal)) {
-        follow(nextKey)
-        setFollowedPtyId(pty.ptyId)
-        if (isAgentViewHost(pty)) {
-          setFindOpen(false)
-          restoreFindPriorView()
-        }
-        requestFocus(nextKey)
-      }
-    }
-    for (const [ptyId, priorKey] of previous) {
-      if (!current.has(ptyId) && selectedId === priorKey && isAgentViewSurfaceKey(priorKey)) {
-        setFindOpen(false)
-        restoreFindPriorView()
-        setFollowedPtyId(null)
-        home()
-      }
-    }
-    priorSurfaceByPtyRef.current = current
-  }, [
-    ptys.active,
-    selectedId,
-    followedPtyId,
-    viewBySession,
-    groups,
-    follow,
-    forget,
-    home,
-    requestFocus,
-    restoreFindPriorView
-  ])
 
   // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
   // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of
@@ -366,56 +266,47 @@ export default function App() {
   //   3. Recent — everything else (not live, not pinned), most-recent first.
   // When a search is active, each section is filtered to the matching sessions.
   const railSections = useMemo<RailSection[]>(() => {
-    // Resolve a row's liveness. Null for a PROVISIONAL PTY, whose conversation identity was never
-    // proven: liveness is read off the transcript, and for an unlinked terminal there is no
-    // transcript known to be its, so any state resolved here would describe some other conversation.
-    // It renders a neutral terminal-only marker instead.
+    // Resolve a live row's liveness; null for rows with no live process — and null for a PROVISIONAL
+    // one, whose conversation identity was never proven. Liveness is read off the transcript, so for
+    // an unlinked terminal there is no transcript that is known to be its: any state resolved here
+    // would describe some other conversation. It shares the hollow nothing-unread marker with
+    // `quiet`, while remaining a distinct unlinked state in behavior and the Live tally.
     //
-    // A running background job resolves too, with NO PTY: Claude's daemon owns it, so it is alive
-    // without Switchboard holding a terminal. Its liveness comes from the same transcript read, with
-    // the job's own start time standing in for a process spawn.
+    // A background job resolves too, with NO PTY: Claude's daemon owns it, so it is alive without
+    // Switchboard holding a terminal. Same transcript read, with the job's own start time standing in
+    // for a process spawn. ConversationRow shows a dot for it only while work is happening.
     const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null => {
-      if (hasProvenConversation(pty) && pty) {
-        return resolveLiveState(
-          meta,
-          seen[id] ?? 0,
-          focused && selectedId === id,
-          isManualUnread(unread[id], meta),
-          liveStartedAtForPty(pty),
-          pty.inputRequestedAt
-        )
+      if (pty) {
+        return pty.provisional
+          ? null
+          : resolveLiveState(
+              meta,
+              seen[id] ?? 0,
+              focused && selectedId === id,
+              isManualUnread(unread[id], meta),
+              pty.startedAt,
+              pty.inputRequestedAt
+            )
       }
-      if (!pty && meta?.bgRunning) {
-        return resolveLiveState(
-          meta,
-          seen[id] ?? 0,
-          focused && selectedId === id,
-          isManualUnread(unread[id], meta),
-          meta.bgStartedAt ?? null
-        )
-      }
-      return null
+      return meta?.bgRunning
+        ? resolveLiveState(
+            meta,
+            seen[id] ?? 0,
+            focused && selectedId === id,
+            isManualUnread(unread[id], meta),
+            meta.bgStartedAt ?? null
+          )
+        : null
     }
 
     const pinnedEntries: RailEntry[] = pinnedOrder
-      .map((id): RailEntry | null => {
+      .map((id) => {
         const pty = ptys.bySession.get(id) ?? null
         // Prefer indexed meta; fall back to the live process so a pinned-but-
         // unindexed session still renders a full row. Drop truly stale pins.
-        const meta = metaById.get(id) ?? (pty ? synthMeta(pty, id) : null)
+        const meta = metaById.get(id) ?? (pty ? synthMeta(pty) : null)
         return meta
-          ? {
-              rowKey: pty?.ptyId ?? id,
-              orderKey: id,
-              sessionId: id,
-              pty,
-              meta,
-              agentView:
-                pty?.surface.kind === 'agent-view-host' || ptys.byController.has(id),
-              host: false,
-              pinned: true,
-              liveState: stateFor(pty, meta, id)
-            }
+          ? { sessionId: id, pty, meta, pinned: true, liveState: stateFor(pty, meta, id) }
           : null
       })
       .filter((e): e is RailEntry => e !== null)
@@ -425,42 +316,25 @@ export default function App() {
     // defensive against the one-frame window before useLiveOrder's sync prunes a just-pinned /
     // just-ended id from the order.
     const liveEntries: RailEntry[] = liveOrder
-      .map((ptyId): RailEntry | null => {
-        const pty = ptys.byPtyId.get(ptyId)
-        if (!pty) return null
-        const conversationId = conversationIdForPty(pty)
-        if (conversationId && pinned.has(conversationId)) return null
-        const sessionId = surfaceKeyForPty(pty)
-        const meta = conversationId
-          ? metaById.get(conversationId) ?? synthMeta(pty, conversationId)
-          : null
-        return {
-          rowKey: pty.ptyId,
-          orderKey: pty.ptyId,
-          sessionId,
-          pty,
-          meta,
-          agentView: pty.surface.kind === 'agent-view-host',
-          host: conversationId == null,
-          pinned: false,
-          liveState: meta ? stateFor(pty, meta, conversationId!) : 'quiet'
-        }
+      .map((id): RailEntry | null => {
+        const pty = ptys.bySession.get(id)
+        if (!pty || pinned.has(id)) return null
+        const meta = metaById.get(id) ?? synthMeta(pty)
+        return { sessionId: id, pty, meta, pinned: false, liveState: stateFor(pty, meta, id) }
       })
       .filter((e): e is RailEntry => e !== null)
 
     const recentEntries: RailEntry[] = allConversations
       .filter((c) => !pinned.has(c.sessionId) && !ptys.bySession.has(c.sessionId))
       .sort((a, b) => b.mtime - a.mtime)
+      // liveState is resolved even here: a running Claude background job is alive with no PTY, so
+      // Recent is exactly where it lands.
       .map((c) => ({
-        rowKey: c.sessionId,
-        orderKey: c.sessionId,
         sessionId: c.sessionId,
         pty: null,
         meta: c,
-        agentView: ptys.byController.has(c.sessionId),
-        host: false,
         pinned: false,
-        liveState: null
+        liveState: stateFor(null, c, c.sessionId)
       }))
 
     const all: RailSection[] = [
@@ -472,21 +346,7 @@ export default function App() {
       ? all.map((s) => ({ ...s, entries: s.entries.filter((e) => matchIds.has(e.sessionId)) }))
       : all
     return scoped.filter((s) => s.entries.length > 0)
-  }, [
-    pinned,
-    pinnedOrder,
-    liveOrder,
-    metaById,
-    ptys.bySession,
-    ptys.byPtyId,
-    ptys.byController,
-    allConversations,
-    matchIds,
-    seen,
-    unread,
-    selectedId,
-    focused
-  ])
+  }, [pinned, pinnedOrder, liveOrder, metaById, ptys.bySession, allConversations, matchIds, seen, unread, selectedId, focused])
 
   // Live-session tally over ALL live sessions — never the search-filtered rail set, so the rail's
   // count + status line reflect everything running even while a query narrows the visible rows.
@@ -500,21 +360,20 @@ export default function App() {
     // Terminals with no proven conversation identity get their OWN count rather than being folded
     // into `idle`. Calling an unlinked terminal idle would be a claim about a conversation we can't
     // identify — and "1 idle" over a terminal the user is actively typing in is exactly the kind of
-    // wrong-dot report this work exists to fix.
+    // wrong-dot report this work exists to fix. Sharing the hollow visual does not fold it into idle.
     let unlinked = 0
     for (const p of ptys.active) {
-      const sessionId = hasProvenConversation(p) ? conversationIdForPty(p) : null
-      if (!sessionId) {
+      const meta = metaById.get(p.sessionId) ?? synthMeta(p)
+      if (isUnlinkedRow(p, meta)) {
         unlinked++
         continue
       }
-      const meta = metaById.get(sessionId) ?? synthMeta(p, sessionId)
       const st = resolveLiveState(
         meta,
-        seen[sessionId] ?? 0,
-        focused && selectedId === sessionId,
-        isManualUnread(unread[sessionId], meta),
-        liveStartedAtForPty(p),
+        seen[p.sessionId] ?? 0,
+        focused && selectedId === p.sessionId,
+        isManualUnread(unread[p.sessionId], meta),
+        p.startedAt,
         p.inputRequestedAt
       )
       if (st === 'working') working++
@@ -543,34 +402,22 @@ export default function App() {
   )
 
   const selectedMeta = selectedId ? metaById.get(selectedId) ?? null : null
-  const selectedPty = selectedId ? ptys.bySurface.get(selectedId) ?? null : null
-  const selectedHost = isAgentViewHost(selectedPty)
-  const selectedController = !!selectedId && ptys.byController.has(selectedId)
-  // Only a proven conversation can be waiting on input; a viewer has no turn of its own to be
-  // blocked on, and an unbound terminal's notifications belong to a conversation we can't name.
-  const selectedInputRequestedAt =
-    selectedId && hasProvenConversation(selectedPty) && selectedPty
-      ? currentInputRequestedAt(
-          selectedMeta ?? synthMeta(selectedPty, selectedId),
-          selectedPty.inputRequestedAt
-        )
-      : null
+  const selectedPty = selectedId ? ptys.bySession.get(selectedId) ?? null : null
+  const selectedInputRequestedAt = selectedPty
+    ? currentInputRequestedAt(selectedMeta ?? synthMeta(selectedPty), selectedPty.inputRequestedAt)
+    : null
 
   // Looking at a conversation (selected + focused) marks it read: it advances the seen marker
   // AND clears any manual-unread override — so selecting/clicking a conversation (or a turn
   // finishing under your eyes) drops the dot to quiet. Re-fires when a new turn lands.
   useEffect(() => {
-    // Guarded on meta, not just selectedId: a viewer's row key is a synthetic `agent-view:` id, and
-    // marking that read would persist a seen entry against a conversation that does not exist.
-    if (selectedMeta && focused) markRead(selectedMeta.sessionId)
+    if (selectedId && focused) markRead(selectedId)
   }, [selectedId, focused, selectedMeta?.turnEndedAt, selectedInputRequestedAt, markRead])
 
   // The view this conversation last had. A never-opened live session defaults to Terminal; everything
   // else defaults to Formatted. Terminal only applies while live, otherwise fall back to the transcript.
   const requestedView: View = selectedId
-    ? selectedHost || (selectedPty && followedPtyId === selectedPty.ptyId)
-      ? 'terminal'
-      : viewBySession[selectedId] ?? (selectedPty ? 'terminal' : 'transcript')
+    ? viewBySession[selectedId] ?? (selectedPty ? 'terminal' : 'transcript')
     : 'transcript'
   const effectiveView: View = requestedView === 'terminal' && selectedPty ? 'terminal' : 'transcript'
   const { transcript, loading: tLoading } = useTranscript(selectedId, effectiveView === 'transcript')
@@ -634,41 +481,19 @@ export default function App() {
   // Every landing on a conversation (click / ⌥⌘↑/↓ switch / Enter / resume / new) goes through
   // useNavHistory's `open`, which records a back/forward stop.
   const resume = useCallback(async (meta: ConversationMeta) => {
-    // A non-empty find query can force any Terminal surface back to Formatted. Clear it before an
-    // explicit Resume / Go to Agent View action so the destination stays on the requested terminal.
-    setFindOpen(false)
-    restoreFindPriorView()
-    setFollowedPtyId(null)
     open(meta.sessionId)
     setSessionView(meta.sessionId, 'terminal')
-    const controllerPty = ptys.byController.get(meta.sessionId)
-    if (controllerPty) {
-      const actualKey = surfaceKeyForPty(controllerPty)
-      follow(actualKey)
-      setFollowedPtyId(controllerPty.ptyId)
-      requestFocus(actualKey)
-      return
-    }
     requestFocus(meta.sessionId)
-    const st = await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
-    const actualKey = surfaceKeyForPty(st)
-    if (actualKey !== meta.sessionId) {
-      follow(actualKey)
-      setFollowedPtyId(st.ptyId)
-      requestFocus(actualKey)
-    }
-  }, [open, follow, requestFocus, restoreFindPriorView, setSessionView, ptys.byController])
+    await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
+  }, [open, requestFocus, setSessionView])
 
   const startNew = useCallback(async (cwd: string, agent: AgentKind) => {
     setMenuOpen(false)
     setLastAgent(agent) // starting an agent makes it the sticky menu default too
     const st = await window.api.startNew(cwd, agent)
-    const sessionId = conversationIdForPty(st)
-    if (!sessionId) throw new Error('New session did not start on a conversation surface')
-    setFollowedPtyId(null)
-    open(sessionId)
-    setSessionView(sessionId, 'terminal')
-    requestFocus(sessionId)
+    open(st.sessionId)
+    setSessionView(st.sessionId, 'terminal')
+    requestFocus(st.sessionId)
   }, [open, requestFocus, setSessionView])
 
   const pickOther = useCallback(
@@ -720,15 +545,10 @@ export default function App() {
 
   const goLive = useCallback(() => {
     if (selectedId) {
-      if (selectedHost) {
-        requestFocus(selectedId)
-        return
-      }
-      setFollowedPtyId(null)
       setSessionView(selectedId, 'terminal')
       requestFocus(selectedId)
     }
-  }, [selectedId, selectedHost, requestFocus, setSessionView])
+  }, [selectedId, requestFocus, setSessionView])
   // Enter/focus a live conversation's terminal: record a history stop, switch to the Terminal
   // view, and hand it the keyboard so you can type immediately. The optional `id` lets a switch /
   // click target a row that isn't selected yet; with no arg it acts on `selectedId`. Shared by
@@ -737,7 +557,6 @@ export default function App() {
   const enterLive = useCallback((id?: string) => {
     const target = id ?? selectedId
     if (!target) return
-    setFollowedPtyId(null)
     open(target)
     setSessionView(target, 'terminal')
     requestFocus(target)
@@ -746,9 +565,7 @@ export default function App() {
   // yet defaults to Terminal; explicit actions (Resume / New / Enter / Go live) still force Terminal.
   const openRemembered = useCallback(
     (id: string) => {
-      setFollowedPtyId(null)
-      if (isAgentViewHost(ptys.bySurface.get(id))) follow(id)
-      else open(id)
+      open(id)
       requestFocus(id)
       if (!ptys.bySession.has(id) || viewBySession[id] === 'transcript') {
         // Land focus synchronously while the cached/new transcript is resolving; TranscriptView
@@ -756,27 +573,24 @@ export default function App() {
         paneRef.current?.focus({ preventScroll: true })
       }
     },
-    [open, follow, requestFocus, ptys.bySession, ptys.bySurface, viewBySession]
+    [open, requestFocus, ptys.bySession, viewBySession]
   )
   const clickLive = useCallback((id: string) => openRemembered(id), [openRemembered])
   const clickConversation = useCallback((id: string) => openRemembered(id), [openRemembered])
   const switchTo = useCallback((id: string) => openRemembered(id), [openRemembered])
   const showHistory = useCallback(() => {
-    if (selectedId && !selectedHost) {
-      setFollowedPtyId(null)
-      setSessionView(selectedId, 'transcript')
-    }
-  }, [selectedId, selectedHost, setSessionView])
+    if (selectedId) setSessionView(selectedId, 'transcript')
+  }, [selectedId, setSessionView])
   const killSession = useCallback((ptyId: string) => window.api.kill(ptyId), [])
   // Stop a session by its conversation id — the rail's right-click menu works in session ids, while
   // the PtyManager kills by ptyId, so resolve the live process first (mirrors the pane header's
   // onKill). A no-op if the conversation isn't live.
   const stopSession = useCallback(
     (id: string) => {
-      const pty = ptys.bySurface.get(id)
+      const pty = ptys.bySession.get(id)
       if (pty) killSession(pty.ptyId)
     },
-    [ptys.bySurface, killSession]
+    [ptys.bySession, killSession]
   )
   // Resume a not-live conversation by id — the rail's right-click menu works in session ids, so
   // resolve id→meta and run the shared resume() (which spawns the process and focuses its terminal,
@@ -804,14 +618,11 @@ export default function App() {
   // would also be marking a row that deliberately shows no read/unread state at all.
   const markUnreadGated = useCallback(
     (id: string) => {
-      // Looked up by SURFACE, not session: an Agent View viewer has no conversation id at all, so a
-      // bySession miss would read as "not provisional" and write an unread marker against a synthetic
-      // `agent-view:` key. Both it and an unbound terminal key their row off something that is not a
-      // conversation, and neither can carry a read state.
-      if (!hasProvenConversation(ptys.bySurface.get(id))) return
+      const pty = ptys.bySession.get(id) ?? null
+      if (pty && isUnlinkedRow(pty, metaById.get(id) ?? synthMeta(pty))) return
       markUnread(id)
     },
-    [ptys.bySurface, markUnread]
+    [ptys.bySession, metaById, markUnread]
   )
 
   // Open the conversation-info modal for a row/title. `edit` starts it in title-edit mode (the
@@ -851,14 +662,14 @@ export default function App() {
   const liveStateOf = useCallback(
     (id: string): LiveState | null => {
       const pty = ptys.bySession.get(id)
-      if (!hasProvenConversation(pty) || !pty) return null
-      const meta = metaById.get(id) ?? synthMeta(pty, id)
+      if (!pty || pty.provisional) return null
+      const meta = metaById.get(id) ?? synthMeta(pty)
       return resolveLiveState(
         meta,
         seen[id] ?? 0,
         focused && selectedId === id,
         isManualUnread(unread[id], meta),
-        liveStartedAtForPty(pty),
+        pty.startedAt,
         pty.inputRequestedAt
       )
     },
@@ -882,35 +693,25 @@ export default function App() {
   // or keystroke in the pane body (see MainPane's listener). Gated on an existing flag so plain
   // typing in the terminal doesn't churn state past the first keystroke.
   const onEngage = useCallback(() => {
-    if (selectedMeta && unread[selectedMeta.sessionId] != null) markRead(selectedMeta.sessionId)
-  }, [selectedMeta, unread, markRead])
+    if (selectedId && unread[selectedId] != null) markRead(selectedId)
+  }, [selectedId, unread, markRead])
 
   // Find-in-conversation searches the rendered transcript, so the first keystroke while a live
   // Terminal is showing switches to Formatted (remembering the prior view to restore on close).
   const onFindActivate = useCallback(() => {
     if (selectedId && effectiveView === 'terminal') {
-      findPriorViewRef.current = {
-        sessionId: selectedId,
-        rememberedView: viewBySession[selectedId],
-        followedPtyId:
-          selectedPty && followedPtyId === selectedPty.ptyId ? followedPtyId : null
-      }
-      setFollowedPtyId(null)
+      findPriorViewRef.current = 'terminal'
       setSessionView(selectedId, 'transcript')
     }
-  }, [selectedId, selectedPty, effectiveView, followedPtyId, viewBySession, setSessionView])
+  }, [selectedId, effectiveView, setSessionView])
 
   const closeFind = useCallback(() => {
     setFindOpen(false)
-    const prior = restoreFindPriorView()
-    if (
-      prior?.followedPtyId &&
-      prior.sessionId === selectedId &&
-      prior.followedPtyId === selectedPty?.ptyId
-    ) {
-      setFollowedPtyId(prior.followedPtyId)
-    }
-  }, [selectedId, selectedPty, restoreFindPriorView])
+    const prior = findPriorViewRef.current
+    findPriorViewRef.current = null
+    // Restore the live Terminal if find pulled us off it (and the session is still live).
+    if (prior === 'terminal' && selectedId && selectedPty) setSessionView(selectedId, 'terminal')
+  }, [selectedId, selectedPty, setSessionView])
 
   // The pane-header magnifier toggles find (closeFind restores the prior view on the way out).
   const toggleFind = useCallback(() => {
@@ -976,10 +777,8 @@ export default function App() {
           // Focus is in the main pane → find within the open conversation. Also bump the focus
           // request so ⌘F re-focuses the input even when the bar is already open (setFindOpen(true)
           // is a no-op then) — e.g. after clicking into the transcript to read it.
-          if (!selectedHost) {
-            setFindOpen(true)
-            setFindFocusReq((n) => n + 1)
-          }
+          setFindOpen(true)
+          setFindFocusReq((n) => n + 1)
         } else {
           // List / rail focus (or nothing open) → the existing cross-conversation search.
           setSearchOpen(true)
@@ -1050,7 +849,6 @@ export default function App() {
     selectedId,
     selectedMeta,
     selectedPty,
-    selectedHost,
     orderedIds,
     resume,
     enterLive,
@@ -1062,17 +860,14 @@ export default function App() {
     newConversation
   ])
 
-  const title = selectedHost
-    ? 'Claude Agent View'
-    : selectedMeta?.title ?? selectedPty?.title ?? 'Conversation'
+  const title = selectedMeta?.title ?? selectedPty?.title ?? 'Conversation'
   const cwd = selectedMeta?.cwd ?? selectedPty?.cwd ?? ''
 
   // Resolve the info-modal target's meta + live process. A live-but-unindexed session still resolves
   // via the synthesized meta, mirroring the rail.
   const infoPty = infoModal ? ptys.bySession.get(infoModal.sessionId) ?? null : null
   const infoMeta = infoModal
-    ? metaById.get(infoModal.sessionId) ??
-      (infoPty ? synthMeta(infoPty, infoModal.sessionId) : null)
+    ? metaById.get(infoModal.sessionId) ?? (infoPty ? synthMeta(infoPty) : null)
     : null
 
   return (
@@ -1148,15 +943,13 @@ export default function App() {
           cwd={cwd}
           meta={selectedMeta}
           pty={selectedPty}
-          agentViewHost={selectedHost}
-          agentViewController={selectedController}
           view={effectiveView}
           theme={themeResolved}
           focusReq={focusReq}
           transcript={transcript}
           transcriptLoading={tLoading}
           activePtys={ptys.active}
-          pinned={selectedMeta ? pinned.has(selectedMeta.sessionId) : false}
+          pinned={selectedId ? pinned.has(selectedId) : false}
           onTogglePin={() => {
             if (selectedId) togglePinGated(selectedId)
           }}
@@ -1208,7 +1001,6 @@ export default function App() {
         open={!!infoModal}
         meta={infoMeta}
         pty={infoPty}
-        liveStartedAt={infoPty ? liveStartedAtForPty(infoPty) : null}
         startInEdit={infoModal?.edit ?? false}
         onClose={() => setInfoModal(null)}
         onRename={(t) => {

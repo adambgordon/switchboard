@@ -1,27 +1,22 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
-import {
-  CONFIG,
-  type AgentKind,
-  type PtyState,
-  type PtyStatus,
-  type PtySurface
-} from '../../shared/types'
+import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
-import {
-  ClaudeAgentViewMonitor,
-  enterClaudeAgentView,
-  exitClaudeAgentView,
-  type ClaudeAgentViewMonitorOptions
-} from './claudeAgentView'
 import {
   resolveCodexBindings,
   type CodexBinding,
   type ProvisionalPty
 } from './codexIdentity'
 import { CodexInputNotificationScanner } from './codexInputNotifications'
+import {
+  ClaudeParkedJobMonitor,
+  type ClaudeParkedJobMonitorOptions,
+  type ParkedJob
+} from './claudeParkedJobs'
+
+type ParkedJobOptions = Omit<ClaudeParkedJobMonitorOptions, 'onChange'>
 
 /** The resolver seam, so tests can drive the orchestration without spawning `lsof`. */
 export type CodexBindingResolver = (
@@ -53,13 +48,10 @@ const PROBE_RETRY_INTERVAL_MS = 10_000
 
 interface Live {
   ptyId: string
-  surface: PtySurface
+  sessionId: string
   agent: AgentKind
   cwd: string
   title: string
-  // What this PTY shows when it is NOT in Agent View, kept so leaving Agent View restores it.
-  controllerCwd: string
-  controllerTitle: string
   origin: 'resume' | 'new'
   proc: pty.IPty
   status: PtyStatus
@@ -74,6 +66,9 @@ interface Live {
   // when the PTY exits). While set, the row is a terminal with no known transcript — the renderer
   // surfaces that rather than guessing, so this crosses IPC on PtyState.
   provisional: boolean
+  // [Claude] The background agent this session launched, once its registry marker is confirmed. Says
+  // nothing about what the terminal is currently showing — see claudeParkedJobs.
+  parkedJob: ParkedJob | null
   booted: boolean
   // Claude boots (the `claude` command is typed) only once the shell is ready AND the renderer
   // has sized the PTY to the real terminal dimensions. Booting before the resize makes claude
@@ -83,12 +78,6 @@ interface Live {
   sized: boolean
   bootWhenReady: () => void
   exitCode: number | null
-}
-
-type AgentViewOptions = Omit<ClaudeAgentViewMonitorOptions, 'onHost' | 'onExit'>
-
-function conversationId(surface: PtySurface): string | null {
-  return surface.kind === 'conversation' ? surface.sessionId : null
 }
 
 /**
@@ -108,7 +97,6 @@ function conversationId(surface: PtySurface): string | null {
  */
 export class PtyManager extends EventEmitter {
   private live = new Map<string, Live>()
-  private readonly agentView: ClaudeAgentViewMonitor | null
   /** Injected only by tests; production always observes the real OS. */
   private resolveBindings: CodexBindingResolver
   // Probe budget state. `probeSig` is the (provisional PTYs × eligible rollouts) state the current
@@ -118,22 +106,12 @@ export class PtyManager extends EventEmitter {
   private probeAttempts = 0
   private probeInFlight = false
   private lastProbeAt = 0
-  // The live-PTY cap (CONFIG.maxLivePtys is the default). User-configurable at runtime via
-  // setMaxLive, pushed from the renderer's Preferences over IPC.ptySetMaxLive. Read only at spawn
-  // time (enforceCap), never on the per-output hot path.
-  private maxLive: number = CONFIG.maxLivePtys
+  private readonly parkedJobs: ClaudeParkedJobMonitor | null
 
   constructor(
-    opts: { claudeAgentView?: AgentViewOptions; resolveBindings?: CodexBindingResolver } = {}
+    opts: { resolveBindings?: CodexBindingResolver; claudeParkedJobs?: ParkedJobOptions } = {}
   ) {
     super()
-    this.agentView = opts.claudeAgentView
-      ? new ClaudeAgentViewMonitor({
-          ...opts.claudeAgentView,
-          onHost: (ptyId) => this.enterAgentView(ptyId),
-          onExit: (ptyId) => this.exitAgentView(ptyId)
-        })
-      : null
     // Dev/QA: SWITCHBOARD_FAKE_UNBOUND=1 makes every probe prove nothing, so the fail-closed
     // terminal-only state can actually be looked at. It is otherwise rare by design — binding
     // normally succeeds — which would leave the one state that must NOT be mistaken for liveness as
@@ -141,7 +119,25 @@ export class PtyManager extends EventEmitter {
     const fakeUnbound = process.env.SWITCHBOARD_FAKE_UNBOUND === '1'
     this.resolveBindings =
       opts.resolveBindings ?? (fakeUnbound ? async () => [] : resolveCodexBindings)
+    this.parkedJobs = opts.claudeParkedJobs
+      ? new ClaudeParkedJobMonitor({
+          ...opts.claudeParkedJobs,
+          onChange: (ptyId, parked) => this.setParkedJob(ptyId, parked)
+        })
+      : null
   }
+
+  private setParkedJob(ptyId: string, parked: ParkedJob | null): void {
+    const entry = this.live.get(ptyId)
+    if (!entry) return
+    entry.parkedJob = parked
+    this.emitActive()
+  }
+
+  // The live-PTY cap (CONFIG.maxLivePtys is the default). User-configurable at runtime via
+  // setMaxLive, pushed from the renderer's Preferences over IPC.ptySetMaxLive. Read only at spawn
+  // time (enforceCap), never on the per-output hot path.
+  private maxLive: number = CONFIG.maxLivePtys
 
   /**
    * Update the live-PTY cap, clamped to the shared bounds (a bad value can't disable the cap or
@@ -231,7 +227,7 @@ export class PtyManager extends EventEmitter {
       }
     }
     this.live.clear()
-    this.agentView?.dispose()
+    this.parkedJobs?.dispose()
   }
 
   list(): PtyState[] {
@@ -241,12 +237,7 @@ export class PtyManager extends EventEmitter {
   /** Find a live PTY already driving a session, if any. */
   findBySession(sessionId: string): PtyState | null {
     for (const e of this.live.values()) {
-      if (
-        conversationId(e.surface) === sessionId ||
-        (e.surface.kind === 'agent-view-host' && e.surface.controllerSessionId === sessionId)
-      ) {
-        return this.toState(e)
-      }
+      if (e.sessionId === sessionId) return this.toState(e)
     }
     return null
   }
@@ -333,14 +324,10 @@ export class PtyManager extends EventEmitter {
   }
 
   /** Every sessionId a live PTY currently claims, including provisional placeholders — harmless,
-   *  since a placeholder is a random UUID that cannot collide with a real rollout id. A Claude PTY
-   *  sitting in Agent View claims none, which is what makes it safe to leave out. */
+   *  since a placeholder is a random UUID that cannot collide with a real rollout id. */
   private ownedSessionIds(): Set<string> {
     const ids = new Set<string>()
-    for (const e of this.live.values()) {
-      const id = conversationId(e.surface)
-      if (id) ids.add(id)
-    }
+    for (const e of this.live.values()) ids.add(e.sessionId)
     return ids
   }
 
@@ -376,13 +363,13 @@ export class PtyManager extends EventEmitter {
    *  `bound` event (so the renderer re-keys its session-keyed state) followed by `active-changed`. */
   private bindCodex(ptyId: string, realSessionId: string): void {
     const entry = this.live.get(ptyId)
-    if (!entry || !entry.provisional || entry.surface.kind !== 'conversation') return
+    if (!entry || !entry.provisional) return
     // Defensive: never bind onto an id another live PTY already owns.
     for (const e of this.live.values()) {
-      if (e.ptyId !== ptyId && conversationId(e.surface) === realSessionId) return
+      if (e.ptyId !== ptyId && e.sessionId === realSessionId) return
     }
-    const oldSessionId = entry.surface.sessionId
-    entry.surface = { kind: 'conversation', sessionId: realSessionId }
+    const oldSessionId = entry.sessionId
+    entry.sessionId = realSessionId
     entry.provisional = false
     this.emit('bound', ptyId, oldSessionId, realSessionId)
     this.emitActive()
@@ -421,12 +408,10 @@ export class PtyManager extends EventEmitter {
     const now = Date.now()
     const entry: Live = {
       ptyId,
-      surface: { kind: 'conversation', sessionId: o.sessionId },
+      sessionId: o.sessionId,
       agent: o.agent,
       cwd: o.cwd,
       title: o.title,
-      controllerCwd: o.cwd,
-      controllerTitle: o.title,
       origin: o.origin,
       proc,
       status: 'busy',
@@ -436,6 +421,7 @@ export class PtyManager extends EventEmitter {
       idleTimer: null,
       bootTimer: null,
       provisional: o.provisional ?? false,
+      parkedJob: null,
       booted: false,
       shellReady: false,
       sized: false,
@@ -443,7 +429,7 @@ export class PtyManager extends EventEmitter {
       exitCode: null
     }
     this.live.set(ptyId, entry)
-    if (o.agent === 'claude') this.agentView?.register(ptyId, o.sessionId)
+    if (o.agent === 'claude') this.parkedJobs?.register(ptyId, o.sessionId)
 
     const boot = (): void => {
       if (entry.booted) return
@@ -488,8 +474,8 @@ export class PtyManager extends EventEmitter {
       entry.exitCode = exitCode ?? 0
       if (entry.idleTimer) clearTimeout(entry.idleTimer)
       if (entry.bootTimer) clearTimeout(entry.bootTimer)
-      this.agentView?.unregister(ptyId)
       this.live.delete(ptyId)
+      this.parkedJobs?.unregister(ptyId)
       this.emit('exit', ptyId, entry.exitCode)
       this.emitActive()
     })
@@ -526,7 +512,7 @@ export class PtyManager extends EventEmitter {
   private toState(e: Live): PtyState {
     return {
       ptyId: e.ptyId,
-      surface: e.surface,
+      sessionId: e.sessionId,
       agent: e.agent,
       cwd: e.cwd,
       title: e.title,
@@ -536,35 +522,13 @@ export class PtyManager extends EventEmitter {
       inputRequestedAt: e.inputRequestedAt,
       origin: e.origin,
       provisional: e.provisional,
+      parkedJob: e.parkedJob,
       exitCode: e.exitCode
     }
   }
 
   private emitActive(): void {
     this.emit('active-changed', this.list())
-  }
-
-  private enterAgentView(ptyId: string): void {
-    const entry = this.live.get(ptyId)
-    if (!entry || entry.agent !== 'claude' || entry.surface.kind === 'agent-view-host') return
-    entry.surface = enterClaudeAgentView(entry.surface)
-    entry.cwd = entry.controllerCwd
-    entry.title = 'Claude Agent View'
-    this.emitSurfaceChanged()
-  }
-
-  private exitAgentView(ptyId: string): void {
-    const entry = this.live.get(ptyId)
-    if (!entry || entry.surface.kind !== 'agent-view-host') return
-    entry.surface = exitClaudeAgentView(entry.surface)
-    entry.cwd = entry.controllerCwd
-    entry.title = entry.controllerTitle
-    this.emitSurfaceChanged()
-  }
-
-  private emitSurfaceChanged(): void {
-    this.emit('surface-changed')
-    this.emitActive()
   }
 }
 

@@ -97,9 +97,9 @@ export function useRowReorder(containerRef: RefObject<HTMLElement>, opts: RowReo
     const el = containerRef.current
     if (!el) return
     for (const r of el.querySelectorAll<HTMLElement>('.sb-row')) {
-      if (r.dataset.order !== drop.id) r.style.transform = ''
+      if (r.dataset.session !== drop.id) r.style.transform = ''
     }
-    const realRow = el.querySelector<HTMLElement>(`.sb-row[data-order="${drop.id}"]`)
+    const realRow = el.querySelector<HTMLElement>(`.sb-row[data-session="${drop.id}"]`)
     if (clone) settleClone(clone, realRow ? realRow.getBoundingClientRect().top : clone.getBoundingClientRect().top, realRow)
     document.body.classList.remove('sb-dragging-row')
   }, [containerRef, opts.order])
@@ -147,7 +147,7 @@ export function useRowReorder(containerRef: RefObject<HTMLElement>, opts: RowReo
       const hit = t?.closest<HTMLElement>(optsRef.current.selector) ?? null
       if (!hit) return
       dragged = hit
-      draggedIndex = optsRef.current.order.indexOf(hit.dataset.order ?? '')
+      draggedIndex = optsRef.current.order.indexOf(hit.dataset.session ?? '')
       startY = e.clientY
       dragging = false
     }
@@ -208,7 +208,7 @@ export function useRowReorder(containerRef: RefObject<HTMLElement>, opts: RowReo
         if (target !== draggedIndex) {
           // Defer to the layout effect (after the reorder re-render): it clears siblings + eases the
           // clone into the row's new slot. Keep the clone + body class alive until then.
-          pendingDrop.current = { id: dragged.dataset.order ?? '' }
+          pendingDrop.current = { id: dragged.dataset.session ?? '' }
           optsRef.current.onReorder(draggedIndex, target)
         } else {
           // No change — ease the clone back to the row's (unchanged) slot now.

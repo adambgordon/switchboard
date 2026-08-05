@@ -102,57 +102,6 @@ describe('navReducer', () => {
     expect(navReducer(INITIAL, { type: 'home' })).toBe(INITIAL)
   })
 
-  it('follow changes only the selected surface and preserves conversation history', () => {
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' },
-      { type: 'follow', id: 'agent-view:pty-1' },
-      { type: 'follow', id: 'c' }
-    ])
-    expect(s).toEqual({ selectedId: 'c', stack: ['a', 'b'], cursor: 1 })
-  })
-
-  it('back from a followed surface returns to the unchanged current stop', () => {
-    const followed = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' },
-      { type: 'follow', id: 'c' }
-    ])
-    expect(navReducer(followed, { type: 'back' })).toEqual({
-      selectedId: 'b',
-      stack: ['a', 'b'],
-      cursor: 1
-    })
-  })
-
-  it('forgets a fileless controller without adding its Agent View host to history', () => {
-    const s = run([
-      { type: 'open', id: 'before' },
-      { type: 'open', id: 'controller' },
-      { type: 'follow', id: 'agent-view:pty-1' },
-      { type: 'forget', id: 'controller' }
-    ])
-    expect(s).toEqual({
-      selectedId: 'agent-view:pty-1',
-      stack: ['before'],
-      cursor: 0
-    })
-    expect(navReducer(s, { type: 'back' })).toEqual({
-      selectedId: 'before',
-      stack: ['before'],
-      cursor: 0
-    })
-  })
-
-  it('returns Home when a selected fileless controller is forgotten without following its host', () => {
-    const s = run([
-      { type: 'open', id: 'before' },
-      { type: 'open', id: 'controller' },
-      { type: 'forget', id: 'controller' }
-    ])
-    expect(s).toEqual({ selectedId: null, stack: ['before'], cursor: 0 })
-  })
-
   // rekey: a provisional new-Codex session's placeholder id is swapped for its real rollout id on
   // bind. It must update the selection AND every history stop so back/forward stay coherent.
   it('rekey swaps the placeholder id in both selection and stack', () => {

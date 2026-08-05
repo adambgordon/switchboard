@@ -135,9 +135,9 @@ export interface ConversationMeta {
    */
   sessionKind?: string
   /**
-   * [Claude, `sessionKind:"bg"` only] The daemon is still running this background job. Such a
-   * conversation is genuinely alive with no Switchboard PTY behind it, so it earns a liveness dot
-   * that no live-process check would ever give it. Read from `~/.claude/jobs/<short>/state.json`.
+   * [Claude, `sessionKind:"bg"` only] Claude's daemon is still running this background job. Such a
+   * conversation is genuinely alive with no Switchboard PTY behind it, so it earns a liveness dot that
+   * no live-process check would ever give it. Read from `~/.claude/jobs/<short>/state.json`.
    */
   bgRunning?: boolean
   /** ms epoch the running background job was created — its stand-in for a process start time. */
@@ -187,26 +187,11 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  */
 export type LiveState = 'working' | 'asking' | 'awaiting' | 'quiet'
 
-/**
- * The user-facing surface currently carried by a stable PTY transport. A Claude terminal sitting in
- * Agent View is a viewer for background agents, not a conversation: it has no transcript of its own,
- * so presenting it as one invents an empty conversation that never gains a message. Which agent it is
- * viewing is deliberately NOT modelled — Claude only reports that through a debug mode that prints a
- * banner into every terminal, which is not worth the one interaction it would buy.
- */
-export type PtySurface =
-  | { kind: 'conversation'; sessionId: string }
-  | {
-      kind: 'agent-view-host'
-      /** The Claude session that entered Agent View. It remains independent if it has a transcript. */
-      controllerSessionId: string
-    }
-
 export interface PtyState {
-  /** Stable handle for this live process. Terminal mounting and PTY I/O always use this identity. */
+  /** Stable handle for this live process (distinct from sessionId). */
   ptyId: string
-  /** The conversation or terminal-only Agent View surface currently projected from this PTY. */
-  surface: PtySurface
+  /** The conversation Switchboard associated with this PTY at launch (or Codex late-bind). */
+  sessionId: string
   /** Which agent this PTY is running (drives the boot command). */
   agent: AgentKind
   cwd: string
@@ -233,6 +218,14 @@ export interface PtyState {
    * new Claude session in the ~1s before its JSONL indexes.
    */
   provisional: boolean
+  /**
+   * [Claude] The background agent this session has launched, or null. Its presence means ONLY that —
+   * Claude writes the marker on spawn and never clears it, so it says nothing about whether the
+   * terminal is currently showing that agent. Paired with "this session has no indexed conversation"
+   * it identifies a terminal whose work went into the agent rather than its own transcript, which
+   * otherwise renders as an empty "New conversation" row while the user is working in it.
+   */
+  parkedJob: { shortId: string; name: string } | null
   exitCode?: number | null
 }
 

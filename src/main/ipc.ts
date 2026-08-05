@@ -6,7 +6,7 @@ import { readdir } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { IPC, type AgentAvailability, type AgentKind, type Transcript } from '../shared/types'
 import { indexConversations, type MetaCache } from './sessions/indexer'
-import { extractMeta, parseTranscript } from './sessions/parser'
+import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
 import { appendCustomTitle } from './sessions/rename'
 import { renameCodexThread } from './sessions/codexRename'
@@ -15,8 +15,7 @@ import { PtyManager } from './pty/manager'
 import { syncTrafficLights } from './trafficLights'
 import { buildInfo, checkForUpdates, runUpdate, relaunchForUpdate } from './updater'
 
-const CLAUDE_ROOT = join(os.homedir(), '.claude')
-const PROJECTS_ROOT = join(CLAUDE_ROOT, 'projects')
+const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 
 let watcher: SessionWatcher | null = null
 let mgr: PtyManager | null = null
@@ -140,12 +139,11 @@ export function openExternalUrl(url: string): void {
 
 export function registerIpc(): void {
   mgr = new PtyManager({
-    claudeAgentView: { sessionsRoot: join(CLAUDE_ROOT, 'sessions') }
+    claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') }
   })
   mgr.on('data', (ptyId: string, data: string) => broadcast(IPC.ptyData, ptyId, data))
   mgr.on('exit', (ptyId: string, code: number | null) => broadcast(IPC.ptyExit, ptyId, code))
   mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))
-  mgr.on('surface-changed', () => void reindexAndBroadcast())
   // A provisional new-Codex PTY got its real rollout id — tell the renderer so it can re-key its
   // session-keyed state (nav / seen / view) from the placeholder to the real id.
   mgr.on('bound', (ptyId: string, oldId: string, newId: string) =>

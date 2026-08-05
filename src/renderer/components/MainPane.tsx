@@ -15,10 +15,6 @@ interface Props {
   cwd: string
   meta: ConversationMeta | null
   pty: PtyState | null
-  /** Terminal-only Claude Agent View list; not a conversation and has no Formatted surface. */
-  agentViewHost: boolean
-  /** Indexed controller transcript whose running PTY is currently serving Claude Agent View. */
-  agentViewController: boolean
   view: View
   /** Resolved app theme, forwarded to the terminal deck for live re-skinning. */
   theme: ResolvedTheme
@@ -104,8 +100,6 @@ export default function MainPane(props: Props) {
     cwd,
     meta,
     pty,
-    agentViewHost,
-    agentViewController,
     view,
     theme,
     focusReq,
@@ -215,8 +209,6 @@ export default function MainPane(props: Props) {
           cwd={cwd}
           meta={meta}
           pty={pty}
-          agentViewHost={agentViewHost}
-          agentViewController={agentViewController}
           view={view}
           pinned={pinned}
           onTogglePin={onTogglePin}

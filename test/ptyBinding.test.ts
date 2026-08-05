@@ -44,13 +44,6 @@ vi.mock('node-pty', () => ({
 
 import { PtyManager, type CodexBindingResolver } from '../src/main/pty/manager'
 import type { CodexBinding, ProvisionalPty } from '../src/main/pty/codexIdentity'
-import type { PtyState } from '../src/shared/types'
-
-/** The placeholder id a freshly-spawned Codex PTY was born with, read off its surface. */
-function placeholderIdOf(state: PtyState): string {
-  if (state.surface.kind !== 'conversation') throw new Error('expected a conversation surface')
-  return state.surface.sessionId
-}
 
 const CWD = '/repo'
 const S1 = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'
@@ -338,7 +331,7 @@ describe('PtyManager Codex identity probing', () => {
     await m.probeCodexIdentity(new Set([S1]))
     await m.probeCodexIdentity(new Set([S1]))
     expect(calledTimes).toBe(3)
-    expect(m.findBySession(placeholderIdOf(a))?.ptyId).toBe(a.ptyId)
+    expect(m.findBySession(a.sessionId)?.ptyId).toBe(a.ptyId)
     m.killAll()
   })
 
@@ -352,7 +345,7 @@ describe('PtyManager Codex identity probing', () => {
     expect(bound).toEqual([`${a.ptyId}->${S1}`])
     expect(active).toBeGreaterThan(before)
     expect(mgr.findBySession(S1)?.ptyId).toBe(a.ptyId)
-    expect(mgr.findBySession(placeholderIdOf(a))).toBeNull()
+    expect(mgr.findBySession(a.sessionId)).toBeNull()
     expect(mgr.findBySession(S1)?.provisional).toBe(false)
   })
 
@@ -385,7 +378,7 @@ describe('PtyManager Codex identity probing', () => {
     for (let i = 0; i < 5; i++) await mgr.probeCodexIdentity(new Set([S1]))
     expect(bound).toEqual([])
     expect(mgr.list().find((s) => s.ptyId === a.ptyId)?.provisional).toBe(true)
-    expect(mgr.findBySession(placeholderIdOf(a))?.ptyId).toBe(a.ptyId)
+    expect(mgr.findBySession(a.sessionId)?.ptyId).toBe(a.ptyId)
     // ...and the terminal still takes input.
     expect(() => mgr.write(a.ptyId, 'still works\r')).not.toThrow()
   })
