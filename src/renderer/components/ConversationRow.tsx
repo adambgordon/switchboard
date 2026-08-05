@@ -2,6 +2,7 @@ import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
+import { displayTitleForRow, isParkedOnlyRow, isUnlinkedRow } from '../lib/rowIdentity'
 import { DashedCircle, Dots } from './icons'
 import AgentLogo from './AgentLogo'
 
@@ -41,12 +42,15 @@ function ConversationRowImpl({
   onOpenMenu,
   onContextMenu
 }: Props) {
-  // A live terminal whose conversation identity was never proven (a new Codex session Switchboard
-  // could not match to a rollout — see PtyState.provisional). It deliberately gets NONE of the four
-  // liveness states: they're read off a transcript, and this terminal has no transcript known to be
-  // its, so it remains distinct as `unlinked`. Visually it shares the hollow marker with `quiet`
-  // because there are no linked messages to be unread, plus the ordinary empty-row placeholder.
-  const unlinked = live?.provisional === true
+  // A live terminal Switchboard cannot show a transcript for. Two ways that happens: a new Codex
+  // session it could not match to a rollout (PtyState.provisional), or a Claude session whose work
+  // went into a background agent instead of its own transcript (`parkedJob` with nothing indexed —
+  // see claudeParkedJobs). Both deliberately get NONE of the four liveness states: they're read off a
+  // transcript, and neither terminal has one known to be its, so it remains distinct as `unlinked`.
+  // Visually it shares the hollow marker with `quiet` because there are no linked messages to be
+  // unread, plus the ordinary empty-row placeholder.
+  const parkedOnly = isParkedOnlyRow(live, meta)
+  const unlinked = isUnlinkedRow(live, meta)
   // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe).
   const liveDotState: LiveState | null =
     live && !unlinked ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting') : null
@@ -83,8 +87,17 @@ function ConversationRowImpl({
       data-session={meta.sessionId}
     >
       <span className="sb-row-main">
-        <span className="sb-row-title truncate">{meta.title}</span>
-        {meta.preview ? (
+        <span className="sb-row-title truncate">{displayTitleForRow(live, meta)}</span>
+        {parkedOnly ? (
+          // This terminal has no conversation of its own — what it produced went into the background
+          // agent named above. Without saying so the row reads as an empty, dead conversation while
+          // the user is actively working in it. Styled as the ordinary empty placeholder: the
+          // dedicated unlinked treatment was retired, and the row's distinction now lives in the
+          // title, the Live tally, and the accessibility label rather than in bespoke preview colour.
+          <span className="sb-row-preview sb-row-preview-empty truncate">
+            Terminal only — work is in a background agent
+          </span>
+        ) : meta.preview ? (
           <span className="sb-row-preview truncate">{meta.preview}</span>
         ) : (
           // No preview (a just-spawned session has no transcript yet) — render a muted
@@ -134,15 +147,17 @@ function ConversationRowImpl({
             // The visible row uses the shared empty placeholder; this label preserves the exact
             // unlinked meaning for assistive technology.
             aria-label={
-              unlinked
-                ? 'live terminal, transcript not linked'
-                : liveDotState === 'working'
-                  ? 'live, working'
-                  : liveDotState === 'asking'
-                    ? 'live, waiting for your reply'
-                    : liveDotState === 'quiet'
-                      ? 'live, idle'
-                      : 'live, finished — not yet seen'
+              parkedOnly
+                ? 'live terminal, work is in a background agent'
+                : unlinked
+                  ? 'live terminal, transcript not linked'
+                  : liveDotState === 'working'
+                    ? 'live, working'
+                    : liveDotState === 'asking'
+                      ? 'live, waiting for your reply'
+                      : liveDotState === 'quiet'
+                        ? 'live, idle'
+                        : 'live, finished — not yet seen'
             }
           />
         )}

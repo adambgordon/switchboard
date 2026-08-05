@@ -19,7 +19,8 @@ import { useUpdates } from './lib/useUpdates'
 import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
-import { currentInputRequestedAt, resolveLiveState, isManualUnread } from './lib/liveness'
+import { currentInputRequestedAt } from './lib/liveness'
+import { displayTitleForRow, isUnlinkedRow, resolveRowLiveState } from './lib/rowIdentity'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
 import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
@@ -265,22 +266,12 @@ export default function App() {
   //   3. Recent — everything else (not live, not pinned), most-recent first.
   // When a search is active, each section is filtered to the matching sessions.
   const railSections = useMemo<RailSection[]>(() => {
-    // Resolve a live row's liveness; null for rows with no live process — and null for a PROVISIONAL
-    // one, whose conversation identity was never proven. Liveness is read off the transcript, so for
-    // an unlinked terminal there is no transcript that is known to be its: any state resolved here
-    // would describe some other conversation. It shares the hollow nothing-unread marker with
-    // `quiet`, while remaining a distinct unlinked state in behavior and the Live tally.
-    const stateFor = (pty: PtyState | null, meta: ConversationMeta | undefined, id: string): LiveState | null =>
-      pty && !pty.provisional
-        ? resolveLiveState(
-            meta,
-            seen[id] ?? 0,
-            focused && selectedId === id,
-            isManualUnread(unread[id], meta),
-            pty.startedAt,
-            pty.inputRequestedAt
-          )
-        : null
+    // Resolve a live row's liveness — null for rows with no live process, and null for an unlinked
+    // one (see resolveRowLiveState, which both other call sites in this file share). Such a row wears
+    // the hollow nothing-unread marker alongside `quiet`, while staying a distinct unlinked state in
+    // behavior and in the Live tally.
+    const stateFor = (pty: PtyState | null, meta: ConversationMeta, id: string): LiveState | null =>
+      resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && selectedId === id, unread[id])
 
     const pinnedEntries: RailEntry[] = pinnedOrder
       .map((id) => {
@@ -338,20 +329,18 @@ export default function App() {
     // wrong-dot report this work exists to fix. Sharing the hollow visual does not fold it into idle.
     let unlinked = 0
     for (const p of ptys.active) {
-      if (p.provisional) {
-        unlinked++
-        continue
-      }
-      const meta = metaById.get(p.sessionId) ?? synthMeta(p)
-      const st = resolveLiveState(
-        meta,
+      const st = resolveRowLiveState(
+        p,
+        metaById.get(p.sessionId) ?? synthMeta(p),
         seen[p.sessionId] ?? 0,
         focused && selectedId === p.sessionId,
-        isManualUnread(unread[p.sessionId], meta),
-        p.startedAt,
-        p.inputRequestedAt
+        unread[p.sessionId]
       )
-      if (st === 'working') working++
+      // Every `p` here is live by construction, so the only way to get no state is the unlinked
+      // gate — which makes this bucket definitionally "the rows that were given no dot" rather
+      // than a second reading of the predicate that could drift from the first.
+      if (st === null) unlinked++
+      else if (st === 'working') working++
       else if (st === 'asking') asking++
       else if (st === 'awaiting') unreadCount++
       else idle++
@@ -381,13 +370,17 @@ export default function App() {
   const selectedInputRequestedAt = selectedPty
     ? currentInputRequestedAt(selectedMeta ?? synthMeta(selectedPty), selectedPty.inputRequestedAt)
     : null
+  // An unlinked row shows no read state, so it must not persist one either — see rowIdentity.
+  const selectedUnlinked = selectedPty
+    ? isUnlinkedRow(selectedPty, selectedMeta ?? synthMeta(selectedPty))
+    : false
 
   // Looking at a conversation (selected + focused) marks it read: it advances the seen marker
   // AND clears any manual-unread override — so selecting/clicking a conversation (or a turn
   // finishing under your eyes) drops the dot to quiet. Re-fires when a new turn lands.
   useEffect(() => {
-    if (selectedId && focused) markRead(selectedId)
-  }, [selectedId, focused, selectedMeta?.turnEndedAt, selectedInputRequestedAt, markRead])
+    if (selectedId && focused && !selectedUnlinked) markRead(selectedId)
+  }, [selectedId, focused, selectedUnlinked, selectedMeta?.turnEndedAt, selectedInputRequestedAt, markRead])
 
   // The view this conversation last had. A never-opened live session defaults to Terminal; everything
   // else defaults to Formatted. Terminal only applies while live, otherwise fall back to the transcript.
@@ -593,10 +586,11 @@ export default function App() {
   // would also be marking a row that deliberately shows no read/unread state at all.
   const markUnreadGated = useCallback(
     (id: string) => {
-      if (ptys.bySession.get(id)?.provisional) return
+      const pty = ptys.bySession.get(id) ?? null
+      if (pty && isUnlinkedRow(pty, metaById.get(id) ?? synthMeta(pty))) return
       markUnread(id)
     },
-    [ptys.bySession, markUnread]
+    [ptys.bySession, metaById, markUnread]
   )
 
   // Open the conversation-info modal for a row/title. `edit` starts it in title-edit mode (the
@@ -630,22 +624,15 @@ export default function App() {
     setExpandedSections((s) => new Set(s).add(key))
   }, [])
 
-  // Resolve the current dot state for any session id (used by the read/unread toggle). Null for a
-  // provisional PTY, which has no dot to toggle — its seen state is keyed to a placeholder id that
-  // may never become a real conversation, so read/unread would be marking nothing.
+  // Resolve the current dot state for any session id (used by the read/unread toggle). Null for any
+  // unlinked row — it has no dot to toggle, and ⇧⌘U would otherwise persist an override for a
+  // conversation the row isn't showing.
   const liveStateOf = useCallback(
     (id: string): LiveState | null => {
-      const pty = ptys.bySession.get(id)
-      if (!pty || pty.provisional) return null
+      const pty = ptys.bySession.get(id) ?? null
+      if (!pty) return null
       const meta = metaById.get(id) ?? synthMeta(pty)
-      return resolveLiveState(
-        meta,
-        seen[id] ?? 0,
-        focused && selectedId === id,
-        isManualUnread(unread[id], meta),
-        pty.startedAt,
-        pty.inputRequestedAt
-      )
+      return resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && selectedId === id, unread[id])
     },
     [ptys.bySession, metaById, seen, unread, focused, selectedId]
   )
@@ -834,7 +821,10 @@ export default function App() {
     newConversation
   ])
 
-  const title = selectedMeta?.title ?? selectedPty?.title ?? 'Conversation'
+  // Same derivation the rail uses, so the header can't name one thing while the row names another.
+  const title = selectedPty
+    ? displayTitleForRow(selectedPty, selectedMeta ?? synthMeta(selectedPty))
+    : selectedMeta?.title ?? 'Conversation'
   const cwd = selectedMeta?.cwd ?? selectedPty?.cwd ?? ''
 
   // Resolve the info-modal target's meta + live process. A live-but-unindexed session still resolves
@@ -924,6 +914,7 @@ export default function App() {
           transcriptLoading={tLoading}
           activePtys={ptys.active}
           pinned={selectedId ? pinned.has(selectedId) : false}
+          unlinked={selectedUnlinked}
           onTogglePin={() => {
             if (selectedId) togglePinGated(selectedId)
           }}

@@ -210,6 +210,14 @@ export interface PtyState {
    * new Claude session in the ~1s before its JSONL indexes.
    */
   provisional: boolean
+  /**
+   * [Claude] The background agent this session has launched, or null. Its presence means ONLY that —
+   * Claude writes the marker on spawn and never clears it, so it says nothing about whether the
+   * terminal is currently showing that agent. Paired with "this session has no indexed conversation"
+   * it identifies a terminal whose work went into the agent rather than its own transcript, which
+   * otherwise renders as an empty "New conversation" row while the user is working in it.
+   */
+  parkedJob: { shortId: string; name: string } | null
   exitCode?: number | null
 }
 

@@ -138,7 +138,9 @@ export function openExternalUrl(url: string): void {
 }
 
 export function registerIpc(): void {
-  mgr = new PtyManager()
+  mgr = new PtyManager({
+    claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') }
+  })
   mgr.on('data', (ptyId: string, data: string) => broadcast(IPC.ptyData, ptyId, data))
   mgr.on('exit', (ptyId: string, code: number | null) => broadcast(IPC.ptyExit, ptyId, code))
   mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))

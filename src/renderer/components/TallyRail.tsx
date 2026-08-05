@@ -6,6 +6,7 @@ import { useRowReorder } from '../lib/useRowReorder'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
+import { isUnlinkedRow } from '../lib/rowIdentity'
 import NewConversationMenu from './NewConversationMenu'
 import { Chevron, Close, Plus, Search, Pin, Info, Stop, Play } from './icons'
 
@@ -262,14 +263,20 @@ export default function TallyRail({
     live: boolean
     unread: boolean
     pinned: boolean
+    unlinked: boolean
   } | null>(null)
-  const menuStateFor = (id: string): { live: boolean; unread: boolean; pinned: boolean } | null => {
+  const menuStateFor = (
+    id: string
+  ): { live: boolean; unread: boolean; pinned: boolean; unlinked: boolean } | null => {
     const entry = entryById(id)
     if (!entry) return null
     return {
       live: !!entry.pty,
       unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
-      pinned: entry.pinned
+      pinned: entry.pinned,
+      // Pin, read state, and session details are all keyed to a conversation this row does not have,
+      // so they would silently do nothing. Hide them rather than offer a no-op.
+      unlinked: isUnlinkedRow(entry.pty, entry.meta)
     }
   }
   // `closing` drives the fade-out: the menu stays mounted with a `.closing` class for one fade, then
@@ -506,17 +513,19 @@ export default function TallyRail({
           onMouseEnter={cancelAutoClose}
           onMouseLeave={armAutoClose}
         >
-          <button
-            className="sb-ctxmenu-item"
-            onClick={() => {
-              onTogglePin(ctxMenu.id)
-              closeMenu()
-            }}
-          >
-            <Pin size={13} filled={!ctxMenu.pinned} />
-            <span>{ctxMenu.pinned ? 'Unpin' : 'Pin'}</span>
-          </button>
-          {ctxMenu.live && (
+          {!ctxMenu.unlinked && (
+            <button
+              className="sb-ctxmenu-item"
+              onClick={() => {
+                onTogglePin(ctxMenu.id)
+                closeMenu()
+              }}
+            >
+              <Pin size={13} filled={!ctxMenu.pinned} />
+              <span>{ctxMenu.pinned ? 'Unpin' : 'Pin'}</span>
+            </button>
+          )}
+          {ctxMenu.live && !ctxMenu.unlinked && (
             <button
               className="sb-ctxmenu-item"
               onClick={() => {
@@ -528,19 +537,21 @@ export default function TallyRail({
               <span>{ctxMenu.unread ? 'Mark as read' : 'Mark as unread'}</span>
             </button>
           )}
-          <button
-            className="sb-ctxmenu-item"
-            onClick={() => {
-              onShowInfo(ctxMenu.id, false)
-              closeMenu()
-            }}
-          >
-            <Info size={14} />
-            <span>Session details…</span>
-          </button>
+          {!ctxMenu.unlinked && (
+            <button
+              className="sb-ctxmenu-item"
+              onClick={() => {
+                onShowInfo(ctxMenu.id, false)
+                closeMenu()
+              }}
+            >
+              <Info size={14} />
+              <span>Session details…</span>
+            </button>
+          )}
           {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**
               (not-live) — so the two always occupy the same slot. Separated from the benign items above. */}
-          <div className="sb-ctxmenu-sep" />
+          {!ctxMenu.unlinked && <div className="sb-ctxmenu-sep" />}
           {ctxMenu.live ? (
             <button
               className="sb-ctxmenu-item danger"

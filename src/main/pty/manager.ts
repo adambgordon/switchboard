@@ -10,6 +10,13 @@ import {
   type ProvisionalPty
 } from './codexIdentity'
 import { CodexInputNotificationScanner } from './codexInputNotifications'
+import {
+  ClaudeParkedJobMonitor,
+  type ClaudeParkedJobMonitorOptions,
+  type ParkedJob
+} from './claudeParkedJobs'
+
+type ParkedJobOptions = Omit<ClaudeParkedJobMonitorOptions, 'onChange'>
 
 /** The resolver seam, so tests can drive the orchestration without spawning `lsof`. */
 export type CodexBindingResolver = (
@@ -59,6 +66,9 @@ interface Live {
   // when the PTY exits). While set, the row is a terminal with no known transcript — the renderer
   // surfaces that rather than guessing, so this crosses IPC on PtyState.
   provisional: boolean
+  // [Claude] The background agent this session launched, once its registry marker is confirmed. Says
+  // nothing about what the terminal is currently showing — see claudeParkedJobs.
+  parkedJob: ParkedJob | null
   booted: boolean
   // Claude boots (the `claude` command is typed) only once the shell is ready AND the renderer
   // has sized the PTY to the real terminal dimensions. Booting before the resize makes claude
@@ -96,9 +106,23 @@ export class PtyManager extends EventEmitter {
   private probeAttempts = 0
   private probeInFlight = false
   private lastProbeAt = 0
+  private readonly parkedJobs: ClaudeParkedJobMonitor | null
+  /**
+   * Dev/QA: SWITCHBOARD_FAKE_PARKED=1 gives every new Claude PTY a background agent, so the
+   * work-went-to-an-agent row can actually be looked at. Same reasoning as SWITCHBOARD_FAKE_UNBOUND
+   * below — it needs a session that launches an agent and then writes NO transcript of its own, which
+   * cannot be produced on demand, leaving a row nobody can review before it ships. Inert unless set.
+   */
+  private readonly fakeParkedJob: ParkedJob | null
 
-  constructor(opts: { resolveBindings?: CodexBindingResolver } = {}) {
+  constructor(
+    opts: { resolveBindings?: CodexBindingResolver; claudeParkedJobs?: ParkedJobOptions } = {}
+  ) {
     super()
+    this.fakeParkedJob =
+      process.env.SWITCHBOARD_FAKE_PARKED === '1'
+        ? { shortId: 'fa4e0000', name: 'Example background agent (fake)' }
+        : null
     // Dev/QA: SWITCHBOARD_FAKE_UNBOUND=1 makes every probe prove nothing, so the fail-closed
     // terminal-only state can actually be looked at. It is otherwise rare by design — binding
     // normally succeeds — which would leave the one state that must NOT be mistaken for liveness as
@@ -106,6 +130,19 @@ export class PtyManager extends EventEmitter {
     const fakeUnbound = process.env.SWITCHBOARD_FAKE_UNBOUND === '1'
     this.resolveBindings =
       opts.resolveBindings ?? (fakeUnbound ? async () => [] : resolveCodexBindings)
+    this.parkedJobs = opts.claudeParkedJobs
+      ? new ClaudeParkedJobMonitor({
+          ...opts.claudeParkedJobs,
+          onChange: (ptyId, parked) => this.setParkedJob(ptyId, parked)
+        })
+      : null
+  }
+
+  private setParkedJob(ptyId: string, parked: ParkedJob | null): void {
+    const entry = this.live.get(ptyId)
+    if (!entry) return
+    entry.parkedJob = parked
+    this.emitActive()
   }
 
   // The live-PTY cap (CONFIG.maxLivePtys is the default). User-configurable at runtime via
@@ -148,7 +185,9 @@ export class PtyManager extends EventEmitter {
     return this.spawn({
       sessionId: randomUUID(), // placeholder; swapped for the real rollout id on bind
       cwd,
-      title: 'New Codex conversation',
+      // Same wording as a new Claude session: at this point neither has done anything, and the row
+      // already carries the agent's logo — spelling the agent out here only made the two look unlike.
+      title: 'New conversation',
       origin: 'new',
       agent: 'codex',
       provisional: true
@@ -201,6 +240,7 @@ export class PtyManager extends EventEmitter {
       }
     }
     this.live.clear()
+    this.parkedJobs?.dispose()
   }
 
   list(): PtyState[] {
@@ -394,6 +434,7 @@ export class PtyManager extends EventEmitter {
       idleTimer: null,
       bootTimer: null,
       provisional: o.provisional ?? false,
+      parkedJob: o.agent === 'claude' ? this.fakeParkedJob : null,
       booted: false,
       shellReady: false,
       sized: false,
@@ -401,6 +442,7 @@ export class PtyManager extends EventEmitter {
       exitCode: null
     }
     this.live.set(ptyId, entry)
+    if (o.agent === 'claude') this.parkedJobs?.register(ptyId, o.sessionId)
 
     const boot = (): void => {
       if (entry.booted) return
@@ -446,6 +488,7 @@ export class PtyManager extends EventEmitter {
       if (entry.idleTimer) clearTimeout(entry.idleTimer)
       if (entry.bootTimer) clearTimeout(entry.bootTimer)
       this.live.delete(ptyId)
+      this.parkedJobs?.unregister(ptyId)
       this.emit('exit', ptyId, entry.exitCode)
       this.emitActive()
     })
@@ -492,6 +535,7 @@ export class PtyManager extends EventEmitter {
       inputRequestedAt: e.inputRequestedAt,
       origin: e.origin,
       provisional: e.provisional,
+      parkedJob: e.parkedJob,
       exitCode: e.exitCode
     }
   }

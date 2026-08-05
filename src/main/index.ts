@@ -137,6 +137,8 @@ function runSmoke(): void {
   const finish = (ok: boolean, detail: string): void => {
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getURL() : ''
     console.log(`SMOKE ${ok ? 'PASS' : 'FAIL'} | pty:${ok} | window:${win ? 'loaded' : 'none'} | ${detail}`)
+    // app.exit() intentionally skips before-quit, so release IPC-owned watchers explicitly.
+    disposeIpc()
     app.exit(ok ? 0 : 1)
   }
   const sh = process.env.SHELL || '/bin/zsh'
