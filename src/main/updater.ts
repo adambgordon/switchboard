@@ -44,11 +44,11 @@ export function buildInfo(): UpdateInfo {
  * Resolve `main`'s tip commit SHA via `git ls-remote` over HTTPS, in a LOGIN shell.
  *
  * NOT the GitHub REST API: that's `api.github.com`, unauthenticated-rate-limited to 60 req/hr PER IP —
- * and behind a shared corporate NAT that pool is drained by everyone's ambient traffic, so the check
- * 403s unpredictably (a public app has no token to raise the limit). git's smart-HTTP transport
- * (`github.com`, not the REST API) isn't subject to that limit. A login shell gives git the PATH +
- * corporate TLS config a GUI app lacks — the same reason runUpdate uses one, and why we avoid hitting
- * the API over node:https (Electron's BoringSSL ignores the corporate CA; see docs/gotchas.md).
+ * so any user behind a shared egress IP has that pool drained by ambient traffic and the check 403s
+ * unpredictably (a public app has no token to raise the limit). git's smart-HTTP transport
+ * (`github.com`, not the REST API) isn't subject to that limit. A login shell gives git the PATH and
+ * TLS configuration a GUI app lacks — the same reason runUpdate uses one, and why we avoid hitting the
+ * API over node:https (Electron's BoringSSL trusts only its bundled CA set; see docs/gotchas.md).
  */
 function remoteMainSha(): Promise<string> {
   return new Promise((resolve, reject) => {

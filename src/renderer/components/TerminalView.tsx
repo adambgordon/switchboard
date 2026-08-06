@@ -58,15 +58,17 @@ const LIGHT_THEME = {
   brightWhite: '#1a1a1a'
 }
 
-// Neutral dark theme: bg matches the dark --paper-pane (#171717, the main content surface the terminal
+// Neutral dark theme: bg matches the dark --paper-pane (#191919, the main content surface the terminal
 // fills — kept in lockstep with tokens.css so the canvas and its surrounding pane read as one), fg is
 // the dark --ink, and the ANSI palette is lifted to read on the dark surface. Neutral grays (no warm
 // cast); chromatic slots stay vivid. Cobalt selection at a higher alpha for contrast.
+// xterm's theme takes literal colors — it cannot read a CSS variable — so these two MUST be updated
+// by hand whenever --paper-pane moves, or the terminal seams against the pane it sits in.
 const DARK_THEME = {
-  background: '#171717',
+  background: '#191919',
   foreground: '#f2f2f2',
   cursor: 'rgba(0,0,0,0)',
-  cursorAccent: '#171717',
+  cursorAccent: '#191919',
   selectionBackground: 'rgba(59, 108, 240, 0.3)',
   black: '#3a3a3a',
   red: '#f0786a',

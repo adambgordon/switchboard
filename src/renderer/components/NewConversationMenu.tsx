@@ -159,7 +159,7 @@ export default function NewConversationMenu({
             ))}
           </div>
         )}
-        <div className="sb-newmenu-head label-caps">New conversation in…</div>
+        <div className="sb-newmenu-head">New conversation in…</div>
         <div className="sb-newmenu-list sb-autoscroll" ref={listRef}>
           {dirs.length === 0 && <div className="sb-newmenu-empty mono">No recent directories</div>}
           {dirs.map((d) => (

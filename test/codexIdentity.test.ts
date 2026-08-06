@@ -481,7 +481,7 @@ describe('resolveBindings — ambiguity and absence bind nothing', () => {
  * whether output may be trusted — the ones that stand between a truncated probe and a wrong bind.
  */
 describe('resolveCodexBindings — the exec path', () => {
-  const DIR = join(process.env.CLAUDE_CODE_TMPDIR ?? tmpdir(), 'sb-codexidentity-test')
+  const DIR = join(tmpdir(), 'sb-codexidentity-test')
   const FIXTURE = join(DIR, 'fixture.bin')
   const PARTIAL = join(DIR, 'partial.bin')
   const NO_NEWLINE = join(DIR, 'nonewline.bin')

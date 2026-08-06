@@ -24,6 +24,12 @@
   --rule: #e6e6e6; /* hairline */
   --rule-soft: #efefef;
   --rule-strong: #d6d6d6;
+  /* Hairline ON a --paper-raised surface (menus, modals, cards). A theme-aware token rather than one
+     shared value, for the reason design.md gives: a token carries hue across themes but NOT
+     perceptual strength. Light raised is #ffffff, so plain --rule reads fine; dark raised is #2a2a2a
+     against --rule #2b2b2b — a one-value difference, invisible — so dark needs the stronger step.
+     Same shape as --shadow-sel-hover. */
+  --rule-raised: #e6e6e6;
 
   /* ---- accent 1: electric cobalt = alive ---- */
   --live: #1f5ae6;
@@ -119,7 +125,9 @@
    * while preserving the inverted-elevation ORDER: pane < sunken(=app shell) < raised < hover < active. */
   --paper: #1f1f1f; /* app shell / titlebar — the lighter chrome (tracks --paper-sunken) */
   --paper-raised: #2a2a2a; /* raised tiles: live cards, modals, menus — lighter still, so they pop on the rail */
-  --paper-pane: #171717; /* main content (pane / Formatted / terminal) — the DARK canvas */
+  --paper-pane: #191919; /* main content (pane / Formatted / terminal) — the DARK canvas. Nudged up
+     from #171717 to ease the contrast against the pane's ink; must stay BELOW --paper-sunken so the
+     inverted-elevation order above still holds. */
   --paper-sunken: #1f1f1f; /* left pane / rail + recessed bits — lighter chrome (sits ABOVE --paper-pane here) */
   --paper-code: #222222; /* unified mono surface: fenced + inline code AND tool result/JSON — a step up from sunken, below raised */
   --paper-hover: #313131;
@@ -135,6 +143,8 @@
   --rule: #2b2b2b; /* hairline */
   --rule-soft: #272727; /* softer = closer to the surface (nudged up to stay just above the lightened paper) */
   --rule-strong: #3f3f3f; /* stronger = more contrast */
+  --rule-raised: #3f3f3f; /* hairline on --paper-raised — see the light-mode note; dark needs the
+     stronger value because --rule (#2b2b2b) is one step off --paper-raised (#2a2a2a) */
 
   /* ---- accent 1: electric cobalt = alive (brightened for dark; tints flip to dark) ---- */
   --live: #3b6cf0;

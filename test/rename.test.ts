@@ -6,8 +6,8 @@ import { randomUUID } from 'node:crypto'
 import { parseTranscript, extractMeta } from '../src/main/sessions/parser'
 import { appendCustomTitle } from '../src/main/sessions/rename'
 
-// Scratch dir; honors CLAUDE_CODE_TMPDIR if set, else the system temp.
-const TMP = join(process.env.CLAUDE_CODE_TMPDIR ?? tmpdir(), 'sb-rename-test')
+// Scratch dir under the system temp.
+const TMP = join(tmpdir(), 'sb-rename-test')
 
 // Write a fixture session and return its path + the generated sessionId (the filename stem — what
 // the parser uses; the in-line `sessionId` fields are scaffolding only, so they stay a literal).

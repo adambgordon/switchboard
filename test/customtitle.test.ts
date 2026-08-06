@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { parseTranscript, extractMeta } from '../src/main/sessions/parser'
 
-// Scratch dir; honors CLAUDE_CODE_TMPDIR if set, else the system temp.
-const TMP = join(process.env.CLAUDE_CODE_TMPDIR ?? tmpdir(), 'sb-customtitle-test')
+// Scratch dir under the system temp.
+const TMP = join(tmpdir(), 'sb-customtitle-test')
 
 async function writeSession(lines: object[]): Promise<string> {
   await mkdir(TMP, { recursive: true })

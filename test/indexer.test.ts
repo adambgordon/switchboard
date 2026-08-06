@@ -5,12 +5,12 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { indexConversations } from '../src/main/sessions/indexer'
 
-/** Base for test temp dirs; honors CLAUDE_CODE_TMPDIR if set, else the system temp. */
-const TMP_BASE = process.env.CLAUDE_CODE_TMPDIR ?? tmpdir()
+/** Base for test temp dirs. */
+const TMP_BASE = tmpdir()
 
 /** A nonexistent Codex sessions root, so these Claude-focused tests stay hermetic — the indexer now
- *  also scans `~/.codex/sessions` by default, which would otherwise leak the real machine's Codex
- *  conversations into these assertions. */
+ *  also scans `~/.codex/sessions` by default, which would otherwise pull whatever Codex
+ *  conversations happen to exist on the host into these assertions. */
 const NO_CODEX = path.join(TMP_BASE, 'switchboard-no-codex-DOES-NOT-EXIST')
 
 /** Serialize line-objects to JSONL text. */
@@ -26,7 +26,7 @@ function msgLine(role: 'user' | 'assistant', cwd: string, content: string): unkn
     isSidechain: false,
     timestamp: '2026-05-29T20:00:00.000Z',
     cwd,
-    gitBranch: 'develop',
+    gitBranch: 'main',
     version: '2.1.156',
     message: { role, content }
   }
