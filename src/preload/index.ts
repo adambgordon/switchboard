@@ -29,6 +29,7 @@ const api: SwitchboardApi = {
 
   pickDirectory: () => ipcRenderer.invoke(IPC.dialogPickDirectory),
   openExternal: (url) => ipcRenderer.send(IPC.openExternal, url),
+  linkContextMenu: (url) => ipcRenderer.send(IPC.linkContextMenu, url),
   setBackgroundColor: (color) => ipcRenderer.send(IPC.windowSetBackgroundColor, color),
   syncTrafficLights: () => ipcRenderer.send(IPC.windowSyncTrafficLights),
   onRefreshStart: (cb) => subscribe(IPC.appRefreshStart, cb as never),

@@ -26,6 +26,24 @@
      body). So the container sets NO cursor of its own. */
 }
 
+/* Chrome exempted from the selectable region above. The invariant: NOTHING HERE IS LIFTED FROM THE DOM
+   BY A COPY, SO NOTHING HERE HIGHLIGHTS — otherwise a drag promises text it can't deliver (the timestamp
+   used to sweep into the highlight and then be absent from the paste).
+   The speaker tag and Sub-agent tag are on this list even though attribution DOES appear in a copy,
+   because the copy generates it from the section's `data-speaker` / `data-sidechain` attributes rather
+   than reading these elements — so `**You:**` / `**Claude (Sub-agent):**` still come through with the
+   tags unselectable. Same reasoning as the ⚙ / ↳ tool heads (see .tool-head), which reach the clipboard
+   as generated `Bash:` / `Result:` labels rather than as the glyphs on screen. */
+.message-meta .role-label,
+.sidechain-tag,
+.message-time,
+.interrupt-note,
+.tool-pending,
+.show-more,
+.transcript-foot-label {
+  user-select: none;
+}
+
 /* The transcript is click-focusable (tabIndex -1) so clicking it gives the main pane focus —
    that's what routes ⌘F to find-in-conversation. It's not keyboard-tabbable and never needs a
    ring (the global cobalt :focus-visible would also break the cobalt-is-liveness invariant). */

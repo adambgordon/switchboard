@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Close, Folder, Info, Reset } from './icons'
 import { basename } from '../lib/format'
+import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
 import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
 import type { Updates } from '../lib/useUpdates'
@@ -209,6 +210,11 @@ interface Props {
   maxLiveDefault: number
   /** Restore the cap to its default. */
   onResetMaxLive: () => void
+  // --- App page: Markdown copy ---
+  /** Whether ⌘C over a Formatted-view selection copies Markdown source rather than rendered text. */
+  markdownCopy: boolean
+  /** Toggle the Markdown-copy behavior (an On / Off segmented control, like Theme). */
+  onSetMarkdownCopy: (value: boolean) => void
 }
 
 /**
@@ -238,7 +244,9 @@ export default function SettingsModal({
   maxLiveMax,
   maxLiveDefault,
   onSetMaxLive,
-  onResetMaxLive
+  onResetMaxLive,
+  markdownCopy,
+  onSetMarkdownCopy
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -261,6 +269,8 @@ export default function SettingsModal({
   }, [page])
 
   if (!page) return null
+
+  const sliderPos = positionForValue(maxLiveSessions, maxLiveMin, maxLiveDefault, maxLiveMax)
 
   return (
     // Close only when the click lands on the scrim itself, not on the card (whose clicks bubble
@@ -379,20 +389,29 @@ export default function SettingsModal({
                       </button>
                     </div>
                     <div className="sb-slider-control">
+                      {/* The input carries a track POSITION, not the cap — the scale is piecewise so the
+                          default sits mid-track (see lib/maxLiveScale.ts). aria-valuetext restores the
+                          real number for screen readers, which would otherwise announce the position. */}
                       <input
                         type="range"
                         className="sb-slider"
-                        min={maxLiveMin}
-                        max={maxLiveMax}
+                        min={0}
+                        max={SLIDER_STEPS}
                         step={1}
-                        value={maxLiveSessions}
-                        onChange={(e) => onSetMaxLive(parseInt(e.target.value, 10))}
-                        aria-label="Maximum live sessions"
-                        style={
-                          {
-                            '--pct': `${((maxLiveSessions - maxLiveMin) / (maxLiveMax - maxLiveMin)) * 100}%`
-                          } as CSSProperties
+                        value={sliderPos}
+                        onChange={(e) =>
+                          onSetMaxLive(
+                            valueForPosition(
+                              parseInt(e.target.value, 10),
+                              maxLiveMin,
+                              maxLiveDefault,
+                              maxLiveMax
+                            )
+                          )
                         }
+                        aria-label="Maximum live sessions"
+                        aria-valuetext={String(maxLiveSessions)}
+                        style={{ '--pct': `${sliderPos}%` } as CSSProperties}
                       />
                       <span className="sb-slider-value mono">{maxLiveSessions}</span>
                       <button
@@ -409,6 +428,35 @@ export default function SettingsModal({
                     <div className="sb-setting-desc">
                       How many conversations can run at once before Switchboard reclaims the
                       longest-idle one to make room.
+                    </div>
+                  </div>
+                </div>
+                <div className="sb-modal-group">
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">Copy as markdown</div>
+                    <div className="sb-seg" role="radiogroup" aria-label="Copy as markdown">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={markdownCopy}
+                        className={`sb-seg-btn${markdownCopy ? ' active' : ''}`}
+                        onClick={() => onSetMarkdownCopy(true)}
+                      >
+                        On
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={!markdownCopy}
+                        className={`sb-seg-btn${!markdownCopy ? ' active' : ''}`}
+                        onClick={() => onSetMarkdownCopy(false)}
+                      >
+                        Off
+                      </button>
+                    </div>
+                    <div className="sb-setting-desc">
+                      Copies text from the Formatted view to the clipboard in markdown (preserves
+                      styling such as bold, headers, links, code). Turn this off to copy as plain text.
                     </div>
                   </div>
                 </div>
