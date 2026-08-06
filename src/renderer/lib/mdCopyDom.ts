@@ -144,14 +144,20 @@ function textOffsetIn(root: Element, container: Node, offset: number): number {
 
 /** The rendered-text window the range cuts out of `el`. A boundary outside means the range swept in
  *  from a neighbour, so that edge takes the whole extent. */
-function windowIn(el: Element, range: Range, length: number): { t0: number; t1: number } {
-  const t0 = el.contains(range.startContainer)
+function windowIn(
+  el: Element,
+  range: Range,
+  length: number
+): { t0: number; t1: number; startsBefore: boolean; endsAfter: boolean } {
+  const startsBefore = !el.contains(range.startContainer)
+  const endsAfter = !el.contains(range.endContainer)
+  const t0 = !startsBefore
     ? textOffsetIn(el, range.startContainer, range.startOffset)
     : 0
-  const t1 = el.contains(range.endContainer)
+  const t1 = !endsAfter
     ? textOffsetIn(el, range.endContainer, range.endOffset)
     : length
-  return { t0, t1 }
+  return { t0, t1, startsBefore, endsAfter }
 }
 
 function intersects(range: Range, el: Element): boolean {
@@ -225,10 +231,10 @@ function proseUnit(
   const source = sourceFor(el.dataset.blockKey ?? '')
   if (source === undefined) return ''
   const node = describe(el)
-  const { t0, t1 } = windowIn(el, range, node.text.length)
+  const { t0, t1, startsBefore, endsAfter } = windowIn(el, range, node.text.length)
   if (t1 <= t0) return ''
   // Normally one range; more when an orphaned delimiter had to be cut out of the middle.
-  return resolveSpan(source, node, t0, t1)
+  return resolveSpan(source, node, t0, t1, { startsBefore, endsAfter })
     .map((r) => source.slice(r.s, r.e))
     .join('')
 }

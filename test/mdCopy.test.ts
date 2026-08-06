@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { assembleCopy, fence, resolveSpan, type SrcChild, type SrcNode } from '../src/renderer/lib/mdCopy'
+import {
+  assembleCopy,
+  fence,
+  resolveSpan,
+  type SpanContext,
+  type SrcChild,
+  type SrcNode
+} from '../src/renderer/lib/mdCopy'
 
 /**
  * The offsets below are the REAL ones react-markdown produces — each fixture was checked against a
@@ -16,8 +23,14 @@ const node = (s: number, e: number, text: string, children: SrcChild[] = []): Sr
 const kid = (at: number, n: SrcNode): SrcChild => ({ at, node: n })
 
 /** Slice a source the way the copy handler does, from a start and an end boundary in rendered text. */
-function copy(source: string, root: SrcNode, from: number, to: number): string {
-  return resolveSpan(source, root, from, to)
+function copy(
+  source: string,
+  root: SrcNode,
+  from: number,
+  to: number,
+  context: SpanContext = { startsBefore: false, endsAfter: false }
+): string {
+  return resolveSpan(source, root, from, to, context)
     .map((r) => source.slice(r.s, r.e))
     .join('')
 }
@@ -111,6 +124,25 @@ describe('resolveSpan — a fence keeps its delimiters only when the selection l
 
   it('gives bare code for a selection wholly inside the block', () => {
     expect(copy(SRC, root, 2, 9)).toBe('gradlew')
+  })
+
+  it('keeps the fence when the selection continues into a later source unit', () => {
+    expect(copy(SRC, root, 0, TEXT.length - 1, { startsBefore: false, endsAfter: true })).toBe(
+      SRC
+    )
+  })
+
+  it('keeps the fence when the selection arrives from an earlier source unit', () => {
+    expect(copy(SRC, root, 0, TEXT.length - 1, { startsBefore: true, endsAfter: false })).toBe(
+      SRC
+    )
+  })
+
+  it('keeps a cross-unit partial selection bare', () => {
+    expect(copy(SRC, root, 2, TEXT.length - 1, { startsBefore: false, endsAfter: true })).toBe(
+      'gradlew spotlessApply'
+    )
+    expect(copy(SRC, root, 0, 9, { startsBefore: true, endsAfter: false })).toBe('./gradlew')
   })
 
   it('never half-fences, from either edge', () => {

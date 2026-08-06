@@ -39,6 +39,11 @@ describe('markdownToPlainText', () => {
     expect(markdownToPlainText('1. first\n2. second')).toBe('1. first\n2. second')
   })
 
+  it('keeps ordered-list starts and task state', () => {
+    expect(markdownToPlainText('3. third\n4. fourth')).toBe('3. third\n4. fourth')
+    expect(markdownToPlainText('- [x] done\n- [ ] todo')).toBe('- [x] done\n- [ ] todo')
+  })
+
   it('renders a GFM table as tab-separated rows rather than leaking pipes', () => {
     expect(markdownToPlainText('| A | B |\n| --- | --- |\n| 1 | 2 |')).toBe('A\tB\n1\t2')
   })
@@ -199,5 +204,21 @@ describe('conversationMarkdown', () => {
     ]
 
     expect(conversationMarkdown(messages, 'claude')).toBe('')
+  })
+
+  it('keeps list numbering and task state in a plain conversation export', () => {
+    const messages: TranscriptMessage[] = [
+      {
+        uuid: 'a1',
+        role: 'assistant',
+        blocks: [{ kind: 'text', text: '3. third\n4. fourth\n\n- [x] done\n- [ ] todo' }],
+        timestamp: null,
+        isSidechain: false
+      }
+    ]
+
+    expect(conversationMarkdown(messages, 'claude', 'plain')).toBe(
+      'Claude:\n\n3. third\n4. fourth\n\n- [x] done\n- [ ] todo'
+    )
   })
 })

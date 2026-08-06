@@ -41,6 +41,13 @@ export interface SrcChild {
 /** Which end of the selection a boundary is — decides which way an unprovable mapping widens. */
 export type Side = 'start' | 'end'
 
+export interface SpanContext {
+  /** The selection begins in an earlier markdown source unit. */
+  startsBefore: boolean
+  /** The selection ends in a later markdown source unit. */
+  endsAfter: boolean
+}
+
 /* Both edge tests take offsets that may fall OUTSIDE the text — a boundary belonging to a sibling is
  * expressed in this node's coordinates and lands negative or past the end. Clamping is essential, not
  * defensive: `'bcd'.slice(0, -2)` is `'b'`, so an unclamped atStart reads "the selection starts before
@@ -99,9 +106,25 @@ function onlyFence(node: SrcNode): boolean {
  * which is why the result can be several ranges rather than one. So cutting through a bold run yields
  * `ld text here` — the closing `**` was in range, but emitting it alone would open a new run on paste.
  */
-export function resolveSpan(source: string, node: SrcNode, from: number, to: number): SrcRange[] {
+export function resolveSpan(
+  source: string,
+  node: SrcNode,
+  from: number,
+  to: number,
+  context: SpanContext
+): SrcRange[] {
   const t0 = Math.max(0, Math.min(from, node.text.length))
   const t1 = Math.max(t0, Math.min(to, node.text.length))
+  // A fence-only unit has no local prose offset that can prove the selection left it. The DOM range
+  // supplies that missing context; both coverage checks keep a partial cross-unit selection bare.
+  if (
+    onlyFence(node) &&
+    (context.startsBefore || context.endsAfter) &&
+    atStart(node.text, t0) &&
+    atEnd(node.text, t1)
+  ) {
+    return [{ s: node.s, e: node.e }]
+  }
   const a = resolvePoint(source, node, t0, 'start', t1)
   const b = resolvePoint(source, node, t1, 'end', t0)
   const cuts = [...unpaired(source, node, t0, 'start'), ...unpaired(source, node, t1, 'end')]

@@ -59,6 +59,8 @@ interface MdNode {
   value?: string
   alt?: string
   ordered?: boolean
+  start?: number | null
+  checked?: boolean | null
   depth?: number
   children?: MdNode[]
 }
@@ -81,13 +83,15 @@ function blockText(node: MdNode, depth = 0): string {
       return '---'
     case 'list': {
       const items = node.children ?? []
+      const start = node.start ?? 1
       return items
         .map((item, i) => {
-          const marker = node.ordered ? `${i + 1}. ` : '- '
+          const marker = node.ordered ? `${start + i}. ` : '- '
+          const task = item.checked == null ? '' : `[${item.checked ? 'x' : ' '}] `
           const body = (item.children ?? []).map((c) => blockText(c, depth + 1)).join('\n')
           const pad = '  '.repeat(depth)
           // Indent continuation lines to the marker so nested content stays visually attached.
-          return `${pad}${marker}${body.replace(/\n/g, `\n${pad}  `)}`
+          return `${pad}${marker}${task}${body.replace(/\n/g, `\n${pad}  `)}`
         })
         .join('\n')
     }
