@@ -7,8 +7,8 @@ import { cleanTitle, extractMeta, extractTurnState, parseTranscript } from '../s
 import { countConversationalMessages } from '../src/shared/messageCount'
 import type { TranscriptBlock } from '../src/shared/types'
 
-/** Base for vitest temp dirs; honors CLAUDE_CODE_TMPDIR if set, else the system temp. */
-const TMP_BASE = process.env.CLAUDE_CODE_TMPDIR ?? tmpdir()
+/** Base for vitest temp dirs. */
+const TMP_BASE = tmpdir()
 
 const CWD = '/home/user/project-one'
 const SESSION_ID = randomUUID()
@@ -34,7 +34,7 @@ beforeAll(async () => {
       isSidechain: false,
       timestamp: '2026-05-29T20:00:00.000Z',
       cwd: CWD,
-      gitBranch: 'develop',
+      gitBranch: 'main',
       version: '2.1.156',
       message: {
         role: 'user',
@@ -50,7 +50,7 @@ beforeAll(async () => {
       isSidechain: false,
       timestamp: '2026-05-29T20:00:05.000Z',
       cwd: CWD,
-      gitBranch: 'develop',
+      gitBranch: 'main',
       version: '2.1.156',
       message: { role: 'user', content: '  Please add a test\nwith details  ' }
     },
@@ -62,7 +62,7 @@ beforeAll(async () => {
       isSidechain: false,
       timestamp: '2026-05-29T20:00:10.000Z',
       cwd: CWD,
-      gitBranch: 'develop',
+      gitBranch: 'main',
       version: '2.1.156',
       message: {
         role: 'assistant',
@@ -81,7 +81,7 @@ beforeAll(async () => {
       isSidechain: false,
       timestamp: '2026-05-29T20:00:12.000Z',
       cwd: CWD,
-      gitBranch: 'develop',
+      gitBranch: 'main',
       version: '2.1.156',
       message: {
         role: 'user',
@@ -103,7 +103,7 @@ beforeAll(async () => {
       isSidechain: true,
       timestamp: '2026-05-29T20:00:15.000Z',
       cwd: CWD,
-      gitBranch: 'develop',
+      gitBranch: 'main',
       version: '2.1.156',
       message: {
         role: 'assistant',
@@ -362,7 +362,7 @@ describe('extractMeta', () => {
     expect(m.title).toBe('Refactor the session parser')
     // last-prompt drives the preview.
     expect(m.preview).toBe('Now also add an indexer test, please')
-    expect(m.gitBranch).toBe('develop')
+    expect(m.gitBranch).toBe('main')
     expect(m.version).toBe('2.1.156')
     // Human prompt + two prose/image-bearing assistant messages. Command echo and tool output
     // are transcript plumbing, not conversational messages.

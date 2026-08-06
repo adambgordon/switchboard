@@ -112,18 +112,18 @@ describe('resolveSpan — whole-node edges', () => {
 describe('resolveSpan — a fence keeps its delimiters only when the selection leaves the block', () => {
   // A fence as it actually renders inside a block: one annotated <pre> under the .md root, its text
   // carrying the trailing newline a drag across the visible line can never reach.
-  const SRC = '```bash\n./gradlew spotlessApply\n```'
-  const TEXT = './gradlew spotlessApply\n'
+  const SRC = '```bash\n./publish release-notes\n```'
+  const TEXT = './publish release-notes\n'
   const pre = { ...node(0, SRC.length, TEXT), fenced: true }
   const root = node(0, SRC.length, TEXT, [kid(0, pre)])
 
   it('gives bare code when the drag covers the whole visible block', () => {
     // The point of the exception: grabbing a command to run it shouldn't hand back a fence to delete.
-    expect(copy(SRC, root, 0, TEXT.length - 1)).toBe('./gradlew spotlessApply')
+    expect(copy(SRC, root, 0, TEXT.length - 1)).toBe('./publish release-notes')
   })
 
   it('gives bare code for a selection wholly inside the block', () => {
-    expect(copy(SRC, root, 2, 9)).toBe('gradlew')
+    expect(copy(SRC, root, 2, 9)).toBe('publish')
   })
 
   it('keeps the fence when the selection continues into a later source unit', () => {
@@ -140,14 +140,14 @@ describe('resolveSpan — a fence keeps its delimiters only when the selection l
 
   it('keeps a cross-unit partial selection bare', () => {
     expect(copy(SRC, root, 2, TEXT.length - 1, { startsBefore: false, endsAfter: true })).toBe(
-      'gradlew spotlessApply'
+      'publish release-notes'
     )
-    expect(copy(SRC, root, 0, 9, { startsBefore: true, endsAfter: false })).toBe('./gradlew')
+    expect(copy(SRC, root, 0, 9, { startsBefore: true, endsAfter: false })).toBe('./publish')
   })
 
   it('never half-fences, from either edge', () => {
-    expect(copy(SRC, root, 0, 9)).toBe('./gradlew')
-    expect(copy(SRC, root, 10, TEXT.length - 1)).toBe('spotlessApply')
+    expect(copy(SRC, root, 0, 9)).toBe('./publish')
+    expect(copy(SRC, root, 10, TEXT.length - 1)).toBe('release-notes')
   })
 
   it('DOES fence once the selection reaches past the block', () => {

@@ -127,6 +127,18 @@
 }
 .sb-newmenu-head {
   padding: 6px 8px 9px;
+  /* Hanken, sentence case — chrome, not data. Follows .sb-rail-section-label rather than the
+     mono/caps `.label-caps` utility, which is reserved for data labels. `.label-caps` is dropped
+     from the element entirely rather than overridden here, so this doesn't depend on stylesheet
+     order to win. Deliberately quieter than .sb-rail-section-label: this is a caption over the
+     folder list, not a structural header competing with it, so it sits at --ink-faint rather than
+     --ink-soft and at 400 rather than 600. (--ink-ghost is the next step down but means
+     "disabled/placeholder" — using it here would make a live label read as inert.) 400 is a real
+     loaded cut (see main.tsx), not a synthesized weight. */
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--ink-faint);
 }
 .sb-newmenu-list {
   max-height: 300px;
@@ -177,7 +189,11 @@
   width: 100%;
   padding: 10px 8px;
   margin-top: 6px;
-  border-top: 1px solid var(--rule);
+  /* --rule-raised, not --rule: dark --rule (#2b2b2b) against the raised menu surface
+     (--paper-raised #2a2a2a) is a one-value difference — invisible. The token resolves to plain
+     --rule in light (where the raised surface is white and --rule reads fine) and to the stronger
+     step in dark; see its definition in tokens.css. */
+  border-top: 1px solid var(--rule-raised);
   color: var(--ink-soft);
   font-weight: 500;
   font-size: var(--text-sm);
@@ -1240,7 +1256,9 @@ body.sb-resizing .sb-pane {
 .sb-ctxmenu-sep {
   height: 1px;
   margin: 4px 6px;
-  /* --rule-strong, not --rule: on the raised menu surface (esp. dark --paper-raised #2a2a2a) a plain
-     --rule hairline is ~invisible; the stronger rule reads in both themes. */
-  background: var(--rule-strong);
+  /* --rule-raised, not --rule: on the raised menu surface a plain --rule hairline is ~invisible in
+     dark (--rule #2b2b2b vs --paper-raised #2a2a2a). This previously used --rule-strong for both
+     themes, which over-darkened light; the token splits them. Same treatment as .sb-newmenu-other —
+     see tokens.css. */
+  background: var(--rule-raised);
 }

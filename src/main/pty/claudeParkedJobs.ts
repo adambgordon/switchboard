@@ -1,7 +1,7 @@
 /**
  * Which Switchboard-owned Claude terminals have launched a background agent.
  *
- * Claude records this on the session in its private registry as `parkedJobId`. Read it for EXACTLY
+ * Claude records this on the session in its own session registry as `parkedJobId`. Read it for EXACTLY
  * what it says and nothing more:
  *
  * - It is written when the session **spawns** a background agent.

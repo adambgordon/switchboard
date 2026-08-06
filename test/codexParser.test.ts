@@ -18,7 +18,7 @@ function jsonl(lines: object[]): string {
 function interactiveLines(
   opts: { originator?: string; cwd?: string; threadSource?: string } = {}
 ): object[] {
-  const { originator = 'codex-tui', cwd = '/Volumes/git/foo', threadSource } = opts
+  const { originator = 'codex-tui', cwd = '/Users/dev/foo', threadSource } = opts
   return [
     {
       timestamp: TS,
@@ -42,7 +42,7 @@ function interactiveLines(
     {
       timestamp: TS,
       type: 'response_item',
-      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context><cwd>/Volumes/git/foo</cwd></environment_context>' }] }
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context><cwd>/Users/dev/foo</cwd></environment_context>' }] }
     },
     { timestamp: TS, type: 'event_msg', payload: { type: 'user_message', message: 'add a dark mode toggle' } },
     {
@@ -89,7 +89,7 @@ describe('extractCodexMetaFromText', () => {
     const meta = extractCodexMetaFromText(jsonl(interactiveLines()), 'abc', 123, 456)
     expect(meta).not.toBeNull()
     expect(meta!.agent).toBe('codex')
-    expect(meta!.cwd).toBe('/Volumes/git/foo')
+    expect(meta!.cwd).toBe('/Users/dev/foo')
     expect(meta!.title).toBe('add a dark mode toggle')
     expect(meta!.preview).toBe('add a dark mode toggle')
     expect(meta!.version).toBe('0.142.0')
@@ -185,7 +185,7 @@ describe('parseCodexTranscriptText', () => {
   it('builds an interleaved transcript from both streams, in order', () => {
     const t = parseCodexTranscriptText(jsonl(interactiveLines()), 'abc')
     expect(t.agent).toBe('codex')
-    expect(t.cwd).toBe('/Volumes/git/foo')
+    expect(t.cwd).toBe('/Users/dev/foo')
     expect(t.title).toBe('add a dark mode toggle')
     // human prompt → assistant text → tool_use (assistant) → tool_result (user) → assistant text
     const roles = t.messages.map((m) => `${m.role}:${m.userKind ?? ''}`)

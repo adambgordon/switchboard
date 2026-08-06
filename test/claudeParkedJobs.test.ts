@@ -168,7 +168,7 @@ describe('ClaudeParkedJobMonitor', () => {
   })
 
   it('ignores a record whose process is gone, so a resumed id inherits nothing', () => {
-    // Claude leaves the registry file behind when a session dies — observed on a real machine.
+    // Claude leaves the registry file behind when a session dies — observed in practice.
     alive.clear()
     writeFileSync(join(root, '4242.json'), record())
     const m = build()

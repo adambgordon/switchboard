@@ -405,7 +405,16 @@ export default function App() {
       ),
     [railSections, collapsedSections, expandedSections, searching]
   )
-  const recentDirs = useMemo(() => groups.map((g) => g.cwd), [groups])
+  // The new-conversation menu orders by when each repo's newest conversation was STARTED, not by
+  // last activity. `groups` arrives sorted by `latestMtime` desc, which answers "where was I last?" —
+  // a different question from "where am I likely to start something new?". Sort a COPY so the rail
+  // keeps its own order. `firstActivityAt` is the first real message, so a session that was opened
+  // but never typed in scores 0 and sinks — deliberate: an empty session isn't evidence you work there.
+  const recentDirs = useMemo(() => {
+    const startedAt = (g: (typeof groups)[number]): number =>
+      g.conversations.reduce((max, c) => Math.max(max, c.firstActivityAt ?? 0), 0)
+    return [...groups].sort((a, b) => startedAt(b) - startedAt(a)).map((g) => g.cwd)
+  }, [groups])
 
   // Agent axis for "new conversation". `availableAgents` are the launchable CLIs. The agent is
   // RESOLVED (no choice to present) when a usable default is set, or when only one agent exists;
