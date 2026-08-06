@@ -1,6 +1,52 @@
 import { describe, expect, it } from 'vitest'
-import { conversationMarkdown, rowsToMarkdownTable, turnMarkdown } from '../src/renderer/lib/clipboard'
+import {
+  conversationMarkdown,
+  markdownToPlainText,
+  rowsToMarkdownTable,
+  rowsToPlainText,
+  turnMarkdown
+} from '../src/renderer/lib/clipboard'
 import type { TranscriptBlock, TranscriptMessage } from '../src/shared/types'
+
+describe('rowsToPlainText', () => {
+  it('joins cells with tabs and rows with newlines', () => {
+    expect(
+      rowsToPlainText([
+        ['Name', 'Size'],
+        ['foo', '12']
+      ])
+    ).toBe('Name\tSize\nfoo\t12')
+  })
+
+  it('flattens newlines inside a cell so a row stays one line', () => {
+    expect(rowsToPlainText([['a\nb', 'c']])).toBe('a b\tc')
+  })
+})
+
+describe('markdownToPlainText', () => {
+  it('drops emphasis, headings, and link syntax but keeps the words', () => {
+    expect(markdownToPlainText('## Title\n\nSome **bold** and a [link](http://x.com).')).toBe(
+      'Title\n\nSome bold and a link.'
+    )
+  })
+
+  it('keeps a code block’s body without its fence', () => {
+    expect(markdownToPlainText('Run:\n\n```bash\nls -la\n```')).toBe('Run:\n\nls -la')
+  })
+
+  it('keeps list markers, because the rendered view shows bullets too', () => {
+    expect(markdownToPlainText('- one\n- two')).toBe('- one\n- two')
+    expect(markdownToPlainText('1. first\n2. second')).toBe('1. first\n2. second')
+  })
+
+  it('renders a GFM table as tab-separated rows rather than leaking pipes', () => {
+    expect(markdownToPlainText('| A | B |\n| --- | --- |\n| 1 | 2 |')).toBe('A\tB\n1\t2')
+  })
+
+  it('keeps inline code content', () => {
+    expect(markdownToPlainText('call `foo()` now')).toBe('call foo() now')
+  })
+})
 
 describe('rowsToMarkdownTable', () => {
   it('builds a padded markdown table with a separator row', () => {

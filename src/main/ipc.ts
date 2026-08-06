@@ -1,4 +1,14 @@
-import { app, ipcMain, BrowserWindow, dialog, shell, nativeImage } from 'electron'
+import {
+  app,
+  clipboard,
+  ipcMain,
+  BrowserWindow,
+  dialog,
+  Menu,
+  shell,
+  nativeImage,
+  type MenuItemConstructorOptions
+} from 'electron'
 import os from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -137,6 +147,35 @@ export function openExternalUrl(url: string): void {
   if (/^https?:\/\//.test(url)) shell.openExternal(url)
 }
 
+/**
+ * Pop the native context menu for a transcript link. Native (rather than an in-app menu like the
+ * conversation-row one) because macOS already draws this correctly in both themes, flips it near the
+ * screen edge, and dismisses it properly — and because an OS menu isn't anchored to a DOM node, so the
+ * transcript's own scroll churn can't close it. (The rail's custom menu has a comment about exactly
+ * that: a document-wide scroll listener was slammed shut by the transcript re-pinning on open.)
+ *
+ * COPY IS UNGATED, OPEN IS NOT. Writing to the clipboard is inert, so any href a transcript carries can
+ * be copied — that's what makes a file path useful here. Launching is the dangerous half: the http(s)
+ * gate on Open is what stops transcript content, which the agent wrote rather than the user, from
+ * turning the app into a launcher for arbitrary schemes or local executables.
+ */
+export function popLinkContextMenu(url: string, win: BrowserWindow | null): void {
+  if (!url) return
+  const openable = /^https?:\/\//.test(url)
+  // A bare path (relative, absolute, or ~-rooted) has no URL scheme; anything with one reads as a link.
+  const isPath = !/^[a-z][a-z0-9+.-]*:/i.test(url)
+  const items: MenuItemConstructorOptions[] = [
+    { label: isPath ? 'Copy Path' : 'Copy Link', click: () => clipboard.writeText(url) }
+  ]
+  if (openable) {
+    items.push(
+      { type: 'separator' },
+      { label: 'Open Link in Browser', click: () => openExternalUrl(url) }
+    )
+  }
+  Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
+}
+
 export function registerIpc(): void {
   mgr = new PtyManager({
     claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') }
@@ -221,6 +260,9 @@ export function registerIpc(): void {
     return r.filePaths[0]
   })
   ipcMain.on(IPC.openExternal, (_e, url: string) => openExternalUrl(url))
+  ipcMain.on(IPC.linkContextMenu, (e, url: string) =>
+    popLinkContextMenu(url, BrowserWindow.fromWebContents(e.sender))
+  )
   // Keep the OS window background in lockstep with the renderer's theme, so a live window resize
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.
   ipcMain.on(IPC.windowSetBackgroundColor, (e, color: string) =>

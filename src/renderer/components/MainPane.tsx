@@ -50,6 +50,8 @@ interface Props {
   onFindActivate: () => void
   /** Toggle the find bar from the pane-header magnifier. */
   onFindToggle: () => void
+  /** Preferences → Application: copy Formatted-view selections as Markdown rather than rendered text. */
+  markdownCopy: boolean
 }
 
 function EmptyState() {
@@ -123,7 +125,8 @@ export default function MainPane(props: Props) {
     findFocusReq,
     onFindClose,
     onFindActivate,
-    onFindToggle
+    onFindToggle,
+    markdownCopy
   } = props
 
   const showTerminal = !!selectedId && view === 'terminal' && !!pty
@@ -250,6 +253,7 @@ export default function MainPane(props: Props) {
                 searchQuery={deferredQuery}
                 searchActiveIndex={activeIndex}
                 onSearchCount={setMatchCount}
+                markdownCopy={markdownCopy}
               />
             </div>
           ) : (

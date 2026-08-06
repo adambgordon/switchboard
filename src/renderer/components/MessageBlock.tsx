@@ -1,5 +1,5 @@
 import { Children, isValidElement, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentPropsWithoutRef, ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, MutableRefObject, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -20,7 +20,9 @@ import markdown from 'highlight.js/lib/languages/markdown'
 import type { TranscriptBlock } from '@shared/types'
 import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
-import { rowsToMarkdownTable, turnMarkdown } from '../lib/clipboard'
+import { rowsToMarkdownTable, rowsToPlainText } from '../lib/clipboard'
+import { assembleCopy } from '../lib/mdCopy'
+import { collectSections, rangeOver } from '../lib/mdCopyDom'
 import { langLabelFromClassName } from '../lib/codeLang'
 import CopyButton from './CopyButton'
 import AgentLogo from './AgentLogo'
@@ -33,10 +35,69 @@ import { Arrow, Chevron, Person } from './icons'
  * transcript.css (.hljs-*), themed per light/dark — the one sanctioned exception to the transcript's
  * otherwise strict grayscale (see the header note there). */
 const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, rust, sql, yaml, xml, css, markdown }
+
+/* Minimal hast shape — enough to walk and stamp. Avoids pulling in @types/hast (and unist-util-visit)
+ * for a dozen lines of tree walk. */
+interface HastNode {
+  type: string
+  tagName?: string
+  properties?: Record<string, unknown>
+  children?: HastNode[]
+  position?: { start?: { offset?: number }; end?: { offset?: number } }
+}
+
+/**
+ * Stamp every rendered element with `data-s` / `data-e` — the offsets of the markdown it came from,
+ * inside this block's source. This is what lets a text SELECTION be mapped back to markdown (see
+ * `lib/mdCopy.ts`); `sliceSource` below already used the same `node.position` offsets to give the table
+ * copy button its exact source, so this generalises a mechanism the view was relying on already.
+ *
+ * Descent stops at `<pre>`: rehype-highlight fills a fence with one token `<span>` per lexeme, and
+ * annotating those would multiply the node count on the render path for nothing — the `<pre>`'s own
+ * span maps to the fence body on its own (its rendered text occurs exactly once inside its source).
+ */
+function rehypeSourceOffsets() {
+  return (tree: HastNode): void => {
+    const visit = (node: HastNode): void => {
+      for (const child of node.children ?? []) {
+        if (child.type !== 'element') continue
+        const s = child.position?.start?.offset
+        const e = child.position?.end?.offset
+        if (typeof s === 'number' && typeof e === 'number') {
+          child.properties = { ...child.properties, 'data-s': s, 'data-e': e }
+        }
+        if (child.tagName === 'pre') continue
+        visit(child)
+      }
+    }
+    visit(tree)
+  }
+}
+
 // Annotated so the literal is read as a plugin tuple (PluggableList), not a nested array.
 const rehypePlugins: ComponentPropsWithoutRef<typeof ReactMarkdown>['rehypePlugins'] = [
-  [rehypeHighlight, { languages: HLJS_LANGUAGES }]
+  [rehypeHighlight, { languages: HLJS_LANGUAGES }],
+  rehypeSourceOffsets
 ]
+
+/** The source-offset pair the plugin above stamps, as it arrives in a component's props. Declared so
+ *  the two wrapper components (CodeBlock / TableBlock) can forward it onto the element they render. */
+type SrcAttrs = { 'data-s'?: number | string; 'data-e'?: number | string }
+
+/** TranscriptView's stable copy context — `enabled` is the Copy-as-markdown preference, read at click
+ *  time by the copy buttons so the toggle never touches the render path. */
+export type CopyCtxRef = MutableRefObject<{ enabled: boolean; sources: Map<string, string> }>
+
+/**
+ * Merge our `md-*` class with whatever hast supplied, instead of letting the spread below overwrite it.
+ *
+ * The overrides forward `...rest` so the offset attributes reach the DOM, but `rest` carries EVERY hast
+ * property — including `className`, and it lands after ours. remark-gfm sets `contains-task-list` on a
+ * task list's `<ul>` and `task-list-item` on each `<li>`, and footnotes get `sr-only` / `data-footnote-backref`,
+ * so an unmerged spread silently strips `md-ul` / `md-li` / `md-h2` / `md-a` from exactly the content
+ * agents emit most. Same trick the `code` override has always used for rehype-highlight's classes.
+ */
+const cx = (ours: string, theirs?: string): string => [ours, theirs].filter(Boolean).join(' ')
 
 /** Read a rendered markdown table's cells into rows (row 0 = header). Shared by the table copy button
  *  and the turn copy. */
@@ -60,39 +121,56 @@ function codeLang(children: ReactNode): string | null {
  * A languaged fence also gets a quiet caps caption in the top-left gutter (`.md-lang`); it lives
  * OUTSIDE the <pre> so it never lands in the copied text, and `.has-lang` opens the gutter so it
  * clears line 1. */
-function CodeBlock({ children }: { children?: ReactNode }): ReactNode {
+function CodeBlock({ children, ...src }: { children?: ReactNode } & SrcAttrs): ReactNode {
   const ref = useRef<HTMLPreElement>(null)
   const lang = codeLang(children)
   return (
     <div className={lang ? 'md-pre-wrap has-lang' : 'md-pre-wrap'} data-lang={lang ?? undefined}>
       {lang ? (
-        <span className="md-lang label-caps" aria-hidden="true">
+        // data-md-skip: the caption is chrome with no markdown behind it. It renders INSIDE the block
+        // but sits outside the annotated <pre>, so counting its text would shift every source offset
+        // after it — see the exclusion note in lib/mdCopyDom.ts.
+        <span className="md-lang label-caps" aria-hidden="true" data-md-skip="">
           {lang}
         </span>
       ) : null}
-      <pre className="md-pre" ref={ref}>
+      <pre className="md-pre" ref={ref} {...src}>
         {children}
       </pre>
-      <CopyButton className="copy-block" tip="Copy code" getText={() => ref.current?.textContent ?? ''} />
+      {/* The rendered <code> carries a trailing newline that isn't part of the code, so strip it —
+          otherwise every code copy arrives with a blank line stuck on the end. (The selection path
+          gets this for free: assembleCopy trims each part.) */}
+      <CopyButton
+        className="copy-block"
+        tip="Copy code"
+        getText={() => (ref.current?.textContent ?? '').replace(/\n+$/, '')}
+      />
     </div>
   )
 }
 
 function TableBlock({
   children,
-  sourceMarkdown
+  sourceMarkdown,
+  copyCtxRef,
+  ...src
 }: {
   children?: ReactNode
   /** The table's exact markdown source (sliced via the hast node's position). Preferred over the DOM
    *  reconstruction because it preserves cell formatting / alignment that the rendered cells drop. */
   sourceMarkdown?: string
-}): ReactNode {
+  /** Read at click time — with "Copy as markdown" off, emit tab-separated cells, not a pipe table. */
+  copyCtxRef: CopyCtxRef
+} & SrcAttrs): ReactNode {
   const ref = useRef<HTMLTableElement>(null)
-  const getText = (): string => sourceMarkdown?.trim() || rowsToMarkdownTable(tableRows(ref.current))
+  const getText = (): string =>
+    copyCtxRef.current.enabled
+      ? sourceMarkdown?.trim() || rowsToMarkdownTable(tableRows(ref.current))
+      : rowsToPlainText(tableRows(ref.current))
   return (
     <div className="md-table-outer">
       <div className="md-table-wrap">
-        <table className="md-table" ref={ref}>
+        <table className="md-table" ref={ref} {...src}>
           {children}
         </table>
       </div>
@@ -105,12 +183,25 @@ function TableBlock({
  * Markdown overrides — every element is styled via a `md-*` class so
  * the look lives entirely in transcript.css. Links never navigate;
  * they hand off to the OS browser via window.api.openExternal.
+ *
+ * Every override destructures `node` OUT (react-markdown passes the hast
+ * node as a prop; spreading it onto a DOM element makes React warn) and
+ * spreads the `...rest`, which is what carries rehypeSourceOffsets'
+ * `data-s` / `data-e` through to the DOM. An override that destructures
+ * only `{ children }` silently DROPS those attributes — and with them,
+ * that element's contribution to a markdown copy.
  * ------------------------------------------------------------------ */
 const markdownComponents: Components = {
-  p: ({ children }) => <p className="md-p">{children}</p>,
-  a: ({ href, children }) => (
+  p: ({ node, className, children, ...rest }) => (
+    <p className={cx('md-p', className)} {...rest}>
+      {children}
+    </p>
+  ),
+  // `title` is destructured out and dropped: `[label](url "T")` puts it in the property bag, and a
+  // native title tooltip both lags ~1s and stacks on top of the data-tip this app replaced it with.
+  a: ({ node, className, href, title, children, ...rest }) => (
     <a
-      className="md-a"
+      className={cx('md-a', className)}
       href={href}
       data-tip={href}
       data-tip-wide
@@ -119,6 +210,15 @@ const markdownComponents: Components = {
         e.preventDefault()
         if (href) window.api.openExternal(href)
       }}
+      // Right-click hands off to a NATIVE menu in main (Copy Link / Open Link in Browser). Suppressed
+      // propagation so the click can't also reach the pane, and no menu at all without an href.
+      onContextMenu={(e) => {
+        if (!href) return
+        e.preventDefault()
+        e.stopPropagation()
+        window.api.linkContextMenu(href)
+      }}
+      {...rest}
     >
       {children}
     </a>
@@ -128,41 +228,99 @@ const markdownComponents: Components = {
   // Merge the incoming className: rehype-highlight sets `hljs language-xxx` on fenced <code> plus the
   // token <span class="hljs-*"> children — clobbering className with a bare "md-code" would drop the
   // highlight hooks. The highlighted spans arrive as `children`, so rendering them as-is preserves them.
-  code: ({ className, children, ...rest }: ComponentPropsWithoutRef<'code'>) => (
-    <code className={['md-code', className].filter(Boolean).join(' ')} {...rest}>
+  code: ({ node, className, children, ...rest }) => (
+    <code className={cx('md-code', className)} {...rest}>
       {children}
     </code>
   ),
-  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-  ul: ({ children }) => <ul className="md-ul">{children}</ul>,
-  ol: ({ children }) => <ol className="md-ol">{children}</ol>,
-  li: ({ children }) => <li className="md-li">{children}</li>,
-  h1: ({ children }) => <h1 className="md-h md-h1">{children}</h1>,
-  h2: ({ children }) => <h2 className="md-h md-h2">{children}</h2>,
-  h3: ({ children }) => <h3 className="md-h md-h3">{children}</h3>,
-  h4: ({ children }) => <h4 className="md-h md-h4">{children}</h4>,
-  h5: ({ children }) => <h5 className="md-h md-h5">{children}</h5>,
-  h6: ({ children }) => <h6 className="md-h md-h6">{children}</h6>,
-  blockquote: ({ children }) => <blockquote className="md-quote">{children}</blockquote>,
-  th: ({ children, style }) => (
-    <th className="md-th" style={style}>
+  pre: ({ node, children, ...rest }) => <CodeBlock {...rest}>{children}</CodeBlock>,
+  ul: ({ node, className, children, ...rest }) => (
+    <ul className={cx('md-ul', className)} {...rest}>
+      {children}
+    </ul>
+  ),
+  ol: ({ node, className, children, ...rest }) => (
+    <ol className={cx('md-ol', className)} {...rest}>
+      {children}
+    </ol>
+  ),
+  li: ({ node, className, children, ...rest }) => (
+    <li className={cx('md-li', className)} {...rest}>
+      {children}
+    </li>
+  ),
+  h1: ({ node, className, children, ...rest }) => (
+    <h1 className={cx('md-h md-h1', className)} {...rest}>
+      {children}
+    </h1>
+  ),
+  h2: ({ node, className, children, ...rest }) => (
+    <h2 className={cx('md-h md-h2', className)} {...rest}>
+      {children}
+    </h2>
+  ),
+  h3: ({ node, className, children, ...rest }) => (
+    <h3 className={cx('md-h md-h3', className)} {...rest}>
+      {children}
+    </h3>
+  ),
+  h4: ({ node, className, children, ...rest }) => (
+    <h4 className={cx('md-h md-h4', className)} {...rest}>
+      {children}
+    </h4>
+  ),
+  h5: ({ node, className, children, ...rest }) => (
+    <h5 className={cx('md-h md-h5', className)} {...rest}>
+      {children}
+    </h5>
+  ),
+  h6: ({ node, className, children, ...rest }) => (
+    <h6 className={cx('md-h md-h6', className)} {...rest}>
+      {children}
+    </h6>
+  ),
+  blockquote: ({ node, className, children, ...rest }) => (
+    <blockquote className={cx('md-quote', className)} {...rest}>
+      {children}
+    </blockquote>
+  ),
+  // `style` carries the GFM column alignment (`text-align:…`) and always has — it is NOT part of the
+  // property spread, so alignment behaves exactly as it did before the offsets were added.
+  th: ({ node, className, children, style, ...rest }) => (
+    <th className={cx('md-th', className)} style={style} {...rest}>
       {children}
     </th>
   ),
-  td: ({ children, style }) => (
-    <td className="md-td" style={style}>
+  td: ({ node, className, children, style, ...rest }) => (
+    <td className={cx('md-td', className)} style={style} {...rest}>
       {children}
     </td>
   ),
-  hr: () => <hr className="md-hr" />,
-  strong: ({ children }) => <strong className="md-strong">{children}</strong>,
-  em: ({ children }) => <em className="md-em">{children}</em>,
-  img: ({ alt }) => (
-    <span className="block-chip">
-      <span aria-hidden="true">🖼</span>
-      <span>{alt && alt.trim() ? alt : 'image'}</span>
-    </span>
-  )
+  hr: ({ node, className, ...rest }) => <hr className={cx('md-hr', className)} {...rest} />,
+  strong: ({ node, className, children, ...rest }) => (
+    <strong className={cx('md-strong', className)} {...rest}>
+      {children}
+    </strong>
+  ),
+  em: ({ node, className, children, ...rest }) => (
+    <em className={cx('md-em', className)} {...rest}>
+      {children}
+    </em>
+  ),
+  // An inline image's chip text ("🖼 alt") never matches its `![alt](url)` source, so it can't map
+  // character-exactly — but keeping it ANNOTATED still pays: it becomes a bounded child, so the plain
+  // text either side of it maps exactly instead of the whole paragraph widening.
+  // Only the offsets are forwarded here: the element rendered is a <span>, and the property bag holds
+  // an image's `src` / `title`, which are meaningless (and invalid) on one.
+  img: ({ node, alt, ...rest }) => {
+    const offsets = rest as SrcAttrs
+    return (
+      <span className="block-chip" data-s={offsets['data-s']} data-e={offsets['data-e']}>
+        <span aria-hidden="true">🖼</span>
+        <span>{alt && alt.trim() ? alt : 'image'}</span>
+      </span>
+    )
+  }
 }
 
 /** Slice an element's exact markdown source from the original `text` via its hast node position.
@@ -176,21 +334,36 @@ function sliceSource(text: string, node: unknown): string {
   return typeof start === 'number' && typeof end === 'number' ? text.slice(start, end) : ''
 }
 
-function MarkdownBlock({ text }: { text: string }): ReactNode {
+function MarkdownBlock({
+  text,
+  blockKey,
+  copyCtxRef
+}: {
+  text: string
+  blockKey: string
+  copyCtxRef: CopyCtxRef
+}): ReactNode {
   // Override `table` with a closure over the source so its copy button yields the exact markdown
   // (cell formatting / alignment preserved) sliced via the node's position offsets — the same source
   // the turn copy uses. Everything else stays the shared module-level components.
   const components = useMemo<Components>(
     () => ({
       ...markdownComponents,
-      table: ({ node, children }) => (
-        <TableBlock sourceMarkdown={sliceSource(text, node)}>{children}</TableBlock>
+      table: ({ node, children, ...rest }) => (
+        <TableBlock sourceMarkdown={sliceSource(text, node)} copyCtxRef={copyCtxRef} {...rest}>
+          {children}
+        </TableBlock>
       )
     }),
-    [text]
+    // copyCtxRef is stable, so flipping the preference doesn't invalidate this — the table button
+    // reads it when clicked instead.
+    [text, copyCtxRef]
   )
+  // The wrapper is the copy handler's unit of work: `data-block-key` identifies which text block's
+  // source to slice, and the 0..length span makes it the root of the same annotated tree its children
+  // form — so one uniform walk describes the whole block (see lib/mdCopyDom.ts).
   return (
-    <div className="md">
+    <div className="md" data-block-key={blockKey} data-s={0} data-e={text.length}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={components}>
         {text}
       </ReactMarkdown>
@@ -361,9 +534,10 @@ function ToolRun({ item }: { item: ToolRunItem }): ReactNode {
   )
 }
 
-function renderBlock(block: TranscriptBlock, key: string): ReactNode {
+function renderBlock(block: TranscriptBlock, key: string, copyCtxRef: CopyCtxRef): ReactNode {
   if (block.kind === 'text') {
-    return <MarkdownBlock key={key} text={block.text} />
+    // `key` is `${message.uuid}:${blockIndex}` — reused as the copy handler's lookup into the source map.
+    return <MarkdownBlock key={key} blockKey={key} text={block.text} copyCtxRef={copyCtxRef} />
   }
   if (block.kind === 'image') return <ImageBlock key={key} alt={block.alt} />
   // tool_use / tool_result are consumed by a tool run, never rendered inside a prose turn.
@@ -379,11 +553,16 @@ function renderBlock(block: TranscriptBlock, key: string): ReactNode {
  * ------------------------------------------------------------------ */
 function MessageBlock({
   item,
-  dividerBefore
+  dividerBefore,
+  copyCtxRef
 }: {
   item: TranscriptItem
   dividerBefore: boolean
+  /** TranscriptView's copy context (stable). The turn and table buttons read the preference from it
+   *  when clicked, so toggling Preferences doesn't re-render every mounted block. */
+  copyCtxRef: CopyCtxRef
 }): ReactNode {
+  const bodyRef = useRef<HTMLDivElement>(null)
   if (item.kind === 'interrupt') {
     return (
       <div className="message message-interrupt">
@@ -396,13 +575,34 @@ function MessageBlock({
   const classes = `message${item.isSidechain ? ' is-sidechain' : ''}${dividerBefore ? ' has-divider' : ''}`
   const ts = item.timestamp
   const time = clockTime(ts)
-  // Copy-turn grabs all narration across the section's prose beats (turnMarkdown skips non-text, so
-  // tool runs never land in the copy); shown only when the section carries prose text.
   const proseMessages = item.items.flatMap((it) => (it.kind === 'turn' ? it.messages : []))
   const hasProse = proseMessages.some((m) => m.blocks.some((b) => b.kind === 'text'))
 
+  /**
+   * Copy-turn runs the SAME collector the ⌘C handler does, over a range covering this section's body —
+   * so the button and a hand-drag across the same content cannot disagree. That matters now that tool
+   * I/O is conditional on a run being expanded: a separate message-walking implementation would have no
+   * way to see the DOM's disclosure state.
+   */
+  const turnText = (): string => {
+    const body = bodyRef.current
+    if (!body) return ''
+    const sources = new Map<string, string>()
+    for (const part of item.items) {
+      if (part.kind !== 'turn') continue
+      for (const msg of part.messages) {
+        msg.blocks.forEach((b, bi) => {
+          if (b.kind === 'text') sources.set(`${msg.uuid}:${bi}`, b.text)
+        })
+      }
+    }
+    const markdown = copyCtxRef.current.enabled
+    const mode = markdown ? 'markdown' : 'plain'
+    return assembleCopy(collectSections(rangeOver(body), body, (k) => sources.get(k), mode), false, !markdown)
+  }
+
   return (
-    <article className={classes}>
+    <article className={classes} data-speaker={item.label} data-sidechain={item.isSidechain ? '' : undefined}>
       <header className="message-meta">
         <span className="role-label label-caps">
           {item.isAssistant ? (
@@ -413,21 +613,19 @@ function MessageBlock({
           <span className="role-name">{item.label}</span>
         </span>
         {item.isSidechain ? <span className="sidechain-tag label-caps">Sub-agent</span> : null}
-        {hasProse ? (
-          <CopyButton className="copy-turn" tip="Copy turn" getText={() => turnMarkdown(proseMessages)} />
-        ) : null}
+        {hasProse ? <CopyButton className="copy-turn" tip="Copy turn" getText={turnText} /> : null}
         {time ? (
           <span className="message-time" data-tip={fullDateTime(ts)}>
             {time}
           </span>
         ) : null}
       </header>
-      <div className="message-body">
+      <div className="message-body" ref={bodyRef}>
         {item.items.map((it) =>
           it.kind === 'turn' ? (
             <div className="prose-beat" key={it.key}>
               {it.messages.flatMap((m) =>
-                m.blocks.map((block, bi) => renderBlock(block, `${m.uuid}:${bi}`))
+                m.blocks.map((block, bi) => renderBlock(block, `${m.uuid}:${bi}`, copyCtxRef))
               )}
             </div>
           ) : (

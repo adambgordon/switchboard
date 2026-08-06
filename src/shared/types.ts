@@ -241,6 +241,7 @@ export const IPC = {
   agentsAvailable: 'agents:available', // which agent CLIs are launchable from the login shell (cached)
   dialogPickDirectory: 'dialog:pickDirectory',
   openExternal: 'shell:openExternal',
+  linkContextMenu: 'shell:linkContextMenu', // renderer -> main: pop the native right-click menu for a link
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
@@ -326,6 +327,9 @@ export interface SwitchboardApi {
   // --- misc ---
   pickDirectory(): Promise<string | null>
   openExternal(url: string): void
+  /** Pop the NATIVE macOS context menu for a transcript link (Copy Link / Open Link in Browser).
+   *  Native rather than an in-app menu so the fonts, theme, and dismissal are the OS's, not ours. */
+  linkContextMenu(url: string): void
   /** Match the window's native backgroundColor to the active theme's --paper, so a live resize
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void
@@ -372,13 +376,19 @@ export const CONFIG = {
    */
   maxLivePtys: 8,
   /**
-   * Bounds for the user-configurable cap (the Preferences slider clamps to these; the
-   * PtyManager re-clamps defensively). 2–14 centers the default (8) on the slider, and the ceiling
-   * stays under Chromium's ~16 WebGL-context limit — past which live terminals fall back to the
-   * canvas renderer (see TerminalView's onContextLoss).
+   * Bounds for the user-configurable cap (the Preferences slider clamps to these; the PtyManager
+   * re-clamps defensively). The range is deliberately ASYMMETRIC about the default — 6 below, 8 above —
+   * so the slider maps it piecewise to keep the default mid-track (see lib/maxLiveScale.ts). An earlier
+   * 2–14 got that centring for free from symmetry, which is the only reason it was 14.
+   *
+   * The ceiling now REACHES Chromium's ~16 WebGL-context limit rather than staying under it. That's a
+   * soft edge, not a cliff: at the top of the range the oldest live terminals lose their GL context and
+   * fall back to the canvas renderer (see TerminalView's onContextLoss), which costs some of the repaint
+   * smoothness WebGL was adopted for. The Preferences tooltip already frames high values as
+   * increase-at-your-own-risk.
    */
   liveSessionsMin: 2,
-  liveSessionsMax: 14,
+  liveSessionsMax: 16,
   /** ms of output silence after which a live session is considered idle (not busy). */
   busyWindowMs: 800
 } as const

@@ -5,6 +5,7 @@ import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
 import { useLayout } from './lib/useLayout'
+import { useMarkdownCopy } from './lib/useMarkdownCopy'
 import { useNewConvoDefault } from './lib/useNewConvoDefault'
 import { useNewConvoDefaultAgent } from './lib/useNewConvoDefaultAgent'
 import { useAgentAvailability } from './lib/useAgentAvailability'
@@ -93,6 +94,7 @@ export default function App() {
   )
   const { seen, unread, markUnread, markRead, rekey: rekeySeen } = useSeen()
   const { dir: defaultDir, setDir: setDefaultDir } = useNewConvoDefault()
+  const { enabled: markdownCopy, setEnabled: setMarkdownCopy } = useMarkdownCopy()
   const {
     agent: defaultAgent,
     enabled: defaultAgentEnabled,
@@ -937,6 +939,7 @@ export default function App() {
           onFindClose={closeFind}
           onFindActivate={onFindActivate}
           onFindToggle={toggleFind}
+          markdownCopy={markdownCopy}
         />
       </div>
       <SettingsModal
@@ -960,6 +963,8 @@ export default function App() {
         maxLiveDefault={maxLiveDefault}
         onSetMaxLive={setMaxLive}
         onResetMaxLive={resetMaxLive}
+        markdownCopy={markdownCopy}
+        onSetMarkdownCopy={setMarkdownCopy}
       />
       <CapWarningModal capWarning={capWarning} onDismiss={() => setCapWarnDismissed(true)} />
       <ConversationInfoModal
