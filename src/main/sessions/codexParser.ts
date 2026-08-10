@@ -2,20 +2,31 @@
  * Read-only parsing of Codex session rollouts
  * (`~/.codex/sessions/YYYY/MM/DD/rollout-<ISO>-<uuid>.jsonl`).
  *
- * Each line is `{ timestamp, type, payload }`. Two streams matter:
+ * Each line is `{ timestamp, type, payload }`. Three shapes matter:
  *   - `response_item` — the canonical model thread (OpenAI Responses API items): assistant/user
  *     `message`s, `reasoning` (dropped, like Claude "thinking"), `function_call` /
  *     `function_call_output`, `custom_tool_call` / `custom_tool_call_output`, `web_search_call`.
- *   - `event_msg` — the TUI event stream: `user_message` (the clean human prompt), `agent_message`
- *     (assistant final text — redundant with the response_item assistant message, so dropped from
- *     the transcript), `token_count`, and `task_started`/`task_complete`/`turn_aborted`
- *     (explicit turn boundaries).
+ *   - `event_msg` per-kind content events — `user_message` (the clean human prompt) and
+ *     `agent_message` (assistant final text — redundant with the response_item assistant message,
+ *     so dropped from the transcript).
+ *   - `event_msg/item_completed` — a later unified envelope that folds those per-kind content
+ *     events into ONE event discriminated by `item.type`: `UserMessage`, `AgentMessage`,
+ *     `Reasoning`, `CommandExecution`, `Extension`, `McpToolCall`, `FileChange`. Top-level threads
+ *     emit this INSTEAD of `user_message`/`agent_message`; subagent rollouts still emit the
+ *     per-kind events, so both shapes have to be read. Only `UserMessage` is read for content —
+ *     every other item mirrors a `response_item` line, so reading them would duplicate the
+ *     transcript.
  *
- * The transcript walks lines in order and emits: human turns from `event_msg/user_message` (the
- * de-noised prompt — the response_item user messages carry injected <environment_context>/AGENTS.md
- * blocks, so they're skipped), assistant text from response_item assistant messages, and tool
- * calls/results from function_call(+custom/web)/function_call_output. These map onto the same
- * normalized tool_use/tool_result block shapes as the Claude parser, so the renderer is shared.
+ * Orthogonal to all three: `token_count` and the `task_started`/`task_complete`/`turn_aborted`
+ * turn boundaries, which the envelope did not change.
+ *
+ * The transcript walks lines in order and emits: human turns from whichever human-turn stream the
+ * rollout carries (the de-noised prompt — the response_item user messages carry injected
+ * <environment_context>/AGENTS.md blocks, so they're skipped), assistant text from response_item
+ * assistant messages, and tool calls/results from function_call(+custom/web)/function_call_output.
+ * These map onto the same normalized tool_use/tool_result block shapes as the Claude parser, so the
+ * renderer is shared. Should a rollout ever carry BOTH human-turn streams, the per-kind
+ * `user_message` wins: reading both would double every prompt.
  *
  * Only INTERACTIVE sessions (`session_meta.originator === 'codex-tui'`) are parsed into metadata;
  * `codex exec` / non-interactive rollouts (originator `codex_exec`) are dropped. The indexer then
@@ -98,6 +109,52 @@ function contentText(content: unknown): string {
   return ''
 }
 
+/** The `item.type` discriminant on an `item_completed` payload, or '' when there isn't one. */
+function itemType(payload: Record<string, unknown>): string {
+  const item = asRecord(payload.item)
+  return item != null && typeof item.type === 'string' ? item.type : ''
+}
+
+/**
+ * Does this rollout carry the per-kind `event_msg/user_message` stream? When it does, the
+ * `item_completed` envelope's `UserMessage` items must be ignored so a prompt is never read twice.
+ *
+ * The substring test is only a cheap pre-filter, and every candidate line is then parsed and
+ * verified to really BE the event. Prose that quotes the term is harmless — JSON escapes its quotes
+ * — but any unescaped string or array value equal to the bare token serializes to the same
+ * characters (a search query for `user_message`, say). Trusting the substring alone would read such
+ * a rollout as having the per-kind stream and silently drop every one of its human turns: the exact
+ * bug this guard exists to prevent.
+ */
+function hasLegacyUserStream(lines: readonly string[]): boolean {
+  return lines.some((line) => {
+    if (!line.includes('"user_message"')) return false
+    const obj = parseLine(line)
+    if (obj == null || obj.type !== 'event_msg') return false
+    return asRecord(obj.payload)?.type === 'user_message'
+  })
+}
+
+/**
+ * The clean human prompt carried by an `event_msg` line, or '' when the line isn't a human turn.
+ *
+ * Reads both stream shapes: the per-kind `user_message` event, and the unified `item_completed`
+ * envelope's `UserMessage` item. `allowItemStream` is false when the rollout also has the per-kind
+ * stream (see {@link hasLegacyUserStream}).
+ *
+ * An attached image is a SIBLING `{ type: 'local_image', path }` content part, and the `text` part
+ * already carries that image's `[Image #N]` placeholder inline — so joining the text parts
+ * reproduces the `user_message` string exactly, and no separate image block belongs here.
+ */
+function humanTurnText(payload: Record<string, unknown>, allowItemStream: boolean): string {
+  if (payload.type === 'user_message') {
+    return typeof payload.message === 'string' ? payload.message : ''
+  }
+  if (!allowItemStream || payload.type !== 'item_completed') return ''
+  if (itemType(payload) !== 'UserMessage') return ''
+  return contentText(asRecord(payload.item)?.content)
+}
+
 /** A `function_call`'s `arguments` is a JSON string; parse it for nicer rendering, else keep raw. */
 function parseArgs(args: unknown): unknown {
   if (typeof args === 'string') {
@@ -153,7 +210,10 @@ export function parseCodexTranscriptText(text: string, sessionId: string): Trans
     messages.push({ uuid, role, userKind, blocks, timestamp, isSidechain: false })
   }
 
-  for (const line of splitLines(text)) {
+  const lines = splitLines(text)
+  const allowItemStream = !hasLegacyUserStream(lines)
+
+  for (const line of lines) {
     const obj = parseLine(line)
     if (!obj) continue
     const payload = asRecord(obj.payload)
@@ -166,13 +226,13 @@ export function parseCodexTranscriptText(text: string, sessionId: string): Trans
     }
 
     if (obj.type === 'event_msg') {
-      if (payload.type === 'user_message') {
-        const msgText = typeof payload.message === 'string' ? payload.message : ''
-        if (msgText.trim().length === 0) continue
+      const msgText = humanTurnText(payload, allowItemStream)
+      if (msgText.trim().length > 0) {
         if (firstUser == null) firstUser = msgText
         add('user', [{ kind: 'text', text: msgText }], ts, 'human')
       }
-      // agent_message duplicates the response_item assistant text; token_count / task_* are not
+      // agent_message duplicates the response_item assistant text; every non-UserMessage
+      // item_completed likewise mirrors a response_item line; token_count / task_* are not
       // transcript content — all skipped here.
       continue
     }
@@ -266,7 +326,10 @@ export function extractCodexMetaFromText(
   let turnEndedAt: number | null = null
   const openUserInputCalls = new Set<string>()
 
-  for (const line of splitLines(text)) {
+  const lines = splitLines(text)
+  const allowItemStream = !hasLegacyUserStream(lines)
+
+  for (const line of lines) {
     const obj = parseLine(line)
     if (!obj) continue
     const payload = asRecord(obj.payload)
@@ -290,28 +353,31 @@ export function extractCodexMetaFromText(
 
     if (obj.type === 'event_msg') {
       const pt = payload.type
-      if (pt === 'user_message') {
-        const m = typeof payload.message === 'string' ? payload.message : ''
-        if (m.trim().length > 0) {
-          if (firstUser == null) firstUser = m
-          lastUser = m
-          if (
-            isConversationalMessage({
-              role: 'user',
-              userKind: 'human',
-              blocks: [{ kind: 'text', text: m }]
-            })
-          ) {
-            messageCount += 1
-          }
-          if (!Number.isNaN(at)) {
-            if (firstActivityAt == null) firstActivityAt = at
-            lastActivityAt = at
-          }
+      const m = humanTurnText(payload, allowItemStream)
+      if (m.trim().length > 0) {
+        if (firstUser == null) firstUser = m
+        lastUser = m
+        if (
+          isConversationalMessage({
+            role: 'user',
+            userKind: 'human',
+            blocks: [{ kind: 'text', text: m }]
+          })
+        ) {
+          messageCount += 1
+        }
+        if (!Number.isNaN(at)) {
+          if (firstActivityAt == null) firstActivityAt = at
+          lastActivityAt = at
         }
         continue
       }
-      if (pt === 'agent_message') {
+      // Assistant prose advances the activity clock without being counted here (the response_item
+      // assistant message is what `messageCount` counts). The envelope's `AgentMessage` item is the
+      // direct successor to the `agent_message` event — and the ONLY item kind treated as activity:
+      // letting `Reasoning`/`CommandExecution` advance the clock would expire an OSC-reported
+      // question (see currentInputRequestedAt) while the agent is still waiting on the user.
+      if (pt === 'agent_message' || (pt === 'item_completed' && itemType(payload) === 'AgentMessage')) {
         if (!Number.isNaN(at)) lastActivityAt = at
         continue
       }
