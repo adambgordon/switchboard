@@ -6,6 +6,11 @@ const TS = '2026-06-23T14:36:56.000Z'
 const TS2 = '2026-06-23T14:37:10.000Z'
 const TS3 = '2026-06-23T14:37:20.000Z'
 
+/** An `event_msg/item_completed` line wrapping one item of the unified envelope. */
+function itemLine(timestamp: string, item: object): object {
+  return { timestamp, type: 'event_msg', payload: { type: 'item_completed', thread_id: 'abc', turn_id: 't1', item } }
+}
+
 function jsonl(lines: object[]): string {
   return lines.map((l) => JSON.stringify(l)).join('\n')
 }
@@ -81,6 +86,76 @@ function interactiveLines(
       }
     },
     { timestamp: TS2, type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Done.', completed_at: 1782225430 } }
+  ]
+}
+
+/**
+ * The same session in the LATER rollout shape: the per-kind `user_message` / `agent_message` events
+ * are gone, and their content arrives through the unified `event_msg/item_completed` envelope. The
+ * `response_item` stream is unchanged, so the assistant text and tool plumbing still come from
+ * there — which is exactly why every non-`UserMessage` item must be ignored.
+ */
+function itemStreamLines(opts: { cwd?: string; userItem?: object } = {}): object[] {
+  const { cwd = '/Users/dev/foo', userItem } = opts
+  return [
+    {
+      timestamp: TS,
+      type: 'session_meta',
+      payload: { session_id: 'abc', cwd, originator: 'codex-tui', cli_version: '0.147.0' }
+    },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
+    { timestamp: TS, type: 'turn_context', payload: { turn_id: 't1', cwd, model: 'gpt-5.6' } },
+    {
+      timestamp: TS,
+      type: 'response_item',
+      payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: '<permissions instructions> sandbox ...' }] }
+    },
+    {
+      timestamp: TS,
+      type: 'response_item',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context><cwd>/Users/dev/foo</cwd></environment_context>' }] }
+    },
+    // The clean prompt is ALSO mirrored here; it stays skipped so the envelope is the only source.
+    {
+      timestamp: TS,
+      type: 'response_item',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'add a dark mode toggle' }] }
+    },
+    itemLine(TS, userItem ?? { type: 'UserMessage', id: 'u1', content: [{ type: 'text', text: 'add a dark mode toggle', text_elements: [] }] }),
+    { timestamp: TS, type: 'response_item', payload: { type: 'reasoning', content: [] } },
+    itemLine(TS, { type: 'Reasoning', id: 'rs1', summary_text: [], raw_content: [] }),
+    {
+      timestamp: TS,
+      type: 'response_item',
+      payload: { type: 'message', role: 'assistant', id: 'm1', content: [{ type: 'output_text', text: "I'll add the toggle." }] }
+    },
+    itemLine(TS, { type: 'AgentMessage', id: 'm1', content: [{ type: 'Text', text: "I'll add the toggle." }], phase: 'commentary' }),
+    {
+      timestamp: TS,
+      type: 'response_item',
+      payload: { type: 'custom_tool_call', name: 'exec', call_id: 'call_1', input: 'const r = await tools.exec_command({cmd:"ls"})' }
+    },
+    { timestamp: TS, type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'call_1', output: 'file.txt\n' } },
+    itemLine(TS2, { type: 'CommandExecution', id: 'exec1', command: 'ls', exit_code: 0 }),
+    {
+      timestamp: TS2,
+      type: 'response_item',
+      payload: { type: 'message', role: 'assistant', id: 'm2', content: [{ type: 'output_text', text: 'Done.' }] }
+    },
+    itemLine(TS2, { type: 'AgentMessage', id: 'm2', content: [{ type: 'Text', text: 'Done.' }], phase: 'final_answer' }),
+    {
+      timestamp: TS2,
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: { input_tokens: 1000, cached_input_tokens: 400, output_tokens: 200, reasoning_output_tokens: 50 },
+          last_token_usage: { input_tokens: 600 },
+          model_context_window: 258400
+        }
+      }
+    },
+    { timestamp: TS3, type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1', last_agent_message: 'Done.' } }
   ]
 }
 
@@ -201,5 +276,148 @@ describe('parseCodexTranscriptText', () => {
     const dump = JSON.stringify(t.messages)
     expect(dump).not.toContain('permissions instructions')
     expect(dump).not.toContain('environment_context')
+  })
+})
+
+/**
+ * The unified `event_msg/item_completed` envelope. Top-level threads emit it INSTEAD of the per-kind
+ * `user_message`/`agent_message` events, so a rollout in this shape has no other source for the
+ * human turn — without it the sidebar preview, the message count, `firstActivityAt`, and every
+ * human turn in the Formatted view all go missing.
+ */
+describe('item_completed envelope', () => {
+  const CWD = '/Users/dev/foo'
+  /** Minimal in-progress turn (no task_complete, so the clock isn't overwritten by the boundary). */
+  function clockLines(...items: object[]): string {
+    return jsonl([
+      { timestamp: TS, type: 'session_meta', payload: { cwd: CWD, originator: 'codex-tui' } },
+      { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
+      itemLine(TS, { type: 'UserMessage', id: 'u1', content: [{ type: 'text', text: 'go' }] }),
+      ...items
+    ])
+  }
+
+  it('reads the human turn, so title/preview/count/firstActivityAt all populate', () => {
+    const meta = extractCodexMetaFromText(jsonl(itemStreamLines()), 'abc', 123, 456)!
+    expect(meta.title).toBe('add a dark mode toggle')
+    expect(meta.preview).toBe('add a dark mode toggle')
+    expect(meta.version).toBe('0.147.0')
+    expect(meta.firstActivityAt).toBe(Date.parse(TS))
+    // 1 human + 2 assistant. The cross-check is the point: the count and the transcript must agree,
+    // which they cannot if only one of the two code paths learned to read the envelope.
+    expect(meta.messageCount).toBe(3)
+    expect(meta.messageCount).toBe(
+      countConversationalMessages(parseCodexTranscriptText(jsonl(itemStreamLines()), 'abc').messages)
+    )
+  })
+
+  it('builds the same transcript shape as the per-kind stream', () => {
+    const t = parseCodexTranscriptText(jsonl(itemStreamLines()), 'abc')
+    const roles = t.messages.map((m) => `${m.role}:${m.userKind ?? ''}`)
+    expect(roles).toEqual(['user:human', 'assistant:', 'assistant:', 'user:tool_result', 'assistant:'])
+    expect(t.messages[0].blocks).toEqual([{ kind: 'text', text: 'add a dark mode toggle' }])
+    expect(t.messages[2].blocks[0]).toMatchObject({ kind: 'tool_use', name: 'exec' })
+    expect(t.messages[3].blocks[0]).toMatchObject({ kind: 'tool_result', text: 'file.txt\n', isError: false })
+  })
+
+  it('ignores every non-UserMessage item, which would otherwise duplicate the transcript', () => {
+    // The fixture carries AgentMessage/Reasoning/CommandExecution items that MIRROR response_item
+    // lines already read above; reading them too would repeat the assistant prose and tool calls.
+    const t = parseCodexTranscriptText(jsonl(itemStreamLines()), 'abc')
+    const prose = t.messages.filter((m) => m.blocks.some((b) => b.kind === 'text' && b.text === 'Done.'))
+    expect(prose).toHaveLength(1)
+    expect(t.messages).toHaveLength(5)
+  })
+
+  it('keeps an attached image inline via its [Image #N] placeholder', () => {
+    // An image is a SIBLING content part; the text part already holds the placeholder, so joining
+    // the text parts reproduces the per-kind event's string and no image block is synthesized.
+    const withImage = {
+      type: 'UserMessage',
+      id: 'u1',
+      content: [
+        { type: 'local_image', path: '/Users/dev/shot.png' },
+        {
+          type: 'text',
+          text: '[Image #1] \n\nwhat is this?',
+          text_elements: [{ byte_range: { start: 0, end: 10 }, placeholder: '[Image #1]' }]
+        }
+      ]
+    }
+    const text = jsonl(itemStreamLines({ userItem: withImage }))
+    expect(extractCodexMetaFromText(text, 'abc', 1, 1)!.preview).toBe('[Image #1] what is this?')
+    expect(parseCodexTranscriptText(text, 'abc').messages[0].blocks).toEqual([
+      { kind: 'text', text: '[Image #1] \n\nwhat is this?' }
+    ])
+  })
+
+  it('advances the activity clock on an AgentMessage item', () => {
+    const meta = extractCodexMetaFromText(
+      clockLines(itemLine(TS2, { type: 'AgentMessage', id: 'm1', content: [{ type: 'Text', text: 'working' }] })),
+      'abc',
+      1,
+      1
+    )!
+    expect(meta.lastActivityAt).toBe(Date.parse(TS2))
+  })
+
+  it('does NOT advance the activity clock on Reasoning or CommandExecution items', () => {
+    // Treating these as activity would expire an OSC-reported question while the agent is still
+    // parked on the user, so the clock must stay at the human turn.
+    const meta = extractCodexMetaFromText(
+      clockLines(
+        itemLine(TS2, { type: 'Reasoning', id: 'rs1', summary_text: [] }),
+        itemLine(TS3, { type: 'CommandExecution', id: 'e1', command: 'ls', exit_code: 0 })
+      ),
+      'abc',
+      1,
+      1
+    )!
+    expect(meta.lastActivityAt).toBe(Date.parse(TS))
+  })
+
+  it('lets the per-kind stream win when a rollout carries both, so prompts are never doubled', () => {
+    const lines = [
+      { timestamp: TS, type: 'session_meta', payload: { cwd: CWD, originator: 'codex-tui' } },
+      { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
+      { timestamp: TS, type: 'event_msg', payload: { type: 'user_message', message: 'go' } },
+      itemLine(TS, { type: 'UserMessage', id: 'u1', content: [{ type: 'text', text: 'go' }] }),
+      { timestamp: TS2, type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1' } }
+    ]
+    const meta = extractCodexMetaFromText(jsonl(lines), 'abc', 1, 1)!
+    expect(meta.messageCount).toBe(1)
+    expect(meta.preview).toBe('go')
+    const humans = parseCodexTranscriptText(jsonl(lines), 'abc').messages.filter((m) => m.userKind === 'human')
+    expect(humans).toHaveLength(1)
+  })
+
+  it('still reads the envelope when content merely CONTAINS the token user_message', () => {
+    // The per-kind-stream check pre-filters on a substring, so it must verify each candidate line is
+    // really the event. These two lines serialize to the literal characters `"user_message"` without
+    // being that event — an unescaped array member and an unescaped text value. (Prose that quotes
+    // the term does NOT reach here: JSON escapes its quotes.) Mistaking either for the per-kind
+    // stream would drop every human turn in this rollout.
+    const lines = [
+      { timestamp: TS, type: 'session_meta', payload: { cwd: CWD, originator: 'codex-tui' } },
+      { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
+      itemLine(TS, { type: 'UserMessage', id: 'u1', content: [{ type: 'text', text: 'search for that event' }] }),
+      {
+        timestamp: TS,
+        type: 'response_item',
+        payload: { type: 'web_search_call', id: 'ws1', action: { type: 'search', queries: ['user_message'] } }
+      },
+      {
+        timestamp: TS2,
+        type: 'response_item',
+        payload: { type: 'message', role: 'assistant', id: 'm1', content: [{ type: 'output_text', text: 'user_message' }] }
+      }
+    ]
+    const text = jsonl(lines)
+    // Guard the fixture itself: if this stops holding, the test below proves nothing.
+    expect(text).toContain('"user_message"')
+    const meta = extractCodexMetaFromText(text, 'abc', 1, 1)!
+    expect(meta.title).toBe('search for that event')
+    expect(meta.preview).toBe('search for that event')
+    expect(meta.firstActivityAt).toBe(Date.parse(TS))
   })
 })
