@@ -166,7 +166,7 @@ src/
     App.tsx                two-column layout + state orchestration (per-conversation view memory, back/forward history)
     components/            TitleBar · MainPane · PaneHeader · TranscriptView · TranscriptSearch ·
                            TerminalDeck/TerminalView · TallyRail · ResizeHandle · SettingsModal · UpdatesSetting · AppVeil · TooltipLayer · …
-    lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus · useLayout · useTheme · useDarkIcon · useTranscript ·
+    lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus/focusSync · useLayout · useTheme · useDarkIcon · useTranscript ·
                            useNavHistory · useMaxLiveSessions · useMarkdownCopy · useSyncedAnimation · useRailFlip ·
                            useTranscriptSearch · useAutoHideScrollbar · messageGroups · clipboard · mdCopy/mdCopyDom ·
                            maxLiveScale · fuzzy · findMatches · ptyStream · format

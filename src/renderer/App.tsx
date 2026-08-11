@@ -367,15 +367,26 @@ export default function App() {
     [liveTally.count, capWarnDismissed, maxLive]
   )
 
+  // "This row stands for no conversation" (see rowIdentity), by id — the ONE place that resolution
+  // lives. Every consumer of the gate routes through here rather than re-deriving it: an unlinked
+  // row must not persist read state or a pin under an id that may never bind, and a gate copied per
+  // call site is how one copy ends up missing (which is what put a stranger's liveness dot on a
+  // background-agent row).
+  const isUnlinkedId = useCallback(
+    (id: string): boolean => {
+      const pty = ptys.bySession.get(id) ?? null
+      return !!pty && isUnlinkedRow(pty, metaById.get(id) ?? synthMeta(pty))
+    },
+    [ptys.bySession, metaById]
+  )
+
   const selectedMeta = selectedId ? metaById.get(selectedId) ?? null : null
   const selectedPty = selectedId ? ptys.bySession.get(selectedId) ?? null : null
   const selectedInputRequestedAt = selectedPty
     ? currentInputRequestedAt(selectedMeta ?? synthMeta(selectedPty), selectedPty.inputRequestedAt)
     : null
   // An unlinked row shows no read state, so it must not persist one either — see rowIdentity.
-  const selectedUnlinked = selectedPty
-    ? isUnlinkedRow(selectedPty, selectedMeta ?? synthMeta(selectedPty))
-    : false
+  const selectedUnlinked = selectedId ? isUnlinkedId(selectedId) : false
 
   // Looking at a conversation (selected + focused) marks it read: it advances the seen marker
   // AND clears any manual-unread override — so selecting/clicking a conversation (or a turn
@@ -545,6 +556,10 @@ export default function App() {
   const openRemembered = useCallback(
     (id: string) => {
       open(id)
+      // Deliberately opening a conversation IS attention, whatever the OS says about window focus —
+      // so read state doesn't rest on that one signal, and losing it can't strand a row unread.
+      // Gated like every other read-state write: an unlinked row must not persist a marker.
+      if (!isUnlinkedId(id)) markRead(id)
       requestFocus(id)
       if (!ptys.bySession.has(id) || viewBySession[id] === 'transcript') {
         // Land focus synchronously while the cached/new transcript is resolving; TranscriptView
@@ -552,7 +567,7 @@ export default function App() {
         paneRef.current?.focus({ preventScroll: true })
       }
     },
-    [open, requestFocus, ptys.bySession, viewBySession]
+    [open, requestFocus, ptys.bySession, viewBySession, isUnlinkedId, markRead]
   )
   const clickLive = useCallback((id: string) => openRemembered(id), [openRemembered])
   const clickConversation = useCallback((id: string) => openRemembered(id), [openRemembered])
@@ -597,11 +612,10 @@ export default function App() {
   // would also be marking a row that deliberately shows no read/unread state at all.
   const markUnreadGated = useCallback(
     (id: string) => {
-      const pty = ptys.bySession.get(id) ?? null
-      if (pty && isUnlinkedRow(pty, metaById.get(id) ?? synthMeta(pty))) return
+      if (isUnlinkedId(id)) return
       markUnread(id)
     },
-    [ptys.bySession, metaById, markUnread]
+    [isUnlinkedId, markUnread]
   )
 
   // Open the conversation-info modal for a row/title. `edit` starts it in title-edit mode (the
