@@ -5,6 +5,8 @@ import { registerIpc, disposeIpc, openExternalUrl } from './ipc'
 import { installAppMenu } from './menu'
 import { loadWindowState, saveWindowState, resolvePlacement } from './windowState'
 import { trafficLightPositionFor } from './trafficLights'
+import { wireWindowFocus } from './windowFocus'
+import { IPC } from '../shared/types'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -65,6 +67,12 @@ function createWindow(): void {
   else if (saved?.maximized) mainWindow.maximize()
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+  // The renderer's focus flag comes from here and nowhere else — see windowFocus.ts for why it
+  // cannot observe its own focus. Wired before the window is shown, so the show()-triggered focus
+  // is forwarded rather than missed.
+  wireWindowFocus(mainWindow, (focused) =>
+    mainWindow?.webContents.send(IPC.windowFocusChanged, focused)
+  )
   // Remember size + position + maximized/fullscreen so the next launch matches.
   // getNormalBounds() is the un-maximized rectangle (the size to restore to once
   // un-maximized); the flags carry the maximized/fullscreen state on top of it.

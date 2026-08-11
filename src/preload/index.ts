@@ -35,6 +35,8 @@ const api: SwitchboardApi = {
   onRefreshStart: (cb) => subscribe(IPC.appRefreshStart, cb as never),
   onRefreshEnd: (cb) => subscribe(IPC.appRefreshEnd, cb as never),
   setDockIcon: (dark) => ipcRenderer.send(IPC.windowSetDockIcon, dark),
+  isWindowFocused: () => ipcRenderer.invoke(IPC.windowIsFocused),
+  onWindowFocusChanged: (cb) => subscribe(IPC.windowFocusChanged, cb as never),
 
   getPathForFile: (file) => webUtils.getPathForFile(file),
 

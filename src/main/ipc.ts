@@ -287,6 +287,12 @@ export function registerIpc(): void {
     const img = nativeImage.createFromPath(iconPath)
     if (!img.isEmpty()) app.dock.setIcon(img)
   })
+  // Seed the renderer's focus flag on mount; every change after that arrives via the
+  // IPC.windowFocusChanged push (see windowFocus.ts — main is the sole authority).
+  ipcMain.handle(
+    IPC.windowIsFocused,
+    (e) => BrowserWindow.fromWebContents(e.sender)?.isFocused() ?? false
+  )
 
   // --- self-update: check compares the build commit to main (GitHub API, HTTPS); run shells out to
   // `git pull --ff-only <https> main && npm run setup` in the source repo, streaming output. ---

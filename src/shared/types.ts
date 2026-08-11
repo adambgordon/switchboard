@@ -245,6 +245,8 @@ export const IPC = {
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
+  windowIsFocused: 'window:isFocused', // renderer -> main: seed the focus flag on mount
+  windowFocusChanged: 'window:focusChanged', // push (focused) — OS window focus/blur
   appRefreshStart: 'app:refreshStart', // push: ⌘R refresh begun — renderer covers the window with the white veil
   appRefreshEnd: 'app:refreshEnd', // push: ⌘R refresh restored — renderer fades the veil back out
   updatesGetInfo: 'updates:getInfo', // build version/sha + whether this copy can self-update
@@ -345,6 +347,12 @@ export interface SwitchboardApi {
    *  light/dark THEME). Fire-and-forget; the renderer re-pushes the saved choice on mount, since a
    *  packaged dock resets to the bundled .icns each launch. No-op off macOS. */
   setDockIcon(dark: boolean): void
+  /** Current OS focus state of the window, for seeding on mount. Main is the SOLE authority on
+   *  window focus: the renderer must not derive it from `document.hasFocus()`, which can disagree
+   *  with the window's actual state. */
+  isWindowFocused(): Promise<boolean>
+  /** Subscribe to window focus/blur (main -> renderer push). Returns an unsubscribe fn. */
+  onWindowFocusChanged(cb: (focused: boolean) => void): () => void
 
   // --- image input (drag-drop) ---
   // `File` here is the ambient global (DOM File in the renderer, node:buffer File
