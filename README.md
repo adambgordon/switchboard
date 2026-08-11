@@ -167,7 +167,7 @@ src/
     components/            TitleBar · MainPane · PaneHeader · TranscriptView · TranscriptSearch ·
                            TerminalDeck/TerminalView · TallyRail · ResizeHandle · SettingsModal · UpdatesSetting · AppVeil · TooltipLayer · …
     lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus/focusSync · useLayout · useTheme · useDarkIcon · useTranscript ·
-                           useNavHistory · useMaxLiveSessions · useMarkdownCopy · useSyncedAnimation · useRailFlip ·
+                           useNavHistory · useMaxLiveSessions · useMarkdownCopy · useSyncedAnimation/animationSync · useRailFlip ·
                            useTranscriptSearch · useAutoHideScrollbar · messageGroups · clipboard · mdCopy/mdCopyDom ·
                            maxLiveScale · fuzzy · findMatches · ptyStream · format
     styles/                tokens.css (design system) + per-zone CSS
