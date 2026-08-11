@@ -5,6 +5,7 @@ import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLive
 import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
 import type { Updates } from '../lib/useUpdates'
+import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import AgentLogo from './AgentLogo'
 import UpdatesSetting from './UpdatesSetting'
 
@@ -32,6 +33,48 @@ interface Group {
 interface Faq {
   q: string
   a: ReactNode
+}
+
+function LivenessLegend() {
+  const busyRef = useSyncedAnimation<HTMLSpanElement>('busy')
+  const askingRef = useSyncedAnimation<HTMLSpanElement>('asking')
+  return (
+    <ul className="sb-faq-legend">
+      <li>
+        <span className="sb-faq-dot">
+          <span className="sb-dot busy" ref={busyRef} />
+        </span>
+        <span>
+          <strong>Breathing</strong>: the agent is working
+        </span>
+      </li>
+      <li>
+        <span className="sb-faq-dot">
+          <span className="sb-dot asking" ref={askingRef} />
+        </span>
+        <span>
+          <strong>Pulsing ripple</strong>: the agent is waiting on your reply
+        </span>
+      </li>
+      <li>
+        <span className="sb-faq-dot">
+          <span className="sb-dot awaiting" />
+        </span>
+        <span>
+          <strong>Solid</strong>: the turn finished and is unread
+        </span>
+      </li>
+      <li>
+        <span className="sb-faq-dot">
+          <span className="sb-dot quiet" />
+        </span>
+        <span>
+          <strong>Hollow</strong>: nothing unread — either the turn is read, or a new terminal has no
+          messages yet
+        </span>
+      </li>
+    </ul>
+  )
 }
 
 // The Shortcuts page mirrors the README keyboard table. ⌘Q / zoom are macOS default-menu
@@ -102,41 +145,7 @@ const FAQ: Faq[] = [
     a: (
       <>
         The cobalt dot next to a live row shows whether anything needs your attention:
-        <ul className="sb-faq-legend">
-          <li>
-            <span className="sb-faq-dot">
-              <span className="sb-dot busy" />
-            </span>
-            <span>
-              <strong>Breathing</strong>: the agent is working
-            </span>
-          </li>
-          <li>
-            <span className="sb-faq-dot">
-              <span className="sb-dot asking" />
-            </span>
-            <span>
-              <strong>Pulsing ripple</strong>: the agent is waiting on your reply
-            </span>
-          </li>
-          <li>
-            <span className="sb-faq-dot">
-              <span className="sb-dot awaiting" />
-            </span>
-            <span>
-              <strong>Solid</strong>: the turn finished and is unread
-            </span>
-          </li>
-          <li>
-            <span className="sb-faq-dot">
-              <span className="sb-dot quiet" />
-            </span>
-            <span>
-              <strong>Hollow</strong>: nothing unread — either the turn is read, or a new terminal has
-              no messages yet
-            </span>
-          </li>
-        </ul>
+        <LivenessLegend />
       </>
     )
   },
