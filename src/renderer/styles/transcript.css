@@ -289,6 +289,52 @@
   padding-top: calc(var(--s3) + var(--s4));
 }
 
+/* ---- math (KaTeX) ----
+   No color of its own: KaTeX draws with `currentColor`, so a formula inherits --ink and both themes
+   follow the tokens with nothing theme-specific here. Only geometry is set below. */
+
+/* inline: rides the text line, so it must not widen the line box. KaTeX sizes its own glyphs, and
+   forcing a font-size here would break the metrics its layout depends on. */
+.md-math {
+  /* A long inline formula may not fit; let it break out of the line rather than push the pane wide. */
+  overflow-wrap: anywhere;
+}
+
+/* display: its own centered block. A wide formula scrolls sideways instead of stretching the pane —
+   the same containment the fenced-code and table blocks use. */
+.md-math-display {
+  margin: var(--s4) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* KaTeX's own centering is on .katex-display inside; padding keeps a scrolled formula's leading
+     glyph off the container edge, and leaves room for the descenders of a tall fraction. */
+  padding: var(--s1) 0;
+}
+
+/* A formula KaTeX could not parse falls back to its source. Presented as quiet mono — deliberately
+   NOT the red error treatment KaTeX ships, since red means a genuine error elsewhere in this view. */
+.md-math-src {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.md-math-display.is-src {
+  overflow-x: auto;
+}
+
+.md-math-src-block {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--ink-soft);
+  white-space: pre;
+}
+
 /* ---- syntax highlighting (rehype-highlight / highlight.js token classes) ----
    EXPERIMENT (github-hl-theme branch): the GitHub palette (github.css / github-dark.css) ported onto
    OUR fence surfaces — we keep --paper-sunken background + --ink base text and swap only the token hues.
@@ -548,7 +594,8 @@
 
 .md-li > .md-pre-wrap,
 .md-li > .md-quote,
-.md-li > .md-table-outer {
+.md-li > .md-table-outer,
+.md-li > .md-math-display {
   margin: var(--s2) 0;
 }
 
