@@ -24,7 +24,7 @@ import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/mes
 import { clockTime, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, rowsToPlainText } from '../lib/clipboard'
 import { assembleCopy } from '../lib/mdCopy'
-import { collectSections, rangeOver } from '../lib/mdCopyDom'
+import { collectSections, rangeOver, visibleText } from '../lib/mdCopyDom'
 import { langLabelFromClassName } from '../lib/codeLang'
 import { normalizeMath } from '../lib/mathDelimiters'
 import { MathDisplay, MathInline } from './MathBlock'
@@ -150,7 +150,9 @@ const cx = (ours: string, theirs?: string): string => [ours, theirs].filter(Bool
  *  and the turn copy. */
 function tableRows(table: HTMLTableElement | null): string[][] {
   if (!table) return []
-  return Array.from(table.rows).map((row) => Array.from(row.cells).map((c) => c.textContent ?? ''))
+  // `visibleText`, not `textContent`: a cell can hold a rendered formula, which carries both the
+  // glyph layout and the hidden LaTeX source — the shared walk resolves that to one of them.
+  return Array.from(table.rows).map((row) => Array.from(row.cells).map((c) => visibleText(c)))
 }
 
 /** The fence's language, read off the child <code>'s `language-xxx` class (set by rehype-highlight /

@@ -71,7 +71,15 @@ function scan(el: Element, kids: Element[]): { text: string; offsets: number[] }
   return { text: acc, offsets }
 }
 
-const textOf = (el: Element): string => scan(el, []).text
+/**
+ * The text a rendered element contributes to the clipboard — the skip rules applied, so a caller
+ * never has to reason about which subtrees are chrome. Exported because `tableRows` (MessageBlock)
+ * needs the same answer: a cell holding inline math contains BOTH the rendered glyphs and the
+ * hidden LaTeX, and raw `textContent` would paste the two concatenated.
+ */
+export const visibleText = (el: Element): string => scan(el, []).text
+
+const textOf = visibleText
 
 /** Read an annotated element (and its annotated descendants) into the pure mapper's shape.
  *  `<pre>` is flagged so the mapper can invert its widen rule — inline `<code>` is NOT a `<pre>`, so it
