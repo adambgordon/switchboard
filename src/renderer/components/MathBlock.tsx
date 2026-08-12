@@ -83,6 +83,27 @@ function render(katex: KatexEngine | null, tex: string, displayMode: boolean): s
  * through from the transcript. */
 const html = (markup: string): { __html: string } => ({ __html: markup })
 
+/**
+ * The rendered glyphs, paired with the LaTeX in a visually-hidden span.
+ *
+ * KaTeX lays a formula out with CSS rather than in reading order — a fraction puts its DENOMINATOR
+ * first in the DOM — so anything that reads the subtree's text gets the formula scrambled
+ * (`\frac{a+b}{c+d}` reads as `c+da+b`). The Formatted view's plain-text copy does exactly that.
+ *
+ * So the glyphs carry `data-md-skip` (the existing marker for "on screen, but not source", already
+ * used by the fenced-code language caption) and the LaTeX rides alongside in a hidden span. The copy
+ * walk then collects the LaTeX and never descends into the layout — no new mechanism, and the
+ * markdown path is unaffected because it maps through source offsets either way.
+ */
+function Rendered({ markup, tex }: { markup: string; tex: string }): ReactNode {
+  return (
+    <>
+      <span className="md-math-tex">{tex}</span>
+      <span data-md-skip="" dangerouslySetInnerHTML={html(markup)} />
+    </>
+  )
+}
+
 /** Inline math — sits in the text flow, so it must not introduce a line box of its own. */
 export function MathInline({ tex, ...src }: { tex: string } & SrcAttrs): ReactNode {
   const katex = useKatex()
@@ -94,7 +115,11 @@ export function MathInline({ tex, ...src }: { tex: string } & SrcAttrs): ReactNo
       </code>
     )
   }
-  return <span className="md-math" {...src} dangerouslySetInnerHTML={html(markup)} />
+  return (
+    <span className="md-math" {...src}>
+      <Rendered markup={markup} tex={tex} />
+    </span>
+  )
 }
 
 /**
@@ -115,5 +140,9 @@ export function MathDisplay({ tex, ...src }: { tex: string } & SrcAttrs): ReactN
       </div>
     )
   }
-  return <div className="md-math-display" {...src} dangerouslySetInnerHTML={html(markup)} />
+  return (
+    <div className="md-math-display" {...src}>
+      <Rendered markup={markup} tex={tex} />
+    </div>
+  )
 }

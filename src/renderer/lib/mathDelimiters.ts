@@ -40,16 +40,27 @@ export interface MathNormalization {
 
 type Range = readonly [number, number]
 
-const covered = (ranges: readonly Range[], start: number, end: number): boolean =>
-  ranges.some(([s, e]) => start >= s && end <= e)
+/**
+ * Does `[start, end)` touch any protected range AT ALL?
+ *
+ * Overlap, not containment. A delimiter pair can begin inside a code span and end outside it
+ * (`` `code \(x` then \) ``); requiring full containment would call that "not in code" and rewrite
+ * straight through the span. Anything that so much as touches code is out.
+ */
+const touchesCode = (ranges: readonly Range[], start: number, end: number): boolean =>
+  ranges.some(([s, e]) => start < e && end > s)
 
 /**
- * Cheap pre-gate: does ANY line consist solely of an opening display delimiter?
+ * Cheap pre-filter: does ANY line consist solely of an opening display delimiter?
  *
- * A display block is the entry condition for everything else, so a text without one can be
- * rejected before any range-building or allocation. This runs on every rendered block in a
- * transcript, so it walks the string in place rather than splitting it — a block that merely
- * mentions a `$` should not pay for a full scan.
+ * A display block is the entry condition for everything else, so a text without one can be rejected
+ * before any range-building or allocation. This runs on every rendered block in a transcript, so it
+ * walks the string in place rather than splitting it — a block that merely mentions a `$` should not
+ * pay for a full scan.
+ *
+ * A FILTER, NOT A GATE: correctness rests on `displayBlocks`'s `opens`/`closes`, which re-test each
+ * line strictly. Loosening the match here can only cost a wasted scan, never admit a non-delimiter —
+ * which is why no test pins this shape, and why loosening it produces no test failure.
  */
 function mightHaveDisplay(text: string): boolean {
   if (!text.includes('\\[') && !text.includes('$$')) return false
@@ -70,9 +81,15 @@ function mightHaveDisplay(text: string): boolean {
 }
 
 /**
- * Spans that must never be treated as math: fenced code blocks (their markers included) and
- * inline code spans. Code-span closing follows CommonMark — a run of N backticks is closed by
- * the next run of exactly N.
+ * Spans that must never be treated as math: fenced code blocks (their markers included), indented
+ * code blocks, and inline code spans. Code-span closing follows CommonMark — a run of N backticks is
+ * closed by the next run of exactly N.
+ *
+ * This deliberately OVER-excludes. Indented code is matched as "any line indented four or more
+ * spaces" rather than by CommonMark's real rules (which depend on preceding blank lines, paragraph
+ * continuation, and list nesting). Over-excluding costs an occasional unrendered formula;
+ * under-excluding rewrites someone's code sample — and the second is the failure that matters, so
+ * the crude rule is the correct one here.
  */
 export function codeRanges(text: string): Range[] {
   const ranges: Range[] = []
@@ -83,9 +100,14 @@ export function codeRanges(text: string): Range[] {
     const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
     if (fence !== null) {
       ranges.push([offset, offset + line.length + 1])
-      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null
+      // Only whitespace may follow a CLOSING fence marker — ```` ```trailing ```` is not a closer,
+      // so a fence closed on it would leave the rest of the sample exposed as prose.
+      const closes = marker && marker[1][0] === fence[0] && marker[1].length >= fence.length
+      if (closes && line.slice(marker.index + marker[0].length).trim() === '') fence = null
     } else if (marker) {
       fence = marker[1]
+      ranges.push([offset, offset + line.length + 1])
+    } else if (/^(?: {4}|\t)/.test(line) && line.trim() !== '') {
       ranges.push([offset, offset + line.length + 1])
     }
     offset += line.length + 1
@@ -156,30 +178,37 @@ function displayBlocks(text: string, ranges: readonly Range[]): DisplayBlock[] {
   const closes = (i: number, kind: DisplayBlock['kind']): boolean =>
     kind === 'latex' ? /^\s*\\\]\s*$/.test(lines[i]) : /^\s*\$\$\s*$/.test(lines[i])
 
+  /* ONE pass. An earlier version rescanned every remaining line for each unmatched opener, which is
+   * quadratic — a block of a few thousand stray `\[` lines cost most of a second inside a synchronous
+   * render. Carrying the pending opener instead makes it linear, and removes the nested loop. */
   const found: DisplayBlock[] = []
+  let pending: { kind: DisplayBlock['kind']; line: number; at: number } | null = null
+
   for (let i = 0; i < lines.length; i++) {
+    if (pending !== null) {
+      if (!closes(i, pending.kind)) continue
+      const closeAt = lineStart[i] + lines[i].indexOf(pending.kind === 'latex' ? '\\]' : '$$')
+      // A closer inside code closes nothing: drop the opener rather than reaching past the code,
+      // which would swallow the span into a formula.
+      if (touchesCode(ranges, closeAt, closeAt + 2)) {
+        pending = null
+        continue
+      }
+      found.push({
+        kind: pending.kind,
+        openAt: pending.at,
+        closeAt,
+        bodyStart: lineStart[pending.line] + lines[pending.line].length + 1,
+        bodyEnd: lineStart[i]
+      })
+      pending = null
+      continue
+    }
     const kind = opens(i)
     if (!kind) continue
-    const token = kind === 'latex' ? '\\[' : '$$'
-    const openAt = lineStart[i] + lines[i].indexOf(token)
-    if (covered(ranges, openAt, openAt + 2)) continue
-    for (let j = i + 1; j < lines.length; j++) {
-      if (!closes(j, kind)) continue
-      const closeToken = kind === 'latex' ? '\\]' : '$$'
-      const closeAt = lineStart[j] + lines[j].indexOf(closeToken)
-      // A closer inside code does not close anything; abandon this opener rather than
-      // reaching past it, which would swallow the code span into a formula.
-      if (covered(ranges, closeAt, closeAt + 2)) break
-      found.push({
-        kind,
-        openAt,
-        closeAt,
-        bodyStart: lineStart[i] + lines[i].length + 1,
-        bodyEnd: lineStart[j]
-      })
-      i = j
-      break
-    }
+    const openAt = lineStart[i] + lines[i].indexOf(kind === 'latex' ? '\\[' : '$$')
+    if (touchesCode(ranges, openAt, openAt + 2)) continue
+    pending = { kind, line: i, at: openAt }
   }
   return found
 }
@@ -213,7 +242,13 @@ export function normalizeMath(text: string): MathNormalization {
   // No display block ⇒ this block is not doing math. Return it untouched.
   if (blocks.length === 0) return { text, hasMath: false, singleDollar: false }
 
-  const chars = Array.from(text)
+  /* `split('')`, NOT `Array.from` — the difference is load-bearing. Every offset here comes from
+   * `indexOf` / `RegExp.index` / `line.length`, which count UTF-16 code UNITS, while `Array.from`
+   * yields one slot per code POINT. One astral character (an emoji) before a formula desynchronises
+   * the two, and the write lands on the wrong character: it can eat a newline, leave a stray
+   * backslash, or change the string's length outright — all silently, since the delimiters still
+   * look plausible afterwards. */
+  const chars = text.split('')
   const write = (at: number): void => {
     chars[at] = '$'
     chars[at + 1] = '$'
@@ -236,7 +271,7 @@ export function normalizeMath(text: string): MathNormalization {
   while ((match = inline.exec(text)) !== null) {
     const start = match.index
     const end = start + match[0].length
-    if (covered(ranges, start, end) || inBody(start)) continue
+    if (touchesCode(ranges, start, end) || inBody(start)) continue
     write(start)
     write(end - 2)
   }

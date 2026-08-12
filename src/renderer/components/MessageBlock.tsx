@@ -18,6 +18,7 @@ import yaml from 'highlight.js/lib/languages/yaml'
 import xml from 'highlight.js/lib/languages/xml'
 import css from 'highlight.js/lib/languages/css'
 import markdown from 'highlight.js/lib/languages/markdown'
+import plaintext from 'highlight.js/lib/languages/plaintext'
 import type { TranscriptBlock } from '@shared/types'
 import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
@@ -37,7 +38,12 @@ import { Arrow, Chevron, Person } from './icons'
  * and shell in `bash` (aliases ```ts / ```py / ```html resolve automatically). The token COLORS live in
  * transcript.css (.hljs-*), themed per light/dark — the one sanctioned exception to the transcript's
  * otherwise strict grayscale (see the header note there). */
-const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, rust, sql, yaml, xml, css, markdown }
+// `math` is registered as PLAINTEXT rather than left out: remark-math hands display math to rehype
+// as a `language-math` fence, and an unregistered language sends every display formula through
+// rehype-highlight's throw/catch + VFile-warning path before the component override replaces it.
+// Registering it makes the bypass explicit and keeps the LaTeX one untokenized text child, which is
+// what `displayMathTex` reads.
+const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, rust, sql, yaml, xml, css, markdown, math: plaintext }
 
 /* Minimal hast shape — enough to walk and stamp. Avoids pulling in @types/hast (and unist-util-visit)
  * for a dozen lines of tree walk. */

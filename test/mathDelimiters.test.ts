@@ -157,6 +157,36 @@ describe('normalizeMath — code is never math', () => {
     expect(out.hasMath).toBe(false)
     expect(out.text).toBe(src)
   })
+
+  it('excludes INDENTED code blocks', () => {
+    const src = ['Sample:', '', '    \\[', '    x = 1', '    \\]', '', 'done'].join('\n')
+    const out = normalized(src)
+    expect(out.hasMath).toBe(false)
+    expect(out.text).toBe(src)
+  })
+
+  // The fail-closed contract: an indented sample must not license `$…$` parsing for the whole block.
+  it('an indented $$ sample cannot opt the block into single-dollar math', () => {
+    const src = ['Set $PATH and $HOME.', '', '    $$', '    x', '    $$', ''].join('\n')
+    const out = normalized(src)
+    expect(out.hasMath).toBe(false)
+    expect(out.singleDollar).toBe(false)
+    expect(out.text).toBe(src)
+  })
+
+  it('a fence marker with trailing text does not close the fence', () => {
+    const src = ['```js', 'const a = 1', '```trailing', '\\[', 'x', '\\]'].join('\n')
+    const out = normalized(src)
+    expect(out.hasMath).toBe(false)
+    expect(out.text).toBe(src)
+  })
+
+  // Overlap, not containment: the pair starts inside a code span and ends outside it.
+  it('rejects a delimiter pair that only PARTLY overlaps code', () => {
+    const src = ['A `code \\(x` then \\) tail.', '', DISPLAY_LATEX, ''].join('\n')
+    const out = normalized(src)
+    expect(out.text.split('\n')[0]).toBe('A `code \\(x` then \\) tail.')
+  })
 })
 
 describe('normalizeMath — the display body is left verbatim', () => {
@@ -165,6 +195,33 @@ describe('normalizeMath — the display body is left verbatim', () => {
     const out = normalized(src)
     expect(out.hasMath).toBe(true)
     expect(out.text).toBe(src)
+  })
+})
+
+describe('normalizeMath — offsets are UTF-16, not code points', () => {
+  /* An astral character is TWO UTF-16 units but ONE code point. Every offset in the module comes
+   * from UTF-16-based APIs, so a code-point-indexed buffer writes to the wrong place. Note the first
+   * case below preserved LENGTH while destroying content — which is why the invariant assertion
+   * alone was not enough, and why these fixtures exist. */
+  it('rewrites correctly with an emoji before the formula', () => {
+    const out = normalized(`😀 intro\n\n${DISPLAY_LATEX}\n`)
+    expect(out.hasMath).toBe(true)
+    expect(out.text).toBe(`😀 intro\n\n$$\n\\sum_{i=1}^{n} x_i\n$$\n`)
+  })
+
+  it('rewrites correctly with several astral characters before the formula', () => {
+    const out = normalized(`🎉🎉 intro\n\n${DISPLAY_LATEX}\n`)
+    expect(out.text).toBe(`🎉🎉 intro\n\n$$\n\\sum_{i=1}^{n} x_i\n$$\n`)
+  })
+
+  it('rewrites inline math correctly after an emoji', () => {
+    const out = normalized(`😀 counts \\(P_i\\).\n\n${DISPLAY_LATEX}\n`)
+    expect(out.text).toContain('😀 counts $$P_i$$.')
+  })
+
+  it('leaves an emoji INSIDE a display body untouched', () => {
+    const src = ['$$', '\\text{😀}', '$$'].join('\n')
+    expect(normalized(src).text).toBe(src)
   })
 })
 
@@ -204,6 +261,24 @@ describe('codeRanges', () => {
 
   it('ignores an unclosed backtick run', () => {
     expect(codeRanges('a ` b').length).toBe(0)
+  })
+})
+
+describe('normalizeMath — scanning is linear in the number of lines', () => {
+  /* Pairing used to rescan every remaining line per unmatched opener. This runs inside a synchronous
+   * React render, so the quadratic version could stall the Formatted view on a generated block. The
+   * assertion is on SHAPE, not a wall-clock threshold: 4x the input must not cost ~16x the time. */
+  it('does not degrade quadratically on many unmatched openers', () => {
+    const time = (n: number): number => {
+      const src = Array.from({ length: n }, () => '\\[').join('\n')
+      const t0 = performance.now()
+      normalizeMath(src)
+      return performance.now() - t0
+    }
+    time(2000) // warm
+    const small = Math.max(time(2000), 0.5)
+    const large = time(8000)
+    expect(large / small).toBeLessThan(8)
   })
 })
 

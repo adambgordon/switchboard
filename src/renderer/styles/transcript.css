@@ -298,6 +298,8 @@
 .md-math {
   /* A long inline formula may not fit; let it break out of the line rather than push the pane wide. */
   overflow-wrap: anywhere;
+  /* Anchors the hidden LaTeX span below, so it can't escape and drag a scrollbar out of an ancestor. */
+  position: relative;
 }
 
 /* display: its own centered block. A wide formula scrolls sideways instead of stretching the pane —
@@ -306,9 +308,26 @@
   margin: var(--s4) 0;
   overflow-x: auto;
   overflow-y: hidden;
+  position: relative;
   /* KaTeX's own centering is on .katex-display inside; padding keeps a scrolled formula's leading
      glyph off the container edge, and leaves room for the descenders of a tall fraction. */
   padding: var(--s1) 0;
+}
+
+/* The LaTeX source riding alongside the rendered glyphs (see MathBlock.tsx). Removed from view and
+   from layout, but NOT with `display:none` — it has to stay in the text tree so the copy walk can
+   read it in place of KaTeX's out-of-order layout text. The clip-rect idiom keeps it selectable
+   while occupying no space. */
+.md-math-tex {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* A formula KaTeX could not parse falls back to its source. Presented as quiet mono — deliberately
