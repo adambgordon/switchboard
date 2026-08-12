@@ -91,13 +91,36 @@ function mightHaveDisplay(text: string): boolean {
  * under-excluding rewrites someone's code sample — and the second is the failure that matters, so
  * the crude rule is the correct one here.
  */
+/** Collapse overlapping and touching ranges. Line-derived ranges are contiguous by construction, so
+ *  this reduces a code block of any size to ONE range — which is what keeps the lookups below cheap. */
+function mergeRanges(ranges: readonly Range[]): Range[] {
+  if (ranges.length < 2) return [...ranges]
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const merged: Range[] = [sorted[0]]
+  for (const [start, end] of sorted.slice(1)) {
+    const last = merged[merged.length - 1]
+    if (start <= last[1]) merged[merged.length - 1] = [last[0], Math.max(last[1], end)]
+    else merged.push([start, end])
+  }
+  return merged
+}
+
 export function codeRanges(text: string): Range[] {
-  const ranges: Range[] = []
+  let ranges: Range[] = []
   const lines = text.split('\n')
   let offset = 0
   let fence: string | null = null
+  /* An indented code block spans the blank lines BETWEEN its chunks (CommonMark: "one or more
+   * indented chunks separated by blank lines"), but trailing blanks are not part of it. Since we
+   * cannot know which a blank is until we see what follows, hold them and flush on the next indented
+   * chunk — a lookahead here would be quadratic on a run of blanks. Keeping the block contiguous also
+   * lets it merge to one range instead of one per line. */
+  let inIndented = false
+  let heldBlanks: Range[] = []
+
   for (const line of lines) {
     const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
+    const blank = line.trim() === ''
     if (fence !== null) {
       ranges.push([offset, offset + line.length + 1])
       // Only whitespace may follow a CLOSING fence marker — ```` ```trailing ```` is not a closer,
@@ -107,11 +130,26 @@ export function codeRanges(text: string): Range[] {
     } else if (marker) {
       fence = marker[1]
       ranges.push([offset, offset + line.length + 1])
-    } else if (/^(?: {4}|\t)/.test(line) && line.trim() !== '') {
+      inIndented = false
+      heldBlanks = []
+    } else if (/^(?: {4}|\t)/.test(line) && !blank) {
+      for (const held of heldBlanks) ranges.push(held)
+      heldBlanks = []
       ranges.push([offset, offset + line.length + 1])
+      inIndented = true
+    } else if (blank && inIndented) {
+      heldBlanks.push([offset, offset + line.length + 1])
+    } else {
+      inIndented = false
+      heldBlanks = []
     }
     offset += line.length + 1
   }
+
+  /* Merge BEFORE the backtick scan, not only at the end. `inFence` runs once per backtick, so
+   * testing it against one range per code LINE makes a fenced sample containing many backticks
+   * quadratic — the merge has to precede its first use, not merely the return. */
+  ranges = mergeRanges(ranges)
   const inFence = (i: number): boolean => ranges.some(([s, e]) => i >= s && i < e)
 
   let i = 0
@@ -150,20 +188,11 @@ export function codeRanges(text: string): Range[] {
     i = close + run
   }
 
-  /* Merge before returning. The scan above emits one range PER LINE of a fenced or indented block,
-   * and every delimiter candidate then tests itself against the whole list — so a large code sample
-   * would cost (lines × ranges) even though the pairing walk itself is linear. A fence's per-line
-   * ranges are contiguous by construction, so merging collapses a block of any size to ONE range and
-   * the test becomes proportional to the number of distinct code regions instead of lines. */
-  if (ranges.length < 2) return ranges
-  const sorted = [...ranges].sort((a, b) => a[0] - b[0] || a[1] - b[1])
-  const merged: Range[] = [sorted[0]]
-  for (const [start, end] of sorted.slice(1)) {
-    const last = merged[merged.length - 1]
-    if (start <= last[1]) merged[merged.length - 1] = [last[0], Math.max(last[1], end)]
-    else merged.push([start, end])
-  }
-  return merged
+  /* Deliberately NOT merged a second time. The line-derived ranges were merged above, and the inline
+   * spans just added are disjoint by construction (the scanner advances past each one it closes), so
+   * a further pass could not collapse anything — it would be a sort that buys nothing. One merge, at
+   * the point where it is load-bearing. */
+  return ranges
 }
 
 interface DisplayBlock {

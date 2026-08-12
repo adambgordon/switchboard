@@ -270,47 +270,51 @@ describe('codeRanges', () => {
   })
 })
 
-describe('normalizeMath — scanning is linear in the number of lines', () => {
-  /* Pairing used to rescan every remaining line per unmatched opener. This runs inside a synchronous
-   * React render, so the quadratic version could stall the Formatted view on a generated block. The
-   * assertion is on SHAPE, not a wall-clock threshold: 4x the input must not cost ~16x the time. */
-  it('does not degrade quadratically on many unmatched openers', () => {
-    const time = (n: number): number => {
-      const src = Array.from({ length: n }, () => '\\[').join('\n')
-      const t0 = performance.now()
-      normalizeMath(src)
-      return performance.now() - t0
-    }
-    time(2000) // warm
-    const small = Math.max(time(2000), 0.5)
-    const large = time(8000)
-    expect(large / small).toBeLessThan(8)
-  })
+describe('normalizeMath — scanning stays linear', () => {
+  /* These guard a PERFORMANCE property, but they assert STRUCTURE, not wall-clock time.
+   *
+   * The blowups all had the same source: every delimiter candidate tests itself against the
+   * protected-range list, so if that list grows per code LINE the work is (delimiters × lines).
+   * Merging is what bounds it — a code block of any size must collapse to ONE range. Asserting the
+   * range count tests exactly that, deterministically.
+   *
+   * An earlier version timed 2,000 vs 8,000 lines and asserted a ratio. It passed in isolation and
+   * failed intermittently under `npm test`, where 34 suites compete for CPU and the two samples are
+   * measured under different load — a ratio of two small timings is not a stable signal. Don't
+   * reintroduce wall-clock assertions here. */
+  const LINES = 4000
+  const openers = (n: number): string[] => Array.from({ length: n }, () => '\\[')
 
-  /* The case above leaves `codeRanges` EMPTY, so it never exercises the protected-range lookup —
-   * the second quadratic factor. These put the delimiters inside code, where the scan emits a range
-   * per line and every candidate is tested against all of them unless the ranges are merged. */
-  for (const [label, wrap] of [
-    ['fenced', (lines: string[]) => ['```latex', ...lines, '```'].join('\n')],
-    ['indented', (lines: string[]) => lines.map((l) => `    ${l}`).join('\n')]
+  for (const [label, src] of [
+    ['fenced', ['```latex', ...openers(LINES), '```'].join('\n')],
+    ['indented', openers(LINES).map((l) => `    ${l}`).join('\n')],
+    // A blank line used to END an indented block, so a separated sample never became contiguous.
+    ['blank-separated indented', openers(LINES).flatMap((l) => [`    ${l}`, '']).join('\n')],
+    /* A backtick on every fenced line. `inFence` runs per backtick, so this only stays cheap if the
+     * merge happens BEFORE the backtick scan rather than only at the return.
+     * The leading display block is load-bearing in the fixture: without a line that trims to a bare
+     * delimiter, `mightHaveDisplay` rejects the text and `normalizeMath` returns before `codeRanges`
+     * is ever reached — the fixture would then exercise nothing at all. */
+    [
+      'fenced with a backtick per line',
+      ['\\[', 'x', '\\]', '', '```', ...openers(LINES).map((l) => `${l} \`x\``), '```'].join('\n')
+    ]
   ] as const) {
-    it(`does not degrade quadratically on many ${label} delimiter lines`, () => {
-      const time = (n: number): number => {
-        const src = wrap(Array.from({ length: n }, () => '\\['))
-        const t0 = performance.now()
-        normalizeMath(src)
-        return performance.now() - t0
-      }
-      time(2000)
-      const small = Math.max(time(2000), 0.5)
-      const large = time(8000)
-      expect(large / small).toBeLessThan(8)
+    it(`collapses a ${label} sample to one protected range`, () => {
+      expect(codeRanges(src)).toHaveLength(1)
+      // And the whole normalize still runs — a guard against the shape passing while parsing throws.
+      expect(normalizeMath(src).text).toHaveLength(src.length)
     })
   }
 
-  it('collapses a fenced block to a single protected range', () => {
-    const src = ['```latex', ...Array.from({ length: 500 }, () => '\\['), '```'].join('\n')
-    expect(codeRanges(src)).toHaveLength(1)
+  it('keeps an indented block contiguous across its interior blank lines', () => {
+    expect(codeRanges(['    a', '', '    b', '', '    c'].join('\n'))).toHaveLength(1)
+  })
+
+  it('does not extend an indented block past its TRAILING blank lines', () => {
+    const src = ['    a', '', '', 'prose \\(x\\) here'].join('\n')
+    const [range] = codeRanges(src)
+    expect(range[1]).toBeLessThanOrEqual(src.indexOf('prose'))
   })
 })
 
