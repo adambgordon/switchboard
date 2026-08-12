@@ -80,19 +80,8 @@ function mightHaveDisplay(text: string): boolean {
   return false
 }
 
-/**
- * Spans that must never be treated as math: fenced code blocks (their markers included), indented
- * code blocks, and inline code spans. Code-span closing follows CommonMark — a run of N backticks is
- * closed by the next run of exactly N.
- *
- * This deliberately OVER-excludes. Indented code is matched as "any line indented four or more
- * spaces" rather than by CommonMark's real rules (which depend on preceding blank lines, paragraph
- * continuation, and list nesting). Over-excluding costs an occasional unrendered formula;
- * under-excluding rewrites someone's code sample — and the second is the failure that matters, so
- * the crude rule is the correct one here.
- */
 /** Collapse overlapping and touching ranges. Line-derived ranges are contiguous by construction, so
- *  this reduces a code block of any size to ONE range — which is what keeps the lookups below cheap. */
+ *  this reduces a contiguous code block of any size to ONE range. */
 function mergeRanges(ranges: readonly Range[]): Range[] {
   if (ranges.length < 2) return [...ranges]
   const sorted = [...ranges].sort((a, b) => a[0] - b[0] || a[1] - b[1])
@@ -105,8 +94,24 @@ function mergeRanges(ranges: readonly Range[]): Range[] {
   return merged
 }
 
-export function codeRanges(text: string): Range[] {
-  let ranges: Range[] = []
+/**
+ * The LINE-derived half of the protected set: fenced code blocks (markers included) and indented
+ * code blocks, **already merged**.
+ *
+ * Split out from `codeRanges` — and exported — so the merge is observable where it MATTERS. The scan
+ * below consults this list once per backtick, so it has to be merged before that first use, not
+ * merely before the return. Asserting on `codeRanges`' output cannot tell the two apart: deferring
+ * the merge to the return leaves the returned value merged either way, while the per-backtick lookup
+ * silently goes quadratic. A test on THIS function's output can tell, because moving the merge out
+ * of here is exactly what the regression looks like.
+ *
+ * Indented code deliberately OVER-matches — "any line indented four or more spaces" rather than
+ * CommonMark's real rules (which depend on preceding blank lines, paragraph continuation, and list
+ * nesting). Over-excluding costs an occasional unrendered formula; under-excluding rewrites someone's
+ * code sample, and only the second is a real failure.
+ */
+export function lineCodeRanges(text: string): Range[] {
+  const ranges: Range[] = []
   const lines = text.split('\n')
   let offset = 0
   let fence: string | null = null
@@ -145,11 +150,16 @@ export function codeRanges(text: string): Range[] {
     }
     offset += line.length + 1
   }
+  return mergeRanges(ranges)
+}
 
-  /* Merge BEFORE the backtick scan, not only at the end. `inFence` runs once per backtick, so
-   * testing it against one range per code LINE makes a fenced sample containing many backticks
-   * quadratic — the merge has to precede its first use, not merely the return. */
-  ranges = mergeRanges(ranges)
+/**
+ * Every span that must never be treated as math: the line-derived blocks above, plus inline code
+ * spans. Code-span closing follows CommonMark — a run of N backticks is closed by the next run of
+ * exactly N.
+ */
+export function codeRanges(text: string): Range[] {
+  const ranges = lineCodeRanges(text)
   const inFence = (i: number): boolean => ranges.some(([s, e]) => i >= s && i < e)
 
   let i = 0

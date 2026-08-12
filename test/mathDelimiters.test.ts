@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { codeRanges, normalizeMath } from '../src/renderer/lib/mathDelimiters'
+import { codeRanges, lineCodeRanges, normalizeMath } from '../src/renderer/lib/mathDelimiters'
 
 /**
  * The fixtures below are the shapes both agents actually emit, and — just as importantly — the
@@ -271,17 +271,20 @@ describe('codeRanges', () => {
 })
 
 describe('normalizeMath — scanning stays linear', () => {
-  /* These guard a PERFORMANCE property, but they assert STRUCTURE, not wall-clock time.
+  /* These guard PERFORMANCE properties. Two rules learned the hard way:
    *
-   * The blowups all had the same source: every delimiter candidate tests itself against the
-   * protected-range list, so if that list grows per code LINE the work is (delimiters × lines).
-   * Merging is what bounds it — a code block of any size must collapse to ONE range. Asserting the
-   * range count tests exactly that, deterministically.
+   * 1. Assert structure, not elapsed time — WHERE possible. An earlier version timed 2,000 vs 8,000
+   *    lines and compared the ratio. It passed alone and failed intermittently under `npm test`,
+   *    where 34 files compete for CPU and the two samples are measured under different load. A ratio
+   *    of two ~1 ms measurements is not a signal. Never reintroduce one.
    *
-   * An earlier version timed 2,000 vs 8,000 lines and asserted a ratio. It passed in isolation and
-   * failed intermittently under `npm test`, where 34 suites compete for CPU and the two samples are
-   * measured under different load — a ratio of two small timings is not a stable signal. Don't
-   * reintroduce wall-clock assertions here. */
+   * 2. Assert it on the function where the property LIVES. The blowups share a cause: every
+   *    delimiter and backtick tests itself against the protected-range list, so a list that grows per
+   *    code LINE makes the work (candidates × lines). Merging bounds it — but `codeRanges`' output is
+   *    merged whether the merge runs before the backtick scan or at the return, and only the former
+   *    is correct. So the assertion belongs on `lineCodeRanges`, the list the scan consumes. An
+   *    earlier version of this suite asserted on `codeRanges` and passed under exactly the mutant it
+   *    claimed to guard. */
   const LINES = 4000
   const openers = (n: number): string[] => Array.from({ length: n }, () => '\\[')
 
@@ -290,22 +293,35 @@ describe('normalizeMath — scanning stays linear', () => {
     ['indented', openers(LINES).map((l) => `    ${l}`).join('\n')],
     // A blank line used to END an indented block, so a separated sample never became contiguous.
     ['blank-separated indented', openers(LINES).flatMap((l) => [`    ${l}`, '']).join('\n')],
-    /* A backtick on every fenced line. `inFence` runs per backtick, so this only stays cheap if the
-     * merge happens BEFORE the backtick scan rather than only at the return.
+    /* A backtick on every fenced line — the shape that needs the merge to precede the scan.
      * The leading display block is load-bearing in the fixture: without a line that trims to a bare
      * delimiter, `mightHaveDisplay` rejects the text and `normalizeMath` returns before `codeRanges`
-     * is ever reached — the fixture would then exercise nothing at all. */
+     * is ever reached, so the fixture would exercise nothing at all. */
     [
       'fenced with a backtick per line',
       ['\\[', 'x', '\\]', '', '```', ...openers(LINES).map((l) => `${l} \`x\``), '```'].join('\n')
     ]
   ] as const) {
-    it(`collapses a ${label} sample to one protected range`, () => {
+    it(`collapses a ${label} sample to one protected range, before the scan consumes it`, () => {
+      // On lineCodeRanges — see rule 2 above. This is what the per-backtick lookup reads.
+      expect(lineCodeRanges(src)).toHaveLength(1)
       expect(codeRanges(src)).toHaveLength(1)
       // And the whole normalize still runs — a guard against the shape passing while parsing throws.
       expect(normalizeMath(src).text).toHaveLength(src.length)
     })
   }
+
+  /* Display pairing has NO structural proxy: the nested-loop and single-pass versions return
+   * identical blocks and differ only in time, so this is the one place a wall-clock assertion earns
+   * its keep. Made robust by scale and headroom rather than by comparing two samples — 20,000
+   * unmatched openers cost ~3 ms paired in one pass and ~2.7 s with a rescan per opener, so the
+   * ceiling sits ~100x above correct and well below the regression. */
+  it('pairs display delimiters in one pass, not a rescan per opener', () => {
+    const src = openers(20_000).join('\n')
+    const started = performance.now()
+    expect(normalizeMath(src).text).toHaveLength(src.length)
+    expect(performance.now() - started).toBeLessThan(400)
+  })
 
   it('keeps an indented block contiguous across its interior blank lines', () => {
     expect(codeRanges(['    a', '', '    b', '', '    c'].join('\n'))).toHaveLength(1)
