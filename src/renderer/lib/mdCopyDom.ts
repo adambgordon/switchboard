@@ -150,6 +150,29 @@ function textOffsetIn(root: Element, container: Node, offset: number): number {
   return acc
 }
 
+/**
+ * Move a boundary that landed inside SKIPPED content out to the edge of the element hosting it.
+ *
+ * A skipped subtree contributes no text, so the walk above cannot locate a boundary inside one — it
+ * returns early and the boundary silently resolves to wherever the walk happened to stop. That is
+ * reachable by ordinary use: a rendered formula's glyphs are skipped (the LaTeX travels instead, see
+ * MathBlock.tsx), so dragging across the formula itself puts both boundaries in skipped content, and
+ * the selection collapses to nothing or drops the formula.
+ *
+ * Snapping to the enclosing ANNOTATED element — its start for the leading edge, its end for the
+ * trailing edge — makes any touch of that content select the whole unit, which is the same rule an
+ * inline-image chip already follows. Expressed as an element-plus-index boundary, which `makeProbe`
+ * handles, so the walk itself needs no new cases.
+ */
+function snapOutOfSkipped(node: Node, offset: number, edge: 'start' | 'end'): [Node, number] {
+  const from = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement
+  const skipped = from?.closest('[data-md-skip], button')
+  if (!skipped) return [node, offset]
+  const host = skipped.closest('[data-s]')
+  if (!host) return [node, offset]
+  return edge === 'start' ? [host, 0] : [host, host.childNodes.length]
+}
+
 /** The rendered-text window the range cuts out of `el`. A boundary outside means the range swept in
  *  from a neighbour, so that edge takes the whole extent. */
 function windowIn(
@@ -157,14 +180,12 @@ function windowIn(
   range: Range,
   length: number
 ): { t0: number; t1: number; startsBefore: boolean; endsAfter: boolean } {
-  const startsBefore = !el.contains(range.startContainer)
-  const endsAfter = !el.contains(range.endContainer)
-  const t0 = !startsBefore
-    ? textOffsetIn(el, range.startContainer, range.startOffset)
-    : 0
-  const t1 = !endsAfter
-    ? textOffsetIn(el, range.endContainer, range.endOffset)
-    : length
+  const [startNode, startOffset] = snapOutOfSkipped(range.startContainer, range.startOffset, 'start')
+  const [endNode, endOffset] = snapOutOfSkipped(range.endContainer, range.endOffset, 'end')
+  const startsBefore = !el.contains(startNode)
+  const endsAfter = !el.contains(endNode)
+  const t0 = !startsBefore ? textOffsetIn(el, startNode, startOffset) : 0
+  const t1 = !endsAfter ? textOffsetIn(el, endNode, endOffset) : length
   return { t0, t1, startsBefore, endsAfter }
 }
 

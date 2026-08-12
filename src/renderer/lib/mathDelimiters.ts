@@ -149,7 +149,21 @@ export function codeRanges(text: string): Range[] {
     ranges.push([i, close + run])
     i = close + run
   }
-  return ranges
+
+  /* Merge before returning. The scan above emits one range PER LINE of a fenced or indented block,
+   * and every delimiter candidate then tests itself against the whole list — so a large code sample
+   * would cost (lines × ranges) even though the pairing walk itself is linear. A fence's per-line
+   * ranges are contiguous by construction, so merging collapses a block of any size to ONE range and
+   * the test becomes proportional to the number of distinct code regions instead of lines. */
+  if (ranges.length < 2) return ranges
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const merged: Range[] = [sorted[0]]
+  for (const [start, end] of sorted.slice(1)) {
+    const last = merged[merged.length - 1]
+    if (start <= last[1]) merged[merged.length - 1] = [last[0], Math.max(last[1], end)]
+    else merged.push([start, end])
+  }
+  return merged
 }
 
 interface DisplayBlock {

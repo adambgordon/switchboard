@@ -247,10 +247,16 @@ describe('codeRanges', () => {
   })
 
   it('closes a code span only on a backtick run of equal length', () => {
-    // A run of 1 must skip PAST a run of 2 to find its partner. Asserting the exact end is what
-    // discriminates: a "close on any run of at least this length" rule would stop at the ``.
-    const src = '`x`` y`'
-    expect(codeRanges(src)).toContainEqual([0, 7])
+    // A run of 1 must skip PAST a run of 2 to find its partner.
+    expect(codeRanges('`x`` y`')).toContainEqual([0, 7])
+  })
+
+  it('leaves a run unclosed when only a LONGER run follows', () => {
+    /* The discriminating case. In `x`` y the single backtick has no partner (the `` is a different
+     * length, and nothing follows), so there is no code span at all. A "close on any run of at least
+     * this length" rule instead pairs it with the ``. The case above cannot show that difference:
+     * the wrong rule splits the span in two, and range MERGING rejoins them into the same extent. */
+    expect(codeRanges('`x`` y')).toEqual([])
   })
 
   it('does not let a longer run close a shorter one', () => {
@@ -279,6 +285,32 @@ describe('normalizeMath — scanning is linear in the number of lines', () => {
     const small = Math.max(time(2000), 0.5)
     const large = time(8000)
     expect(large / small).toBeLessThan(8)
+  })
+
+  /* The case above leaves `codeRanges` EMPTY, so it never exercises the protected-range lookup —
+   * the second quadratic factor. These put the delimiters inside code, where the scan emits a range
+   * per line and every candidate is tested against all of them unless the ranges are merged. */
+  for (const [label, wrap] of [
+    ['fenced', (lines: string[]) => ['```latex', ...lines, '```'].join('\n')],
+    ['indented', (lines: string[]) => lines.map((l) => `    ${l}`).join('\n')]
+  ] as const) {
+    it(`does not degrade quadratically on many ${label} delimiter lines`, () => {
+      const time = (n: number): number => {
+        const src = wrap(Array.from({ length: n }, () => '\\['))
+        const t0 = performance.now()
+        normalizeMath(src)
+        return performance.now() - t0
+      }
+      time(2000)
+      const small = Math.max(time(2000), 0.5)
+      const large = time(8000)
+      expect(large / small).toBeLessThan(8)
+    })
+  }
+
+  it('collapses a fenced block to a single protected range', () => {
+    const src = ['```latex', ...Array.from({ length: 500 }, () => '\\['), '```'].join('\n')
+    expect(codeRanges(src)).toHaveLength(1)
   })
 })
 
