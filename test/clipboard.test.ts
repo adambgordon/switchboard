@@ -21,6 +21,14 @@ describe('rowsToPlainText', () => {
   it('flattens newlines inside a cell so a row stays one line', () => {
     expect(rowsToPlainText([['a\nb', 'c']])).toBe('a b\tc')
   })
+
+  it('preserves the ragged row shape of a selection across table rows', () => {
+    expect(rowsToPlainText([['tail', 'right'], ['left']])).toBe('tail\tright\nleft')
+  })
+
+  it('preserves an empty cell swept between selected cells', () => {
+    expect(rowsToPlainText([['a', '', 'c']])).toBe('a\t\tc')
+  })
 })
 
 describe('markdownToPlainText', () => {

@@ -740,6 +740,9 @@ export interface CopySection {
   parts: string[]
 }
 
+/** Tabs carry table columns in plain mode, so trim the surrounding whitespace without consuming them. */
+export const trimPlainEdges = (text: string): string => text.replace(/^[^\S\t]+|[^\S\t]+$/g, '')
+
 /**
  * Join per-section markdown into the final clipboard text, in the same shape the footer's "Copy entire
  * conversation" produces: a bold speaker label over each body, sections divided by a horizontal rule.
@@ -756,7 +759,10 @@ export function assembleCopy(sections: CopySection[], alwaysLabel = false, plain
   const kept = sections
     .map((sec) => ({
       label: sec.isSidechain ? `${sec.label} (Sub-agent)` : sec.label,
-      body: sec.parts.map((p) => p.trim()).filter(Boolean).join('\n\n')
+      body: sec.parts
+        .map((p) => (plain ? trimPlainEdges(p) : p.trim()))
+        .filter(Boolean)
+        .join('\n\n')
     }))
     .filter((sec) => sec.body)
   if (kept.length === 0) return ''

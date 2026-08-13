@@ -640,4 +640,14 @@ describe('assembleCopy', () => {
       'You:\n\nWhy does it retry?\n\n---\n\nClaude:\n\nIt backs off exponentially.'
     )
   })
+
+  it('preserves leading and trailing table columns in plain mode', () => {
+    expect(
+      assembleCopy(
+        [{ label: 'Claude', isSidechain: false, parts: [' \n\tvalue\t\n '] }],
+        false,
+        true
+      )
+    ).toBe('\tvalue\t')
+  })
 })

@@ -1,4 +1,5 @@
-import { fence, resolveSpan, type CopySection, type SrcNode } from './mdCopy'
+import { fence, resolveSpan, trimPlainEdges, type CopySection, type SrcNode } from './mdCopy'
+import { rowsToPlainText } from './clipboard'
 
 /**
  * The DOM half of the Formatted view's copy pipeline — turns a `Range` into the per-speaker sections
@@ -71,15 +72,8 @@ function scan(el: Element, kids: Element[]): { text: string; offsets: number[] }
   return { text: acc, offsets }
 }
 
-/**
- * The text a rendered element contributes to the clipboard — the skip rules applied, so a caller
- * never has to reason about which subtrees are chrome. Exported because `tableRows` (MessageBlock)
- * needs the same answer: a cell holding inline math contains BOTH the rendered glyphs and the
- * hidden LaTeX, and raw `textContent` would paste the two concatenated.
- */
-export const visibleText = (el: Element): string => scan(el, []).text
-
-const textOf = visibleText
+/** The text a rendered element contributes to the clipboard, with renderer-only chrome excluded. */
+const visibleText = (el: Element): string => scan(el, []).text
 
 /** Read an annotated element (and its annotated descendants) into the pure mapper's shape.
  *  `<pre>` is flagged so the mapper can invert its widen rule — inline `<code>` is NOT a `<pre>`, so it
@@ -207,6 +201,29 @@ function intersects(range: Range, el: Element): boolean {
   }
 }
 
+/** Read a rendered table into the same row grid used by its copy button. With a range, the first and
+ *  last cells are sliced to their selected text while cells swept between the boundaries stay whole. */
+export function tableRows(table: HTMLTableElement | null, range?: Range): string[][] {
+  if (!table) return []
+  const rows: string[][] = []
+  for (const row of Array.from(table.rows)) {
+    const cells: string[] = []
+    for (const cell of Array.from(row.cells)) {
+      if (!range) {
+        cells.push(visibleText(cell))
+        continue
+      }
+      if (!intersects(range, cell)) continue
+      const full = visibleText(cell)
+      const { t0, t1, startsBefore, endsAfter } = windowIn(cell, range, full.length)
+      if (t1 > t0) cells.push(full.slice(t0, t1))
+      else if (full.length === 0 && startsBefore && endsAfter) cells.push('')
+    }
+    if (cells.length > 0) rows.push(cells)
+  }
+  return rows
+}
+
 /** Tool I/O only travels when its run is open — see the exclusion note at the top of the file. */
 function inOpenRun(el: Element): boolean {
   const details = el.closest('details.tool-run')
@@ -225,13 +242,38 @@ const toolLabel = (el: Element): string => (el.querySelector('.tool-name')?.text
 function toolUnit(el: Element, range: Range, mode: CopyMode): string {
   const pre = el.querySelector('pre.tool-json, pre.tool-result-text')
   if (!pre) return ''
-  const full = textOf(pre)
+  const full = visibleText(pre)
   const { t0, t1 } = windowIn(pre, range, full.length)
   const body = t1 > t0 ? full.slice(t0, t1) : ''
   if (!body.trim()) return ''
   const label = toolLabel(el) || 'Tool'
   const lang = pre.classList.contains('tool-json') ? 'json' : ''
   return `${label}:\n\n${mode === 'markdown' ? fence(body, lang) : body.replace(/\s+$/, '')}`
+}
+
+/** Slice one rendered block, replacing table subtrees with their row-and-column structure. */
+function plainSlice(el: Element, range: Range): string {
+  if (el.tagName === 'TABLE') return rowsToPlainText(tableRows(el as HTMLTableElement, range))
+
+  const tables = Array.from(el.querySelectorAll<HTMLTableElement>('table'))
+  const { text, offsets } = scan(el, tables)
+  const { t0, t1 } = windowIn(el, range, text.length)
+  if (t1 <= t0) return ''
+  if (tables.length === 0) return text.slice(t0, t1)
+
+  const parts: string[] = []
+  let cursor = t0
+  for (const [i, table] of tables.entries()) {
+    const start = offsets[i]
+    const end = start + visibleText(table).length
+    if (end <= t0 || start >= t1) continue
+    if (cursor < start) parts.push(text.slice(cursor, Math.min(start, t1)))
+    const replacement = rowsToPlainText(tableRows(table, range))
+    if (replacement) parts.push(replacement)
+    cursor = Math.max(cursor, Math.min(end, t1))
+  }
+  if (cursor < t1) parts.push(text.slice(cursor, t1))
+  return parts.join('')
 }
 
 /**
@@ -244,19 +286,14 @@ function toolUnit(el: Element, range: Range, mode: CopyMode): string {
  */
 function plainUnit(el: Element, range: Range): string {
   const kids = annotatedChildren(el)
-  if (kids.length === 0) {
-    const full = textOf(el)
-    const { t0, t1 } = windowIn(el, range, full.length)
-    return t1 > t0 ? full.slice(t0, t1) : ''
-  }
+  if (kids.length === 0) return plainSlice(el, range)
   const parts: string[] = []
   for (const kid of kids) {
     if (!intersects(range, kid)) continue
-    const full = textOf(kid)
-    const { t0, t1 } = windowIn(kid, range, full.length)
-    if (t1 > t0) parts.push(full.slice(t0, t1).trim())
+    const text = trimPlainEdges(plainSlice(kid, range))
+    if (text) parts.push(text)
   }
-  return parts.filter(Boolean).join('\n\n')
+  return parts.join('\n\n')
 }
 
 /** One prose block: its markdown source sliced to the selection, or the rendered text of that slice. */
@@ -299,7 +336,7 @@ export function collectSections(
     const isProse = el.classList.contains('md')
     if (!isProse && !inOpenRun(el)) continue
     const text = isProse ? proseUnit(el, range, sourceFor, mode) : toolUnit(el, range, mode)
-    if (!text.trim()) continue
+    if (!(mode === 'plain' ? trimPlainEdges(text) : text.trim())) continue
     const article = el.closest('article.message')
     if (article !== current || sections.length === 0) {
       current = article
