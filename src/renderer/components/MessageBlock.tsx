@@ -3,6 +3,7 @@ import type { ComponentPropsWithoutRef, MutableRefObject, ReactNode } from 'reac
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import python from 'highlight.js/lib/languages/python'
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -17,13 +18,16 @@ import yaml from 'highlight.js/lib/languages/yaml'
 import xml from 'highlight.js/lib/languages/xml'
 import css from 'highlight.js/lib/languages/css'
 import markdown from 'highlight.js/lib/languages/markdown'
+import plaintext from 'highlight.js/lib/languages/plaintext'
 import type { TranscriptBlock } from '@shared/types'
 import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, rowsToPlainText } from '../lib/clipboard'
 import { assembleCopy } from '../lib/mdCopy'
-import { collectSections, rangeOver } from '../lib/mdCopyDom'
+import { collectSections, rangeOver, visibleText } from '../lib/mdCopyDom'
 import { langLabelFromClassName } from '../lib/codeLang'
+import { normalizeMath } from '../lib/mathDelimiters'
+import { MathDisplay, MathInline } from './MathBlock'
 import CopyButton from './CopyButton'
 import AgentLogo from './AgentLogo'
 import { Arrow, Chevron, Person } from './icons'
@@ -34,7 +38,12 @@ import { Arrow, Chevron, Person } from './icons'
  * and shell in `bash` (aliases ```ts / ```py / ```html resolve automatically). The token COLORS live in
  * transcript.css (.hljs-*), themed per light/dark — the one sanctioned exception to the transcript's
  * otherwise strict grayscale (see the header note there). */
-const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, rust, sql, yaml, xml, css, markdown }
+// `math` is registered as PLAINTEXT rather than left out: remark-math hands display math to rehype
+// as a `language-math` fence, and an unregistered language sends every display formula through
+// rehype-highlight's throw/catch + VFile-warning path before the component override replaces it.
+// Registering it makes the bypass explicit and keeps the LaTeX one untokenized text child, which is
+// what `displayMathTex` reads.
+const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, rust, sql, yaml, xml, css, markdown, math: plaintext }
 
 /* Minimal hast shape — enough to walk and stamp. Avoids pulling in @types/hast (and unist-util-visit)
  * for a dozen lines of tree walk. */
@@ -80,6 +89,44 @@ const rehypePlugins: ComponentPropsWithoutRef<typeof ReactMarkdown>['rehypePlugi
   rehypeSourceOffsets
 ]
 
+/* Remark plugin sets — three, chosen per block by `normalizeMath` (see lib/mathDelimiters.ts).
+ *
+ * A block with no math parses EXACTLY as it always has: the math extension never runs, so no `$`
+ * in it can be reinterpreted. That is the point of selecting rather than always enabling — the
+ * math parser only ever sees a block that proved it wants math, which is also why blocks full of
+ * `$PATH` and `${dir}` are untouchable.
+ *
+ * `singleDollarTextMath` is off in the middle set so `$…$` stays literal while `$$…$$` (the form
+ * the `\(…\)` rewrite produces) still reads as inline math. */
+type RemarkPlugins = ComponentPropsWithoutRef<typeof ReactMarkdown>['remarkPlugins']
+const remarkPlain: RemarkPlugins = [remarkGfm]
+const remarkMathOnlyDoubleDollar: RemarkPlugins = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]]
+const remarkMathWithSingleDollar: RemarkPlugins = [remarkGfm, [remarkMath, { singleDollarTextMath: true }]]
+
+/** remark-math marks its output with these; rehype-highlight leaves the LaTeX text untokenized. */
+const MATH_INLINE = 'math-inline'
+const MATH_DISPLAY = 'math-display'
+
+const classNamesOf = (node: unknown): string[] => {
+  const raw = (node as HastNode | undefined)?.properties?.className
+  if (Array.isArray(raw)) return raw.map(String)
+  return typeof raw === 'string' ? raw.split(/\s+/) : []
+}
+
+/** The LaTeX inside a `language-math` element — one unsplit text child (see the note above). */
+const texOf = (node: unknown): string =>
+  ((node as HastNode | undefined)?.children ?? [])
+    .map((child) => (child as { value?: string }).value ?? '')
+    .join('')
+
+/** A display-math `<pre>` wraps exactly one `language-math math-display` `<code>`. */
+function displayMathTex(node: unknown): string | null {
+  const kids = (node as HastNode | undefined)?.children ?? []
+  const code = kids.find((child) => child.type === 'element' && child.tagName === 'code')
+  if (!code || !classNamesOf(code).includes(MATH_DISPLAY)) return null
+  return texOf(code)
+}
+
 /** The source-offset pair the plugin above stamps, as it arrives in a component's props. Declared so
  *  the two wrapper components (CodeBlock / TableBlock) can forward it onto the element they render. */
 type SrcAttrs = { 'data-s'?: number | string; 'data-e'?: number | string }
@@ -103,7 +150,9 @@ const cx = (ours: string, theirs?: string): string => [ours, theirs].filter(Bool
  *  and the turn copy. */
 function tableRows(table: HTMLTableElement | null): string[][] {
   if (!table) return []
-  return Array.from(table.rows).map((row) => Array.from(row.cells).map((c) => c.textContent ?? ''))
+  // `visibleText`, not `textContent`: a cell can hold a rendered formula, which carries both the
+  // glyph layout and the hidden LaTeX source — the shared walk resolves that to one of them.
+  return Array.from(table.rows).map((row) => Array.from(row.cells).map((c) => visibleText(c)))
 }
 
 /** The fence's language, read off the child <code>'s `language-xxx` class (set by rehype-highlight /
@@ -228,12 +277,27 @@ const markdownComponents: Components = {
   // Merge the incoming className: rehype-highlight sets `hljs language-xxx` on fenced <code> plus the
   // token <span class="hljs-*"> children — clobbering className with a bare "md-code" would drop the
   // highlight hooks. The highlighted spans arrive as `children`, so rendering them as-is preserves them.
-  code: ({ node, className, children, ...rest }) => (
-    <code className={cx('md-code', className)} {...rest}>
-      {children}
-    </code>
-  ),
-  pre: ({ node, children, ...rest }) => <CodeBlock {...rest}>{children}</CodeBlock>,
+  // Inline math arrives as a `language-math math-inline` <code> carrying its own source offsets
+  // (rehypeSourceOffsets can stamp it because remark-math preserves the node's position), so the
+  // offsets forward straight onto the rendered formula and it stays one mapped copy unit.
+  code: ({ node, className, children, ...rest }) => {
+    if (classNamesOf(node).includes(MATH_INLINE)) {
+      return <MathInline tex={texOf(node)} {...(rest as SrcAttrs)} />
+    }
+    return (
+      <code className={cx('md-code', className)} {...rest}>
+        {children}
+      </code>
+    )
+  },
+  // Display math is a <pre> wrapping a math <code>. The offsets live on the <pre> — descent stops
+  // there — so this is the only place that can forward them, and it renders MathDisplay itself
+  // rather than delegating to the <code> override (which would never see them).
+  pre: ({ node, children, ...rest }) => {
+    const tex = displayMathTex(node)
+    if (tex !== null) return <MathDisplay tex={tex} {...(rest as SrcAttrs)} />
+    return <CodeBlock {...rest}>{children}</CodeBlock>
+  },
   ul: ({ node, className, children, ...rest }) => (
     <ul className={cx('md-ul', className)} {...rest}>
       {children}
@@ -359,13 +423,25 @@ function MarkdownBlock({
     // reads it when clicked instead.
     [text, copyCtxRef]
   )
+  /* Math delimiters are normalised onto the form remark-math understands. The rewrite is
+   * LENGTH-PRESERVING, which is what makes this a one-line change instead of a rework: every
+   * source offset the parse produces still indexes `text`, so `sliceSource` above, the copy
+   * pipeline, and the 0..length span below all keep using the ORIGINAL source — and a copied
+   * formula comes back as the `\(…\)` the agent wrote, not the rewritten form. */
+  const math = useMemo(() => normalizeMath(text), [text])
+  const remarkPlugins = !math.hasMath
+    ? remarkPlain
+    : math.singleDollar
+      ? remarkMathWithSingleDollar
+      : remarkMathOnlyDoubleDollar
+
   // The wrapper is the copy handler's unit of work: `data-block-key` identifies which text block's
   // source to slice, and the 0..length span makes it the root of the same annotated tree its children
   // form — so one uniform walk describes the whole block (see lib/mdCopyDom.ts).
   return (
     <div className="md" data-block-key={blockKey} data-s={0} data-e={text.length}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={components}>
-        {text}
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+        {math.text}
       </ReactMarkdown>
     </div>
   )

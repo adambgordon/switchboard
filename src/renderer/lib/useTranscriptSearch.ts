@@ -34,7 +34,10 @@ function collectRanges(root: HTMLElement, query: string): Range[] {
     acceptNode(node: Node): number {
       const parent = node.parentElement
       if (!parent) return NodeFilter.FILTER_REJECT
-      if (parent.closest('.transcript-foot, .transcript-loading')) {
+      // `.md-math-tex` is the LaTeX source parked beside a rendered formula for the clipboard
+      // (see MathBlock.tsx). It is invisible, so matching it would inflate the count with hits that
+      // highlight nothing — and double-count every formula, since its glyphs are searchable too.
+      if (parent.closest('.transcript-foot, .transcript-loading, .md-math-tex')) {
         return NodeFilter.FILTER_REJECT
       }
       const text = node.nodeValue
