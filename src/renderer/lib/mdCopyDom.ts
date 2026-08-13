@@ -83,16 +83,26 @@ const textOf = visibleText
 
 /** Read an annotated element (and its annotated descendants) into the pure mapper's shape.
  *  `<pre>` is flagged so the mapper can invert its widen rule — inline `<code>` is NOT a `<pre>`, so it
- *  keeps the ordinary behaviour and a backtick pair travels only on a full-coverage selection. */
+ *  keeps the ordinary behaviour and a backtick pair travels only on a full-coverage selection.
+ *  Line containers and `<br>` keep their tag semantics because their source carries invisible syntax. */
 function describe(el: Element): SrcNode {
   const kids = annotatedChildren(el)
   const { text, offsets } = scan(el, kids)
+  const kind =
+    el.tagName === 'BLOCKQUOTE'
+      ? 'blockquote'
+      : el.tagName === 'LI'
+        ? 'list-item'
+        : el.tagName === 'BR'
+          ? 'break'
+          : undefined
   return {
     s: intAttr(el, 'data-s'),
     e: intAttr(el, 'data-e'),
     text,
     children: kids.map((k, i) => ({ at: offsets[i], node: describe(k) })),
-    fenced: el.tagName === 'PRE'
+    fenced: el.tagName === 'PRE',
+    kind
   }
 }
 
