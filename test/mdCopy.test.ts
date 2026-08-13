@@ -21,6 +21,13 @@ const node = (s: number, e: number, text: string, children: SrcChild[] = []): Sr
   children
 })
 const kid = (at: number, n: SrcNode): SrcChild => ({ at, node: n })
+const structural = (
+  kind: NonNullable<SrcNode['kind']>,
+  s: number,
+  e: number,
+  text: string,
+  children: SrcChild[] = []
+): SrcNode => ({ s, e, text, children, kind })
 
 /** Slice a source the way the copy handler does, from a start and an end boundary in rendered text. */
 function copy(
@@ -298,6 +305,241 @@ describe('resolveSpan — a list item with an inline run', () => {
   })
 })
 
+describe('resolveSpan — markdown line containers', () => {
+  it('maps a partial selection through explicit blockquote continuation markers', () => {
+    const source = '> first\n> second'
+    const paragraph = node(2, 16, 'first\nsecond')
+    const quote = structural('blockquote', 0, 16, '\nfirst\nsecond\n', [kid(1, paragraph)])
+    const root = node(0, 16, '\nfirst\nsecond\n', [kid(0, quote)])
+
+    expect(copy(source, root, 7, 13)).toBe('second')
+    expect(copy(source, root, 1, 13)).toBe(source)
+  })
+
+  it.each([' ', '  ', '   '])(
+    'maps a list continuation indented by %j',
+    (indent) => {
+      const source = `- first\n${indent}second`
+      const item = structural('list-item', 0, source.length, 'first\nsecond')
+      const list = node(0, source.length, '\nfirst\nsecond\n', [kid(1, item)])
+      const root = node(0, source.length, '\nfirst\nsecond\n', [kid(0, list)])
+
+      expect(copy(source, root, 7, 13)).toBe('second')
+      expect(copy(source, root, 1, 13)).toBe(source)
+    }
+  )
+
+  it('maps an ordered-list continuation without losing the full-list marker', () => {
+    const source = '1. first\n   second'
+    const item = structural('list-item', 0, 18, 'first\nsecond')
+    const list = node(0, 18, '\nfirst\nsecond\n', [kid(1, item)])
+    const root = node(0, 18, '\nfirst\nsecond\n', [kid(0, list)])
+
+    expect(copy(source, root, 7, 13)).toBe('second')
+    expect(copy(source, root, 1, 13)).toBe(source)
+  })
+
+  it('preserves a fully selected list item while stripping a partial sibling', () => {
+    const source = '- first\n- second'
+    const first = structural('list-item', 0, 7, 'first')
+    const second = structural('list-item', 8, 16, 'second')
+    const list = node(0, 16, '\nfirst\nsecond\n', [kid(1, first), kid(7, second)])
+    const root = node(0, 16, '\nfirst\nsecond\n', [kid(0, list)])
+
+    expect(copy(source, root, 1, 10)).toBe('- first\nsec')
+  })
+
+  it('keeps lazy blockquote continuations on the ordinary exact-mapping path', () => {
+    const source = '> first\nsecond'
+    const paragraph = node(2, 14, 'first\nsecond')
+    const quote = structural('blockquote', 0, 14, '\nfirst\nsecond\n', [kid(1, paragraph)])
+    const root = node(0, 14, '\nfirst\nsecond\n', [kid(0, quote)])
+
+    expect(copy(source, root, 7, 13)).toBe('second')
+  })
+
+  it('removes quote and list continuation prefixes together', () => {
+    const source = '> - first\n>   second'
+    const item = structural('list-item', 2, 20, 'first\nsecond')
+    const list = node(2, 20, '\nfirst\nsecond\n', [kid(1, item)])
+    const quote = structural('blockquote', 0, 20, '\n\nfirst\nsecond\n\n', [kid(1, list)])
+    const root = node(0, 20, '\n\nfirst\nsecond\n\n', [kid(0, quote)])
+
+    expect(copy(source, root, 8, 14)).toBe('second')
+    expect(copy(source, root, 2, 14)).toBe(source)
+  })
+
+  it('strips only the partially selected owner in a nested list', () => {
+    const source = '- outer\n  - inner one\n    inner two'
+    const innerItem = structural('list-item', 10, 35, 'inner one\ninner two')
+    const innerList = node(10, 35, '\ninner one\ninner two\n', [kid(1, innerItem)])
+    const outerItem = structural('list-item', 0, 35, 'outer\n\ninner one\ninner two\n\n', [
+      kid(6, innerList)
+    ])
+    const outerList = node(0, 35, '\nouter\n\ninner one\ninner two\n\n\n', [kid(1, outerItem)])
+    const root = node(0, 35, '\nouter\n\ninner one\ninner two\n\n\n', [kid(0, outerList)])
+
+    expect(copy(source, root, 8, 27)).toBe('- inner one\n  inner two')
+    expect(copy(source, root, 24, 27)).toBe('two')
+  })
+
+  it('strips only the partially selected owner in a nested blockquote', () => {
+    const source = '> outer\n>\n> > inner one\n> > inner two\n>\n> outer two'
+    const innerParagraph = node(14, 37, 'inner one\ninner two')
+    const innerQuote = structural('blockquote', 12, 37, '\ninner one\ninner two\n', [
+      kid(1, innerParagraph)
+    ])
+    const outerQuote = structural(
+      'blockquote',
+      0,
+      51,
+      '\nouter\n\ninner one\ninner two\n\nouter two\n',
+      [kid(1, node(2, 7, 'outer')), kid(7, innerQuote), kid(29, node(42, 51, 'outer two'))]
+    )
+    const root = node(0, 51, '\nouter\n\ninner one\ninner two\n\nouter two\n', [
+      kid(0, outerQuote)
+    ])
+
+    expect(copy(source, root, 8, 27)).toBe('> inner one\n> inner two')
+    expect(copy(source, root, 24, 27)).toBe('two')
+    expect(copy(source, root, 1, 38)).toBe(source)
+  })
+
+  it('preserves paragraph separation while stripping a partial quote', () => {
+    const source = '> first\n>\n> second'
+    const quote = structural('blockquote', 0, 18, '\nfirst\nsecond\n', [
+      kid(1, node(2, 7, 'first')),
+      kid(7, node(12, 18, 'second'))
+    ])
+    const root = node(0, 18, '\nfirst\nsecond\n', [kid(0, quote)])
+
+    expect(copy(source, root, 2, 10)).toBe('irst\n\nsec')
+  })
+
+  it('keeps complete inline markup while mapping across quote lines', () => {
+    const source = '> first **bold**\n> second *em*'
+    const strong = node(8, 16, 'bold')
+    const emphasis = node(26, 30, 'em')
+    const paragraph = node(2, 30, 'first bold\nsecond em', [
+      kid(6, strong),
+      kid(18, emphasis)
+    ])
+    const quote = structural('blockquote', 0, 30, '\nfirst bold\nsecond em\n', [kid(1, paragraph)])
+    const root = node(0, 30, '\nfirst bold\nsecond em\n', [kid(0, quote)])
+
+    expect(copy(source, root, 7, 18)).toBe('**bold**\nsecond')
+  })
+
+  it('still widens escaped markdown whose rendered position is ambiguous', () => {
+    const source = '> x \\* y\n> second'
+    const paragraph = node(2, 17, 'x * y\nsecond')
+    const quote = structural('blockquote', 0, 17, '\nx * y\nsecond\n', [kid(1, paragraph)])
+    const root = node(0, 17, '\nx * y\nsecond\n', [kid(0, quote)])
+
+    expect(copy(source, root, 3, 4)).toBe('x \\* y\nsecond')
+  })
+
+  it('preserves literal indentation inside a quoted fenced block', () => {
+    const source = '> before\n>\n> ```python\n> if ok:\n>     pass\n> ```\n>\n> after'
+    const before = node(2, 8, 'before')
+    const code = { ...node(13, 48, 'if ok:\n    pass\n'), fenced: true }
+    const after = node(53, 58, 'after')
+    const quote = structural(
+      'blockquote',
+      0,
+      58,
+      '\nbefore\nif ok:\n    pass\n\nafter\n',
+      [kid(1, before), kid(8, code), kid(25, after)]
+    )
+    const root = node(0, 58, quote.text, [kid(0, quote)])
+
+    expect(copy(source, root, 8, 23)).toBe('if ok:\n    pass')
+  })
+
+  it('preserves literal indentation inside a list-contained fenced block', () => {
+    const source = '- before\n\n  ```python\n  if ok:\n      pass\n  ```\n\n  after'
+    const before = node(2, 8, 'before')
+    const code = { ...node(12, 47, 'if ok:\n    pass\n'), fenced: true }
+    const after = node(51, 56, 'after')
+    const item = structural(
+      'list-item',
+      0,
+      56,
+      '\nbefore\nif ok:\n    pass\n\nafter\n',
+      [kid(1, before), kid(8, code), kid(25, after)]
+    )
+    const list = node(0, 56, `\n${item.text}\n`, [kid(1, item)])
+    const root = node(0, 56, list.text, [kid(0, list)])
+
+    expect(copy(source, root, 9, 24)).toBe('if ok:\n    pass')
+  })
+
+  it.each([
+    ['multi-digit ordered list', '10. > first\n    > second'],
+    ['extra-indented unordered list', '-   > first\n    > second']
+  ])('consumes %s and quote prefixes in their actual nesting order', (_name, source) => {
+    const paragraph = node(6, 24, 'first\nsecond')
+    const quote = structural('blockquote', 4, 24, '\nfirst\nsecond\n', [kid(1, paragraph)])
+    const item = structural('list-item', 0, 24, '\n\nfirst\nsecond\n\n', [kid(1, quote)])
+    const list = node(0, 24, '\n\n\nfirst\nsecond\n\n\n', [kid(1, item)])
+    const root = node(0, 24, list.text, [kid(0, list)])
+
+    expect(copy(source, root, 9, 15)).toBe('second')
+  })
+
+  it('subtracts many structural prefixes without quadratic growth', () => {
+    const lineCount = 12_000
+    const lines = Array.from({ length: lineCount }, (_, i) => `line ${i}`)
+    const source = lines.map((line) => `> ${line}`).join('\n')
+    const rendered = lines.join('\n')
+    const paragraph = node(2, source.length, rendered)
+    const quote = structural('blockquote', 0, source.length, `\n${rendered}\n`, [
+      kid(1, paragraph)
+    ])
+    const root = node(0, source.length, quote.text, [kid(0, quote)])
+
+    const started = performance.now()
+    const copied = copy(source, root, 2, root.text.length - 2)
+    const elapsed = performance.now() - started
+
+    expect(copied).toBe(rendered.slice(1, -1))
+    expect(elapsed).toBeLessThan(500)
+  })
+})
+
+describe('resolveSpan — hard breaks', () => {
+  it.each<[string, string, number, number, string]>([
+    ['backslash', 'first\\\nsecond', 5, 7, 'rst\\\nsec'],
+    ['two-space', 'first  \nsecond', 5, 8, 'rst  \nsec']
+  ])('maps a %s hard break outside a container', (_name, source, breakStart, breakEnd, expected) => {
+    const hardBreak = structural('break', breakStart, breakEnd, '')
+    const paragraph = node(0, source.length, 'first\nsecond', [kid(5, hardBreak)])
+    const root = node(0, source.length, 'first\nsecond', [kid(0, paragraph)])
+
+    expect(copy(source, root, 6, 12)).toBe('second')
+    expect(copy(source, root, 2, 9)).toBe(expected)
+  })
+
+  it.each<[string, string, number, number, string]>([
+    ['backslash', '> first\\\n> second', 7, 9, 'rst\\\nsec'],
+    ['two-space', '> first  \n> second', 7, 10, 'rst  \nsec']
+  ])('maps a %s hard break inside a blockquote', (_name, source, breakStart, breakEnd, expected) => {
+    const hardBreak = structural('break', breakStart, breakEnd, '')
+    const paragraph = node(2, source.length, 'first\nsecond', [kid(5, hardBreak)])
+    const quote = structural(
+      'blockquote',
+      0,
+      source.length,
+      '\nfirst\nsecond\n',
+      [kid(1, paragraph)]
+    )
+    const root = node(0, source.length, '\nfirst\nsecond\n', [kid(0, quote)])
+
+    expect(copy(source, root, 7, 13)).toBe('second')
+    expect(copy(source, root, 3, 10)).toBe(expected)
+  })
+})
+
 describe('resolveSpan — unprovable mappings widen rather than mislead', () => {
   // `x \* y **z**` renders as "x * y z": the escape makes the gap one char shorter than its source.
   const SRC = 'x \\* y **z**'
@@ -397,5 +639,15 @@ describe('assembleCopy', () => {
     expect(assembleCopy([you, claude], false, true)).toBe(
       'You:\n\nWhy does it retry?\n\n---\n\nClaude:\n\nIt backs off exponentially.'
     )
+  })
+
+  it('preserves leading and trailing table columns in plain mode', () => {
+    expect(
+      assembleCopy(
+        [{ label: 'Claude', isSidechain: false, parts: [' \n\tvalue\t\n '] }],
+        false,
+        true
+      )
+    ).toBe('\tvalue\t')
   })
 })

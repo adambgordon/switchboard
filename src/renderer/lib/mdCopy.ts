@@ -24,12 +24,14 @@ export interface SrcNode {
   s: number
   /** Source offset just past this element's markdown (its `data-e`). */
   e: number
-  /** The element's rendered text, with injected chrome (language captions, buttons) excluded. */
+  /** The element's rendered text, with injected chrome excluded. Empty for `<br>`; `kind` supplies it. */
   text: string
   /** Nearest annotated descendants, in document order. */
   children: SrcChild[]
   /** A fenced code block. Inverts the widen rule — see `fenceWiden`. */
   fenced?: boolean
+  /** Structural meaning that changes how source-only characters project into rendered text. */
+  kind?: 'blockquote' | 'list-item' | 'break'
 }
 
 export interface SrcChild {
@@ -59,6 +61,284 @@ const atStart = (text: string, off: number): boolean =>
 /** Is everything from `off` on whitespace? A fence's rendered text ends in a newline no drag covers. */
 const atEnd = (text: string, off: number): boolean => text.slice(Math.max(0, off)).trim() === ''
 
+/** remark-rehype represents a hard break as an empty `<br>` followed by a generated newline text node. */
+const renderedText = (node: SrcNode): string => (node.kind === 'break' ? '\n' : node.text)
+
+interface ContainerOwner {
+  node: SrcNode
+  kind: 'blockquote' | 'list-item'
+  s: number
+  e: number
+  t0: number
+  t1: number
+  depth: number
+  order: number
+  indent: number
+}
+
+interface SourcePrefix {
+  s: number
+  e: number
+  owner: ContainerOwner
+}
+
+interface LocatedText {
+  at: number
+  length: number
+}
+
+interface SourceProjection {
+  text: string
+  positions: number[]
+  prefixes: SourcePrefix[]
+  leaves: WeakMap<SrcNode, LocatedText | null>
+  gaps: WeakMap<SrcNode, Map<number, LocatedText | null>>
+}
+
+function collectOwners(
+  node: SrcNode,
+  t0: number,
+  depth: number,
+  owners: ContainerOwner[],
+  fenced: SrcRange[]
+): void {
+  const text = renderedText(node)
+  if (node.fenced) fenced.push({ s: node.s, e: node.e })
+  if (node.kind === 'blockquote' || node.kind === 'list-item') {
+    owners.push({
+      node,
+      kind: node.kind,
+      s: node.s,
+      e: node.e,
+      t0,
+      t1: t0 + text.length,
+      depth,
+      order: owners.length,
+      indent: 0
+    })
+    depth += 1
+  }
+  for (const child of node.children) {
+    collectOwners(child.node, t0 + child.at, depth, owners, fenced)
+  }
+}
+
+function quoteMarkerEnd(source: string, at: number, lineEnd: number): number | null {
+  let p = at
+  while (p < lineEnd && p - at < 3 && source[p] === ' ') p += 1
+  if (source[p] !== '>') return null
+  p += 1
+  if (p < lineEnd && (source[p] === ' ' || source[p] === '\t')) p += 1
+  return p
+}
+
+function listMarkerEnd(source: string, at: number, lineEnd: number): number | null {
+  const match = /^(?:[*+-]|\d{1,9}[.)])(?:[ \t]+|$)/.exec(source.slice(at, lineEnd))
+  return match ? at + match[0].length : null
+}
+
+const isLineSpace = (char: string): boolean => char === ' ' || char === '\t'
+
+function lineSpaceEnd(source: string, at: number, lineEnd: number): number {
+  let end = at
+  while (end < lineEnd && isLineSpace(source[end])) end += 1
+  return end
+}
+
+const startsOnLine = (owner: ContainerOwner, lineStart: number, lineEnd: number): boolean =>
+  owner.s >= lineStart && owner.s < lineEnd
+
+function addPrefix(out: SourcePrefix[], s: number, e: number, owner: ContainerOwner): void {
+  if (e > s) out.push({ s, e, owner })
+}
+
+function consumePrefixes(
+  source: string,
+  lineStart: number,
+  lineEnd: number,
+  active: ContainerOwner[],
+  out: SourcePrefix[]
+): number {
+  let cursor = lineStart
+  for (let i = 0; i < active.length; i += 1) {
+    const owner = active[i]
+    if (owner.kind === 'blockquote') {
+      const markerEnd = quoteMarkerEnd(source, cursor, lineEnd)
+      if (
+        markerEnd === null ||
+        (startsOnLine(owner, lineStart, lineEnd) && source.indexOf('>', cursor) !== owner.s)
+      ) {
+        continue
+      }
+      addPrefix(out, cursor, markerEnd, owner)
+      cursor = markerEnd
+      continue
+    }
+    if (startsOnLine(owner, lineStart, lineEnd)) {
+      if (owner.s < cursor || lineSpaceEnd(source, cursor, owner.s) !== owner.s) continue
+      const parent = active[i - 1]
+      if (parent) addPrefix(out, cursor, owner.s, parent)
+      cursor = owner.s
+      const markerEnd = listMarkerEnd(source, cursor, lineEnd)
+      if (markerEnd === null) continue
+      owner.indent = markerEnd - cursor
+      addPrefix(out, cursor, markerEnd, owner)
+      cursor = markerEnd
+      continue
+    }
+
+    const whitespaceEnd = lineSpaceEnd(source, cursor, lineEnd)
+    const nextStart = active
+      .slice(i + 1)
+      .find((candidate) => startsOnLine(candidate, lineStart, lineEnd))?.s
+    const limit = nextStart === undefined ? whitespaceEnd : Math.min(whitespaceEnd, nextStart)
+    const take = Math.min(owner.indent, Math.max(0, limit - cursor))
+    addPrefix(out, cursor, cursor + take, owner)
+    cursor += take
+  }
+  return cursor
+}
+
+/**
+ * Find only source prefixes whose ownership is proved by the annotated container tree. The scan is
+ * linear in source lines and container depth; no rendered-text endpoint performs its own line walk.
+ */
+function sourcePrefixes(
+  source: string,
+  root: SrcNode,
+  owners: ContainerOwner[],
+  fenced: SrcRange[]
+): SourcePrefix[] {
+  const out: SourcePrefix[] = []
+  const starts = [...owners].sort((a, b) => a.s - b.s || a.depth - b.depth || a.order - b.order)
+  const fencedSpans = [...fenced].sort((a, b) => a.s - b.s || a.e - b.e)
+  const active: ContainerOwner[] = []
+  let nextOwner = 0
+  let nextFence = 0
+  let lineStart = root.s
+
+  while (lineStart < root.e) {
+    const newline = source.indexOf('\n', lineStart)
+    const lineEnd = newline >= 0 && newline < root.e ? newline : root.e
+    for (let i = active.length - 1; i >= 0; i -= 1) {
+      if (active[i].e <= lineStart) active.splice(i, 1)
+    }
+    while (nextOwner < starts.length && starts[nextOwner].s < lineEnd) {
+      const owner = starts[nextOwner]
+      if (owner.e > lineStart) active.push(owner)
+      nextOwner += 1
+    }
+    active.sort((a, b) => a.depth - b.depth || a.order - b.order)
+
+    const cursor = consumePrefixes(source, lineStart, lineEnd, active, out)
+    while (nextFence < fencedSpans.length && fencedSpans[nextFence].e <= cursor) nextFence += 1
+    const insideFence =
+      nextFence < fencedSpans.length &&
+      fencedSpans[nextFence].s <= cursor &&
+      cursor < fencedSpans[nextFence].e
+    const deepest = active[active.length - 1]
+    if (deepest && !insideFence) addPrefix(out, cursor, lineSpaceEnd(source, cursor, lineEnd), deepest)
+
+    if (lineEnd === root.e) break
+    lineStart = lineEnd + 1
+  }
+  return out
+}
+
+function buildProjection(source: string, root: SrcNode): SourceProjection {
+  const owners: ContainerOwner[] = []
+  const fenced: SrcRange[] = []
+  collectOwners(root, 0, 0, owners, fenced)
+  if (owners.length === 0) {
+    return {
+      text: '',
+      positions: [],
+      prefixes: [],
+      leaves: new WeakMap(),
+      gaps: new WeakMap()
+    }
+  }
+  const prefixes = sourcePrefixes(source, root, owners, fenced)
+  const text: string[] = []
+  const positions: number[] = []
+  let prefixIndex = 0
+  let sourceAt = root.s
+  while (sourceAt < root.e) {
+    const prefix = prefixes[prefixIndex]
+    if (prefix && prefix.s === sourceAt) {
+      sourceAt = prefix.e
+      prefixIndex += 1
+      continue
+    }
+    text.push(source[sourceAt])
+    positions.push(sourceAt)
+    sourceAt += 1
+  }
+  return {
+    text: text.join(''),
+    positions,
+    prefixes,
+    leaves: new WeakMap(),
+    gaps: new WeakMap()
+  }
+}
+
+function lowerBound(values: number[], target: number): number {
+  let lo = 0
+  let hi = values.length
+  while (lo < hi) {
+    const mid = lo + Math.floor((hi - lo) / 2)
+    if (values[mid] < target) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+function hasPrefix(projection: SourceProjection, s: number, e: number): boolean {
+  let lo = 0
+  let hi = projection.prefixes.length
+  while (lo < hi) {
+    const mid = lo + Math.floor((hi - lo) / 2)
+    if (projection.prefixes[mid].e <= s) lo = mid + 1
+    else hi = mid
+  }
+  return lo < projection.prefixes.length && projection.prefixes[lo].s < e
+}
+
+function locateText(
+  projection: SourceProjection,
+  s: number,
+  e: number,
+  text: string
+): LocatedText | null {
+  const p0 = lowerBound(projection.positions, s)
+  const p1 = lowerBound(projection.positions, e)
+  const at = contentStart(projection.text.slice(p0, p1), text)
+  return at === null ? null : { at: p0 + at, length: text.length }
+}
+
+function mapLocated(
+  projection: SourceProjection,
+  located: LocatedText,
+  off: number,
+  side: Side
+): number | null {
+  if (located.length === 0) return null
+  const clamped = Math.max(0, Math.min(off, located.length))
+  if (clamped === 0) return projection.positions[located.at]
+  if (clamped === located.length) {
+    return projection.positions[located.at + located.length - 1] + 1
+  }
+  return side === 'start'
+    ? projection.positions[located.at + clamped]
+    : projection.positions[located.at + clamped - 1] + 1
+}
+
+function ownerFullyCovered(owner: ContainerOwner, from: number, to: number): boolean {
+  const text = renderedText(owner.node)
+  return atStart(text, from - owner.t0) && atEnd(text, to - owner.t0)
+}
+
 /**
  * A fenced code block INVERTS the widen rule: everything else earns its delimiters by being fully
  * covered, a fence earns them only when the selection reaches outside it.
@@ -72,7 +352,7 @@ const atEnd = (text: string, off: number): boolean => text.slice(Math.max(0, off
  * full coverage, because `foo()` pasted without its ticks silently loses that it was code.
  */
 const fenceWiden = (kid: SrcChild, side: Side, other: number): boolean =>
-  side === 'start' ? other > kid.at + kid.node.text.length : other < kid.at
+  side === 'start' ? other > kid.at + renderedText(kid.node).length : other < kid.at
 
 /**
  * Does this node contribute nothing but a fenced block? Then it has no delimiters of its OWN to widen
@@ -85,7 +365,7 @@ function onlyFence(node: SrcNode): boolean {
   return (
     node.children.length === 1 &&
     only.at === 0 &&
-    only.node.text.length === node.text.length &&
+    renderedText(only.node).length === renderedText(node).length &&
     onlyFence(only.node)
   )
 }
@@ -113,21 +393,34 @@ export function resolveSpan(
   to: number,
   context: SpanContext
 ): SrcRange[] {
-  const t0 = Math.max(0, Math.min(from, node.text.length))
-  const t1 = Math.max(t0, Math.min(to, node.text.length))
+  const text = renderedText(node)
+  const t0 = Math.max(0, Math.min(from, text.length))
+  const t1 = Math.max(t0, Math.min(to, text.length))
+  const coversNode = atStart(text, t0) && atEnd(text, t1)
+  const fenceOnly = onlyFence(node)
   // A fence-only unit has no local prose offset that can prove the selection left it. The DOM range
   // supplies that missing context; both coverage checks keep a partial cross-unit selection bare.
   if (
-    onlyFence(node) &&
+    fenceOnly &&
     (context.startsBefore || context.endsAfter) &&
-    atStart(node.text, t0) &&
-    atEnd(node.text, t1)
+    coversNode
   ) {
     return [{ s: node.s, e: node.e }]
   }
-  const a = resolvePoint(source, node, t0, 'start', t1)
-  const b = resolvePoint(source, node, t1, 'end', t0)
-  const cuts = [...unpaired(source, node, t0, 'start'), ...unpaired(source, node, t1, 'end')]
+  // Whole-block copies already have an exact annotated span; the projection is only needed to locate
+  // a boundary inside the block. This keeps turn/conversation copy on its original constant-time path.
+  if (!fenceOnly && coversNode) return [{ s: node.s, e: node.e }]
+  const projection = buildProjection(source, node)
+  const a = resolvePoint(source, node, t0, 'start', t1, projection)
+  const b = resolvePoint(source, node, t1, 'end', t0, projection)
+  const delimiterCuts = normalizeRanges([
+    ...unpaired(source, node, t0, 'start', projection),
+    ...unpaired(source, node, t1, 'end', projection)
+  ])
+  const prefixCuts = projection.prefixes
+    .filter((prefix) => !ownerFullyCovered(prefix.owner, t0, t1))
+    .map(({ s, e }) => ({ s, e }))
+  const cuts = mergeOrderedRanges(prefixCuts, delimiterCuts)
   return subtract({ s: Math.min(a, b), e: Math.max(a, b) }, cuts)
 }
 
@@ -150,19 +443,27 @@ export interface SrcRange {
  * a bold run orphans both, and both are cut. Fenced blocks are exempt: their delimiters are already
  * governed by `fenceWiden`, which never leaves one unpaired.
  */
-function unpaired(source: string, node: SrcNode, off: number, side: Side): SrcRange[] {
+function unpaired(
+  source: string,
+  node: SrcNode,
+  off: number,
+  side: Side,
+  projection: SourceProjection
+): SrcRange[] {
   const out: SrcRange[] = []
   let cur = node
   let here = off
   while (cur.children.length > 0) {
     // Only a boundary STRICTLY inside a child orphans anything; on an edge, the widen rules apply.
-    const kid = cur.children.find((k) => here > k.at && here < k.at + k.node.text.length)
+    const kid = cur.children.find(
+      (k) => here > k.at && here < k.at + renderedText(k.node).length
+    )
     if (!kid) break
     // No "does the selection reach past this run" test is needed: if it doesn't, the delimiter lies
     // outside the resolved span and `subtract` finds nothing to remove. Fences ARE exempt, since
     // fenceWiden governs them and never leaves one unpaired.
     if (!kid.node.fenced) {
-      const cut = orphanDelimiter(source, kid.node, side)
+      const cut = orphanDelimiter(source, kid.node, side, projection)
       if (cut) out.push(cut)
     }
     here -= kid.at
@@ -181,46 +482,100 @@ function unpaired(source: string, node: SrcNode, off: number, side: Side): SrcRa
  * node's content start" — otherwise a run beginning with a nested run would measure to the inner
  * delimiter and cut too much.
  */
-function orphanDelimiter(source: string, node: SrcNode, side: Side): SrcRange | null {
+function orphanDelimiter(
+  source: string,
+  node: SrcNode,
+  side: Side,
+  projection: SourceProjection
+): SrcRange | null {
+  const text = renderedText(node)
   if (side === 'start') {
-    const contentEnd = mapExact(source, node, node.text.length, 'end', 0)
+    const contentEnd = mapExact(source, node, text.length, 'end', 0, projection)
     return contentEnd === null ? null : { s: contentEnd, e: node.e }
   }
-  const contentBegin = mapExact(source, node, 0, 'start', node.text.length)
+  const contentBegin = mapExact(source, node, 0, 'start', text.length, projection)
   return contentBegin === null ? null : { s: node.s, e: contentBegin }
 }
 
-/** Remove `cuts` from `range`, leaving the surviving pieces in source order. */
-function subtract(range: SrcRange, cuts: SrcRange[]): SrcRange[] {
-  let pieces: SrcRange[] = [range]
-  for (const cut of cuts) {
-    if (cut.e <= cut.s) continue
-    pieces = pieces.flatMap((p) => {
-      if (cut.e <= p.s || cut.s >= p.e) return [p]
-      const kept: SrcRange[] = []
-      if (cut.s > p.s) kept.push({ s: p.s, e: cut.s })
-      if (cut.e < p.e) kept.push({ s: cut.e, e: p.e })
-      return kept
-    })
+function appendRange(ranges: SrcRange[], range: SrcRange): void {
+  if (range.e <= range.s) return
+  const last = ranges[ranges.length - 1]
+  if (last && range.s <= last.e) {
+    last.e = Math.max(last.e, range.e)
+  } else {
+    ranges.push({ ...range })
   }
-  return pieces.filter((p) => p.e > p.s)
 }
 
-function resolvePoint(source: string, node: SrcNode, off: number, side: Side, other: number): number {
+function normalizeRanges(ranges: SrcRange[]): SrcRange[] {
+  const out: SrcRange[] = []
+  for (const range of [...ranges].sort((a, b) => a.s - b.s || a.e - b.e)) {
+    appendRange(out, range)
+  }
+  return out
+}
+
+function mergeOrderedRanges(left: SrcRange[], right: SrcRange[]): SrcRange[] {
+  const out: SrcRange[] = []
+  let i = 0
+  let j = 0
+  while (i < left.length || j < right.length) {
+    if (j >= right.length || (i < left.length && left[i].s <= right[j].s)) {
+      appendRange(out, left[i])
+      i += 1
+    } else {
+      appendRange(out, right[j])
+      j += 1
+    }
+  }
+  return out
+}
+
+/** Remove ordered, non-overlapping `cuts` from `range` in one pass. */
+function subtract(range: SrcRange, cuts: SrcRange[]): SrcRange[] {
+  const pieces: SrcRange[] = []
+  let at = range.s
+  for (const cut of cuts) {
+    if (cut.e <= at) continue
+    if (cut.s >= range.e) break
+    if (cut.s > at) pieces.push({ s: at, e: Math.min(cut.s, range.e) })
+    at = Math.max(at, cut.e)
+    if (at >= range.e) break
+  }
+  if (at < range.e) pieces.push({ s: at, e: range.e })
+  return pieces
+}
+
+function resolvePoint(
+  source: string,
+  node: SrcNode,
+  off: number,
+  side: Side,
+  other: number,
+  projection: SourceProjection
+): number {
+  const text = renderedText(node)
   // The whole node is covered — take its own span, delimiters and all. Skipped for a node that is
   // nothing but a fence, whose delimiters are governed by fenceWiden instead.
   if (!onlyFence(node)) {
-    if (side === 'start' && atStart(node.text, off) && atEnd(node.text, other)) return node.s
-    if (side === 'end' && atEnd(node.text, off) && atStart(node.text, other)) return node.e
+    if (side === 'start' && atStart(text, off) && atEnd(text, other)) return node.s
+    if (side === 'end' && atEnd(text, off) && atStart(text, other)) return node.e
   }
-  const exact = mapExact(source, node, off, side, other)
+  const exact = mapExact(source, node, off, side, other, projection)
   return exact ?? (side === 'start' ? node.s : node.e)
 }
 
-function mapExact(source: string, node: SrcNode, off: number, side: Side, other: number): number | null {
+function mapExact(
+  source: string,
+  node: SrcNode,
+  off: number,
+  side: Side,
+  other: number,
+  projection: SourceProjection
+): number | null {
   return node.children.length > 0
-    ? mapContainer(source, node, off, side, other)
-    : mapLeaf(source, node, off)
+    ? mapContainer(source, node, off, side, other, projection)
+    : mapLeaf(source, node, off, side, projection)
 }
 
 /**
@@ -238,13 +593,15 @@ function mapContainer(
   node: SrcNode,
   off: number,
   side: Side,
-  other: number
+  other: number,
+  projection: SourceProjection
 ): number | null {
   const kids = node.children
   for (let i = 0; i < kids.length; i += 1) {
     const kid = kids[i]
-    const kidEnd = kid.at + kid.node.text.length
-    if (off < kid.at) return mapGap(source, node, i, off)
+    const kidText = renderedText(kid.node)
+    const kidEnd = kid.at + kidText.length
+    if (off < kid.at) return mapGap(source, node, i, off, side, projection)
     if (off > kidEnd) continue
     const here = off - kid.at
     const far = other - kid.at
@@ -257,20 +614,20 @@ function mapContainer(
     const qualifies = kid.node.fenced
       ? fenceWiden(kid, side, other)
       : side === 'start'
-        ? atEnd(kid.node.text, far)
-        : atStart(kid.node.text, far)
-    if (side === 'start' && atStart(kid.node.text, here) && qualifies) return kid.node.s
-    if (side === 'end' && atEnd(kid.node.text, here) && qualifies) return kid.node.e
+        ? atEnd(kidText, far)
+        : atStart(kidText, far)
+    if (side === 'start' && atStart(kidText, here) && qualifies) return kid.node.s
+    if (side === 'end' && atEnd(kidText, here) && qualifies) return kid.node.e
     // Inside the child (or on its trailing edge without qualifying to widen). Ending exactly at the
     // run's end after starting INSIDE it maps to the content end, not past the closing delimiter —
     // `old text` out of `**bold text**`, never `old text**`. An unpaired delimiter here would be the
     // same defect the widen rule above exists to prevent.
     // A child that can't prove its mapping falls back to ITS own span, not the whole block's: an
     // ambiguous link should widen to the link, not swallow every paragraph around it.
-    const inner = mapExact(source, kid.node, here, side, far)
+    const inner = mapExact(source, kid.node, here, side, far, projection)
     return inner ?? (side === 'start' ? kid.node.s : kid.node.e)
   }
-  return mapGap(source, node, kids.length, off)
+  return mapGap(source, node, kids.length, off, side, projection)
 }
 
 /**
@@ -279,18 +636,41 @@ function mapContainer(
  * VERIFIED by comparing the two strings; an escape (`\*`), an entity, or any other place where rendered
  * text and source diverge fails that check and returns null so the caller widens instead.
  */
-function mapGap(source: string, node: SrcNode, i: number, off: number): number | null {
+function mapGap(
+  source: string,
+  node: SrcNode,
+  i: number,
+  off: number,
+  side: Side,
+  projection: SourceProjection
+): number | null {
   const kids = node.children
   if (kids.length === 0) return null
   const prev = i > 0 ? kids[i - 1] : null
   const next = i < kids.length ? kids[i] : null
-  const t0 = prev ? prev.at + prev.node.text.length : 0
-  const t1 = next ? next.at : node.text.length
+  const text = renderedText(node)
+  const t0 = prev ? prev.at + renderedText(prev.node).length : 0
+  const t1 = next ? next.at : text.length
   if (off < t0 || off > t1) return null
+  const sourceStart = prev ? prev.node.e : node.s
+  const sourceEnd = next ? next.node.s : node.e
+  if (hasPrefix(projection, sourceStart, sourceEnd)) {
+    let gaps = projection.gaps.get(node)
+    if (!gaps) {
+      gaps = new Map()
+      projection.gaps.set(node, gaps)
+    }
+    let located = gaps.get(i)
+    if (located === undefined) {
+      located = locateText(projection, sourceStart, sourceEnd, text.slice(t0, t1))
+      gaps.set(i, located)
+    }
+    return located ? mapLocated(projection, located, off - t0, side) : null
+  }
   // Anchor to the preceding child's end where there is one, else back off the following child's start.
   const srcAt = prev ? prev.node.e : (next as SrcChild).node.s - (t1 - t0)
   if (srcAt < 0) return null
-  if (source.slice(srcAt, srcAt + (t1 - t0)) !== node.text.slice(t0, t1)) return null
+  if (source.slice(srcAt, srcAt + (t1 - t0)) !== text.slice(t0, t1)) return null
   return srcAt + (off - t0)
 }
 
@@ -298,10 +678,25 @@ function mapGap(source: string, node: SrcNode, i: number, off: number): number |
  * Map an offset inside a leaf — an element with no annotated descendants, so its rendered text is one
  * run sitting somewhere inside its source span. `contentStart` finds where, or refuses.
  */
-function mapLeaf(source: string, node: SrcNode, off: number): number | null {
+function mapLeaf(
+  source: string,
+  node: SrcNode,
+  off: number,
+  side: Side,
+  projection: SourceProjection
+): number | null {
+  const text = renderedText(node)
+  if (hasPrefix(projection, node.s, node.e)) {
+    let located = projection.leaves.get(node)
+    if (located === undefined) {
+      located = locateText(projection, node.s, node.e, text)
+      projection.leaves.set(node, located)
+    }
+    return located ? mapLocated(projection, located, off, side) : null
+  }
   const src = source.slice(node.s, node.e)
-  if (src === node.text) return node.s + off
-  const cs = contentStart(src, node.text)
+  if (src === text) return node.s + off
+  const cs = contentStart(src, text)
   return cs === null ? null : node.s + cs + off
 }
 
@@ -345,6 +740,9 @@ export interface CopySection {
   parts: string[]
 }
 
+/** Tabs carry table columns in plain mode, so trim the surrounding whitespace without consuming them. */
+export const trimPlainEdges = (text: string): string => text.replace(/^[^\S\t]+|[^\S\t]+$/g, '')
+
 /**
  * Join per-section markdown into the final clipboard text, in the same shape the footer's "Copy entire
  * conversation" produces: a bold speaker label over each body, sections divided by a horizontal rule.
@@ -361,7 +759,10 @@ export function assembleCopy(sections: CopySection[], alwaysLabel = false, plain
   const kept = sections
     .map((sec) => ({
       label: sec.isSidechain ? `${sec.label} (Sub-agent)` : sec.label,
-      body: sec.parts.map((p) => p.trim()).filter(Boolean).join('\n\n')
+      body: sec.parts
+        .map((p) => (plain ? trimPlainEdges(p) : p.trim()))
+        .filter(Boolean)
+        .join('\n\n')
     }))
     .filter((sec) => sec.body)
   if (kept.length === 0) return ''
