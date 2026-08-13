@@ -271,7 +271,7 @@ describe('codeRanges', () => {
 })
 
 describe('normalizeMath — scanning stays linear', () => {
-  /* These guard PERFORMANCE properties. Two rules learned the hard way:
+  /* These guard PERFORMANCE properties. Two rules govern how:
    *
    * 1. Assert structure, not elapsed time — WHERE possible. An earlier version timed 2,000 vs 8,000
    *    lines and compared the ratio. It passed alone and failed intermittently under `npm test`,
