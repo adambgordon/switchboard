@@ -1,12 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { clampTipText, placeTip } from '../lib/tooltip'
 
 interface Tip {
   text: string
   /** Viewport x of the host's horizontal center. */
   x: number
-  /** Viewport y the label anchors to (its top when below, its bottom when above). */
-  y: number
-  placement: 'top' | 'bottom'
+  /** Viewport y of the host's top edge. */
+  hostTop: number
+  /** Viewport y of the host's bottom edge. */
+  hostBottom: number
   /** Host opted into a wrapping, max-width label (for paragraph-length copy) via `data-tip-wide`. */
   wide: boolean
   /** Host opted into the tighter padding variant via `data-tip-compact`. */
@@ -21,9 +23,13 @@ const EDGE = 8
  * App-wide tooltips. One fixed-positioned label driven by `data-tip` attributes anywhere in the
  * tree — the replacement for native `title`, which lags ~1s and resets on the slightest pointer
  * move (so it rarely showed). Delegated off document mouseover/out, so any element opts in with a
- * single `data-tip`; fixed positioning escapes scroll/overflow containers (the rail list, the
- * modal), flips above when there's no room below, and clamps to the viewport near the edges.
+ * single `data-tip`; fixed positioning escapes scroll/overflow containers (the rail list, the modal).
  * Ink-on-paper — never an accent, per the two-color invariant.
+ *
+ * PLACEMENT HAPPENS AFTER MEASUREMENT, on both axes. `reveal` only records the host's rect; which side
+ * the label takes and where it lands is decided in the layout effect below, once the label's real size
+ * is known. A wrapped label can be twenty times the height of a one-liner, so any side chosen before
+ * it exists is a guess — see `placeTip`.
  */
 export default function TooltipLayer() {
   const [tip, setTip] = useState<Tip | null>(null)
@@ -42,12 +48,11 @@ export default function TooltipLayer() {
       const text = el.getAttribute('data-tip')
       if (!text) return
       const r = el.getBoundingClientRect()
-      const below = window.innerHeight - r.bottom > 60
       setTip({
-        text,
+        text: clampTipText(text),
         x: r.left + r.width / 2,
-        y: below ? r.bottom + GAP : r.top - GAP,
-        placement: below ? 'bottom' : 'top',
+        hostTop: r.top,
+        hostBottom: r.bottom,
         wide: el.hasAttribute('data-tip-wide'),
         compact: el.hasAttribute('data-tip-compact')
       })
@@ -82,10 +87,25 @@ export default function TooltipLayer() {
     }
   }, [])
 
-  // Keep the label inside the viewport horizontally (it's centered on the host by default).
+  // Place the label now that it can be measured — vertical side + clamp, then the horizontal clamp.
+  // Done imperatively in ONE layout effect (rather than by feeding a measurement back into state) so
+  // there is no second render between measuring and placing, and so nothing paints mis-positioned.
   useLayoutEffect(() => {
     const el = elRef.current
     if (!el || !tip) return
+
+    const { side, top } = placeTip({
+      hostTop: tip.hostTop,
+      hostBottom: tip.hostBottom,
+      height: el.offsetHeight,
+      viewport: window.innerHeight,
+      gap: GAP,
+      edge: EDGE
+    })
+    el.style.top = `${top}px`
+    el.style.transform = side === 'bottom' ? 'translate(-50%, 0)' : 'translate(-50%, -100%)'
+
+    // Horizontal: centered on the host, shifted just enough to clear either edge.
     el.style.left = `${tip.x}px`
     const r = el.getBoundingClientRect()
     let shift = 0
@@ -98,8 +118,10 @@ export default function TooltipLayer() {
   return (
     <div
       ref={elRef}
-      className={`sb-tip sb-tip-${tip.placement}${tip.wide ? ' sb-tip-wide' : ''}${tip.compact ? ' sb-tip-compact' : ''}`}
-      style={{ left: tip.x, top: tip.y }}
+      className={`sb-tip${tip.wide ? ' sb-tip-wide' : ''}${tip.compact ? ' sb-tip-compact' : ''}`}
+      // A first guess only, so the label never paints at the viewport origin; the layout effect above
+      // overwrites all three before paint.
+      style={{ left: tip.x, top: tip.hostBottom + GAP, transform: 'translate(-50%, 0)' }}
       role="tooltip"
     >
       {tip.text}

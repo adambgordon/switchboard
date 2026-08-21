@@ -152,9 +152,11 @@ input::placeholder {
 }
 
 /* ---- tooltips: one fixed-positioned label (rendered by TooltipLayer) for all `data-tip` hosts.
-   Replaces native `title` (slow, resets on pointer move). Ink-on-paper — never an accent. The
-   element is positioned in JS (centered on the host, flipped above near the bottom edge); these
-   rules are just its look + which side of the anchor point it grows from. */
+   Replaces native `title` (slow, resets on pointer move). Ink-on-paper — never an accent.
+   POSITION IS ENTIRELY JS's: TooltipLayer measures the label, picks a side, and writes `top`, `left`,
+   and the `transform` that anchors it to that side. These rules are only its look and its bounds —
+   there is deliberately no `.sb-tip-top` / `.sb-tip-bottom` here, because a transform in CSS and an
+   offset in JS were two places to hold one decision. */
 .sb-tip {
   position: fixed;
   z-index: 1100;
@@ -173,12 +175,6 @@ input::placeholder {
      column before the JS clamp could measure + reposition it. */
   white-space: nowrap;
   animation: sb-fade-in var(--dur-fast) var(--ease);
-}
-.sb-tip-bottom {
-  transform: translate(-50%, 0);
-}
-.sb-tip-top {
-  transform: translate(-50%, -100%);
 }
 /* Wide variant (data-tip-wide): wraps to a readable column for paragraph-length copy or long URLs.
    Overrides the nowrap default; the JS clamp still keeps it on-screen. */
