@@ -95,23 +95,40 @@ input::placeholder {
    New-conversation menu, and the transcript. (No opacity fade — Chromium doesn't animate scrollbar
    pseudo-elements, so a transition would just snap; the show/hide is intentionally instant.) */
 .sb-autoscroll::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: var(--bar-thin);
+  height: var(--bar-thin);
+  /* The bar is chrome, not text — so it takes the plain arrow, matching the darker thumb it already
+     shows on hover. Needed explicitly because a custom scrollbar with no cursor of ITS own falls back
+     to the scrolling element's, and `.message-body` sets `cursor: text`, which inherits down into
+     every code block: without this the i-beam rides over the thumb. Set on each part rather than one,
+     since the parts do not reliably inherit from `::-webkit-scrollbar`. */
+  cursor: default;
 }
-.sb-autoscroll::-webkit-scrollbar-track {
+/* All three, not just the track: a bar that is RESERVED but not scrollable (see .md-pre's
+   `overflow-x: scroll`) paints in a disabled state, and the track-piece / corner would otherwise take
+   a default background and give the reserved strip away. */
+.sb-autoscroll::-webkit-scrollbar-track,
+.sb-autoscroll::-webkit-scrollbar-track-piece,
+.sb-autoscroll::-webkit-scrollbar-corner {
   background: transparent;
+  cursor: default;
 }
 .sb-autoscroll::-webkit-scrollbar-thumb {
   background: transparent;
   border: 1.5px solid transparent;
   background-clip: padding-box;
   border-radius: var(--r-pill);
+  cursor: default;
 }
+/* `background-color`, NOT the `background` shorthand — the shorthand resets `background-clip` to
+   `border-box`, which paints the thumb across the transparent border set above and hands back a bar
+   that is both the full track thickness and flush to its ends. The inset only survives if these two
+   rules touch the color alone. */
 .sb-autoscroll.is-scrolling::-webkit-scrollbar-thumb {
-  background: var(--rule-strong);
+  background-color: var(--rule-strong);
 }
 .sb-autoscroll::-webkit-scrollbar-thumb:hover {
-  background: var(--ink-ghost);
+  background-color: var(--ink-ghost);
 }
 
 /* ---- shared text primitives ---- */

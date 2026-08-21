@@ -174,7 +174,9 @@ function CodeBlock({ children, ...src }: { children?: ReactNode } & SrcAttrs): R
           {lang}
         </span>
       ) : null}
-      <pre className="md-pre" ref={ref} {...src}>
+      {/* sb-autoscroll: the sideways bar hides at rest and reveals while scrolling, the same as every
+          other scroll surface. Marked by the delegated listener in TranscriptView. */}
+      <pre className="md-pre sb-autoscroll" ref={ref} {...src}>
         {children}
       </pre>
       {/* The rendered <code> carries a trailing newline that isn't part of the code, so strip it —
@@ -209,7 +211,7 @@ function TableBlock({
       : rowsToPlainText(tableRows(ref.current))
   return (
     <div className="md-table-outer">
-      <div className="md-table-wrap">
+      <div className="md-table-wrap sb-autoscroll">
         <table className="md-table" ref={ref} {...src}>
           {children}
         </table>
@@ -506,7 +508,7 @@ function ToolResultBlock({ text, isError }: { text: string; isError: boolean }):
   return (
     <div className={cardClass}>
       <CopyButton className="copy-block" tip="Copy result" getText={() => text} />
-      <div className="tool-result-body">
+      <div className="tool-result-body sb-autoscroll">
         <div ref={clipRef} className={clipClass}>
           <pre ref={textRef} className="tool-result-text">
             {text}
@@ -550,7 +552,7 @@ function ToolCallView({ call }: { call: ToolCall }): ReactNode {
       </div>
       {hasInput ? (
         <div className="tool-json-wrap">
-          <pre className="tool-json">{safeStringify(call.input)}</pre>
+          <pre className="tool-json sb-autoscroll">{safeStringify(call.input)}</pre>
           <CopyButton className="copy-block" tip="Copy JSON" getText={() => safeStringify(call.input)} />
         </div>
       ) : null}

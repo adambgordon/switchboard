@@ -252,11 +252,23 @@
   border: 1px solid var(--rule);
   border-radius: var(--r-md);
   padding: var(--s3);
-  overflow-x: auto;
+  /* `scroll`, not `auto`, and the bottom padding gives the bar's strip back.
+     A horizontal bar CONSUMES height from inside the padding box, so with `auto` a block that scrolls
+     reads --s3 above its code and --s3 + bar below it — taller than its neighbours and visibly
+     bottom-heavy. Reserving the strip unconditionally makes every fenced block the same height, and
+     the strip is invisible when unused because the track is transparent. Chromium has no block-end
+     `scrollbar-gutter` (it is inline-axis only in horizontal writing mode), so this is the only way to
+     hold the space. Net inset stays --s3 on all four sides. */
+  overflow-x: scroll;
+  padding-bottom: calc(var(--s3) - var(--bar-thin));
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.55;
 }
+
+/* No horizontal-only thumb override: every scroll surface in the app carries the one weight set by
+   .sb-autoscroll in global.css, so a code block's sideways bar and the rail's vertical one read the
+   same. --bar-thin is the single dial. */
 
 /* inside a <pre>, code is plain block text — undo the inline pill */
 .md-pre .md-code {

@@ -77,6 +77,12 @@
   --s6: 32px;
   --s7: 48px;
 
+  /* ---- scrollbar ----
+     Track thickness of the auto-hiding bar (.sb-autoscroll). A token because a horizontal bar CONSUMES
+     layout space, so any block that reserves a strip for one has to subtract exactly this from its own
+     padding to stay visually even — see .md-pre. Two consumers, one number, no drift. */
+  --bar-thin: 7px;
+
   /* ---- radii ---- */
   --r-sm: 5px;
   --r-md: 8px;
