@@ -254,7 +254,7 @@
   padding: var(--s3);
   /* `scroll`, not `auto`, and the bottom padding gives the bar's strip back.
      A horizontal bar CONSUMES height from inside the padding box, so with `auto` a block that scrolls
-     reads --s3 above its code and --s3 + bar below it — taller than its neighbours and visibly
+     reads --s3 above its code and --s3 + bar below it — taller than its neighbors and visibly
      bottom-heavy. Reserving the strip unconditionally makes every fenced block the same height, and
      the strip is invisible when unused because the track is transparent. Chromium has no block-end
      `scrollbar-gutter` (it is inline-axis only in horizontal writing mode), so this is the only way to
