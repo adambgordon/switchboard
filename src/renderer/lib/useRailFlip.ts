@@ -20,7 +20,7 @@ const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
  * spawned session arriving in Live) fades and rises in instead.
  *
  * Web Animations API rather than inline-style transitions: it's compositor-driven, auto-cleans up
- * (nothing lingers on the element for React to fight), and an in-flight slide is cancelled before we
+ * (nothing lingers on the element for React to fight), and an in-flight slide is canceled before we
  * re-measure (so rapid pin/unpin reads true settled positions, never a mid-animation transform).
  *
  * Cost is one `querySelectorAll` + `getBoundingClientRect` pass over the visible rows (≤ a few dozen),

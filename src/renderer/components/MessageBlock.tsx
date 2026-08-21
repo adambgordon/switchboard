@@ -59,7 +59,7 @@ interface HastNode {
  * Stamp every rendered element with `data-s` / `data-e` — the offsets of the markdown it came from,
  * inside this block's source. This is what lets a text SELECTION be mapped back to markdown (see
  * `lib/mdCopy.ts`); `sliceSource` below already used the same `node.position` offsets to give the table
- * copy button its exact source, so this generalises a mechanism the view was relying on already.
+ * copy button its exact source, so this generalizes a mechanism the view was relying on already.
  *
  * Descent stops at `<pre>`: rehype-highlight fills a fence with one token `<span>` per lexeme, and
  * annotating those would multiply the node count on the render path for nothing — the `<pre>`'s own
@@ -280,7 +280,7 @@ const markdownComponents: Components = {
         className={cx('md-code', className)}
         // Right-click hands off to a NATIVE menu in main (Copy Code), mirroring the link handler above.
         // GUARDED because this override also renders a FENCED block's inner <code>: a fence already has
-        // its corner copy button, so it keeps the default menu-less behaviour. Read from the element at
+        // its corner copy button, so it keeps the default menu-less behavior. Read from the element at
         // click time rather than from `children`, which carries rehype-highlight's token spans.
         onContextMenu={(e) => {
           const el = e.currentTarget
@@ -428,7 +428,7 @@ function MarkdownBlock({
     // reads it when clicked instead.
     [text, copyCtxRef]
   )
-  /* Math delimiters are normalised onto the form remark-math understands. The rewrite is
+  /* Math delimiters are normalized onto the form remark-math understands. The rewrite is
    * LENGTH-PRESERVING, which is what makes this a one-line change instead of a rework: every
    * source offset the parse produces still indexes `text`, so `sliceSource` above, the copy
    * pipeline, and the 0..length span below all keep using the ORIGINAL source — and a copied

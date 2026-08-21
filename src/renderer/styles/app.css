@@ -635,7 +635,7 @@ body.sb-resizing .sb-pane {
   width: 760px;
 }
 /* Mirror the main app's three surfaces so the modal reads as a little Switchboard: the head takes
-   the title-bar's slightly-off-white (--paper), the nav takes the rail's sunken grey
+   the title-bar's slightly-off-white (--paper), the nav takes the rail's sunken gray
    (--paper-sunken, below), and the page stays the main pane's white (--paper-raised, inherited from
    .sb-modal). */
 .sb-modal-settings .sb-modal-head {
@@ -870,7 +870,7 @@ body.sb-resizing .sb-pane {
   background: var(--btn-hover);
   border-color: var(--ink-ghost);
 }
-/* Greyed, inert placeholder — e.g. the "Checking…" button while an update check is in flight. */
+/* Grayed, inert placeholder — e.g. the "Checking…" button while an update check is in flight. */
 .sb-setting-btn:disabled {
   color: var(--ink-faint);
   cursor: default;
@@ -1096,7 +1096,7 @@ body.sb-resizing .sb-pane {
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
-/* Reset-to-default: a ghost rewind-arrow icon button (greyed when already at default). */
+/* Reset-to-default: a ghost rewind-arrow icon button (grayed when already at default). */
 .sb-slider-reset {
   display: inline-flex;
   align-items: center;
@@ -1122,7 +1122,7 @@ body.sb-resizing .sb-pane {
   background: transparent;
   cursor: pointer;
 }
-/* filled portion = ink up to --pct (set inline from the value), the rest = track grey */
+/* filled portion = ink up to --pct (set inline from the value), the rest = track gray */
 .sb-slider::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: var(--r-pill);

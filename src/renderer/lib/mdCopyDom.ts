@@ -195,7 +195,7 @@ function snapOutOfSkipped(node: Node, offset: number, edge: 'start' | 'end'): [N
 }
 
 /** The rendered-text window the range cuts out of `el`. A boundary outside means the range swept in
- *  from a neighbour, so that edge takes the whole extent. */
+ *  from a neighbor, so that edge takes the whole extent. */
 function windowIn(
   el: Element,
   range: Range,

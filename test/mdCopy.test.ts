@@ -178,7 +178,7 @@ describe('resolveSpan — a fence keeps its delimiters only when the selection l
 
   it('DOES fence when the selection arrives from prose ABOVE the block', () => {
     // The mirror of the case above. The end boundary lands at offset 11 — the last VISIBLE character,
-    // one short of the block's trailing newline — so recognising that as the block's edge is what lets
+    // one short of the block's trailing newline — so recognizing that as the block's edge is what lets
     // the closing fence travel.
     const doc = 'Run this:\n\n```bash\nls\n```'
     const lead = node(0, 9, 'Run this:')
@@ -192,9 +192,9 @@ describe('resolveSpan — a fence keeps its delimiters only when the selection l
 describe('resolveSpan — an inline code span keeps its backticks only when the selection leaves the run', () => {
   // Selecting exactly a code span is the "give me the payload" gesture — a URL to open, an error string
   // to search for. Sweeping the sentence around it is the "give me the prose" gesture, and keeps markup.
-  const SRC = 'Logs: `Session launch was cancelled` rows'
-  const TEXT = 'Logs: Session launch was cancelled rows'
-  const CODE = 'Session launch was cancelled'
+  const SRC = 'Logs: `Session launch was canceled` rows'
+  const TEXT = 'Logs: Session launch was canceled rows'
+  const CODE = 'Session launch was canceled'
   const AT = 6
   const END = AT + CODE.length
   const para = node(0, SRC.length, TEXT, [kid(AT, codeSpan(AT, END + 2, CODE))])
@@ -204,18 +204,18 @@ describe('resolveSpan — an inline code span keeps its backticks only when the 
   })
 
   it('keeps the backticks once the selection runs PAST the code into following prose', () => {
-    expect(copy(SRC, para, AT, TEXT.length)).toBe('`Session launch was cancelled` rows')
+    expect(copy(SRC, para, AT, TEXT.length)).toBe('`Session launch was canceled` rows')
   })
 
   it('keeps the backticks when the selection arrives from prose and stops at the run’s end', () => {
-    expect(copy(SRC, para, 0, END)).toBe('Logs: `Session launch was cancelled`')
+    expect(copy(SRC, para, 0, END)).toBe('Logs: `Session launch was canceled`')
   })
 
   it('brings the backticks back on a single space of overshoot', () => {
     // The accepted cost of the strict rule: "reaches past the run" counts whitespace, so a drag that
     // releases just past the closing tick is a crossing selection. Overshooting yields MORE markup than
     // was highlighted, never a corrupt slice, which is the safe direction for the cliff to fall.
-    expect(copy(SRC, para, AT, END + 1)).toBe('`Session launch was cancelled` ')
+    expect(copy(SRC, para, AT, END + 1)).toBe('`Session launch was canceled` ')
   })
 
   it('keeps the whole block marked up for a turn or conversation copy', () => {
@@ -647,7 +647,7 @@ describe('assembleCopy', () => {
   const you = { label: 'You', isSidechain: false, parts: ['Why does it retry?'] }
   const claude = { label: 'Claude', isSidechain: false, parts: ['It backs off exponentially.'] }
 
-  it('leaves a single-section selection unlabelled', () => {
+  it('leaves a single-section selection unlabeled', () => {
     expect(assembleCopy([claude])).toBe('It backs off exponentially.')
   })
 

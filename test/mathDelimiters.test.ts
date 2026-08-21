@@ -29,13 +29,13 @@ describe('normalizeMath — the display-block gate', () => {
     expect(out.text).toBe(src)
   })
 
-  it('recognises a line-anchored \\[ … \\] display block', () => {
+  it('recognizes a line-anchored \\[ … \\] display block', () => {
     const out = normalized(`Bound:\n\n${DISPLAY_LATEX}\n`)
     expect(out.hasMath).toBe(true)
     expect(out.text).toContain('$$\n\\sum_{i=1}^{n} x_i\n$$')
   })
 
-  it('recognises a line-anchored $$ … $$ display block without rewriting it', () => {
+  it('recognizes a line-anchored $$ … $$ display block without rewriting it', () => {
     const src = `Bound:\n\n${DISPLAY_DOLLAR}\n`
     const out = normalized(src)
     expect(out.hasMath).toBe(true)

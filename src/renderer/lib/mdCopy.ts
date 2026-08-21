@@ -369,7 +369,7 @@ const codeWiden = (kid: SrcChild, side: Side, other: number): boolean =>
 /**
  * Does this node contribute nothing but code? Then it has no delimiters of its OWN to widen to —
  * widening would emit the markers the rule above just declined. Recurses so a wrapper of a wrapper is
- * still recognised (a message whose entire body is one code block, or a bullet holding one code span).
+ * still recognized (a message whose entire body is one code block, or a bullet holding one code span).
  */
 function onlyCode(node: SrcNode): boolean {
   if (isCode(node)) return true
@@ -455,7 +455,7 @@ export interface SrcRange {
  * a bold run orphans both, and both are cut.
  *
  * FENCES ARE EXEMPT HERE AND CODE SPANS ARE NOT, even though `codeWiden` governs both. A fence is a block,
- * so a boundary inside one and a boundary in neighbouring prose can never share a source unit — the split
+ * so a boundary inside one and a boundary in neighboring prose can never share a source unit — the split
  * gives each its own `resolveSpan`, and no single span can hold half a fence. A code span sits inside a
  * paragraph, so exactly that shape occurs: start mid-span, end in the prose after it, and the closing
  * backtick falls inside the resolved span with its partner outside. Exempting code spans would emit it.
@@ -649,7 +649,7 @@ function mapContainer(
 
 /**
  * Map an offset inside gap `i` — the plain-text run before child `i` (or after the last child, when
- * `i === children.length`). The gap's source position is anchored to the neighbouring child's span, then
+ * `i === children.length`). The gap's source position is anchored to the neighboring child's span, then
  * VERIFIED by comparing the two strings; an escape (`\*`), an entity, or any other place where rendered
  * text and source diverge fails that check and returns null so the caller widens instead.
  */

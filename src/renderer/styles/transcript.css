@@ -514,7 +514,7 @@
 }
 
 /* ---- YAML exception — YAML keeps the ORIGINAL One Light/Dark palette; everything else uses GitHub
-   above. Scoped to the block's normalised language (CodeBlock stamps data-lang on .md-pre-wrap, and
+   above. Scoped to the block's normalized language (CodeBlock stamps data-lang on .md-pre-wrap, and
    codeLang() folds yml→yaml, so ```yaml and ```yml both match). The extra classes outspecify the
    GitHub rules; dark mirrors with the [data-theme] scope (comment/deletion stay on theme-aware ink/
    danger tokens, so they flip for free — no dark override needed, same as the original). ---- */

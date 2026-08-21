@@ -93,7 +93,7 @@ function ConversationRowImpl({
           // agent named above. Without saying so the row reads as an empty, dead conversation while
           // the user is actively working in it. Styled as the ordinary empty placeholder: the
           // dedicated unlinked treatment was retired, and the row's distinction now lives in the
-          // title, the Live tally, and the accessibility label rather than in bespoke preview colour.
+          // title, the Live tally, and the accessibility label rather than in bespoke preview color.
           <span className="sb-row-preview sb-row-preview-empty truncate">
             Terminal only — work is in a background agent
           </span>
