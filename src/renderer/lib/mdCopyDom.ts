@@ -75,9 +75,25 @@ function scan(el: Element, kids: Element[]): { text: string; offsets: number[] }
 /** The text a rendered element contributes to the clipboard, with renderer-only chrome excluded. */
 const visibleText = (el: Element): string => scan(el, []).text
 
+/**
+ * An inline code span — the `<code>` a single-backtick run renders to, and nothing else.
+ *
+ * Identified by the class the `code` override stamps rather than by tag name, because two other things
+ * in the transcript are also a `<code>`: a fenced block's inner one, and the source fallback a formula
+ * falls back to (`.md-math-src`). Neither may take the code widen rule — the fence has its own flag and
+ * its own delimiters, and a formula's offsets are load-bearing for math copy.
+ *
+ * The `<pre>` test is what excludes the fenced case. It is currently redundant, since `rehypeSourceOffsets`
+ * stops descending at `<pre>` and a fence's inner `<code>` is therefore never annotated — kept anyway so
+ * this predicate does not silently depend on that, and so it holds for the right-click handler too, which
+ * runs on every rendered `<code>` including the ones inside a fence.
+ */
+export const isInlineCode = (el: Element): boolean =>
+  el.classList.contains('md-code') && el.closest('pre') === null
+
 /** Read an annotated element (and its annotated descendants) into the pure mapper's shape.
- *  `<pre>` is flagged so the mapper can invert its widen rule — inline `<code>` is NOT a `<pre>`, so it
- *  keeps the ordinary behaviour and a backtick pair travels only on a full-coverage selection.
+ *  `<pre>` and an inline code span are both flagged so the mapper can invert their widen rule — code
+ *  markers travel only once a selection reaches past the run.
  *  Line containers and `<br>` keep their tag semantics because their source carries invisible syntax. */
 function describe(el: Element): SrcNode {
   const kids = annotatedChildren(el)
@@ -96,6 +112,7 @@ function describe(el: Element): SrcNode {
     text,
     children: kids.map((k, i) => ({ at: offsets[i], node: describe(k) })),
     fenced: el.tagName === 'PRE',
+    codeSpan: isInlineCode(el),
     kind
   }
 }

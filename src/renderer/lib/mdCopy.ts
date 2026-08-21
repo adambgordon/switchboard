@@ -28,8 +28,13 @@ export interface SrcNode {
   text: string
   /** Nearest annotated descendants, in document order. */
   children: SrcChild[]
-  /** A fenced code block. Inverts the widen rule — see `fenceWiden`. */
+  /** A fenced code block. Inverts the widen rule — see `codeWiden`. */
   fenced?: boolean
+  /**
+   * An inline code span. Takes the same inverted widen rule as a fence, but NOT the fence's exemption
+   * from `unpaired` — see the note there for why the two must differ.
+   */
+  codeSpan?: boolean
   /** Structural meaning that changes how source-only characters project into rendered text. */
   kind?: 'blockquote' | 'list-item' | 'break'
 }
@@ -103,6 +108,9 @@ function collectOwners(
   fenced: SrcRange[]
 ): void {
   const text = renderedText(node)
+  // `fenced` rather than `isCode`: this list suppresses blockquote / list continuation-prefix stripping
+  // inside a block whose lines are literal. A code span has no lines of its own, so adding one here
+  // would suppress prefix cuts that the surrounding container genuinely needs.
   if (node.fenced) fenced.push({ s: node.s, e: node.e })
   if (node.kind === 'blockquote' || node.kind === 'list-item') {
     owners.push({
@@ -339,34 +347,38 @@ function ownerFullyCovered(owner: ContainerOwner, from: number, to: number): boo
   return atStart(text, from - owner.t0) && atEnd(text, to - owner.t0)
 }
 
+/** A fenced block or an inline code span — the two constructs `codeWiden` governs. */
+const isCode = (node: SrcNode): boolean => node.fenced === true || node.codeSpan === true
+
 /**
- * A fenced code block INVERTS the widen rule: everything else earns its delimiters by being fully
- * covered, a fence earns them only when the selection reaches outside it.
+ * Code delimiters INVERT the widen rule: everything else earns its delimiters by being fully covered,
+ * code earns them only when the selection reaches outside the run.
  *
- * The reason is that ```` ``` ```` is the one delimiter people routinely want to leave behind. Grabbing a
- * command out of a transcript to run it, you want the command — not a fence you then delete. But once a
- * selection spans the block AND its surroundings, the fence has to come along: it sits between the two
- * ends in the source, so a slice that omitted it would splice code into prose.
+ * Code markers are the ones people routinely want left behind. Grabbing a command out of a transcript to
+ * run it, or a URL to open it, you want the payload — not markup you then delete. But once a selection
+ * spans the run AND its surroundings, the markers have to come along: they sit between the two ends in
+ * the source, so a slice that omitted them would splice code into prose.
  *
- * Inline code is deliberately NOT fenced — a backtick pair behaves like `**`, earning its delimiters by
- * full coverage, because `foo()` pasted without its ticks silently loses that it was code.
+ * This holds for ```` ``` ```` and for a single-backtick span alike. The distinction that matters is not
+ * fence-versus-span, it is confined-versus-crossing: a selection that stops at the run's edges is asking
+ * for the code, and one that runs past them is asking for the prose that contains it.
  */
-const fenceWiden = (kid: SrcChild, side: Side, other: number): boolean =>
+const codeWiden = (kid: SrcChild, side: Side, other: number): boolean =>
   side === 'start' ? other > kid.at + renderedText(kid.node).length : other < kid.at
 
 /**
- * Does this node contribute nothing but a fenced block? Then it has no delimiters of its OWN to widen
- * to — widening would emit the fence the rule above just declined. Recurses so a wrapper of a wrapper
- * of a fence is still recognised (a message whose entire body is one code block).
+ * Does this node contribute nothing but code? Then it has no delimiters of its OWN to widen to —
+ * widening would emit the markers the rule above just declined. Recurses so a wrapper of a wrapper is
+ * still recognised (a message whose entire body is one code block, or a bullet holding one code span).
  */
-function onlyFence(node: SrcNode): boolean {
-  if (node.fenced) return true
+function onlyCode(node: SrcNode): boolean {
+  if (isCode(node)) return true
   const [only] = node.children
   return (
     node.children.length === 1 &&
     only.at === 0 &&
     renderedText(only.node).length === renderedText(node).length &&
-    onlyFence(only.node)
+    onlyCode(only.node)
   )
 }
 
@@ -374,10 +386,12 @@ function onlyFence(node: SrcNode): boolean {
  * Map a selection — both boundaries at once — from rendered-text offsets to a source span.
  *
  * WIDENING IS ALL-OR-NOTHING. An element's own delimiters are added only when BOTH ends of the
- * selection cover that element: select all of a heading and you get `## Title`, select all of a bold
- * run and you get `**bold**`, select all of a fence and you get the fence. Cover only part of it and
- * you get bare content — which is what keeps a partial code selection from coming back with an opening
- * ```` ``` ```` and no closing one.
+ * selection cover that element: select all of a heading and you get `## Title`, select all of a bold run
+ * and you get `**bold**`. Cover only part of it and you get bare content — which is what keeps a partial
+ * selection from coming back with an opening delimiter and no closing one.
+ *
+ * CODE INVERTS THAT (`codeWiden`): a fence and a backtick span hand back bare content on full coverage,
+ * and their markers travel only once the selection reaches past the run.
  *
  * Both ends have to be resolved together for that: a single boundary can't tell whether it's one edge
  * of a full-element selection or one edge of a partial one.
@@ -397,19 +411,17 @@ export function resolveSpan(
   const t0 = Math.max(0, Math.min(from, text.length))
   const t1 = Math.max(t0, Math.min(to, text.length))
   const coversNode = atStart(text, t0) && atEnd(text, t1)
-  const fenceOnly = onlyFence(node)
-  // A fence-only unit has no local prose offset that can prove the selection left it. The DOM range
-  // supplies that missing context; both coverage checks keep a partial cross-unit selection bare.
-  if (
-    fenceOnly &&
-    (context.startsBefore || context.endsAfter) &&
-    coversNode
-  ) {
+  const codeOnly = onlyCode(node)
+  // A code-only unit has no local prose offset that can prove the selection left it. The DOM range
+  // supplies that missing context; both coverage checks keep a partial cross-unit selection bare. This
+  // is what keeps a turn or whole-conversation copy — which always arrives from an outer range — fully
+  // marked up, even where the unit is a lone code span that a confined drag would hand back bare.
+  if (codeOnly && (context.startsBefore || context.endsAfter) && coversNode) {
     return [{ s: node.s, e: node.e }]
   }
   // Whole-block copies already have an exact annotated span; the projection is only needed to locate
   // a boundary inside the block. This keeps turn/conversation copy on its original constant-time path.
-  if (!fenceOnly && coversNode) return [{ s: node.s, e: node.e }]
+  if (!codeOnly && coversNode) return [{ s: node.s, e: node.e }]
   const projection = buildProjection(source, node)
   const a = resolvePoint(source, node, t0, 'start', t1, projection)
   const b = resolvePoint(source, node, t1, 'end', t0, projection)
@@ -440,8 +452,13 @@ export interface SrcRange {
  * highlighted, unstyled, which is the only honest rendering of half a styled run.
  *
  * Walks the same descent as `mapContainer`, so nesting is handled — a boundary inside inline code inside
- * a bold run orphans both, and both are cut. Fenced blocks are exempt: their delimiters are already
- * governed by `fenceWiden`, which never leaves one unpaired.
+ * a bold run orphans both, and both are cut.
+ *
+ * FENCES ARE EXEMPT HERE AND CODE SPANS ARE NOT, even though `codeWiden` governs both. A fence is a block,
+ * so a boundary inside one and a boundary in neighbouring prose can never share a source unit — the split
+ * gives each its own `resolveSpan`, and no single span can hold half a fence. A code span sits inside a
+ * paragraph, so exactly that shape occurs: start mid-span, end in the prose after it, and the closing
+ * backtick falls inside the resolved span with its partner outside. Exempting code spans would emit it.
  */
 function unpaired(
   source: string,
@@ -460,8 +477,8 @@ function unpaired(
     )
     if (!kid) break
     // No "does the selection reach past this run" test is needed: if it doesn't, the delimiter lies
-    // outside the resolved span and `subtract` finds nothing to remove. Fences ARE exempt, since
-    // fenceWiden governs them and never leaves one unpaired.
+    // outside the resolved span and `subtract` finds nothing to remove. Deliberately `fenced` and not
+    // `isCode` — see the fence/code-span asymmetry in this function's doc comment.
     if (!kid.node.fenced) {
       const cut = orphanDelimiter(source, kid.node, side, projection)
       if (cut) out.push(cut)
@@ -556,8 +573,8 @@ function resolvePoint(
 ): number {
   const text = renderedText(node)
   // The whole node is covered — take its own span, delimiters and all. Skipped for a node that is
-  // nothing but a fence, whose delimiters are governed by fenceWiden instead.
-  if (!onlyFence(node)) {
+  // nothing but code, whose delimiters are governed by codeWiden instead.
+  if (!onlyCode(node)) {
     if (side === 'start' && atStart(text, off) && atEnd(text, other)) return node.s
     if (side === 'end' && atEnd(text, off) && atStart(text, other)) return node.e
   }
@@ -608,11 +625,11 @@ function mapContainer(
     if (off === kid.at && side === 'end') return kid.node.s
     if (off === kidEnd && side === 'start') return kid.node.e
     // Widening over the child's own delimiters. Everything qualifies by the other end covering the
-    // child; a fence qualifies by the other end reaching PAST it (see fenceWiden). Either way the
+    // child; code qualifies by the other end reaching PAST it (see codeWiden). Either way the
     // boundary itself must sit on the child's edge — a boundary strictly inside a run never widens,
     // and that run's other delimiter is cut back out afterwards by `unpaired`.
-    const qualifies = kid.node.fenced
-      ? fenceWiden(kid, side, other)
+    const qualifies = isCode(kid.node)
+      ? codeWiden(kid, side, other)
       : side === 'start'
         ? atEnd(kidText, far)
         : atStart(kidText, far)

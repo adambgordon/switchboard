@@ -242,6 +242,7 @@ export const IPC = {
   dialogPickDirectory: 'dialog:pickDirectory',
   openExternal: 'shell:openExternal',
   linkContextMenu: 'shell:linkContextMenu', // renderer -> main: pop the native right-click menu for a link
+  codeContextMenu: 'shell:codeContextMenu', // renderer -> main: pop the native right-click menu for inline code
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
@@ -332,6 +333,9 @@ export interface SwitchboardApi {
   /** Pop the NATIVE macOS context menu for a transcript link (Copy Link / Open Link in Browser).
    *  Native rather than an in-app menu so the fonts, theme, and dismissal are the OS's, not ours. */
   linkContextMenu(url: string): void
+  /** Pop the NATIVE macOS context menu for an inline code span (Copy Code). Same reasoning as above,
+   *  and the same one-gesture-one-payload intent: the code, without its backticks. */
+  codeContextMenu(code: string): void
   /** Match the window's native backgroundColor to the active theme's --paper, so a live resize
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void

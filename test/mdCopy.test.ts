@@ -28,6 +28,14 @@ const structural = (
   text: string,
   children: SrcChild[] = []
 ): SrcNode => ({ s, e, text, children, kind })
+/** An inline code span, as `describe()` reads a `<code class="md-code">` outside any `<pre>`. */
+const codeSpan = (s: number, e: number, text: string): SrcNode => ({
+  s,
+  e,
+  text,
+  children: [],
+  codeSpan: true
+})
 
 /** Slice a source the way the copy handler does, from a start and an end boundary in rendered text. */
 function copy(
@@ -181,6 +189,56 @@ describe('resolveSpan — a fence keeps its delimiters only when the selection l
   })
 })
 
+describe('resolveSpan — an inline code span keeps its backticks only when the selection leaves the run', () => {
+  // Selecting exactly a code span is the "give me the payload" gesture — a URL to open, an error string
+  // to search for. Sweeping the sentence around it is the "give me the prose" gesture, and keeps markup.
+  const SRC = 'Logs: `Session launch was cancelled` rows'
+  const TEXT = 'Logs: Session launch was cancelled rows'
+  const CODE = 'Session launch was cancelled'
+  const AT = 6
+  const END = AT + CODE.length
+  const para = node(0, SRC.length, TEXT, [kid(AT, codeSpan(AT, END + 2, CODE))])
+
+  it('gives bare code when the selection covers exactly the run', () => {
+    expect(copy(SRC, para, AT, END)).toBe(CODE)
+  })
+
+  it('keeps the backticks once the selection runs PAST the code into following prose', () => {
+    expect(copy(SRC, para, AT, TEXT.length)).toBe('`Session launch was cancelled` rows')
+  })
+
+  it('keeps the backticks when the selection arrives from prose and stops at the run’s end', () => {
+    expect(copy(SRC, para, 0, END)).toBe('Logs: `Session launch was cancelled`')
+  })
+
+  it('brings the backticks back on a single space of overshoot', () => {
+    // The accepted cost of the strict rule: "reaches past the run" counts whitespace, so a drag that
+    // releases just past the closing tick is a crossing selection. Overshooting yields MORE markup than
+    // was highlighted, never a corrupt slice, which is the safe direction for the cliff to fall.
+    expect(copy(SRC, para, AT, END + 1)).toBe('`Session launch was cancelled` ')
+  })
+
+  it('keeps the whole block marked up for a turn or conversation copy', () => {
+    expect(copy(SRC, para, 0, TEXT.length, { startsBefore: true, endsAfter: true })).toBe(SRC)
+  })
+})
+
+describe('resolveSpan — a block that is nothing but an inline code span', () => {
+  // `onlyCode` has to see a lone code span the way it sees a lone fence, or this block would take the
+  // whole-coverage shortcut and hand back markup the rule above just declined.
+  const SRC = '`npm run setup`'
+  const CODE = 'npm run setup'
+  const only = node(0, SRC.length, CODE, [kid(0, codeSpan(0, SRC.length, CODE))])
+
+  it('gives bare code to a drag confined to the block', () => {
+    expect(copy(SRC, only, 0, CODE.length)).toBe(CODE)
+  })
+
+  it('keeps the backticks for a copy arriving from outside the block', () => {
+    expect(copy(SRC, only, 0, CODE.length, { startsBefore: true, endsAfter: true })).toBe(SRC)
+  })
+})
+
 describe('resolveSpan — leaves whose text sits inside markup', () => {
   it('maps into a fenced code block past its info line', () => {
     const SRC = '```ts\nconst x = 1\n```'
@@ -191,19 +249,9 @@ describe('resolveSpan — leaves whose text sits inside markup', () => {
     expect(copy(SRC, pre, 0, 11)).toBe('const x = 1')
   })
 
-  it('keeps a backtick pair on a fully-selected inline code run', () => {
-    // Inline code is NOT fenced: it behaves like `**`, because `foo()` pasted bare loses that it was
-    // code at all. Ticks travel on full coverage...
-    const SRC = 'call `foo()` now'
-    const inline = node(5, 12, 'foo()')
-    const para = node(0, SRC.length, 'call foo() now', [kid(5, inline)])
-    expect(copy(SRC, para, 5, 10)).toBe('`foo()`')
-  })
-
   it('drops the backticks on a partial inline code selection', () => {
-    // ...and not on a partial one, same as bold.
     const SRC = 'call `foo()` now'
-    const inline = node(5, 12, 'foo()')
+    const inline = codeSpan(5, 12, 'foo()')
     const para = node(0, SRC.length, 'call foo() now', [kid(5, inline)])
     expect(copy(SRC, para, 6, 9)).toBe('oo(')
   })
@@ -211,14 +259,14 @@ describe('resolveSpan — leaves whose text sits inside markup', () => {
   it('drops a lone backtick when the selection cuts out of inline code into prose', () => {
     // The reported case: starting inside `foo()` and running on would carry the closing tick alone.
     const SRC = 'call `foo()` now'
-    const inline = node(5, 12, 'foo()')
+    const inline = codeSpan(5, 12, 'foo()')
     const para = node(0, SRC.length, 'call foo() now', [kid(5, inline)])
     expect(copy(SRC, para, 6, 14)).toBe('oo() now')
   })
 
   it('drops a lone backtick when the selection cuts INTO inline code from prose', () => {
     const SRC = 'call `foo()` now'
-    const inline = node(5, 12, 'foo()')
+    const inline = codeSpan(5, 12, 'foo()')
     const para = node(0, SRC.length, 'call foo() now', [kid(5, inline)])
     // Offset 8 in 'call foo() now' lands after "foo", at the '('.
     expect(copy(SRC, para, 0, 8)).toBe('call foo')
@@ -228,7 +276,7 @@ describe('resolveSpan — leaves whose text sits inside markup', () => {
     //  x **a `bcd` e** y   — starting inside `bcd` orphans the code's closer AND the bold's.
     //  ^0  ^2  ^6   ^13
     const SRC = 'x **a `bcd` e** y'
-    const inline = node(6, 11, 'bcd')
+    const inline = codeSpan(6, 11, 'bcd')
     const bold = node(2, 15, 'a bcd e', [kid(2, inline)])
     const para = node(0, SRC.length, 'x a bcd e y', [kid(2, bold)])
     // Rendered selection is "cd e y"; the output must match it exactly, unstyled.
@@ -239,17 +287,18 @@ describe('resolveSpan — leaves whose text sits inside markup', () => {
     //  x **`bcd` e** y  — the bold opens straight onto the inline code, so locating the bold's own
     //  ^0  ^2^4    ^11    opening `**` must not run on and swallow the backtick with it.
     const SRC = 'x **`bcd` e** y'
-    const inline = node(4, 9, 'bcd')
+    const inline = codeSpan(4, 9, 'bcd')
     const bold = node(2, 13, 'bcd e', [kid(0, inline)])
     const para = node(0, SRC.length, 'x bcd e y', [kid(2, bold)])
     expect(copy(SRC, para, 0, 5)).toBe('x `bcd`')
   })
 
   it('keeps a fully-covered nested run’s delimiters while cutting the outer orphan', () => {
-    // Same shape, but the boundary lands ON the inline run's start — so it is complete and keeps its
-    // backticks, while the bold it sits inside is only partly covered and loses its asterisks.
+    // Same shape, but the boundary lands ON the inline run's start — and the selection runs PAST the
+    // run, so the code keeps its backticks, while the bold it sits inside is only partly covered and
+    // loses its asterisks.
     const SRC = 'x **a `bcd` e** y'
-    const inline = node(6, 11, 'bcd')
+    const inline = codeSpan(6, 11, 'bcd')
     const bold = node(2, 15, 'a bcd e', [kid(2, inline)])
     const para = node(0, SRC.length, 'x a bcd e y', [kid(2, bold)])
     expect(copy(SRC, para, 4, 11)).toBe('`bcd` e y')

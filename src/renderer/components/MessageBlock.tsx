@@ -24,7 +24,7 @@ import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/mes
 import { clockTime, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, rowsToPlainText } from '../lib/clipboard'
 import { assembleCopy } from '../lib/mdCopy'
-import { collectSections, rangeOver, tableRows } from '../lib/mdCopyDom'
+import { collectSections, isInlineCode, rangeOver, tableRows } from '../lib/mdCopyDom'
 import { langLabelFromClassName } from '../lib/codeLang'
 import { normalizeMath } from '../lib/mathDelimiters'
 import { MathDisplay, MathInline } from './MathBlock'
@@ -276,7 +276,21 @@ const markdownComponents: Components = {
       return <MathInline tex={texOf(node)} {...(rest as SrcAttrs)} />
     }
     return (
-      <code className={cx('md-code', className)} {...rest}>
+      <code
+        className={cx('md-code', className)}
+        // Right-click hands off to a NATIVE menu in main (Copy Code), mirroring the link handler above.
+        // GUARDED because this override also renders a FENCED block's inner <code>: a fence already has
+        // its corner copy button, so it keeps the default menu-less behaviour. Read from the element at
+        // click time rather than from `children`, which carries rehype-highlight's token spans.
+        onContextMenu={(e) => {
+          const el = e.currentTarget
+          if (!isInlineCode(el)) return
+          e.preventDefault()
+          e.stopPropagation()
+          window.api.codeContextMenu(el.textContent ?? '')
+        }}
+        {...rest}
+      >
         {children}
       </code>
     )
