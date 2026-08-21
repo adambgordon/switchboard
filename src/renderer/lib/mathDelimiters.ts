@@ -297,10 +297,10 @@ export function normalizeMath(text: string): MathNormalization {
 
   /* `split('')`, NOT `Array.from` — the difference is load-bearing. Every offset here comes from
    * `indexOf` / `RegExp.index` / `line.length`, which count UTF-16 code UNITS, while `Array.from`
-   * yields one slot per code POINT. One astral character (an emoji) before a formula desynchronises
+   * yields one slot per code POINT. One astral character (an emoji) before a formula desynchronizes
    * the two, and the write lands on the wrong character: it can eat a newline, leave a stray
    * backslash, or change the string's length outright — all silently, since the delimiters still
-   * look plausible afterwards. */
+   * look plausible afterward. */
   const chars = text.split('')
   const write = (at: number): void => {
     chars[at] = '$'

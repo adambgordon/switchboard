@@ -135,13 +135,15 @@ export function MathDisplay({ tex, ...src }: { tex: string } & SrcAttrs): ReactN
   const markup = useMemo(() => render(katex, tex, true), [katex, tex])
   if (markup === null) {
     return (
-      <div className="md-math-display is-src" {...src}>
+      <div className="md-math-display is-src sb-autoscroll" {...src}>
         <pre className="md-math-src-block">{tex}</pre>
       </div>
     )
   }
+  // sb-autoscroll: a formula wider than the pane scrolls sideways, and that bar hides at rest like
+  // every other one. Marked by the delegated listener in TranscriptView.
   return (
-    <div className="md-math-display" {...src}>
+    <div className="md-math-display sb-autoscroll" {...src}>
       <Rendered markup={markup} tex={tex} />
     </div>
   )

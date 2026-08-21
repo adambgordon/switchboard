@@ -11,7 +11,7 @@ describe('langLabelFromClassName', () => {
     expect(langLabelFromClassName('md-code hljs language-go')).toBe('go')
   })
 
-  it('normalises common aliases', () => {
+  it('normalizes common aliases', () => {
     expect(langLabelFromClassName('hljs language-ts')).toBe('typescript')
     expect(langLabelFromClassName('language-tsx')).toBe('typescript')
     expect(langLabelFromClassName('language-js')).toBe('javascript')

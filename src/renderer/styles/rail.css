@@ -262,7 +262,7 @@
   box-shadow: var(--shadow-sel-hover);
 }
 /* Lift the selected row above its siblings so its drop shadow paints ON TOP of adjacent rows —
-   otherwise a neighbouring live card (opaque --paper-raised background, later in DOM) occludes the
+   otherwise a neighboring live card (opaque --paper-raised background, later in DOM) occludes the
    shadow where they overlap. Rows are already position:relative (sidebar.css), so z-index alone does
    it. Hover gets the same lift so a hovered card's shadow isn't occluded by the next card either. */
 .sb-rail-body .sb-row.selected,
@@ -270,8 +270,8 @@
   z-index: 1;
 }
 /* selection — a single tier. The main pane always owns the keyboard now, so there's no list-focus
-   "loud" state: the selected row carries its colour as a thin 1px ring — cobalt for a LIVE row
-   (border + ring), neutral grey for the rest (cobalt stays liveness-only) — with no drop shadow or
+   "loud" state: the selected row carries its color as a thin 1px ring — cobalt for a LIVE row
+   (border + ring), neutral gray for the rest (cobalt stays liveness-only) — with no drop shadow or
    lift. (Mouse-hover keeps its own lift, above — deliberately separate from selection.) border-color
    is set so the ring snaps instantly on select/deselect, matching the flat rows. */
 .sb-rail-body .sb-row.card.selected {
@@ -283,8 +283,8 @@
   border-color: var(--live);
   box-shadow: 0 0 0 1px var(--live);
 }
-/* Unlive rows are flat (Recent + non-live Pinned, no card chrome): a single heavy-weight 2px grey
-   outline. (Cobalt reads strongly at 1px; grey needs the extra weight to carry the selection.) */
+/* Unlive rows are flat (Recent + non-live Pinned, no card chrome): a single heavy-weight 2px gray
+   outline. (Cobalt reads strongly at 1px; gray needs the extra weight to carry the selection.) */
 .sb-rail-body .sb-row.selected:not(.card) {
   box-shadow: 0 0 0 2px var(--ink-ghost);
 }

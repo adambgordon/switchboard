@@ -2,7 +2,7 @@ import { useEffect, type RefObject } from 'react'
 
 /**
  * While `ref`'s element overflows AND isn't scrolled to the bottom, add `has-fade-bottom` (a CSS
- * gradient on the rail then fades the last rows, signalling there's more below). Recomputes on
+ * gradient on the rail then fades the last rows, signaling there's more below). Recomputes on
  * scroll, on viewport resize (ResizeObserver), and when the content changes (MutationObserver) — so
  * the fade appears/clears as the list grows, shrinks, or the pane resizes, not only on scroll.
  */

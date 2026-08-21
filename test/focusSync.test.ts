@@ -62,7 +62,7 @@ describe('startFocusSync', () => {
   })
 
   // Rule 2. The push happened after the seed was requested, so it is the newer fact; applying the
-  // seed afterwards would walk the flag back to the pre-transition value.
+  // seed afterward would walk the flag back to the pre-transition value.
   it('lets a push during the seed round-trip win over the seed', async () => {
     const h = harness()
     h.push(true)

@@ -24,7 +24,7 @@ import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/mes
 import { clockTime, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, rowsToPlainText } from '../lib/clipboard'
 import { assembleCopy } from '../lib/mdCopy'
-import { collectSections, rangeOver, tableRows } from '../lib/mdCopyDom'
+import { collectSections, isInlineCode, rangeOver, tableRows } from '../lib/mdCopyDom'
 import { langLabelFromClassName } from '../lib/codeLang'
 import { normalizeMath } from '../lib/mathDelimiters'
 import { MathDisplay, MathInline } from './MathBlock'
@@ -59,7 +59,7 @@ interface HastNode {
  * Stamp every rendered element with `data-s` / `data-e` — the offsets of the markdown it came from,
  * inside this block's source. This is what lets a text SELECTION be mapped back to markdown (see
  * `lib/mdCopy.ts`); `sliceSource` below already used the same `node.position` offsets to give the table
- * copy button its exact source, so this generalises a mechanism the view was relying on already.
+ * copy button its exact source, so this generalizes a mechanism the view was relying on already.
  *
  * Descent stops at `<pre>`: rehype-highlight fills a fence with one token `<span>` per lexeme, and
  * annotating those would multiply the node count on the render path for nothing — the `<pre>`'s own
@@ -174,7 +174,9 @@ function CodeBlock({ children, ...src }: { children?: ReactNode } & SrcAttrs): R
           {lang}
         </span>
       ) : null}
-      <pre className="md-pre" ref={ref} {...src}>
+      {/* sb-autoscroll: the sideways bar hides at rest and reveals while scrolling, the same as every
+          other scroll surface. Marked by the delegated listener in TranscriptView. */}
+      <pre className="md-pre sb-autoscroll" ref={ref} {...src}>
         {children}
       </pre>
       {/* The rendered <code> carries a trailing newline that isn't part of the code, so strip it —
@@ -209,7 +211,7 @@ function TableBlock({
       : rowsToPlainText(tableRows(ref.current))
   return (
     <div className="md-table-outer">
-      <div className="md-table-wrap">
+      <div className="md-table-wrap sb-autoscroll">
         <table className="md-table" ref={ref} {...src}>
           {children}
         </table>
@@ -276,7 +278,21 @@ const markdownComponents: Components = {
       return <MathInline tex={texOf(node)} {...(rest as SrcAttrs)} />
     }
     return (
-      <code className={cx('md-code', className)} {...rest}>
+      <code
+        className={cx('md-code', className)}
+        // Right-click hands off to a NATIVE menu in main (Copy Code), mirroring the link handler above.
+        // GUARDED because this override also renders a FENCED block's inner <code>: a fence already has
+        // its corner copy button, so it keeps the default menu-less behavior. Read from the element at
+        // click time rather than from `children`, which carries rehype-highlight's token spans.
+        onContextMenu={(e) => {
+          const el = e.currentTarget
+          if (!isInlineCode(el)) return
+          e.preventDefault()
+          e.stopPropagation()
+          window.api.codeContextMenu(el.textContent ?? '')
+        }}
+        {...rest}
+      >
         {children}
       </code>
     )
@@ -414,7 +430,7 @@ function MarkdownBlock({
     // reads it when clicked instead.
     [text, copyCtxRef]
   )
-  /* Math delimiters are normalised onto the form remark-math understands. The rewrite is
+  /* Math delimiters are normalized onto the form remark-math understands. The rewrite is
    * LENGTH-PRESERVING, which is what makes this a one-line change instead of a rework: every
    * source offset the parse produces still indexes `text`, so `sliceSource` above, the copy
    * pipeline, and the 0..length span below all keep using the ORIGINAL source — and a copied
@@ -492,7 +508,7 @@ function ToolResultBlock({ text, isError }: { text: string; isError: boolean }):
   return (
     <div className={cardClass}>
       <CopyButton className="copy-block" tip="Copy result" getText={() => text} />
-      <div className="tool-result-body">
+      <div className="tool-result-body sb-autoscroll">
         <div ref={clipRef} className={clipClass}>
           <pre ref={textRef} className="tool-result-text">
             {text}
@@ -536,7 +552,7 @@ function ToolCallView({ call }: { call: ToolCall }): ReactNode {
       </div>
       {hasInput ? (
         <div className="tool-json-wrap">
-          <pre className="tool-json">{safeStringify(call.input)}</pre>
+          <pre className="tool-json sb-autoscroll">{safeStringify(call.input)}</pre>
           <CopyButton className="copy-block" tip="Copy JSON" getText={() => safeStringify(call.input)} />
         </div>
       ) : null}

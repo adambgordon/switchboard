@@ -7,7 +7,7 @@ import { conversationMarkdown } from '../lib/clipboard'
 import { assembleCopy } from '../lib/mdCopy'
 import { collectSections } from '../lib/mdCopyDom'
 import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
-import { attachAutoHide } from '../lib/useAutoHideScrollbar'
+import { attachAutoHideWithin } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
 
 const NOOP = (): void => {}
@@ -256,7 +256,10 @@ export default function TranscriptView({
     e.preventDefault()
   }, [])
 
-  // Callback ref: attach/detach the scroll listener + the auto-hiding scrollbar as the container mounts.
+  // Callback ref: attach/detach the scroll listener + the auto-hiding scrollbar as the container
+  // mounts. The scrollbar attachment is DELEGATED — one capture-phase listener here serves this
+  // container and every `sb-autoscroll` scroller inside it (fenced code, tables, wide formulas, tool
+  // payloads), so a horizontal bar hides at rest exactly like the vertical ones do.
   const attachScroll = useCallback(
     (node: HTMLDivElement | null): void => {
       if (scrollElRef.current) {
@@ -270,7 +273,7 @@ export default function TranscriptView({
       if (node) {
         node.addEventListener('scroll', handleScroll, { passive: true })
         node.addEventListener('copy', handleCopy)
-        detachAutoHideRef.current = attachAutoHide(node)
+        detachAutoHideRef.current = attachAutoHideWithin(node)
       }
     },
     [handleScroll, rememberPosition, handleCopy]

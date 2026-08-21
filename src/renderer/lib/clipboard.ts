@@ -137,7 +137,7 @@ export function turnMarkdown(messages: TranscriptMessage[]): string {
  * A readable Markdown export of the whole Formatted conversation. Reusing the render sections keeps
  * attribution identical to the UI; turnMarkdown deliberately drops tool I/O and images.
  *
- * Shares `assembleCopy` with the selection copy so the two can't drift apart on labelling or spacing —
+ * Shares `assembleCopy` with the selection copy so the two can't drift apart on labeling or spacing —
  * `alwaysLabel` is the one difference: a whole-conversation export names its speaker even when there's
  * only one, where a selection that never leaves a single section comes back bare.
  */

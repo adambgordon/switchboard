@@ -242,6 +242,7 @@ export const IPC = {
   dialogPickDirectory: 'dialog:pickDirectory',
   openExternal: 'shell:openExternal',
   linkContextMenu: 'shell:linkContextMenu', // renderer -> main: pop the native right-click menu for a link
+  codeContextMenu: 'shell:codeContextMenu', // renderer -> main: pop the native right-click menu for inline code
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
@@ -332,6 +333,9 @@ export interface SwitchboardApi {
   /** Pop the NATIVE macOS context menu for a transcript link (Copy Link / Open Link in Browser).
    *  Native rather than an in-app menu so the fonts, theme, and dismissal are the OS's, not ours. */
   linkContextMenu(url: string): void
+  /** Pop the NATIVE macOS context menu for an inline code span (Copy Code). Same reasoning as above,
+   *  and the same one-gesture-one-payload intent: the code, without its backticks. */
+  codeContextMenu(code: string): void
   /** Match the window's native backgroundColor to the active theme's --paper, so a live resize
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void
@@ -387,7 +391,7 @@ export const CONFIG = {
    * Bounds for the user-configurable cap (the Preferences slider clamps to these; the PtyManager
    * re-clamps defensively). The range is deliberately ASYMMETRIC about the default — 6 below, 8 above —
    * so the slider maps it piecewise to keep the default mid-track (see lib/maxLiveScale.ts). An earlier
-   * 2–14 got that centring for free from symmetry, which is the only reason it was 14.
+   * 2–14 got that centering for free from symmetry, which is the only reason it was 14.
    *
    * The ceiling now REACHES Chromium's ~16 WebGL-context limit rather than staying under it. That's a
    * soft edge, not a cliff: at the top of the range the oldest live terminals lose their GL context and

@@ -176,6 +176,22 @@ export function popLinkContextMenu(url: string, win: BrowserWindow | null): void
   Menu.buildFromTemplate(items).popup(win ? { window: win } : undefined)
 }
 
+/**
+ * Pop the native context menu for an inline code span. Native for the same reasons as the link menu
+ * above; unlike that one it needs no scheme gating, because writing to the clipboard is inert and there
+ * is no launching half.
+ *
+ * The payload is the code WITHOUT its backticks, and deliberately without regard to the "Copy as
+ * markdown" preference. A selection can express either intent — the markers travel or they don't,
+ * depending on where its ends fall — but this gesture can only mean one thing.
+ */
+export function popCodeContextMenu(code: string, win: BrowserWindow | null): void {
+  if (!code) return
+  Menu.buildFromTemplate([
+    { label: 'Copy Code', click: () => clipboard.writeText(code) }
+  ]).popup(win ? { window: win } : undefined)
+}
+
 export function registerIpc(): void {
   mgr = new PtyManager({
     claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') }
@@ -262,6 +278,9 @@ export function registerIpc(): void {
   ipcMain.on(IPC.openExternal, (_e, url: string) => openExternalUrl(url))
   ipcMain.on(IPC.linkContextMenu, (e, url: string) =>
     popLinkContextMenu(url, BrowserWindow.fromWebContents(e.sender))
+  )
+  ipcMain.on(IPC.codeContextMenu, (e, code: string) =>
+    popCodeContextMenu(code, BrowserWindow.fromWebContents(e.sender))
   )
   // Keep the OS window background in lockstep with the renderer's theme, so a live window resize
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.
