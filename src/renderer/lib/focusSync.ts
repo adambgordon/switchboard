@@ -9,7 +9,7 @@
  *     must already have a listener, or it is never delivered at all and the flag keeps a value that
  *     is known to be stale.
  *  2. A push always beats the seed. A push observed during the round-trip is newer by construction,
- *     so applying the seed afterwards would move the flag BACKWARDS to the pre-transition value.
+ *     so applying the seed afterward would move the flag BACKWARD to the pre-transition value.
  *
  * Get either wrong and the flag can settle on a value nothing ever corrects — which is exactly the
  * failure this signal was rebuilt to remove, and it is invisible from the outside: everything gated

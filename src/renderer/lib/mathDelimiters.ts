@@ -300,7 +300,7 @@ export function normalizeMath(text: string): MathNormalization {
    * yields one slot per code POINT. One astral character (an emoji) before a formula desynchronizes
    * the two, and the write lands on the wrong character: it can eat a newline, leave a stray
    * backslash, or change the string's length outright — all silently, since the delimiters still
-   * look plausible afterwards. */
+   * look plausible afterward. */
   const chars = text.split('')
   const write = (at: number): void => {
     chars[at] = '$'

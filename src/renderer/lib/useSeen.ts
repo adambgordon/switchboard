@@ -61,7 +61,7 @@ export function useSeen(): Seen {
 
   const markSeen = useCallback((sessionId: string, ts: number) => {
     setSeen((prev) => {
-      // Never move a marker backwards; bailing with `prev` also skips a needless re-render.
+      // Never move a marker backward; bailing with `prev` also skips a needless re-render.
       if ((prev[sessionId] ?? 0) >= ts) return prev
       const next = { ...prev, [sessionId]: ts }
       saveMap(SEEN_KEY, next)

@@ -627,7 +627,7 @@ function mapContainer(
     // Widening over the child's own delimiters. Everything qualifies by the other end covering the
     // child; code qualifies by the other end reaching PAST it (see codeWiden). Either way the
     // boundary itself must sit on the child's edge — a boundary strictly inside a run never widens,
-    // and that run's other delimiter is cut back out afterwards by `unpaired`.
+    // and that run's other delimiter is cut back out afterward by `unpaired`.
     const qualifies = isCode(kid.node)
       ? codeWiden(kid, side, other)
       : side === 'start'
