@@ -36,10 +36,17 @@
 }
 
 .sb-rail-head {
-  /* Bottom padding (6px) drops the scroll divider a touch below the count text so it isn't cramped.
-     It's PAIRED with a matching 6px reduction of .sb-rail-body's top padding (10 -> 4) so the first
-     row stays exactly where it was — change the two together. */
-  padding: 18px 18px 6px;
+  /* Bottom padding drops the scroll divider below the count text so it isn't cramped, and it is PAIRED
+     with .sb-rail-body's top padding: the two must always SUM TO 10px, because that sum is what fixes
+     where the first row sits. Move one, move the other the opposite way. The split favours the body
+     (4 here, 6 there) because the body's side of it is also the hover shadow's only clearance above a
+     card — see .sb-rail-body, which carries the reach-vs-budget figures for all three directions.
+     L/R is --rail-text-inset, NOT the body's padding: the head sits outside the scroller, so it has no
+     gutter to account for, and matching the body's raw padding would leave the head's label a full
+     --bar-thin left of the titles underneath it. Aligning to the text column instead puts
+     "N working · M idle" over the flat-row titles, and the "+" / magnifier over the far end of that
+     same column. (Live CARDS indent a further 3px inside that column — see --rail-text-inset.) */
+  padding: 18px var(--rail-text-inset) 4px;
   flex-shrink: 0;
   /* Divider under the liveness box, shown only when the list is scrolled off the top (the `.scrolled`
      class is toggled from TallyRail off the body's scrollTop). INSET box-shadow, not a border or a
@@ -101,11 +108,11 @@
   background: var(--paper-active);
 }
 /* In the rail, the New popover drops under the "+" and spans the head's content width (between the
-   18px gutters) — overriding the title-bar anchoring (right:0; width:330px) defined in app.css. */
+   --rail-text-inset gutters) — overriding the title-bar anchoring (right:0; width:330px) in app.css. */
 .sb-rail-newwrap .sb-newmenu {
   right: 0;
   left: auto;
-  width: calc(var(--pane-w) - 36px);
+  width: calc(var(--pane-w) - 2 * var(--rail-text-inset));
   top: calc(100% + 8px);
 }
 /* While searching, the field fills the whole row and the ✕ floats inside its right edge (the
@@ -184,17 +191,44 @@
   flex: 1;
   overflow-y: auto;
   /* Always reserve the scrollbar gutter, scrollable or not — so collapsing a section (e.g. Recent)
-     that removes the overflow doesn't reclaim the ~6px gutter and shift every row sideways. The
+     that removes the overflow doesn't reclaim the 7px gutter and shift every row sideways. The
      padding stays constant; the gutter just sits empty when there's nothing to scroll. */
   scrollbar-gutter: stable;
-  /* overflow-y:auto also clips overflow-x, so a selected row's shadow is clipped at the scrollport
-     edge. Rather than widen the padding (which narrows the rows), the loud shadows below are kept
-     SMALL — ~6px horizontal reach (negative spread) — so they fade well short of the edge / scrollbar
-     gutter and never hard-cut; their *strength* comes from opacity, not size. The scrollbar thumb is a
-     pseudo-element painted above content, so it always sits on top of whatever shadow does reach it. */
-  /* Top padding trimmed to 4px (from 10) to offset .sb-rail-head's 6px bottom padding — keeps the
-     first row where it was while letting the head's divider sit a touch lower. L/R/bottom stay 10px. */
-  padding: 4px 10px 10px;
+  /* The L/R padding is ASYMMETRIC ON PURPOSE — that is what makes the rows look CENTERED. Two facts
+     drive it. (1) `stable` reserves the gutter at the inline-END only, so an even padding puts a card's
+     right border a full --bar-thin further in than its left. (2) The overflow clip edge is the PADDING
+     BOX, which sits INSIDE that gutter: descendants cannot paint into the gutter
+     at all, so a hover shadow can never "slide under" the scrollbar — set a small padding-right and a
+     bare strip opens between where the shadow is cut and where the thumb begins. So the scrollbar side
+     gets --rail-inset, and the other side gets --rail-inset PLUS the gutter it doesn't have to reserve;
+     both of a card's borders then land the same distance from the rail's edge. Equalizing the two
+     un-centers the rows again; taking the end one below --rail-inset hard-cuts the shadow (that token's
+     comment has the numbers).
+     The block padding is NOT --rail-inset either: top and bottom are the hover shadow's only clearance
+     above and below a card. All three directions are budgets against the same clip. Measured reach vs
+     budget in light — the binding theme, since its shadow carries the larger peaks:
+
+         edge     reach    budget                  clearance
+         side     7.5px    --rail-inset      7px     -0.5px   over budget; accepted, see below
+         top      4.0px    padding-top       6px     +2.0px
+         bottom  11.5px    padding-bottom   12px     +0.5px
+
+     Read the clearance column and draw the ordering yourself. There is deliberately no adjective here
+     naming one edge the tightest: which one wins changes the moment any budget moves, and a superlative
+     written next to numbers goes stale silently while the numbers stay right.
+     The side runs OVER and is kept that way on purpose — closing it costs another 1px of row width per
+     side, and the residue is verified clean by inspection. That is an accepted exception, not a standard
+     to match on the other edges.
+     Clearance is not the same as risk, and only the SECTION order is guaranteed: Pinned and Live precede
+     Recent. Inside Pinned the order is the user's (a new pin lands at the END) and card chrome is decided
+     per row, so a live card can sit anywhere, last included — do not reason from where cards "usually"
+     are. padding-bottom governs exactly one case: a hovered card at max scroll. At any intermediate
+     scrollTop the clip falls wherever the viewport ends, so a card within the shadow's reach of it is cut
+     with rows still below, and the rail's bottom fade does NOT cover that — the same :hover rule that
+     draws the shadow sets z-index: 1, which outranks the fade's ::after.
+     Top also trades against .sb-rail-head's bottom padding: that pair must always sum to 10px or the
+     first row moves. Bottom has no such partner, so it is the cheap one to widen. */
+  padding: 6px var(--rail-inset) 12px calc(var(--rail-inset) + var(--bar-thin));
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -208,6 +242,9 @@
   flex-direction: column;
   align-items: center;
   gap: 11px;
+  /* A plain literal, deliberately NOT --rail-text-inset: this copy is centered, so the padding bounds
+     its wrapping width rather than aligning an edge to the row column. Tying it to that token would
+     reflow the empty state every time the rail's inset changed, for no reason. */
   padding: 0 18px;
   color: var(--ink-ghost);
 }
