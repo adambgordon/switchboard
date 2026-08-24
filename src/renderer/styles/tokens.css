@@ -100,17 +100,54 @@
   --pane-w: 320px;
   --titlebar-h: 44px;
 
+  /* ---- rail insets ----
+     Horizontal room between a rail row and the scrollport edge, and the dial for how much side space the
+     rail spends: a card's visible inset on BOTH sides is this plus --bar-thin (see .sb-rail-body for why),
+     so 7 + 7 = 14px. .sb-rail-body's overflow clip truncates the card hover-lift shadow at exactly this
+     distance, and --shadow-sel-hover's side reach is 7.5px in light (the binding theme), so this runs
+     0.5px short of the reach — an overshoot small enough to verify clean by inspection rather than pay
+     a further 1px per side to eliminate.
+     Do NOT set this from an arithmetic threshold, in either direction. Upward: the cut is a straight edge
+     along the card's full run, and vision resolves edges far better than the same difference spread over
+     a flat field, so a 4/255 step measures negligible and still reads as a line. Downward: a residual in
+     the 0–2/255 range is at the quantization floor and is NOT stable — sub-pixel layout differences move
+     it, so two measurements of the same build can disagree and neither is wrong. Which means: judge the edge
+     by eye, and treat reach-versus-budget as the durable check. Raising this costs row width, 1px/side. */
+  --rail-inset: 7px;
+  /* Where the rail's FLAT-row text column starts: a row's inset, plus the gutter it doesn't reserve, plus
+     .sb-row's own 8px padding. The head and the New popover align to it, so the head's label sits over
+     the flat-row titles. It is NOT a universal all-rows column: a live CARD overrides .sb-row's padding
+     to 10px and adds a 1px border, so its title lands 3px further in. That 3px is deliberate — a card is
+     its own container and reads as inset — but it means "aligned to the text column" describes the head,
+     the popover, and flat rows only. Anything centered (see .sb-rail-empty) should use a plain literal
+     instead, since this token positions an EDGE and would otherwise reflow for unrelated reasons.
+     Derived, not typed, so it tracks the two tokens above. */
+  --rail-text-inset: calc(var(--rail-inset) + var(--bar-thin) + 8px);
+
   /* ---- elevation (used sparingly; depth is mostly hairlines) ---- */
   --shadow-pane: 0 1px 1px rgba(26, 26, 26, 0.03), 0 10px 30px rgba(26, 26, 26, 0.06);
   --shadow-pop: 0 2px 6px rgba(26, 26, 26, 0.08), 0 16px 44px rgba(26, 26, 26, 0.14);
   /* Neutral-ink RGB channels for ad-hoc one-off shadows (rgba(var(--shadow-color), α)); dark flips
      it to pure black so a near-black shadow doesn't vanish into a dark surface. */
   --shadow-color: 26, 26, 26;
-  /* Card hover-lift shadow — narrow + downward-biased (negative spread, ~7px reach) so it fades within
-     the rail's 10px padding and never hard-cuts at the overflow clip / scrollbar gutter; strength is
-     opacity. Theme-aware (the dark block boosts the alpha — a black shadow under-reads on the near-black
-     rail, so dark uses a light glow). Selection itself is shadowless (a single 1px ring — see rail.css). */
-  --shadow-sel-hover: 0 4px 16px -6px rgba(var(--shadow-color), 0.3), 0 2px 10px -3px rgba(var(--shadow-color), 0.26);
+  /* Card hover-lift shadow — narrow + downward-biased (negative spread); strength is opacity, not size.
+     Reach in light: 7.5px to the sides, 4.0px above, 11.5px below (peaks 26 / 6 / 42 against the rail).
+     Those are measured, not derived — a blur's real reach runs well past what `blur/2 - spread` predicts,
+     because Chromium's Gaussian tail extends beyond the shadow's geometric edge, so arithmetic will
+     under-estimate it badly. Every one of the three runs against a clip inside .sb-rail-body, which
+     carries the reach-vs-budget table, the per-edge clearances, and the one accepted overshoot. Read it
+     before touching blur, spread, or offset-y, and re-measure all THREE afterwards. No edge is called
+     the tightest here on purpose: which one that is flips whenever a budget moves, so the figures live
+     in one place and the ordering is derived from them, never asserted alongside them.
+     There is NO automated gate on any of this. Every figure quoted came from one-off measurement, so a
+     change made without measuring again is simply unverified — the type checker, the unit tests, and the
+     production build all stay green straight through a visible hard edge.
+     NOTE three consumers — the rail card, .sb-btn-resume:hover, and a transcript control that carries
+     this shadow at REST rather than on hover, so a change there is permanently visible, not hover-only.
+     Only the rail one is clipped, so fix a clipped edge at the RAIL's inset, never in this geometry, or
+     two unrelated surfaces move with it. Theme-aware: the dark block swaps in a near-opaque black.
+     Selection itself is shadowless (a 1px ring — see rail.css). */
+  --shadow-sel-hover: 0 4px 10px -4px rgba(var(--shadow-color), 0.3), 0 2px 7px -2px rgba(var(--shadow-color), 0.26);
   /* modal/overlay dim */
   --scrim: rgba(26, 26, 26, 0.28);
 }
@@ -170,10 +207,14 @@
   --shadow-pane: 0 1px 1px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.45);
   --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.4), 0 16px 44px rgba(0, 0, 0, 0.55);
   --shadow-color: 0, 0, 0;
-  /* Card hover-lift shadow — a BLACK drop shadow is invisible on the near-black rail (almost no
-     perceptual contrast at the dark end), so dark uses a neutral LIGHT glow instead (still gray, not
-     cobalt — it's the dark counterpart of the light drop shadow). Reach kept ≤~7px so the glow (now
-     light, so a cut WOULD show) never hard-cuts at the scrollbar / clip edge. */
-  --shadow-sel-hover: 0 4px 16px -6px rgba(0, 0, 0, 1), 0 2px 10px -3px rgba(0, 0, 0, 0.85);
+  /* Card hover-lift shadow — same geometry as light, near-OPAQUE black. A LOW-ALPHA black does vanish on
+     the near-black rail, which is why this isn't just the light value; an opaque one darkens toward #000
+     and reads fine (a 17/255 peak below the card against --paper-sunken). A light glow is the wrong
+     instrument here: it inverts the elevation cue, haloing the card rather than seating it. Reach is
+     6.0px to the sides, 3.5px above, 9.5px below — shorter than light's on every axis, and the smaller
+     peaks make any truncation a smaller step, so LIGHT sets all THREE budgets — --rail-inset sideways,
+     padding-top above, padding-bottom below. Do not tune any of them against dark and assume light
+     follows: dark is the slacker constraint on every axis. See --rail-inset and .sb-rail-body. */
+  --shadow-sel-hover: 0 4px 10px -4px rgba(0, 0, 0, 1), 0 2px 7px -2px rgba(0, 0, 0, 0.85);
   --scrim: rgba(0, 0, 0, 0.6);
 }
