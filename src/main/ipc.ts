@@ -14,7 +14,13 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
-import { IPC, type AgentAvailability, type AgentKind, type Transcript } from '../shared/types'
+import {
+  IPC,
+  type AgentAvailability,
+  type AgentKind,
+  type PtyBindKind,
+  type Transcript
+} from '../shared/types'
 import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
@@ -204,8 +210,8 @@ export function registerIpc(): void {
   mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))
   // A provisional new-Codex PTY got its real rollout id — tell the renderer so it can re-key its
   // session-keyed state (nav / seen / view) from the placeholder to the real id.
-  mgr.on('bound', (ptyId: string, oldId: string, newId: string) =>
-    broadcast(IPC.ptyBound, ptyId, oldId, newId)
+  mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) =>
+    broadcast(IPC.ptyBound, ptyId, oldId, newId, kind)
   )
 
   // Warm the agent-availability probe now so the first New-menu open is instant (it's cached).

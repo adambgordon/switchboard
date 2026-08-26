@@ -30,6 +30,7 @@ export type NavAction =
   | { type: 'back' }
   | { type: 'forward' }
   | { type: 'rekey'; from: string; to: string }
+  | { type: 'retarget'; from: string; to: string }
 
 const INITIAL: NavState = { selectedId: null, stack: [], cursor: -1 }
 
@@ -78,6 +79,24 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         stack: state.stack.map((id) => (id === action.from ? action.to : id))
       }
     }
+    case 'retarget': {
+      // A LIVE terminal turned out to be running a different conversation than it claimed, and both
+      // ids are real. Unlike `rekey`, earlier stops on `from` are genuine past visits to a
+      // conversation that still exists — rewriting them would send back/forward to the wrong place.
+      // Only the stop the user is standing on follows the terminal.
+      //
+      // The current stop is moved alongside the selection deliberately. Changing `selectedId` alone
+      // would leave the state "drifted" (selectedId !== stack[cursor]), which makes the next `back()`
+      // snap in place and `forward()` inert — treating a re-label the user never navigated as if
+      // they had. No-op unless they are actually looking at this terminal.
+      if (action.from === action.to) return state
+      if (state.selectedId !== action.from) return state
+      const stack =
+        state.cursor >= 0 && state.stack[state.cursor] === action.from
+          ? state.stack.map((id, i) => (i === state.cursor ? action.to : id))
+          : state.stack
+      return { ...state, selectedId: action.to, stack }
+    }
     default:
       return state
   }
@@ -90,5 +109,9 @@ export function useNavHistory() {
   const back = useCallback(() => dispatch({ type: 'back' }), [])
   const forward = useCallback(() => dispatch({ type: 'forward' }), [])
   const rekey = useCallback((from: string, to: string) => dispatch({ type: 'rekey', from, to }), [])
-  return { selectedId: state.selectedId, open, home, back, forward, rekey }
+  const retarget = useCallback(
+    (from: string, to: string) => dispatch({ type: 'retarget', from, to }),
+    []
+  )
+  return { selectedId: state.selectedId, open, home, back, forward, rekey, retarget }
 }

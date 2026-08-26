@@ -169,6 +169,24 @@ export interface ConversationGroup {
 export type PtyStatus = 'busy' | 'idle' | 'exited'
 
 /**
+ * Why a Codex PTY's sessionId changed — the two cases need OPPOSITE renderer handling, and the
+ * difference is not inferable from the ids themselves.
+ *
+ * - `initial`: a provisional PTY's throwaway placeholder was replaced by its real rollout id. The
+ *   placeholder names no conversation and is about to cease existing, so everything keyed to it —
+ *   history stops, persisted seen/unread markers, the remembered surface — MUST migrate to the new id.
+ * - `correction`: a bound PTY was proven to be running a DIFFERENT conversation than the one it
+ *   claimed. Both ids name durable conversations: the old one still exists and reappears in Recent,
+ *   and the new one may already carry its own state. Migrating here would delete the old
+ *   conversation's read state and overwrite the new one's. Only what points at the terminal itself —
+ *   the current selection — may follow.
+ *
+ * Main knows which happened; the renderer must be told rather than guess from whether the old id
+ * happens to be indexed, which is also true of a real conversation in the moment before it indexes.
+ */
+export type PtyBindKind = 'initial' | 'correction'
+
+/**
  * Renderer-derived liveness of a live session, from the transcript's turn-state plus a local
  * "seen" marker — NOT PTY output activity (a live TUI repaints constantly, so it isn't a turn
  * signal):
@@ -317,9 +335,11 @@ export interface SwitchboardApi {
   kill(ptyId: string): void
   onPtyData(cb: (ptyId: string, data: string) => void): () => void
   onPtyExit(cb: (ptyId: string, exitCode: number | null) => void): () => void
-  /** A provisional new-Codex PTY was correlated to its rollout: its sessionId changed from the
-   *  placeholder `oldSessionId` to the real `newSessionId` (same `ptyId`). Returns an unsubscribe fn. */
-  onPtyBound(cb: (ptyId: string, oldSessionId: string, newSessionId: string) => void): () => void
+  /** A Codex PTY's sessionId changed from `oldSessionId` to `newSessionId` (same `ptyId`).
+   *  `kind` is load-bearing and must not be inferred — see `PtyBindKind`. Returns an unsubscribe fn. */
+  onPtyBound(
+    cb: (ptyId: string, oldSessionId: string, newSessionId: string, kind: PtyBindKind) => void
+  ): () => void
   listActive(): Promise<PtyState[]>
   onActiveChanged(cb: (states: PtyState[]) => void): () => void
   /** Update the main-process live-PTY cap (LRU eviction threshold). Fire-and-forget. */

@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
-import { CONFIG, type AgentKind, type PtyState, type PtyStatus } from '../../shared/types'
+import {
+  CONFIG,
+  type AgentKind,
+  type PtyBindKind,
+  type PtyState,
+  type PtyStatus
+} from '../../shared/types'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
 import {
@@ -421,10 +427,14 @@ export class PtyManager extends EventEmitter {
       if (e.ptyId !== ptyId && e.sessionId === realSessionId) return
     }
     const oldSessionId = entry.sessionId
+    // Read BEFORE clearing: `provisional` is what distinguishes replacing a throwaway placeholder
+    // from correcting a terminal that has moved between two real conversations. The renderer handles
+    // those oppositely and cannot tell them apart from the ids — see PtyBindKind.
+    const kind: PtyBindKind = entry.provisional ? 'initial' : 'correction'
     entry.sessionId = realSessionId
     entry.provisional = false
     entry.identityConfirmed = true
-    this.emit('bound', ptyId, oldSessionId, realSessionId)
+    this.emit('bound', ptyId, oldSessionId, realSessionId, kind)
     this.emitActive()
   }
 

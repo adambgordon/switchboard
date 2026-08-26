@@ -57,6 +57,8 @@ interface Call {
 describe('PtyManager Codex identity probing', () => {
   let mgr: PtyManager
   let bound: string[]
+  /** The `kind` of each emitted bind, in order — the renderer branches on it destructively. */
+  let kinds: string[]
   let active: number
   let calls: Call[]
   /** What the injected resolver returns next. Replaced per-test. */
@@ -83,11 +85,15 @@ describe('PtyManager Codex identity probing', () => {
     ptyPids.spawns = 0
     calls = []
     bound = []
+    kinds = []
     active = 0
     gate = null
     answer = () => []
     mgr = new PtyManager({ resolveBindings: resolver })
-    mgr.on('bound', (ptyId: string, _old: string, newId: string) => bound.push(`${ptyId}->${newId}`))
+    mgr.on('bound', (ptyId: string, _old: string, newId: string, kind: string) => {
+      bound.push(`${ptyId}->${newId}`)
+      kinds.push(kind)
+    })
     mgr.on('active-changed', () => {
       active += 1
     })
@@ -411,6 +417,21 @@ describe('PtyManager Codex identity probing', () => {
     expect(bound).toEqual([`${a.ptyId}->${S1}`, `${a.ptyId}->${S2}`])
     expect(mgr.findBySession(S2)?.ptyId).toBe(a.ptyId)
     expect(mgr.findBySession(S1)).toBeNull()
+    // The discriminator the renderer branches on. The first swap replaced a throwaway placeholder,
+    // so migrating everything keyed to it is right; the second moved between two REAL conversations,
+    // where the same migration would delete S1's read state and overwrite S2's. Emitting `initial`
+    // for both — which is what a missing discriminator amounts to — is the corrupting case.
+    expect(kinds).toEqual(['initial', 'correction'])
+  })
+
+  it('labels a resumed terminal being corrected as a correction, not an initial bind', async () => {
+    // A resumed PTY is not provisional, so its id is real from the start; if `codex resume` did not
+    // land on it, the swap that follows is a correction even though this PTY never bound before.
+    const a = mgr.resume(S1, CWD, 'codex')
+    answer = () => [{ ptyId: a.ptyId, sessionId: S2 }]
+    await mgr.probeCodexIdentity(new Set([S1, S2]))
+    expect(bound).toEqual([`${a.ptyId}->${S2}`])
+    expect(kinds).toEqual(['correction'])
   })
 
   it('a terminal proven to be running what the row already says announces nothing', async () => {

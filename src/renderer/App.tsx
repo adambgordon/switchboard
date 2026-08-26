@@ -129,7 +129,18 @@ export default function App() {
   } = useLayout()
   const dragStartRef = useRef(0)
 
-  const { selectedId, open, home, back, forward, rekey: rekeyNav } = useNavHistory()
+  const {
+    selectedId,
+    open,
+    home,
+    back,
+    forward,
+    rekey: rekeyNav,
+    retarget: retargetNav
+  } = useNavHistory()
+  // Read by the onPtyBound listener, which must not re-subscribe on every selection change.
+  const selectedIdRef = useRef(selectedId)
+  selectedIdRef.current = selectedId
   // Session-targeted focus request, bumped whenever you land on a conversation (a click, ⌥⌘↑/↓
   // switch, Enter, resume, new, go-live) — the main pane always takes the keyboard. A per-session
   // focusReq lets MainPane route focus to the right surface (a live terminal, else the Formatted
@@ -172,26 +183,45 @@ export default function App() {
     initPtyStream()
   }, [])
 
-  // A provisional new-Codex PTY just got its real rollout id. Migrate every piece of session-keyed
-  // state from the placeholder to the real id so the row upgrades IN PLACE — same terminal (it's
-  // keyed by ptyId, untouched), now carrying its real identity. rekeyNav swaps the current selection
-  // and history stops, so no new history entry is pushed; re-requesting focus keeps the terminal hot
-  // through the id change.
+  // A Codex PTY's sessionId changed. The two reasons need OPPOSITE handling and the event says which
+  // (see PtyBindKind) — the ids alone can't distinguish them, and guessing corrupts real state.
+  //
+  // `initial`: the old id is a throwaway placeholder that is about to stop existing, so every piece
+  // of session-keyed state migrates to the real id and the row upgrades IN PLACE — same terminal
+  // (keyed by ptyId, untouched), now carrying its real identity. rekeyNav swaps the selection and
+  // every history stop, so no new entry is pushed; re-requesting focus keeps the terminal hot.
+  //
+  // `correction`: BOTH ids are durable conversations. The old one did not stop existing — it drops
+  // back to Recent — and the new one may already carry its own read state and history. Migrating
+  // here would delete the old conversation's seen marker, overwrite the new one's, and retarget past
+  // history stops that were genuine visits. So nothing durable moves; only the current selection
+  // follows the terminal, and only if the user is actually looking at it.
   useEffect(() => {
-    const off = window.api.onPtyBound((_ptyId, oldId, newId) => {
+    const off = window.api.onPtyBound((_ptyId, oldId, newId, kind) => {
       if (oldId === newId) return
-      rekeyNav(oldId, newId)
-      rekeySeen(oldId, newId)
-      setViewBySession((prev) => {
-        if (!(oldId in prev)) return prev
-        const next = { ...prev, [newId]: prev[oldId] }
-        delete next[oldId]
-        return next
-      })
+      if (kind === 'initial') {
+        rekeyNav(oldId, newId)
+        rekeySeen(oldId, newId)
+        setViewBySession((prev) => {
+          if (!(oldId in prev)) return prev
+          const next = { ...prev, [newId]: prev[oldId] }
+          delete next[oldId]
+          return next
+        })
+        requestFocus(newId)
+        return
+      }
+      const wasSelected = selectedIdRef.current === oldId
+      retargetNav(oldId, newId)
+      if (!wasSelected) return
+      // Carry the surface the user is standing on across, rather than letting the new conversation's
+      // own remembered view flip a terminal they are typing in over to Formatted. The old id keeps
+      // its entry — that conversation still exists.
+      setViewBySession((prev) => ({ ...prev, [newId]: prev[oldId] ?? 'terminal' }))
       requestFocus(newId)
     })
     return off
-  }, [rekeyNav, rekeySeen, requestFocus])
+  }, [rekeyNav, rekeySeen, requestFocus, retargetNav])
 
   // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
   // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of
