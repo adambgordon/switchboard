@@ -64,20 +64,23 @@ function broadcast(channel: string, ...args: unknown[]): void {
 async function reindexAndBroadcast(): Promise<void> {
   try {
     const groups = await indexConversations(PROJECTS_ROOT, undefined, metaCache)
-    // Late-bind new Codex sessions: a new Codex rollout only lands on disk at its first turn, which is
-    // exactly when this re-index fires (the live session goes active). Hand the manager the eligible
-    // rollout ids so it can ask the OS which one the Codex process in each unbound terminal actually
-    // has open. `groups` is already fully filtered, so archived / non-interactive / zero-message /
-    // subagent rollouts can never be bind targets. Binding emits `bound` + `active-changed`, so the
-    // row upgrades in place and the rollout isn't also shown as a separate Recent conversation.
+    // Keep every live Codex terminal's identity honest: a new rollout only lands on disk at its first
+    // turn, which is exactly when this re-index fires (the live session goes active). Hand the manager
+    // the eligible rollout ids so it can ask the OS which one the Codex process in each terminal
+    // actually has open. `groups` is already fully filtered, so archived / non-interactive /
+    // zero-message / subagent rollouts can never be bind targets. This both binds a terminal that had
+    // no identity and corrects one that has since drifted onto another conversation; either emits
+    // `bound` + `active-changed`, so the row re-labels in place and the rollout isn't also shown as a
+    // separate Recent conversation.
     //
     // Deliberately NOT awaited, and deliberately ABOVE the identical-groups early return: the probe
     // shells out to lsof, which must never delay the session-list broadcast, and a pass whose groups
     // are byte-identical to the last one is still a pass where a rollout may have just become
     // observable — returning early before scheduling it would strand exactly the case this fixes.
-    // The hasProvisionalCodex() gate keeps the id set from being built at all in the common case: this
-    // function runs twice a second while anything is live, and nothing is usually unbound.
-    if (mgr?.hasProvisionalCodex()) {
+    // The hasCodexToProbe() gate keeps the id set from being built when no Codex session is live at
+    // all; this function runs twice a second while anything is live. The manager itself is what stays
+    // quiet once every terminal is confirmed, so a settled app does no lsof work.
+    if (mgr?.hasCodexToProbe()) {
       const eligibleCodexIds = new Set(
         groups
           .flatMap((g) => g.conversations)
