@@ -253,7 +253,7 @@ export const IPC = {
   ptySetMaxLive: 'pty:setMaxLive', // renderer -> main: update the live-PTY cap
   ptyData: 'pty:data', // push (ptyId, data)
   ptyExit: 'pty:exit', // push (ptyId, exitCode)
-  ptyBound: 'pty:bound', // push (ptyId, oldSessionId, newSessionId) — a provisional new-Codex PTY got its real id
+  ptyBound: 'pty:bound', // push (ptyId, oldSessionId, newSessionId, kind: PtyBindKind) — a Codex PTY's id changed; `kind` says whether state migrates
   ptyActiveList: 'pty:activeList',
   ptyActiveChanged: 'pty:activeChanged', // push (PtyState[])
   agentsAvailable: 'agents:available', // which agent CLIs are launchable from the login shell (cached)

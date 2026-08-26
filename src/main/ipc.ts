@@ -208,8 +208,9 @@ export function registerIpc(): void {
   mgr.on('data', (ptyId: string, data: string) => broadcast(IPC.ptyData, ptyId, data))
   mgr.on('exit', (ptyId: string, code: number | null) => broadcast(IPC.ptyExit, ptyId, code))
   mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))
-  // A provisional new-Codex PTY got its real rollout id — tell the renderer so it can re-key its
-  // session-keyed state (nav / seen / view) from the placeholder to the real id.
+  // A Codex PTY's sessionId changed. `kind` must be forwarded: it tells the renderer whether this
+  // replaced a placeholder (migrate nav / seen / view onto the new id) or corrected a terminal onto
+  // a different real conversation (migrate NOTHING — both ids are durable). See PtyBindKind.
   mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) =>
     broadcast(IPC.ptyBound, ptyId, oldId, newId, kind)
   )

@@ -410,14 +410,23 @@ export class PtyManager extends EventEmitter {
 
   /**
    * Point a Codex PTY at the rollout the OS just proved it is running, then announce it: a `bound`
-   * event (so the renderer re-keys its session-keyed state) followed by `active-changed`.
+   * event carrying a `PtyBindKind`, followed by `active-changed`.
    *
    * Serves both the FIRST identification of a provisional terminal and the CORRECTION of one that has
-   * drifted to another conversation. There is deliberately no `provisional` gate: a correction is the
-   * same operation on a terminal that already has an id, the renderer's handler is a plain
-   * oldId -> newId rekey either way, and refusing to move an established id is exactly what let a
-   * stale identity outlive the process it described. The caller supplies only Codex PTYs it probed,
-   * and only when the observed id differs from the current one.
+   * drifted to another conversation. There is deliberately no `provisional` gate here — refusing to
+   * move an established id is exactly what let a stale identity outlive the process it described.
+   *
+   * The two are NOT the same operation downstream, which is why `kind` is emitted rather than left
+   * for the renderer to infer: an initial bind migrates history, persisted seen/unread, and the
+   * remembered surface off a placeholder that is ceasing to exist, while a correction must migrate
+   * none of it (both ids name durable conversations). See PtyBindKind and lib/bindPolicy.ts.
+   *
+   * Event ORDER is load-bearing: `bound` must precede `active-changed`, because the renderer uses
+   * `bound` to keep the Live row in its slot before the new id arrives in the active list and the
+   * order sync would otherwise read the same terminal as newly live.
+   *
+   * The caller supplies only Codex PTYs it probed, and only when the observed id differs from the
+   * current one.
    */
   private bindCodex(ptyId: string, realSessionId: string): void {
     const entry = this.live.get(ptyId)
