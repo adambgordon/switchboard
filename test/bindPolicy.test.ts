@@ -7,8 +7,11 @@ import { bindActions } from '../src/renderer/lib/bindPolicy'
  * correction from deleting one real conversation's persisted read marker and overwriting another's,
  * and left inside the hook no test could reach it.
  *
- * The asymmetry under test: `initial` migrates everything off a placeholder that is ceasing to
- * exist; `correction` migrates NOTHING, because both ids name conversations that continue to exist.
+ * The asymmetry under test: `initial` migrates everything off a placeholder that is ceasing to exist;
+ * `correction` migrates no CONVERSATION-owned state — persisted seen/unread markers and earlier
+ * history stops stay with the id that owns them, because both ids name conversations that continue to
+ * exist. Terminal-owned state still follows the terminal: the selection, the current history stop,
+ * the surface it is showing, and the row's Live slot.
  */
 describe('bindActions', () => {
   const initial = { oldId: 'placeholder', newId: 'S1', kind: 'initial' as const }
