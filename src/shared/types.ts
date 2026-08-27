@@ -172,14 +172,19 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  * Why a Codex PTY's sessionId changed — the two cases need OPPOSITE renderer handling, and the
  * difference is not inferable from the ids themselves.
  *
+ * The line that decides it is CONVERSATION-owned state versus TERMINAL-owned state:
+ *  - conversation-owned — history stops, persisted seen/unread markers — belongs to the id itself.
+ *  - terminal-owned — the current selection, the surface that selection is showing, and the row's
+ *    Live slot — describes the terminal in front of the user, and follows it in BOTH cases.
+ *
  * - `initial`: a provisional PTY's throwaway placeholder was replaced by its real rollout id. The
- *   placeholder names no conversation and is about to cease existing, so everything keyed to it —
- *   history stops, persisted seen/unread markers, the remembered surface — MUST migrate to the new id.
+ *   placeholder names no conversation and is about to cease existing, so there is no conversation-owned
+ *   state to protect: EVERYTHING keyed to it migrates, or it is orphaned.
  * - `correction`: a bound PTY was proven to be running a DIFFERENT conversation than the one it
- *   claimed. Both ids name durable conversations: the old one still exists and reappears in Recent,
- *   and the new one may already carry its own state. Migrating here would delete the old
- *   conversation's read state and overwrite the new one's. Only what points at the terminal itself —
- *   the current selection — may follow.
+ *   claimed. Both ids name durable conversations — the old one still exists and reappears in Recent,
+ *   the new one may already carry its own state — so conversation-owned state does NOT move; moving it
+ *   would delete one conversation's read state and overwrite the other's. Terminal-owned state still
+ *   follows, and the selection and its surface do so only when the user is actually on that terminal.
  *
  * Main knows which happened; the renderer must be told rather than guess from whether the old id
  * happens to be indexed, which is also true of a real conversation in the moment before it indexes.

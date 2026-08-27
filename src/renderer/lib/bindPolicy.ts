@@ -10,6 +10,11 @@ import type { PtyBindKind } from '@shared/types'
  * that were genuine visits. Inside a hook that branch is unreachable by any test, and a one-line
  * regression to it looks exactly like working code. Pure, DOM-free, and mutation-checked instead.
  *
+ * The split is CONVERSATION-owned state (history, persisted seen/unread — belongs to the id, never
+ * migrates on a correction) versus TERMINAL-owned state (the selection, the surface it shows, the
+ * Live slot — describes the terminal, follows it in both cases). Note that "a correction migrates
+ * nothing" is too strong a summary: it migrates nothing DURABLE.
+ *
  * See `PtyBindKind` for why the two cases are opposites and why the kind is told rather than
  * inferred.
  */

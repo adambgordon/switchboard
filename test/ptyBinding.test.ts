@@ -59,6 +59,14 @@ describe('PtyManager Codex identity probing', () => {
   let bound: string[]
   /** The `kind` of each emitted bind, in order — the renderer branches on it destructively. */
   let kinds: string[]
+  /**
+   * Both event names in ONE sequence, because their relative order is itself a contract: the
+   * renderer uses `bound` to keep a Live row in its slot before `active-changed` delivers the new
+   * sessionId, and the order sync would otherwise read the same terminal as newly live and prepend
+   * it. Recorded in separate arrays this was untestable — swapping the two emissions left all 572
+   * tests green.
+   */
+  let events: string[]
   let active: number
   let calls: Call[]
   /** What the injected resolver returns next. Replaced per-test. */
@@ -86,6 +94,7 @@ describe('PtyManager Codex identity probing', () => {
     calls = []
     bound = []
     kinds = []
+    events = []
     active = 0
     gate = null
     answer = () => []
@@ -93,9 +102,11 @@ describe('PtyManager Codex identity probing', () => {
     mgr.on('bound', (ptyId: string, _old: string, newId: string, kind: string) => {
       bound.push(`${ptyId}->${newId}`)
       kinds.push(kind)
+      events.push('bound')
     })
     mgr.on('active-changed', () => {
       active += 1
+      events.push('active')
     })
   })
 
@@ -358,9 +369,14 @@ describe('PtyManager Codex identity probing', () => {
     const a = mgr.startNew(CWD, 'codex')
     const before = active
     answer = (p) => [{ ptyId: p[0].ptyId, sessionId: S1 }]
+    events = [] // drop the spawn's own active-changed so the assertion is about this bind
     await mgr.probeCodexIdentity(new Set([S1]))
     expect(bound).toEqual([`${a.ptyId}->${S1}`])
     expect(active).toBeGreaterThan(before)
+    // The ORDER, not just the occurrence. `bound` must land first so the renderer can keep the Live
+    // row in its slot before the new sessionId arrives in the active list; reversed, the order sync
+    // sees an unknown id, calls it newly live, and prepends the row it was supposed to leave alone.
+    expect(events).toEqual(['bound', 'active'])
     expect(mgr.findBySession(S1)?.ptyId).toBe(a.ptyId)
     expect(mgr.findBySession(a.sessionId)).toBeNull()
     expect(mgr.findBySession(S1)?.provisional).toBe(false)
@@ -413,7 +429,10 @@ describe('PtyManager Codex identity probing', () => {
     expect(bound).toEqual([`${a.ptyId}->${S1}`])
 
     answer = (p) => [{ ptyId: p[0].ptyId, sessionId: S2 }]
+    events = []
     await mgr.probeCodexIdentity(new Set([S1, S2]))
+    // Same ordering contract on the correction path — this is the path the Live-slot retarget rides.
+    expect(events).toEqual(['bound', 'active'])
     expect(bound).toEqual([`${a.ptyId}->${S1}`, `${a.ptyId}->${S2}`])
     expect(mgr.findBySession(S2)?.ptyId).toBe(a.ptyId)
     expect(mgr.findBySession(S1)).toBeNull()

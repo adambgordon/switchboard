@@ -36,13 +36,19 @@ export interface LiveOrder {
  * breaking the rule that an existing Live row holds its slot until the user moves it.
  *
  * Returns the same array reference when there is nothing to do, so callers keep a stable identity.
- * A `newId` already present is contradictory input (two live PTYs cannot own one conversation) and
- * is refused rather than allowed to produce a duplicate key.
+ *
+ * An entry for `newId` that is ALREADY in the list is necessarily stale, not a conflict: `bindCodex`
+ * refuses to bind onto a conversation a live PTY owns, so such an entry belongs to a PTY that has
+ * already exited and that this list simply has not pruned yet (it lags active state until the passive
+ * sync below). So it is dropped and `oldId`'s row is retargeted — which keeps the corrected terminal
+ * in its OWN slot. Refusing instead would leave the corrected PTY to inherit the dead row's position
+ * once the sync pruned `oldId`, silently relocating a row the user had placed.
  */
 export function retargetOrder(order: string[], oldId: string, newId: string): string[] {
   if (oldId === newId) return order
-  if (!order.includes(oldId) || order.includes(newId)) return order
-  return order.map((id) => (id === oldId ? newId : id))
+  if (!order.includes(oldId)) return order
+  const pruned = order.includes(newId) ? order.filter((id) => id !== newId) : order
+  return pruned.map((id) => (id === oldId ? newId : id))
 }
 
 export function useLiveOrder(liveUnpinnedIds: string[]): LiveOrder {

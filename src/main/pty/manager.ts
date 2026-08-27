@@ -417,9 +417,9 @@ export class PtyManager extends EventEmitter {
    * move an established id is exactly what let a stale identity outlive the process it described.
    *
    * The two are NOT the same operation downstream, which is why `kind` is emitted rather than left
-   * for the renderer to infer: an initial bind migrates history, persisted seen/unread, and the
-   * remembered surface off a placeholder that is ceasing to exist, while a correction must migrate
-   * none of it (both ids name durable conversations). See PtyBindKind and lib/bindPolicy.ts.
+   * for the renderer to infer: an initial bind migrates everything off a placeholder that is ceasing
+   * to exist, while a correction leaves CONVERSATION-owned state (history, persisted seen/unread) on
+   * the id that owns it and moves only terminal-owned state. See PtyBindKind and lib/bindPolicy.ts.
    *
    * Event ORDER is load-bearing: `bound` must precede `active-changed`, because the renderer uses
    * `bound` to keep the Live row in its slot before the new id arrives in the active list and the
