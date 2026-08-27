@@ -210,8 +210,9 @@ export function registerIpc(): void {
   mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))
   // A Codex PTY's sessionId changed. `kind` must be forwarded: it tells the renderer whether this
   // replaced a placeholder (everything keyed to it migrates) or corrected a terminal onto a different
-  // real conversation (CONVERSATION-owned state — history, persisted seen/unread — stays put, while
-  // terminal-owned state still follows the terminal). See PtyBindKind.
+  // real conversation (CONVERSATION-owned state — persisted seen/unread, earlier history stops —
+  // stays put, while terminal-owned state — selection, current stop, surface, Live slot — follows the
+  // terminal). See PtyBindKind.
   mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) =>
     broadcast(IPC.ptyBound, ptyId, oldId, newId, kind)
   )

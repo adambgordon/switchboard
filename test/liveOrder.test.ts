@@ -31,8 +31,16 @@ describe('retargetOrder', () => {
     // onto the now-unowned S2. A present S2 can only be stale — `bindCodex` refuses a conversation a
     // LIVE PTY owns — so the dead row goes and the corrected row is retargeted where it stands.
     // Refusing instead would hand the corrected PTY the dead row's position.
+    //
+    // The rows are deliberately SEPARATED. With S1 and S2 adjacent, "keep the dead row's slot and
+    // delete S1" yields the identical array, so an adjacent fixture cannot tell the two apart — it
+    // asserts nothing, and a version that relocates the corrected row passes it. Verified: that
+    // mutant survived every test here while they were adjacent.
+    expect(retargetOrder(['A', 'S2', 'B', 'S1', 'C'], 'S1', 'S2')).toEqual(['A', 'B', 'S2', 'C'])
+    // Stale row BELOW the corrected one, still separated — the corrected row must not slide down.
+    expect(retargetOrder(['A', 'S1', 'B', 'S2', 'C'], 'S1', 'S2')).toEqual(['A', 'S2', 'B', 'C'])
+    // Adjacent kept only as an extra shape, not as the load-bearing case.
     expect(retargetOrder(['S2', 'S1', 'A'], 'S1', 'S2')).toEqual(['S2', 'A'])
-    expect(retargetOrder(['B', 'S1', 'S2'], 'S1', 'S2')).toEqual(['B', 'S2'])
   })
 
   it('never yields a duplicate key', () => {

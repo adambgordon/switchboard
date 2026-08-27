@@ -173,9 +173,12 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  * difference is not inferable from the ids themselves.
  *
  * The line that decides it is CONVERSATION-owned state versus TERMINAL-owned state:
- *  - conversation-owned — history stops, persisted seen/unread markers — belongs to the id itself.
- *  - terminal-owned — the current selection, the surface that selection is showing, and the row's
- *    Live slot — describes the terminal in front of the user, and follows it in BOTH cases.
+ *  - conversation-owned — persisted seen/unread markers, and EARLIER history stops — belongs to the
+ *    id itself. Earlier stops were genuine visits to a conversation that still exists.
+ *  - terminal-owned — the current selection, the CURRENT history stop, the surface that selection is
+ *    showing, and the row's Live slot — describes the terminal in front of the user, and follows it.
+ *    The current stop is not optional: moving the selection without it leaves the history "drifted"
+ *    (selectedId !== stack[cursor]), which makes the next Back snap in place and Forward inert.
  *
  * - `initial`: a provisional PTY's throwaway placeholder was replaced by its real rollout id. The
  *   placeholder names no conversation and is about to cease existing, so there is no conversation-owned

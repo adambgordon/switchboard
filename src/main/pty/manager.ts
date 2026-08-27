@@ -418,8 +418,9 @@ export class PtyManager extends EventEmitter {
    *
    * The two are NOT the same operation downstream, which is why `kind` is emitted rather than left
    * for the renderer to infer: an initial bind migrates everything off a placeholder that is ceasing
-   * to exist, while a correction leaves CONVERSATION-owned state (history, persisted seen/unread) on
-   * the id that owns it and moves only terminal-owned state. See PtyBindKind and lib/bindPolicy.ts.
+   * to exist, while a correction leaves CONVERSATION-owned state (persisted seen/unread, earlier
+   * history stops) on the id that owns it and moves only terminal-owned state — the selection, the
+   * current history stop, its surface, the Live slot. See PtyBindKind and lib/bindPolicy.ts.
    *
    * Event ORDER is load-bearing: `bound` must precede `active-changed`, because the renderer uses
    * `bound` to keep the Live row in its slot before the new id arrives in the active list and the
