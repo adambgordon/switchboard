@@ -1,11 +1,15 @@
 /**
- * Authoritative identity for a freshly-spawned Codex PTY: which indexed rollout does the Codex
- * process running in THIS terminal actually have open?
+ * Authoritative identity for ANY live Codex PTY: which indexed rollout does the Codex process
+ * running in THIS terminal actually have open?
  *
  * Why this exists at all. Claude lets Switchboard impose the id (`claude --session-id <uuid>`), so a
  * Claude PTY's identity is settled at spawn. Codex mints its own id, offers no flag to override it,
  * and does not write the rollout file until the first real turn — so a new-Codex PTY starts life with
  * a placeholder id and has to learn its real one later.
+ *
+ * And the question is asked repeatedly, not once. A Switchboard terminal is a login shell that
+ * outlives the Codex process it was matched against, so every live Codex PTY is a target here —
+ * including resumed and already-confirmed ones. See `CodexPtyTarget`.
  *
  * Why it uses the OS rather than time. Four successive timing heuristics were tried and each was
  * broken by a real counterexample: spawn order (an untouched older tab stole a used tab's rollout),
@@ -341,8 +345,8 @@ export async function resolveCodexBindings(
  *
  * The central trap, verified against lsof 4.91 on macOS: **lsof exits 1 whenever ANY requested pid no
  * longer exists**, while still printing complete, correct output for the ones that do (measured: one
- * live + one dead pid → exit 1, 347 bytes, all live records present, empty stderr). Provisional pids
- * are snapshotted before the probe, so a terminal closing mid-probe makes that routine — and treating
+ * live + one dead pid → exit 1, 347 bytes, all live records present, empty stderr). Target pids are
+ * snapshotted before the probe, so a terminal closing mid-probe makes that routine — and treating
  * a nonzero exit as failure would disable binding at random. So a clean nonzero exit IS parsed.
  *
  * Truncated output, by contrast, must NEVER be parsed: dropping records is the DE-POISONING direction,
