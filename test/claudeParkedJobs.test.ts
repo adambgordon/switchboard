@@ -61,7 +61,7 @@ describe('ClaudeParkedJobMonitor', () => {
     root = mkdtempSync(join(tmpdir(), 'sb-parked-'))
     changes = []
     alive = new Set([4242])
-    jobName = 'Find retrier example in mio'
+    jobName = 'Find the retry helper example'
     clock = 1_000_000
     nth = 0
     monitor = null
@@ -105,7 +105,7 @@ describe('ClaudeParkedJobMonitor', () => {
     // The first sighting is deliberately not enough — see CONFIRM_AFTER_MS.
     expect(changes).toEqual([])
     settle(m)
-    expect(changes).toEqual([['pty-1', { shortId: SHORT, name: 'Find retrier example in mio' }]])
+    expect(changes).toEqual([['pty-1', { shortId: SHORT, name: 'Find the retry helper example' }]])
   })
 
   it('does not confirm on a second observation that costs no time', () => {
@@ -148,7 +148,7 @@ describe('ClaudeParkedJobMonitor', () => {
     observeAgain(m)
     expect(changes).toEqual([])
     settle(m)
-    expect(changes).toEqual([['pty-1', { shortId: 'ab12cd34', name: 'Find retrier example in mio' }]])
+    expect(changes).toEqual([['pty-1', { shortId: 'ab12cd34', name: 'Find the retry helper example' }]])
   })
 
   it('never reports for a session that launched no background agent', () => {
