@@ -20,7 +20,7 @@
  * So identity comes from evidence the OS already owns: a live Codex process holds its rollout file
  * open, and both that process and the shell Switchboard spawned expose file descriptor 0 as the same
  * `/dev/tty…` device. `lsof` reads that graph. A bind happens ONLY when the graph has exactly one
- * answer — one terminal device, one provisional Switchboard PTY, one eligible rollout. Anything
+ * answer — one terminal device, one Switchboard PTY target, one eligible rollout. Anything
  * missing, duplicated, or contradictory yields NO binding; there is deliberately no fallback.
  *
  * Pure Node — no Electron, no DOM. `parseLsof` and `resolveBindings` are pure so the whole rule set
@@ -32,10 +32,16 @@ import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { defaultCodexRoot, sessionIdFromPath } from '../sessions/codexParser'
 
-/** A new-Codex PTY that has not yet learned its real rollout id. `shellPid` is node-pty's `proc.pid`
- *  — the login shell Switchboard spawned, which shares its controlling terminal with the Codex
- *  process it went on to launch. */
-export interface ProvisionalPty {
+/**
+ * A live Codex PTY to identify — ANY of them, not only one still waiting to learn its id. Resumed
+ * and already-confirmed terminals are targets too, because identity is maintained rather than
+ * established once: a terminal outlives the Codex process it was matched against. Narrowing this
+ * back to provisional PTYs would silently disable re-validation.
+ *
+ * `shellPid` is node-pty's `proc.pid` — the login shell Switchboard spawned, which shares its
+ * controlling terminal with the Codex process it went on to launch.
+ */
+export interface CodexPtyTarget {
   ptyId: string
   shellPid: number
 }
@@ -205,7 +211,7 @@ function soleTty(proc: LsofProcess): string | null {
  * fixtures. A pairing survives only if ALL of these hold:
  *
  *   1. the PTY's shell exposes exactly one `/dev/tty…` on fd 0;
- *   2. that terminal belongs to exactly one provisional Switchboard PTY;
+ *   2. that terminal belongs to exactly one Switchboard PTY target;
  *   3. at least one `codex*` process holds that same terminal on fd 0;
  *   4. the eligible rollouts open on those Codex processes are collected as a set;
  *   5. that set has exactly one member;
@@ -223,11 +229,11 @@ function soleTty(proc: LsofProcess): string | null {
  */
 export function resolveBindings(
   procs: readonly LsofProcess[],
-  provisional: readonly ProvisionalPty[],
+  targets: readonly CodexPtyTarget[],
   eligibleSessionIds: ReadonlySet<string>,
   sessionsRoot: string = defaultCodexRoot()
 ): CodexBinding[] {
-  if (provisional.length === 0 || eligibleSessionIds.size === 0) return []
+  if (targets.length === 0 || eligibleSessionIds.size === 0) return []
 
   const byPid = new Map<number, LsofProcess>()
   for (const p of procs) byPid.set(p.pid, p)
@@ -236,14 +242,14 @@ export function resolveBindings(
   // break this function's own contract. Refuse the id outright rather than picking one of its pids.
   const seen = new Set<string>()
   const conflicted = new Set<string>()
-  for (const p of provisional) {
+  for (const p of targets) {
     if (seen.has(p.ptyId)) conflicted.add(p.ptyId)
     seen.add(p.ptyId)
   }
 
-  // Rules 1-2: terminal -> the provisional PTYs claiming it.
+  // Rules 1-2: terminal -> the PTY targets claiming it.
   const ptysByTty = new Map<string, string[]>()
-  for (const p of provisional) {
+  for (const p of targets) {
     if (conflicted.has(p.ptyId)) continue
     const proc = byPid.get(p.shellPid)
     if (!proc) continue
@@ -310,12 +316,12 @@ export function resolveBindings(
  * argv array with no shell, and pids come from node-pty as integers.
  */
 export async function resolveCodexBindings(
-  provisional: readonly ProvisionalPty[],
+  targets: readonly CodexPtyTarget[],
   eligibleSessionIds: ReadonlySet<string>,
   opts: ProbeOptions = {}
 ): Promise<readonly CodexBinding[]> {
-  if (provisional.length === 0 || eligibleSessionIds.size === 0) return []
-  const pids = [...new Set(provisional.map((p) => p.shellPid))].filter(
+  if (targets.length === 0 || eligibleSessionIds.size === 0) return []
+  const pids = [...new Set(targets.map((p) => p.shellPid))].filter(
     (n) => Number.isInteger(n) && n > 0
   )
   if (pids.length === 0) return []
@@ -324,7 +330,7 @@ export async function resolveCodexBindings(
   if (raw == null) return []
   return resolveBindings(
     parseLsof(raw),
-    provisional,
+    targets,
     eligibleSessionIds,
     opts.sessionsRoot ?? defaultCodexRoot()
   )

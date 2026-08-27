@@ -13,7 +13,7 @@ import { bootPayloadFor } from './bootCommand'
 import {
   resolveCodexBindings,
   type CodexBinding,
-  type ProvisionalPty
+  type CodexPtyTarget
 } from './codexIdentity'
 import { CodexInputNotificationScanner } from './codexInputNotifications'
 import {
@@ -26,12 +26,12 @@ type ParkedJobOptions = Omit<ClaudeParkedJobMonitorOptions, 'onChange'>
 
 /** The resolver seam, so tests can drive the orchestration without spawning `lsof`. */
 export type CodexBindingResolver = (
-  provisional: readonly ProvisionalPty[],
+  targets: readonly CodexPtyTarget[],
   eligibleSessionIds: ReadonlySet<string>
 ) => Promise<readonly CodexBinding[]>
 
 /**
- * How many times one UNCHANGED state — the same provisional PTYs and the same eligible rollouts — is
+ * How many times one UNCHANGED state — the same Codex PTY targets and the same eligible rollouts — is
  * probed EAGERLY, i.e. on every re-index. Three absorbs the ordinary race where a rollout is indexed a
  * beat before Codex has it open.
  */
@@ -118,7 +118,7 @@ export class PtyManager extends EventEmitter {
   private live = new Map<string, Live>()
   /** Injected only by tests; production always observes the real OS. */
   private resolveBindings: CodexBindingResolver
-  // Probe budget state. `probeSig` is the (provisional PTYs × eligible rollouts) state the current
+  // Probe budget state. `probeSig` is the (Codex PTY targets × eligible rollouts) state the current
   // attempt count belongs to; `probeInFlight` collapses overlapping re-indexes onto one `lsof`;
   // `lastProbeAt` paces the slow retries that continue after the eager budget is spent.
   private probeSig: string | null = null
@@ -315,7 +315,7 @@ export class PtyManager extends EventEmitter {
    * overwhelmingly common case.
    */
   async probeCodexIdentity(eligibleSessionIds: ReadonlySet<string>): Promise<void> {
-    const targets: ProvisionalPty[] = []
+    const targets: CodexPtyTarget[] = []
     let anyUnconfirmed = false
     for (const e of this.live.values()) {
       if (e.agent !== 'codex') continue
@@ -380,7 +380,7 @@ export class PtyManager extends EventEmitter {
    */
   private applyBindings(
     bindings: readonly CodexBinding[],
-    probed: readonly ProvisionalPty[],
+    probed: readonly CodexPtyTarget[],
     probedCandidates: ReadonlySet<string>
   ): void {
     if (bindings.length === 0) return
@@ -441,6 +441,17 @@ export class PtyManager extends EventEmitter {
     // from correcting a terminal that has moved between two real conversations. The renderer handles
     // those oppositely and cannot tell them apart from the ids — see PtyBindKind.
     const kind: PtyBindKind = entry.provisional ? 'initial' : 'correction'
+    if (kind === 'correction') {
+      // Conversation-specific RUNTIME state must not ride along onto a different conversation. An
+      // OSC input-request timestamp says "this conversation is waiting on you", and it takes
+      // precedence over transcript-derived liveness — so left in place after a correction the row
+      // would pulse `asking` for an approval that belongs to the conversation the terminal LEFT, and
+      // generic TUI output cannot clear it by design. Correcting identity while leaving the dot
+      // describing someone else's turn is the same class of lie this whole path exists to remove.
+      // Not cleared on an `initial` bind: there the notification came from the very process whose
+      // rollout is being named, so it is genuinely about the new id.
+      entry.inputRequestedAt = null
+    }
     entry.sessionId = realSessionId
     entry.provisional = false
     entry.identityConfirmed = true
@@ -612,7 +623,7 @@ export class PtyManager extends EventEmitter {
  * meaningful — only membership is.
  */
 function probeSignature(
-  targets: readonly ProvisionalPty[],
+  targets: readonly CodexPtyTarget[],
   candidates: ReadonlySet<string>
 ): string {
   const ptys = targets

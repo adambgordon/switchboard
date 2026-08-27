@@ -18,7 +18,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * replaced" is reproducible without a test-only setter on PtyManager. Spawns are numbered in order,
  * so the first PTY of a test is index 0.
  */
-const ptyPids = vi.hoisted(() => ({ table: new Map<number, number>(), spawns: 0 }))
+const ptyPids = vi.hoisted(() => ({
+  table: new Map<number, number>(),
+  spawns: 0,
+  /** Each PTY's onData callback, by spawn index — lets a test push real terminal output so runtime
+   *  state (an OSC input-request timestamp) can be SET before asserting that a correction clears it.
+   *  Without this the assertion would pass against a no-op, since the field starts null. */
+  feeds: [] as ((data: string) => void)[]
+}))
 vi.mock('node-pty', () => ({
   spawn: () => {
     const index = ptyPids.spawns++
@@ -33,7 +40,10 @@ vi.mock('node-pty', () => ({
       write: () => {},
       resize: () => {},
       kill: () => exited?.({ exitCode: 0 }),
-      onData: () => ({ dispose: () => {} }),
+      onData: (cb: (data: string) => void) => {
+        ptyPids.feeds[index] = cb
+        return { dispose: () => {} }
+      },
       onExit: (cb: (e: { exitCode: number }) => void) => {
         exited = cb
         return { dispose: () => {} }
@@ -43,14 +53,14 @@ vi.mock('node-pty', () => ({
 }))
 
 import { PtyManager, type CodexBindingResolver } from '../src/main/pty/manager'
-import type { CodexBinding, ProvisionalPty } from '../src/main/pty/codexIdentity'
+import type { CodexBinding, CodexPtyTarget } from '../src/main/pty/codexIdentity'
 
 const CWD = '/repo'
 const S1 = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'
 const S2 = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'
 
 interface Call {
-  provisional: ProvisionalPty[]
+  targets: CodexPtyTarget[]
   eligible: string[]
 }
 
@@ -70,7 +80,7 @@ describe('PtyManager Codex identity probing', () => {
   let active: number
   let calls: Call[]
   /** What the injected resolver returns next. Replaced per-test. */
-  let answer: (p: readonly ProvisionalPty[]) => CodexBinding[]
+  let answer: (p: readonly CodexPtyTarget[]) => CodexBinding[]
   /** Set to hold a probe open so overlap/staleness can be driven deterministically. */
   let gate: { promise: Promise<void>; release: () => void } | null
 
@@ -82,15 +92,16 @@ describe('PtyManager Codex identity probing', () => {
     return { promise, release }
   }
 
-  const resolver: CodexBindingResolver = async (provisional, eligible) => {
-    calls.push({ provisional: [...provisional], eligible: [...eligible] })
+  const resolver: CodexBindingResolver = async (targets, eligible) => {
+    calls.push({ targets: [...targets], eligible: [...eligible] })
     if (gate) await gate.promise
-    return answer(provisional)
+    return answer(targets)
   }
 
   beforeEach(() => {
     ptyPids.table.clear()
     ptyPids.spawns = 0
+    ptyPids.feeds = []
     calls = []
     bound = []
     kinds = []
@@ -120,7 +131,7 @@ describe('PtyManager Codex identity probing', () => {
     const a = mgr.startNew(CWD, 'codex')
     await mgr.probeCodexIdentity(new Set([S1]))
     expect(calls).toHaveLength(1)
-    expect(calls[0].provisional).toEqual([{ ptyId: a.ptyId, shellPid: 1000 }])
+    expect(calls[0].targets).toEqual([{ ptyId: a.ptyId, shellPid: 1000 }])
     expect(calls[0].eligible).toEqual([S1])
   })
 
@@ -137,7 +148,7 @@ describe('PtyManager Codex identity probing', () => {
     const a = mgr.resume(S1, CWD, 'codex')
     await mgr.probeCodexIdentity(new Set([S1, S2]))
     expect(calls).toHaveLength(1)
-    expect(calls[0].provisional).toEqual([{ ptyId: a.ptyId, shellPid: 1000 }])
+    expect(calls[0].targets).toEqual([{ ptyId: a.ptyId, shellPid: 1000 }])
   })
 
   it('keeps probing after a PTY has bound — identity is maintained, not just established', async () => {
@@ -150,7 +161,7 @@ describe('PtyManager Codex identity probing', () => {
     // on to it, so the bound terminal must be re-examined rather than trusted forever.
     await mgr.probeCodexIdentity(new Set([S1, S2]))
     expect(calls).toHaveLength(1)
-    expect(calls[0].provisional).toEqual([{ ptyId: a.ptyId, shellPid: 1000 }])
+    expect(calls[0].targets).toEqual([{ ptyId: a.ptyId, shellPid: 1000 }])
   })
 
   it('does not probe when no rollout exists at all', async () => {
@@ -453,6 +464,35 @@ describe('PtyManager Codex identity probing', () => {
     expect(kinds).toEqual(['correction'])
   })
 
+  it('a correction drops the old conversation approval request', async () => {
+    // `inputRequestedAt` outranks transcript-derived liveness, so carrying it across a correction
+    // makes the row pulse `asking` for an approval belonging to the conversation the terminal left —
+    // and ordinary TUI output cannot clear it. The OSC sequence is pushed through the REAL scanner
+    // first, so the assertion has something to clear; asserting on a field that was never set would
+    // pass against a no-op.
+    const a = mgr.startNew(CWD, 'codex')
+    answer = (p) => [{ ptyId: p[0].ptyId, sessionId: S1 }]
+    await mgr.probeCodexIdentity(new Set([S1]))
+    ptyPids.feeds[0]('\x1b]9;Approval requested: run rm -rf /tmp/x\x07')
+    expect(mgr.list().find((s) => s.ptyId === a.ptyId)?.inputRequestedAt).not.toBeNull()
+
+    answer = (p) => [{ ptyId: p[0].ptyId, sessionId: S2 }]
+    await mgr.probeCodexIdentity(new Set([S1, S2]))
+    expect(mgr.findBySession(S2)?.ptyId).toBe(a.ptyId)
+    expect(mgr.list().find((s) => s.ptyId === a.ptyId)?.inputRequestedAt).toBeNull()
+  })
+
+  it('an initial bind keeps an approval request — it belongs to the id being named', async () => {
+    // The other direction: on a placeholder bind the notification came from the very process whose
+    // rollout is being named, so clearing it would drop a real "waiting on you" signal.
+    const a = mgr.startNew(CWD, 'codex')
+    ptyPids.feeds[0]('\x1b]9;Approval requested: apply patch\x07')
+    answer = (p) => [{ ptyId: p[0].ptyId, sessionId: S1 }]
+    await mgr.probeCodexIdentity(new Set([S1]))
+    expect(bound).toEqual([`${a.ptyId}->${S1}`])
+    expect(mgr.list().find((s) => s.ptyId === a.ptyId)?.inputRequestedAt).not.toBeNull()
+  })
+
   it('a terminal proven to be running what the row already says announces nothing', async () => {
     // Confirmation is not a state change: re-emitting `bound` every time the answer agrees would churn
     // the renderer's rekey and the active broadcast twice a second for no reason.
@@ -592,7 +632,7 @@ describe('PtyManager Codex identity probing', () => {
     mgr.write(a.ptyId, '\r')
     await mgr.probeCodexIdentity(new Set([S1]))
     // The probe inputs are identical to the never-touched case: no submit state exists to leak in.
-    expect(calls[0]).toEqual({ provisional: [{ ptyId: a.ptyId, shellPid: 1000 }], eligible: [S1] })
+    expect(calls[0]).toEqual({ targets: [{ ptyId: a.ptyId, shellPid: 1000 }], eligible: [S1] })
     expect(bound).toEqual([])
   })
 
