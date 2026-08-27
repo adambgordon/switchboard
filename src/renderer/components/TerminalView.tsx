@@ -8,6 +8,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import type { AgentKind } from '@shared/types'
 import { attachPty } from '../lib/ptyStream'
 import type { ResolvedTheme } from '../lib/theme'
+import { installScrollbackSafeScrollUp } from '../lib/xtermScrollUp'
 
 interface Props {
   ptyId: string
@@ -283,6 +284,12 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
           })
         : null
 
+    // Send a top-anchored SU's displaced rows to scrollback instead of destroying them (see
+    // xtermScrollUp). Registered for BOTH agents and gated on the BUFFER, not the agent: scrollback
+    // is a property of the normal buffer, so an alternate-screen TUI declines on its own and needs
+    // no agent branch. Installed before attachPty so it is in place for the first byte.
+    const safeScrollUp = installScrollbackSafeScrollUp(term)
+
     // Size the terminal to its container BEFORE the PTY backlog floods in. On resume the host is
     // already visible (display:block) and measurable, so this synchronous fit resizes the still-
     // empty renderer once, up front — instead of letting claude's replay flood paint at the
@@ -392,6 +399,7 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       onInput.dispose()
       followRefreshScroll?.dispose()
       scrollbackReset?.dispose()
+      safeScrollUp.dispose()
       detach()
       term.dispose()
       termRef.current = null
