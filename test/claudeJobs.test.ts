@@ -23,14 +23,14 @@ describe('readBgJobName', () => {
   }
 
   it('returns the agent name', () => {
-    job(SHORT, { state: 'working', name: 'Find retrier example in mio' })
-    expect(readBgJobName(SHORT, root)).toBe('Find retrier example in mio')
+    job(SHORT, { state: 'working', name: 'Find the retry helper example' })
+    expect(readBgJobName(SHORT, root)).toBe('Find the retry helper example')
   })
 
   it('reads the name whatever the job lifecycle state', () => {
     // The row labels a terminal whose work went into this agent; that stays true once it finishes.
-    job(SHORT, { state: 'done', name: 'Find retrier example in mio' })
-    expect(readBgJobName(SHORT, root)).toBe('Find retrier example in mio')
+    job(SHORT, { state: 'done', name: 'Find the retry helper example' })
+    expect(readBgJobName(SHORT, root)).toBe('Find the retry helper example')
   })
 
   it('trims surrounding whitespace', () => {

@@ -169,6 +169,32 @@ export interface ConversationGroup {
 export type PtyStatus = 'busy' | 'idle' | 'exited'
 
 /**
+ * Why a Codex PTY's sessionId changed — the two cases need OPPOSITE renderer handling, and the
+ * difference is not inferable from the ids themselves.
+ *
+ * The line that decides it is CONVERSATION-owned state versus TERMINAL-owned state:
+ *  - conversation-owned — persisted seen/unread markers, and EARLIER history stops — belongs to the
+ *    id itself. Earlier stops were genuine visits to a conversation that still exists.
+ *  - terminal-owned — the current selection, the CURRENT history stop, the surface that selection is
+ *    showing, and the row's Live slot — describes the terminal in front of the user, and follows it.
+ *    The current stop is not optional: moving the selection without it leaves the history "drifted"
+ *    (selectedId !== stack[cursor]), which makes the next Back snap in place and Forward inert.
+ *
+ * - `initial`: a provisional PTY's throwaway placeholder was replaced by its real rollout id. The
+ *   placeholder names no conversation and is about to cease existing, so there is no conversation-owned
+ *   state to protect: EVERYTHING keyed to it migrates, or it is orphaned.
+ * - `correction`: a bound PTY was proven to be running a DIFFERENT conversation than the one it
+ *   claimed. Both ids name durable conversations — the old one still exists and reappears in Recent,
+ *   the new one may already carry its own state — so conversation-owned state does NOT move; moving it
+ *   would delete one conversation's read state and overwrite the other's. Terminal-owned state still
+ *   follows, and the selection and its surface do so only when the user is actually on that terminal.
+ *
+ * Main knows which happened; the renderer must be told rather than guess from whether the old id
+ * happens to be indexed, which is also true of a real conversation in the moment before it indexes.
+ */
+export type PtyBindKind = 'initial' | 'correction'
+
+/**
  * Renderer-derived liveness of a live session, from the transcript's turn-state plus a local
  * "seen" marker — NOT PTY output activity (a live TUI repaints constantly, so it isn't a turn
  * signal):
@@ -235,7 +261,7 @@ export const IPC = {
   ptySetMaxLive: 'pty:setMaxLive', // renderer -> main: update the live-PTY cap
   ptyData: 'pty:data', // push (ptyId, data)
   ptyExit: 'pty:exit', // push (ptyId, exitCode)
-  ptyBound: 'pty:bound', // push (ptyId, oldSessionId, newSessionId) — a provisional new-Codex PTY got its real id
+  ptyBound: 'pty:bound', // push (ptyId, oldSessionId, newSessionId, kind: PtyBindKind) — a Codex PTY's id changed; `kind` says whether state migrates
   ptyActiveList: 'pty:activeList',
   ptyActiveChanged: 'pty:activeChanged', // push (PtyState[])
   agentsAvailable: 'agents:available', // which agent CLIs are launchable from the login shell (cached)
@@ -317,9 +343,11 @@ export interface SwitchboardApi {
   kill(ptyId: string): void
   onPtyData(cb: (ptyId: string, data: string) => void): () => void
   onPtyExit(cb: (ptyId: string, exitCode: number | null) => void): () => void
-  /** A provisional new-Codex PTY was correlated to its rollout: its sessionId changed from the
-   *  placeholder `oldSessionId` to the real `newSessionId` (same `ptyId`). Returns an unsubscribe fn. */
-  onPtyBound(cb: (ptyId: string, oldSessionId: string, newSessionId: string) => void): () => void
+  /** A Codex PTY's sessionId changed from `oldSessionId` to `newSessionId` (same `ptyId`).
+   *  `kind` is load-bearing and must not be inferred — see `PtyBindKind`. Returns an unsubscribe fn. */
+  onPtyBound(
+    cb: (ptyId: string, oldSessionId: string, newSessionId: string, kind: PtyBindKind) => void
+  ): () => void
   listActive(): Promise<PtyState[]>
   onActiveChanged(cb: (states: PtyState[]) => void): () => void
   /** Update the main-process live-PTY cap (LRU eviction threshold). Fire-and-forget. */

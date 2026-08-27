@@ -131,4 +131,54 @@ describe('navReducer', () => {
     const start = run([{ type: 'open', id: 'a' }])
     expect(navReducer(start, { type: 'rekey', from: 'a', to: 'a' })).toBe(start)
   })
+
+  // retarget: a LIVE terminal was proven to be running a different conversation than it claimed.
+  // Unlike rekey, `from` is a real conversation that still exists, so only the stop the user is
+  // standing on may follow the terminal — earlier stops on it were genuine visits.
+  it('retarget moves the selection and the current stop only', () => {
+    const s = run([
+      { type: 'open', id: 'a' },
+      { type: 'open', id: 'S1' },
+      { type: 'retarget', from: 'S1', to: 'S2' }
+    ])
+    expect(s).toEqual({ selectedId: 'S2', stack: ['a', 'S2'], cursor: 1 })
+  })
+
+  it('retarget leaves earlier visits to the same conversation pointing at it', () => {
+    // The distinction from rekey. `S1` at index 0 is a real past visit to a conversation that still
+    // exists once the terminal leaves it, so back() must still return there.
+    const s = run([
+      { type: 'open', id: 'S1' },
+      { type: 'open', id: 'b' },
+      { type: 'open', id: 'S1' },
+      { type: 'retarget', from: 'S1', to: 'S2' }
+    ])
+    expect(s).toEqual({ selectedId: 'S2', stack: ['S1', 'b', 'S2'], cursor: 2 })
+  })
+
+  it('retarget does nothing when the user is not looking at that terminal', () => {
+    const start = run([
+      { type: 'open', id: 'S1' },
+      { type: 'open', id: 'b' }
+    ])
+    expect(navReducer(start, { type: 'retarget', from: 'S1', to: 'S2' })).toBe(start)
+  })
+
+  it('retarget does not leave history drifted', () => {
+    // Moving the selection without the stop would make selectedId !== stack[cursor], which back()
+    // reads as "drifted" and answers by snapping in place — so the first back() after a re-label
+    // would appear to do nothing.
+    const s = run([
+      { type: 'open', id: 'a' },
+      { type: 'open', id: 'S1' },
+      { type: 'retarget', from: 'S1', to: 'S2' },
+      { type: 'back' }
+    ])
+    expect(s).toEqual({ selectedId: 'a', stack: ['a', 'S2'], cursor: 0 })
+  })
+
+  it('retarget is a no-op when from === to', () => {
+    const start = run([{ type: 'open', id: 'a' }])
+    expect(navReducer(start, { type: 'retarget', from: 'a', to: 'a' })).toBe(start)
+  })
 })

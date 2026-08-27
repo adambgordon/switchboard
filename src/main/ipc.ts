@@ -14,7 +14,13 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
-import { IPC, type AgentAvailability, type AgentKind, type Transcript } from '../shared/types'
+import {
+  IPC,
+  type AgentAvailability,
+  type AgentKind,
+  type PtyBindKind,
+  type Transcript
+} from '../shared/types'
 import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
@@ -64,20 +70,23 @@ function broadcast(channel: string, ...args: unknown[]): void {
 async function reindexAndBroadcast(): Promise<void> {
   try {
     const groups = await indexConversations(PROJECTS_ROOT, undefined, metaCache)
-    // Late-bind new Codex sessions: a new Codex rollout only lands on disk at its first turn, which is
-    // exactly when this re-index fires (the live session goes active). Hand the manager the eligible
-    // rollout ids so it can ask the OS which one the Codex process in each unbound terminal actually
-    // has open. `groups` is already fully filtered, so archived / non-interactive / zero-message /
-    // subagent rollouts can never be bind targets. Binding emits `bound` + `active-changed`, so the
-    // row upgrades in place and the rollout isn't also shown as a separate Recent conversation.
+    // Keep every live Codex terminal's identity honest: a new rollout only lands on disk at its first
+    // turn, which is exactly when this re-index fires (the live session goes active). Hand the manager
+    // the eligible rollout ids so it can ask the OS which one the Codex process in each terminal
+    // actually has open. `groups` is already fully filtered, so archived / non-interactive /
+    // zero-message / subagent rollouts can never be bind targets. This both binds a terminal that had
+    // no identity and corrects one that has since drifted onto another conversation; either emits
+    // `bound` + `active-changed`, so the row re-labels in place and the rollout isn't also shown as a
+    // separate Recent conversation.
     //
     // Deliberately NOT awaited, and deliberately ABOVE the identical-groups early return: the probe
     // shells out to lsof, which must never delay the session-list broadcast, and a pass whose groups
     // are byte-identical to the last one is still a pass where a rollout may have just become
     // observable — returning early before scheduling it would strand exactly the case this fixes.
-    // The hasProvisionalCodex() gate keeps the id set from being built at all in the common case: this
-    // function runs twice a second while anything is live, and nothing is usually unbound.
-    if (mgr?.hasProvisionalCodex()) {
+    // The hasCodexToProbe() gate keeps the id set from being built when no Codex session is live at
+    // all; this function runs twice a second while anything is live. The manager itself is what stays
+    // quiet once every terminal is confirmed, so a settled app does no lsof work.
+    if (mgr?.hasCodexToProbe()) {
       const eligibleCodexIds = new Set(
         groups
           .flatMap((g) => g.conversations)
@@ -199,10 +208,13 @@ export function registerIpc(): void {
   mgr.on('data', (ptyId: string, data: string) => broadcast(IPC.ptyData, ptyId, data))
   mgr.on('exit', (ptyId: string, code: number | null) => broadcast(IPC.ptyExit, ptyId, code))
   mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))
-  // A provisional new-Codex PTY got its real rollout id — tell the renderer so it can re-key its
-  // session-keyed state (nav / seen / view) from the placeholder to the real id.
-  mgr.on('bound', (ptyId: string, oldId: string, newId: string) =>
-    broadcast(IPC.ptyBound, ptyId, oldId, newId)
+  // A Codex PTY's sessionId changed. `kind` must be forwarded: it tells the renderer whether this
+  // replaced a placeholder (everything keyed to it migrates) or corrected a terminal onto a different
+  // real conversation (CONVERSATION-owned state — persisted seen/unread, earlier history stops —
+  // stays put, while terminal-owned state — selection, current stop, surface, Live slot — follows the
+  // terminal). See PtyBindKind.
+  mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) =>
+    broadcast(IPC.ptyBound, ptyId, oldId, newId, kind)
   )
 
   // Warm the agent-availability probe now so the first New-menu open is instant (it's cached).

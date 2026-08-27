@@ -4,6 +4,7 @@ import { useSessions } from './lib/useSessions'
 import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
+import { bindActions } from './lib/bindPolicy'
 import { useLayout } from './lib/useLayout'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
 import { useNewConvoDefault } from './lib/useNewConvoDefault'
@@ -84,7 +85,11 @@ export default function App() {
     () => ptys.active.filter((p) => !pinned.has(p.sessionId)).map((p) => p.sessionId),
     [ptys.active, pinned]
   )
-  const { order: liveOrder, reorder: reorderLive } = useLiveOrder(liveUnpinnedIds)
+  const {
+    order: liveOrder,
+    reorder: reorderLive,
+    retarget: retargetLiveOrder
+  } = useLiveOrder(liveUnpinnedIds)
   const commitLiveReorder = useCallback(
     (from: number, to: number) => {
       reorderLive(from, to)
@@ -129,7 +134,18 @@ export default function App() {
   } = useLayout()
   const dragStartRef = useRef(0)
 
-  const { selectedId, open, home, back, forward, rekey: rekeyNav } = useNavHistory()
+  const {
+    selectedId,
+    open,
+    home,
+    back,
+    forward,
+    rekey: rekeyNav,
+    retarget: retargetNav
+  } = useNavHistory()
+  // Read by the onPtyBound listener, which must not re-subscribe on every selection change.
+  const selectedIdRef = useRef(selectedId)
+  selectedIdRef.current = selectedId
   // Session-targeted focus request, bumped whenever you land on a conversation (a click, ⌥⌘↑/↓
   // switch, Enter, resume, new, go-live) — the main pane always takes the keyboard. A per-session
   // focusReq lets MainPane route focus to the right surface (a live terminal, else the Formatted
@@ -172,26 +188,34 @@ export default function App() {
     initPtyStream()
   }, [])
 
-  // A provisional new-Codex PTY just got its real rollout id. Migrate every piece of session-keyed
-  // state from the placeholder to the real id so the row upgrades IN PLACE — same terminal (it's
-  // keyed by ptyId, untouched), now carrying its real identity. rekeyNav swaps the current selection
-  // and history stops, so no new history entry is pushed; re-requesting focus keeps the terminal hot
-  // through the id change.
+  // A Codex PTY's sessionId changed — an initial bind off a placeholder, or a correction between two
+  // real conversations. The two need OPPOSITE handling of session-keyed state, and getting it wrong
+  // destroys durable data, so the decision lives in pure, mutation-checked `bindActions` and this
+  // effect is only the wiring. See bindPolicy.ts and PtyBindKind.
   useEffect(() => {
-    const off = window.api.onPtyBound((_ptyId, oldId, newId) => {
-      if (oldId === newId) return
-      rekeyNav(oldId, newId)
-      rekeySeen(oldId, newId)
-      setViewBySession((prev) => {
-        if (!(oldId in prev)) return prev
-        const next = { ...prev, [newId]: prev[oldId] }
-        delete next[oldId]
-        return next
-      })
-      requestFocus(newId)
+    const off = window.api.onPtyBound((_ptyId, oldId, newId, kind) => {
+      const act = bindActions({ oldId, newId, kind }, selectedIdRef.current)
+      if (act.nav === 'rekey') rekeyNav(oldId, newId)
+      else if (act.nav === 'retarget') retargetNav(oldId, newId)
+      if (act.rekeySeen) rekeySeen(oldId, newId)
+      if (act.retargetLiveOrder) retargetLiveOrder(oldId, newId)
+      if (act.view === 'move') {
+        setViewBySession((prev) => {
+          if (!(oldId in prev)) return prev
+          const next = { ...prev, [newId]: prev[oldId] }
+          delete next[oldId]
+          return next
+        })
+      } else if (act.view === 'copy') {
+        // Carry the surface the user is standing on across, rather than letting the new
+        // conversation's own remembered view flip a terminal they are typing in over to Formatted.
+        // The old id keeps its entry — that conversation still exists.
+        setViewBySession((prev) => ({ ...prev, [newId]: prev[oldId] ?? 'terminal' }))
+      }
+      if (act.focus) requestFocus(newId)
     })
     return off
-  }, [rekeyNav, rekeySeen, requestFocus])
+  }, [rekeyNav, rekeySeen, requestFocus, retargetNav, retargetLiveOrder])
 
   // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
   // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of

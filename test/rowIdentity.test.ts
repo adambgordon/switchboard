@@ -46,7 +46,7 @@ function meta(over: Partial<ConversationMeta> = {}): ConversationMeta {
   }
 }
 
-const PARKED = { shortId: '6e76e54b', name: 'Find retrier example in mio' }
+const PARKED = { shortId: '6e76e54b', name: 'Find the retry helper example' }
 
 describe('isParkedOnlyRow', () => {
   it('is true for a live terminal with a parked agent and no conversation of its own', () => {
@@ -71,7 +71,7 @@ describe('isParkedOnlyRow', () => {
 describe('displayTitleForRow', () => {
   it('names the background agent when the terminal has no conversation of its own', () => {
     expect(displayTitleForRow(pty({ parkedJob: PARKED }), meta({ messageCount: 0 }))).toBe(
-      'Find retrier example in mio'
+      'Find the retry helper example'
     )
   })
 

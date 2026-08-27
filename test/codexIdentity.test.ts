@@ -97,9 +97,9 @@ const parseOf = (specs: Spec[]): LsofProcess[] => parseLsof(lsofText(specs))
 /** Always pins the sessions root, so a rollout path is judged against a fixed tree. */
 const resolve = (
   procs: readonly LsofProcess[],
-  prov: { ptyId: string; shellPid: number }[],
+  targets: { ptyId: string; shellPid: number }[],
   eligible: Set<string>
-) => resolveBindings(procs, prov, eligible, ROOT)
+) => resolveBindings(procs, targets, eligible, ROOT)
 
 describe('parseLsof', () => {
   it('parses the real capture into processes and their files', () => {
@@ -244,7 +244,7 @@ describe('resolveBindings — exact evidence binds', () => {
 
   it('is unaffected by a foreign Codex running an unrelated conversation elsewhere', () => {
     // A Codex the user started in their own Terminal.app, on another tty, holding another eligible
-    // rollout. It must neither be stolen by our provisional PTY nor poison it.
+    // rollout. It must neither be stolen by our own PTY nor poison it.
     const procs = parseOf([
       ...terminal(100, '/dev/ttys001', [S1]),
       ...terminal(500, '/dev/ttys007', [S2])
@@ -258,9 +258,9 @@ describe('resolveBindings — exact evidence binds', () => {
 describe('resolveBindings — ambiguity and absence bind nothing', () => {
   const noBind = (
     procs: LsofProcess[],
-    prov: { ptyId: string; shellPid: number }[],
+    targets: { ptyId: string; shellPid: number }[],
     eligible: Set<string>
-  ): void => expect(resolve(procs, prov, eligible)).toEqual([])
+  ): void => expect(resolve(procs, targets, eligible)).toEqual([])
 
   it('rejects the /dev/tty ALIAS, which names a different terminal per process', () => {
     // `/dev/tty` is not a device — it means "my own controlling terminal" — and lsof reports it
@@ -320,7 +320,7 @@ describe('resolveBindings — ambiguity and absence bind nothing', () => {
     )
   })
 
-  it('two provisional PTYs claiming one terminal', () => {
+  it('two PTY targets claiming one terminal', () => {
     const procs = parseOf(terminal(100, '/dev/ttys001', [S1]))
     noBind(
       procs,
@@ -460,7 +460,7 @@ describe('resolveBindings — ambiguity and absence bind nothing', () => {
     noBind(procs, [{ ptyId: 'A', shellPid: 100 }], new Set([S1]))
   })
 
-  it('an empty provisional list or empty eligible set short-circuits', () => {
+  it('an empty target list or empty eligible set short-circuits', () => {
     const procs = parseOf(terminal(100, '/dev/ttys001', [S1]))
     noBind(procs, [], new Set([S1]))
     noBind(procs, [{ ptyId: 'A', shellPid: 100 }], new Set())
@@ -495,7 +495,7 @@ describe('resolveCodexBindings — the exec path', () => {
   /** Emits far more than the caller's maxBuffer allows. */
   const STUB_FLOOD = join(DIR, 'flood.sh')
 
-  const prov = [{ ptyId: 'A', shellPid: 2202 }]
+  const targets = [{ ptyId: 'A', shellPid: 2202 }]
   const opts = { sessionsRoot: ROOT }
 
   beforeAll(() => {
@@ -523,15 +523,15 @@ describe('resolveCodexBindings — the exec path', () => {
 
   it('parses a COMPLETE capture even though the command exited 1', async () => {
     // The single most important behavior of the exec path. lsof exits 1 whenever any requested pid has
-    // died — while printing perfect output for the rest — and provisional pids are snapshotted before
+    // died — while printing perfect output for the rest — and target pids are snapshotted before
     // the probe, so this happens routinely. Bailing on the exit code would disable binding at random.
     await expect(
-      resolveCodexBindings(prov, new Set([S1]), { ...opts, lsofPath: STUB_EXIT1 })
+      resolveCodexBindings(targets,new Set([S1]), { ...opts, lsofPath: STUB_EXIT1 })
     ).resolves.toEqual([{ ptyId: 'A', sessionId: S1 }])
   })
 
   it('passes exactly the intended argv — a union of -p and -c, never intersected', async () => {
-    await resolveCodexBindings(prov, new Set([S1]), { ...opts, lsofPath: STUB_EXIT1 })
+    await resolveCodexBindings(targets,new Set([S1]), { ...opts, lsofPath: STUB_EXIT1 })
     const argv = readFileSync(ARGV_LOG, 'utf8')
     expect(argv).toBe('-n -p 2202 -c codex -F0pcfn')
     // `-a` would intersect "these shell pids" with "processes named codex" and return neither side.
@@ -544,32 +544,32 @@ describe('resolveCodexBindings — the exec path', () => {
     // a terminal holding ONE rollout when it really holds two. Parsing it binds the wrong conversation
     // with full confidence, which is why a killed probe is thrown away rather than salvaged.
     await expect(
-      resolveCodexBindings(prov, new Set([S1, S2]), { ...opts, lsofPath: STUB_HANG, timeoutMs: 300 })
+      resolveCodexBindings(targets,new Set([S1, S2]), { ...opts, lsofPath: STUB_HANG, timeoutMs: 300 })
     ).resolves.toEqual([])
   })
 
   it('discards output that does not end in a newline', async () => {
     // lsof always terminates its final record with one, so a missing newline means a cut mid-stream.
     await expect(
-      resolveCodexBindings(prov, new Set([S1]), { ...opts, lsofPath: STUB_NO_NEWLINE })
+      resolveCodexBindings(targets,new Set([S1]), { ...opts, lsofPath: STUB_NO_NEWLINE })
     ).resolves.toEqual([])
   })
 
   it('discards output that overflowed the buffer', async () => {
     await expect(
-      resolveCodexBindings(prov, new Set([S1]), { ...opts, lsofPath: STUB_FLOOD, maxBuffer: 64 })
+      resolveCodexBindings(targets,new Set([S1]), { ...opts, lsofPath: STUB_FLOOD, maxBuffer: 64 })
     ).resolves.toEqual([])
   })
 
   it('resolves to [] when the lsof binary is missing', async () => {
     await expect(
-      resolveCodexBindings(prov, new Set([S1]), { ...opts, lsofPath: '/nonexistent/lsof' })
+      resolveCodexBindings(targets,new Set([S1]), { ...opts, lsofPath: '/nonexistent/lsof' })
     ).resolves.toEqual([])
   })
 
   it('resolves to [] when the command fails with no output', async () => {
     await expect(
-      resolveCodexBindings(prov, new Set([S1]), { ...opts, lsofPath: '/usr/bin/false' })
+      resolveCodexBindings(targets,new Set([S1]), { ...opts, lsofPath: '/usr/bin/false' })
     ).resolves.toEqual([])
   })
 
@@ -577,7 +577,7 @@ describe('resolveCodexBindings — the exec path', () => {
     // An unspawnable path proves the short-circuits return before exec.
     const bad = { ...opts, lsofPath: '/nonexistent/lsof' }
     await expect(resolveCodexBindings([], new Set([S1]), bad)).resolves.toEqual([])
-    await expect(resolveCodexBindings(prov, new Set(), bad)).resolves.toEqual([])
+    await expect(resolveCodexBindings(targets,new Set(), bad)).resolves.toEqual([])
     await expect(resolveCodexBindings([{ ptyId: 'A', shellPid: 0 }], new Set([S1]), bad)).resolves.toEqual(
       []
     )
