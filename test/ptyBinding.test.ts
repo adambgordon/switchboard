@@ -482,6 +482,29 @@ describe('PtyManager Codex identity probing', () => {
     expect(mgr.list().find((s) => s.ptyId === a.ptyId)?.inputRequestedAt).toBeNull()
   })
 
+  it('a correction drops a half-written sequence so it cannot splice onto the next process', async () => {
+    // The scanner buffers an incomplete OSC 9 across chunk boundaries. If the process writing one is
+    // killed before the terminator — Ctrl-C mid-notification — the fragment waits for a terminator
+    // that the NEXT process now supplies, and `Approval requested: …` from the dead conversation gets
+    // completed by ordinary output from the new one.
+    //
+    // The follow-up chunk is a BARE BEL in plain text, deliberately: the scanner already restarts
+    // parsing when a new OSC 9 START appears before a terminator, so a fixture whose second chunk
+    // opens another OSC 9 exercises that existing guard instead of this one and proves nothing. A
+    // lone bell — which terminals emit routinely — supplies the missing terminator with no new start
+    // to trigger the restart, splicing `Approval requested: …` onto whatever followed it.
+    const a = mgr.startNew(CWD, 'codex')
+    answer = (p) => [{ ptyId: p[0].ptyId, sessionId: S1 }]
+    await mgr.probeCodexIdentity(new Set([S1]))
+    ptyPids.feeds[0]('\x1b]9;Approval requested: delete everything') // no terminator — writer died
+    expect(mgr.list().find((s) => s.ptyId === a.ptyId)?.inputRequestedAt).toBeNull()
+
+    answer = (p) => [{ ptyId: p[0].ptyId, sessionId: S2 }]
+    await mgr.probeCodexIdentity(new Set([S1, S2]))
+    ptyPids.feeds[0]('compiling\x07') // the new process, saying something harmless, with a bell
+    expect(mgr.list().find((s) => s.ptyId === a.ptyId)?.inputRequestedAt).toBeNull()
+  })
+
   it('an initial bind keeps an approval request — it belongs to the id being named', async () => {
     // The other direction: on a placeholder bind the notification came from the very process whose
     // rollout is being named, so clearing it would drop a real "waiting on you" signal.

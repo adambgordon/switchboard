@@ -68,6 +68,11 @@ interface Live {
   lastActivity: number
   startedAt: number
   inputRequestedAt: number | null
+  // [Codex] Streaming OSC 9 scanner for this terminal. Held on the entry rather than only in the
+  // onData closure so an identity correction can reset it: its `partial` buffer is per-PROCESS
+  // state, and a half-written sequence from a replaced process must not be completed by the next
+  // one's output. Null for Claude.
+  inputScanner: CodexInputNotificationScanner | null
   idleTimer: ReturnType<typeof setTimeout> | null
   bootTimer: ReturnType<typeof setTimeout> | null
   // A new Codex session has no real id at spawn (Codex mints its own), so the PTY carries a
@@ -451,6 +456,11 @@ export class PtyManager extends EventEmitter {
       // Not cleared on an `initial` bind: there the notification came from the very process whose
       // rollout is being named, so it is genuinely about the new id.
       entry.inputRequestedAt = null
+      // The scalar is only half of it — the scanner's buffer is per-process state too. A sequence
+      // left half-written by the replaced process would otherwise be completed by the NEXT process's
+      // terminator, splicing the old payload onto new output and manufacturing a request nobody
+      // made. Clearing one and not the other fixes the visible symptom and leaves the cause.
+      entry.inputScanner?.reset()
     }
     entry.sessionId = realSessionId
     entry.provisional = false
@@ -502,6 +512,7 @@ export class PtyManager extends EventEmitter {
       lastActivity: now,
       startedAt: now,
       inputRequestedAt: null,
+      inputScanner: o.agent === 'codex' ? new CodexInputNotificationScanner() : null,
       idleTimer: null,
       bootTimer: null,
       provisional: o.provisional ?? false,
@@ -537,8 +548,7 @@ export class PtyManager extends EventEmitter {
     // Fallback: a terminal created while hidden may never send a resize — boot anyway so claude
     // always starts. Generous, since a visible terminal sends its first resize within a frame.
     entry.bootTimer = setTimeout(boot, 2500)
-    const inputNotifications =
-      o.agent === 'codex' ? new CodexInputNotificationScanner() : null
+    const inputNotifications = entry.inputScanner
 
     proc.onData((data) => {
       if (!entry.shellReady) {

@@ -86,4 +86,18 @@ export class CodexInputNotificationScanner {
 
     return detected
   }
+
+  /**
+   * Drop any buffered incomplete sequence.
+   *
+   * Call this at a PROCESS boundary — when the Codex process behind this terminal is replaced. A
+   * half-written OSC 9 (its writer killed before the terminator) otherwise waits in `partial` for a
+   * terminator that will now be supplied by an unrelated later sequence, which splices the dead
+   * process's payload onto the new one's: an ordinary notification from the new process can complete
+   * `Approval requested: …` from the old and raise a request that nobody made. The buffer exists to
+   * span CHUNK boundaries within one stream, not to span streams.
+   */
+  reset(): void {
+    this.partial = ''
+  }
 }
