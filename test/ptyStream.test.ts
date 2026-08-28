@@ -3,18 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /**
  * The renderer's PTY output fan-out.
  *
- * Two properties here are load-bearing far out of proportion to the file's size, and both are about
- * output that CANNOT be recovered: nothing anywhere retains PTY bytes to replay, so anything this
- * drops is gone, and a terminal that attaches to an empty backlog shows a blank screen until
- * something changes its size.
+ * This module is the ONLY place PTY output is retained — main does not keep it and the agents do not —
+ * so anything it drops is gone for good, and a terminal that attaches to an empty record shows a blank
+ * screen until something produces more output. Three properties carry that weight:
  *
  *  1. **One writer per terminal.** A second attach for the same id replaces the first, and the first
- *     is never restored — which is the reason a terminal is confined to one pane and one window.
- *  2. **The backlog is bounded, and bounded from the FRONT.** Every window receives every terminal's
- *     output, so a window showing one conversation is buffering all the others with no writer to
- *     consume them. Dropping the newest instead of the oldest would leave an attaching terminal
- *     showing stale output; dropping without a floor would discard a single chunk larger than the cap
- *     and show nothing at all.
+ *     is never restored. This is a property of the fan-out, not a policy: it cannot express two.
+ *  2. **The record is RETAINED, not drained.** Attaching replays without consuming, and chunks are
+ *     recorded whether or not anyone is listening. This is what makes moving a terminal between panes
+ *     and windows non-destructive: an xterm is destroyed and rebuilt by such a move, and with a
+ *     drain-on-attach buffer the rebuilt one had nothing to repaint from, so "move it" meant "blank
+ *     it". These tests are the difference between that being fixed and it silently regressing.
+ *  3. **The record is bounded, and bounded from the FRONT.** Retention with no end is a leak, so the
+ *     window is capped and the OLDEST goes first — dropping the newest would leave an attaching
+ *     terminal showing stale output, and dropping without a floor would discard a single chunk larger
+ *     than the cap and show nothing at all.
  *
  * `ptyStream` holds module state and subscribes through `window.api`, so each test re-imports it
  * against a fresh stub. That is the same shape as the suites that drive `PtyManager` and the identity
@@ -32,6 +35,7 @@ async function freshStream(): Promise<{
   emit: Emit
   attachPty: (id: string, writer: (d: string) => void) => () => void
   initPtyStream: () => void
+  retainOnly: (ids: Set<string>) => void
   subscribeCount: () => number
 }> {
   vi.resetModules()
@@ -51,6 +55,7 @@ async function freshStream(): Promise<{
     emit: (id, data) => emit(id, data),
     attachPty: mod.attachPty,
     initPtyStream: mod.initPtyStream,
+    retainOnly: mod.retainOnly,
     subscribeCount: () => subscribes
   }
 }
@@ -100,9 +105,11 @@ describe('ptyStream — delivery', () => {
     expect(got).toEqual(['first', 'second'])
   })
 
-  it('consumes the backlog exactly once', async () => {
-    // Whichever terminal attaches first drains it. A second attach getting the same bytes again would
-    // paint them twice; this pins that it gets nothing instead.
+  it('replays to EVERY terminal that attaches, without consuming', async () => {
+    // The inversion of the old contract, and the point of the whole module. This used to assert the
+    // second attach got nothing, because the first drained the buffer — which is exactly why moving a
+    // terminal blanked it: the move destroys the xterm and builds a new one, and the new one arrived
+    // to an empty record. Retention is what a rebuilt terminal repaints from.
     const s = await freshStream()
     s.initPtyStream()
     s.emit('a', 'only')
@@ -111,7 +118,77 @@ describe('ptyStream — delivery', () => {
     const second: string[] = []
     s.attachPty('a', (d) => second.push(d))
     expect(first).toEqual(['only'])
-    expect(second).toEqual([])
+    expect(second).toEqual(['only'])
+  })
+})
+
+describe('ptyStream — a terminal survives being moved', () => {
+  it('replays everything seen so far into a terminal rebuilt elsewhere', async () => {
+    // What a pane or window move actually looks like from here: the old writer detaches, a brand-new
+    // terminal attaches for the same id, and it must come up showing the session rather than blank.
+    const s = await freshStream()
+    s.initPtyStream()
+    s.emit('a', 'prompt$ ')
+    const inPaneOne: string[] = []
+    const detach = s.attachPty('a', (d) => inPaneOne.push(d))
+    s.emit('a', 'running…')
+    detach()
+
+    const inPaneTwo: string[] = []
+    s.attachPty('a', (d) => inPaneTwo.push(d))
+    // Both chunks, in order — including the one delivered live to the first terminal, which is the
+    // half a drained buffer lost.
+    expect(inPaneTwo).toEqual(['prompt$ ', 'running…'])
+  })
+
+  it('records while a writer is attached, so the NEXT attach is current', async () => {
+    // Delivering to an attached writer must not be an alternative to recording. If recording only
+    // happened when nobody was listening, a terminal moved after a long working session would repaint
+    // to whatever was on screen before it was first attached — stale, and worse than blank.
+    const s = await freshStream()
+    s.initPtyStream()
+    const live: string[] = []
+    const detach = s.attachPty('a', (d) => live.push(d))
+    s.emit('a', 'one')
+    s.emit('a', 'two')
+    detach()
+    const rebuilt: string[] = []
+    s.attachPty('a', (d) => rebuilt.push(d))
+    expect(live).toEqual(['one', 'two'])
+    expect(rebuilt).toEqual(['one', 'two'])
+  })
+})
+
+describe('ptyStream — retention ends', () => {
+  it('forgets a terminal that is no longer live', async () => {
+    // Retention is unbounded in time, so it needs an end or a window leaks one full buffer per
+    // terminal it has ever seen. Asserted by attaching AFTER the sweep: a fresh terminal for a dead id
+    // gets nothing.
+    const s = await freshStream()
+    s.initPtyStream()
+    s.emit('dead', 'gone')
+    s.emit('alive', 'kept')
+    s.retainOnly(new Set(['alive']))
+    const dead: string[] = []
+    s.attachPty('dead', (d) => dead.push(d))
+    const alive: string[] = []
+    s.attachPty('alive', (d) => alive.push(d))
+    expect(dead).toEqual([])
+    // The other half: the sweep must not be a clear-everything. A live terminal keeps its record.
+    expect(alive).toEqual(['kept'])
+  })
+
+  it('keeps recording for a live terminal after a sweep', async () => {
+    // Proves the sweep drops the RECORD and not the subscription — a swept-then-still-live id must go
+    // on being recorded, or the first move after any session ending would come up blank.
+    const s = await freshStream()
+    s.initPtyStream()
+    s.emit('a', 'before')
+    s.retainOnly(new Set(['a']))
+    s.emit('a', 'after')
+    const got: string[] = []
+    s.attachPty('a', (d) => got.push(d))
+    expect(got).toEqual(['before', 'after'])
   })
 })
 
@@ -197,9 +274,11 @@ describe('ptyStream — the backlog is bounded', () => {
     expect(got).toEqual([huge])
   })
 
-  it('starts counting again from zero after a terminal attaches', async () => {
-    // The byte tally is deleted with the backlog. Leaving it behind would make the NEXT detached
-    // stretch start already near the cap and evict output that fits.
+  it('bounds continuously across an attach, rather than restarting at zero', async () => {
+    // The cap is a property of the rolling window, so attaching is not an event it resets. The two
+    // behaviours are distinguishable and this asserts which one is in force: six 64KB chunks against a
+    // 256KB cap leave D, E, F. Were the record cleared and the tally zeroed on attach — the old
+    // drain semantics — the last two alone would fit and this would read ['E', 'F'].
     const s = await freshStream()
     s.initPtyStream()
     const chunk = 'x'.repeat(64 * 1024)
@@ -209,6 +288,6 @@ describe('ptyStream — the backlog is bounded', () => {
     for (const tag of ['E', 'F']) s.emit('a', tag + chunk)
     const got: string[] = []
     s.attachPty('a', (d) => got.push(d))
-    expect(got.map((d) => d[0])).toEqual(['E', 'F'])
+    expect(got.map((d) => d[0])).toEqual(['D', 'E', 'F'])
   })
 })

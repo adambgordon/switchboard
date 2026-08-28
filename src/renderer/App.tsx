@@ -32,7 +32,7 @@ import { useDarkIcon } from './lib/useDarkIcon'
 import { useUpdates } from './lib/useUpdates'
 import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
-import { initPtyStream } from './lib/ptyStream'
+import { initPtyStream, retainOnly } from './lib/ptyStream'
 import { currentInputRequestedAt } from './lib/liveness'
 import {
   displayTitleForRow,
@@ -236,6 +236,14 @@ export default function App() {
   useEffect(() => {
     initPtyStream()
   }, [])
+
+  // Recent PTY output is retained per terminal so one can be rebuilt in another pane or window without
+  // coming up blank — which means it is retained until told otherwise. This is the "otherwise": the
+  // live set is the authority, so a terminal that ended has its record dropped on the next change,
+  // and no teardown path can be missed because none is consulted.
+  useEffect(() => {
+    retainOnly(new Set(ptys.active.map((p) => p.ptyId)))
+  }, [ptys.active])
 
   // Read by subscriptions that must not re-subscribe on every layout change.
   const paneLayoutRef = useRef(paneLayout)
