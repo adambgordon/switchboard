@@ -7,6 +7,7 @@ import {
   Menu,
   shell,
   nativeImage,
+  screen,
   type MenuItemConstructorOptions
 } from 'electron'
 import os from 'node:os'
@@ -21,6 +22,7 @@ import {
   type PtyBindKind,
   type PtySession,
   type PtyState,
+  type TabDropOutcome,
   type TabMenuAction,
   type Transcript,
   type WindowInit
@@ -65,6 +67,48 @@ export function setWindowOpener(fn: (init?: WindowInit) => void): void {
 }
 
 /**
+ * The tab drag currently in flight, if any — main's whole share of cross-window dragging.
+ *
+ * `hoveringId` is which window is currently showing the "you can drop here" state, so it can be told
+ * to stop when the cursor moves on. Held here rather than in either renderer because neither can see
+ * the other: the OS gives the source window mouse capture for the duration.
+ */
+let tabDrag: { sourceId: number; sessionId: string; hoveringId: number | null } | null = null
+
+function sendToWindow(wcId: number | null, channel: string, ...args: unknown[]): void {
+  if (wcId == null) return
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.webContents.id === wcId && !w.isDestroyed()) w.webContents.send(channel, ...args)
+  }
+}
+
+function endTabDrag(): void {
+  if (!tabDrag) return
+  sendToWindow(tabDrag.hoveringId, IPC.tabDragLeave)
+  tabDrag = null
+}
+
+/**
+ * The topmost visible window containing the cursor, or null when the cursor is over none.
+ *
+ * Deliberately asked of the OS rather than taken from the pointer event: `MouseEvent.screenX/screenY`
+ * is in the renderer's CSS pixels, and this app zooms (⌘+/-), so those coordinates and a window's DIP
+ * bounds part company at any zoom but 100%. `getCursorScreenPoint` is in the same space as the bounds.
+ *
+ * `getAllWindows` returns front-to-back, so the first hit is the topmost — which is the one the user
+ * sees under the cursor, and therefore the one they mean.
+ */
+function windowUnderCursor(): BrowserWindow | null {
+  const { x, y } = screen.getCursorScreenPoint()
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed() || !w.isVisible() || w.isMinimized()) continue
+    const b = w.getBounds()
+    if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return w
+  }
+  return null
+}
+
+/**
  * A window closed. Its claims are released so a surviving window can take those terminals over —
  * without this a live session whose window was closed would stay unreachable for the rest of the run,
  * still running, with no window permitted to show it.
@@ -76,6 +120,11 @@ export function releaseWindow(webContentsId: number): void {
       ptyOwner.delete(ptyId)
       released = true
     }
+  }
+  // A drag whose source window is gone can never be dropped or cancelled by it, so it would otherwise
+  // leave another window stuck showing the drop highlight forever.
+  if (tabDrag && (tabDrag.sourceId === webContentsId || tabDrag.hoveringId === webContentsId)) {
+    endTabDrag()
   }
   if (released) emitActive()
 }
@@ -432,6 +481,44 @@ export function registerIpc(): void {
       opts: { closeOthers: boolean; details: boolean; splitRight: boolean; newWindow: boolean }
     ) => popTabContextMenu(opts, BrowserWindow.fromWebContents(e.sender))
   )
+  // ---- dragging a tab between windows ----
+  // The referee. While a mouse button is held the OS delivers every move to the window the drag began
+  // in, so no other window can see the pointer over itself; main is the only party that can. It reads
+  // the cursor ON DEMAND — never on a timer — and only between dragBegin and drop/cancel.
+  ipcMain.on(IPC.tabDragBegin, (e, sessionId: string) => {
+    if (typeof sessionId !== 'string' || !sessionId) return
+    tabDrag = { sourceId: e.sender.id, sessionId, hoveringId: null }
+  })
+  ipcMain.on(IPC.tabDragHover, () => {
+    if (!tabDrag) return
+    const target = windowUnderCursor()
+    // Only the window under the cursor is highlighted, and only when it is not the source — the
+    // source shows its own caret locally, from real pointer events it is already receiving.
+    const id = target && target.webContents.id !== tabDrag.sourceId ? target.webContents.id : null
+    if (id === tabDrag.hoveringId) return
+    sendToWindow(tabDrag.hoveringId, IPC.tabDragLeave)
+    tabDrag.hoveringId = id
+    sendToWindow(id, IPC.tabDragOver)
+  })
+  ipcMain.handle(IPC.tabDragDrop, (e): TabDropOutcome => {
+    const drag = tabDrag
+    endTabDrag()
+    if (!drag || drag.sourceId !== e.sender.id) return 'cancelled'
+    const target = windowUnderCursor()
+    if (target && target.webContents.id !== drag.sourceId) {
+      target.webContents.send(IPC.tabDropHere, drag.sessionId)
+      target.focus()
+      return 'moved'
+    }
+    // Still over the source window, just not over a strip — dropping a tab back onto its own window
+    // means nothing, so it means nothing.
+    if (target) return 'cancelled'
+    // Over no window at all: released on the desktop, which is the detach gesture.
+    openWindow?.({ sessionId: drag.sessionId, collapseRail: true })
+    return 'detached'
+  })
+  ipcMain.on(IPC.tabDragCancel, () => endTabDrag())
+
   // The ⌘W fallback: the renderer asks for its own window to close when it has no tab to close.
   ipcMain.on(IPC.windowClose, (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   // Open a conversation in its own window. The new window is the same app with the rail hidden — the

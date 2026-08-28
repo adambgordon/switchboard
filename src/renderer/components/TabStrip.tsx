@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MouseEvent } from 'react'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
+import { useTabReorder } from '../lib/useTabReorder'
 import type { LiveDotClass } from '../lib/rowIdentity'
 import { Close } from './icons'
 
@@ -41,6 +42,10 @@ interface Props {
   /** Move the tab to the other pane, creating the split when there is none. */
   onSplitRight: (sessionId: string, paneIndex: number) => void
   onOpenInNewWindow: (sessionId: string) => void
+  /** A drag landed on a strip in THIS window — reorder, or move between panes. */
+  onMoveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
+  /** A drag left this window: another window took the tab, or it became a window of its own. */
+  onTabLeftWindow: (sessionId: string) => void
 }
 
 interface ItemProps {
@@ -144,9 +149,22 @@ export default function TabStrip({
   onPromote,
   onShowInfo,
   onSplitRight,
-  onOpenInNewWindow
+  onOpenInNewWindow,
+  onMoveTab,
+  onTabLeftWindow
 }: Props) {
   const stripRef = useRef<HTMLDivElement>(null)
+  // Dragging: reorder here, move to the other pane, move to another window, or off into a new one.
+  // The strip's own tab order is derived rather than passed — it is already in `tabs`.
+  useTabReorder(stripRef, {
+    paneIndex,
+    order: tabs.map((t) => t.sessionId),
+    // Any tab can be dragged, including a pane's only one: it cannot be reordered, but moving it to
+    // the other pane or another window is still meaningful — this pane just ends up empty.
+    enabled: tabs.length > 0,
+    onMove: onMoveTab,
+    onLeaveWindow: onTabLeftWindow
+  })
   // Past the row cap the strip becomes a vertical scroller, and it carries the same hide-at-rest
   // behavior as every other scroller in the app.
   useAutoHideScrollbar(stripRef)
@@ -182,7 +200,14 @@ export default function TabStrip({
   }
 
   return (
-    <div className="sb-tabstrip sb-autoscroll" ref={stripRef} role="tablist">
+    <div
+      className="sb-tabstrip sb-autoscroll"
+      ref={stripRef}
+      role="tablist"
+      // Read by the drag hook when it hit-tests every strip in the window: a drop has to resolve to a
+      // pane, and the DOM is where both strips are visible to each other.
+      data-pane={paneIndex}
+    >
       {tabs.map((tab, i) => (
         <Tab
           key={tab.sessionId}

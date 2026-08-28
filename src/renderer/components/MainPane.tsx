@@ -45,6 +45,10 @@ interface Props {
   canSplitRight: boolean
   onSplitRightTab: (sessionId: string, pane: number) => void
   onOpenTabInNewWindow: (sessionId: string) => void
+  /** A tab was dragged onto a strip in this window. */
+  onMoveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
+  /** A tab was dragged out of this window entirely. */
+  onTabLeftWindow: (sessionId: string) => void
   /** Open the conversation-info modal for an arbitrary conversation (the tab menu's Session Details). */
   onShowInfoFor: (sessionId: string) => void
   title: string
@@ -152,6 +156,8 @@ export default function MainPane(props: Props) {
     canSplitRight,
     onSplitRightTab,
     onOpenTabInNewWindow,
+    onMoveTab,
+    onTabLeftWindow,
     onShowInfoFor,
     title,
     cwd,
@@ -292,6 +298,8 @@ export default function MainPane(props: Props) {
           canSplitRight={canSplitRight}
           onSplitRight={onSplitRightTab}
           onOpenInNewWindow={onOpenTabInNewWindow}
+          onMoveTab={onMoveTab}
+          onTabLeftWindow={onTabLeftWindow}
         />
       )}
       {selectedId && (

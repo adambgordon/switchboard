@@ -36,6 +36,13 @@ const api: SwitchboardApi = {
   closeWindow: () => ipcRenderer.send(IPC.windowClose),
   openConversationWindow: (sessionId) =>
     ipcRenderer.send(IPC.windowOpenConversation, sessionId),
+  tabDragBegin: (sessionId) => ipcRenderer.send(IPC.tabDragBegin, sessionId),
+  tabDragHover: () => ipcRenderer.send(IPC.tabDragHover),
+  tabDragDrop: () => ipcRenderer.invoke(IPC.tabDragDrop),
+  tabDragCancel: () => ipcRenderer.send(IPC.tabDragCancel),
+  onTabDragOver: (cb) => subscribe(IPC.tabDragOver, cb as never),
+  onTabDragLeave: (cb) => subscribe(IPC.tabDragLeave, cb as never),
+  onTabDropHere: (cb) => subscribe(IPC.tabDropHere, cb as never),
   claimTerminal: (ptyId) => ipcRenderer.send(IPC.ptyClaim, ptyId),
   setBackgroundColor: (color) => ipcRenderer.send(IPC.windowSetBackgroundColor, color),
   syncTrafficLights: () => ipcRenderer.send(IPC.windowSyncTrafficLights),

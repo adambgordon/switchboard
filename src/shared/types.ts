@@ -301,6 +301,17 @@ export const IPC = {
   menuCloseTab: 'menu:closeTab', // push: ⌘W — the renderer closes the active tab, or asks main to close the window when there is none
   windowClose: 'window:close', // renderer -> main: close the sender's window (⌘W with no tab to close)
   windowOpenConversation: 'window:openConversation', // renderer -> main: open a NEW window showing one conversation
+  // Dragging a tab between windows. While a mouse button is held the OS routes every move to the
+  // window the drag STARTED in, so the window under the cursor never learns the pointer is there —
+  // main is the only party that can see all the windows, so it referees. It reads the cursor on
+  // demand (never on a timer) and only while a drag is actually in flight.
+  tabDragBegin: 'tab:dragBegin', // renderer -> main: a tab drag started here
+  tabDragHover: 'tab:dragHover', // renderer -> main: resolve which window the cursor is over now
+  tabDragDrop: 'tab:dragDrop', // renderer -> main: released; resolves with what became of the tab
+  tabDragCancel: 'tab:dragCancel', // renderer -> main: the source window handled it itself
+  tabDragOver: 'tab:dragOver', // push: this window is under a tab drag from elsewhere
+  tabDragLeave: 'tab:dragLeave', // push: it no longer is
+  tabDropHere: 'tab:dropHere', // push (sessionId): adopt this conversation as a tab
   ptyClaim: 'pty:claim', // renderer -> main: take ownership of a terminal from another window
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
@@ -340,6 +351,9 @@ export type UpdateCheck =
 
 /** What the native tab context menu resolved to. */
 export type TabMenuAction = 'close' | 'closeOthers' | 'details' | 'splitRight' | 'newWindow'
+
+/** What became of a tab released outside its own window's strips. See `tabDragDrop`. */
+export type TabDropOutcome = 'moved' | 'detached' | 'cancelled'
 
 /** What a freshly-created window should show. Requested once on mount via `IPC.windowGetInit`. */
 export interface WindowInit {
@@ -435,6 +449,27 @@ export interface SwitchboardApi {
   closeWindow(): void
   /** Open a NEW window showing one conversation, with the rail hidden. Fire-and-forget. */
   openConversationWindow(sessionId: string): void
+
+  // ---- dragging a tab between windows ----
+  /** Tell main a tab drag started here, so it can referee where the cursor goes. */
+  tabDragBegin(sessionId: string): void
+  /** Ask main to re-resolve which window the cursor is over, and to move the drop highlight there.
+   *  Called at most once per animation frame, and only while dragging. */
+  tabDragHover(): void
+  /**
+   * The pointer was released outside this window's own strips. Main decides from the cursor:
+   *  - `moved` — another window took the tab; the caller must now close its own.
+   *  - `detached` — no window was under the cursor, so a new one opened with it; also close ours.
+   *  - `cancelled` — the cursor was still over this window, so nothing happened.
+   */
+  tabDragDrop(): Promise<TabDropOutcome>
+  /** The source window handled the drop itself (it landed on one of its own strips). */
+  tabDragCancel(): void
+  /** This window is under a tab drag from another one — show that it can receive it. */
+  onTabDragOver(cb: () => void): () => void
+  onTabDragLeave(cb: () => void): () => void
+  /** Adopt a conversation dragged in from another window, as a kept tab in the focused pane. */
+  onTabDropHere(cb: (sessionId: string) => void): () => void
   /** Take ownership of a terminal currently owned by another window, so this one can show it. The
    *  previous owner's xterm unmounts; ours mounts and repaints on its first fit. */
   claimTerminal(ptyId: string): void

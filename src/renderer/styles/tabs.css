@@ -25,6 +25,53 @@
      vertical bar overlays them without moving anything. */
   overflow-y: auto;
   overflow-x: hidden;
+  /* The insertion caret is positioned in the strip's own scrolled coordinates. */
+  position: relative;
+}
+
+/* ---- dragging a tab ---- */
+
+/* The moving tab: a fixed clone on <body>, so the strip's scroll container cannot clip it and it can
+   travel anywhere in the window. Lifted off the surface, and slightly transparent so the caret and
+   the tabs it is passing over stay readable underneath it. */
+.sb-tab-dragging {
+  border-radius: var(--r-sm);
+  border-right: none;
+  background: var(--paper-raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-pop);
+  opacity: 0.92;
+}
+/* The whole window shows the grab cursor for the duration, not just the strip — the pointer is
+   captured, so it keeps dragging wherever it goes and the cursor should say so. */
+body.sb-dragging-tab,
+body.sb-dragging-tab * {
+  cursor: grabbing !important;
+}
+/* Where it would land. A 2px rule rather than a gap opened in the strip: opening a gap would reflow
+   every tab under the pointer and move the very targets the drop is being aimed at. Ink, not cobalt —
+   cobalt means a session is alive. */
+.sb-tab-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  pointer-events: none;
+  z-index: 2;
+}
+/* The strip currently under the drag. Deliberately quiet: the caret says WHERE, this only says which
+   strip is answering, which matters when there are two side by side. */
+.sb-tabstrip.sb-drop-target {
+  background: var(--paper-hover);
+}
+/* This WINDOW will take a tab dragged from another one. It cannot show a caret — the drop appends,
+   because the cursor's position inside this window is not knowable while another window holds the
+   pointer — so the whole window answers instead. */
+body.sb-window-drop-target .sb-tabstrip {
+  background: var(--paper-hover);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
 }
 
 .sb-tab {

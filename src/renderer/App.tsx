@@ -976,11 +976,56 @@ export default function App() {
     (index: number): boolean => index === 0 && (paneLayout.panes[0]?.tabs.length ?? 0) >= 2,
     [paneLayout.panes]
   )
+  // A tab was dragged onto a strip in THIS window: a reorder, or a move between panes.
+  const moveTabHere = useCallback(
+    (from: { pane: number; index: number }, to: { pane: number; index: number }) => {
+      panes.moveTab(from, to)
+      panes.focusPane(to.pane)
+    },
+    [panes.moveTab, panes.focusPane]
+  )
+  // A tab was dragged OUT of this window — another window took it, or it became a window of its own.
+  // Either way this window gives it up, which is what makes the gesture a move rather than a copy.
+  const tabLeftWindow = useCallback(
+    (sessionId: string) => {
+      const at = locateTab(paneLayoutRef.current, sessionId)
+      if (at) panes.closeTab(at.pane, at.index)
+    },
+    [panes.closeTab]
+  )
   // Open a conversation in its own window. Explicitly does NOT move its terminal: the new window
   // shows the transcript and offers to bring the terminal over, so asking for a second view of a
   // session you are typing in never yanks the terminal out from under you.
   const openInNewWindow = useCallback((id: string) => {
     window.api.openConversationWindow(id)
+  }, [])
+  // A tab dragged in from ANOTHER window. It lands as a KEPT tab in the focused pane: a drop is a
+  // deliberate act, so it should not be replaceable by the next ordinary click the way a preview is.
+  // Its position within the strip is deliberately not honoured — the OS gave the source window the
+  // pointer, so where the cursor sits inside THIS window is not knowable here, and appending is
+  // honest where guessing a slot would not be.
+  useEffect(
+    () =>
+      window.api.onTabDropHere((sessionId: string) => {
+        land(sessionId, 'persistent')
+        if (!isUnlinkedId(sessionId)) markRead(sessionId)
+        requestFocus(sessionId)
+      }),
+    [land, isUnlinkedId, markRead, requestFocus]
+  )
+  // Show that this window will accept a tab currently being dragged over it. Driven by main, because
+  // this window receives no pointer events at all while another one holds the drag.
+  useEffect(() => {
+    const mark = (on: boolean) => (): void => {
+      document.body.classList.toggle('sb-window-drop-target', on)
+    }
+    const offOver = window.api.onTabDragOver(mark(true))
+    const offLeave = window.api.onTabDragLeave(mark(false))
+    return () => {
+      offOver()
+      offLeave()
+      document.body.classList.remove('sb-window-drop-target')
+    }
   }, [])
   // Take a live terminal over from whichever window currently holds it, then show it. One xterm per
   // terminal app-wide, so this is a move, not a copy — the other window falls back to the transcript.
@@ -1451,6 +1496,8 @@ export default function App() {
                   canSplitRight={canSplitRightFrom(i)}
                   onSplitRightTab={splitRightTab}
                   onOpenTabInNewWindow={openInNewWindow}
+                  onMoveTab={moveTabHere}
+                  onTabLeftWindow={tabLeftWindow}
                   onShowInfoFor={(id) => showInfo(id, false)}
                   title={v.title}
                   cwd={v.cwd}
