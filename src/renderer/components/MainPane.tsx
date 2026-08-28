@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useRef, useState, type RefObj
 import type { ConversationMeta, PtyState, Transcript } from '@shared/types'
 import type { ResolvedTheme } from '../lib/theme'
 import PaneHeader from './PaneHeader'
+import TabStrip, { type TabDescriptor } from './TabStrip'
 import TranscriptView, { type TranscriptScrollState } from './TranscriptView'
 import TerminalDeck from './TerminalDeck'
 import { Play } from './icons'
@@ -11,6 +12,20 @@ type View = 'transcript' | 'terminal'
 
 interface Props {
   selectedId: string | null
+  /** Which pane this is, for the tab callbacks (0 when unsplit). */
+  paneIndex: number
+  /** Whether this pane owns the keyboard — only its active tab reads fully selected. */
+  paneFocused: boolean
+  /** Preferences → Application → Tabs and split view. False renders no strip at all. */
+  showTabs: boolean
+  tabs: TabDescriptor[]
+  activeTabIndex: number
+  onActivateTab: (pane: number, index: number) => void
+  onCloseTab: (pane: number, index: number) => void
+  onCloseOtherTabs: (pane: number, index: number) => void
+  onPromoteTab: (sessionId: string, pane?: number) => void
+  /** Open the conversation-info modal for an arbitrary conversation (the tab menu's Session Details). */
+  onShowInfoFor: (sessionId: string) => void
   title: string
   cwd: string
   meta: ConversationMeta | null
@@ -100,6 +115,16 @@ function NoHistory({ live, onGoLive }: { live: boolean; onGoLive: () => void }) 
 export default function MainPane(props: Props) {
   const {
     selectedId,
+    paneIndex,
+    paneFocused,
+    showTabs,
+    tabs,
+    activeTabIndex,
+    onActivateTab,
+    onCloseTab,
+    onCloseOtherTabs,
+    onPromoteTab,
+    onShowInfoFor,
     title,
     cwd,
     meta,
@@ -209,6 +234,22 @@ export default function MainPane(props: Props) {
 
   return (
     <main className="sb-pane" ref={paneRef} tabIndex={-1}>
+      {/* Tabs sit ABOVE the header: the strip says which conversations are open, the header describes
+          the one you are in. The strip renders whenever the feature is on and this pane holds a tab —
+          including while the welcome screen shows, since the tabs are still there to go back to. */}
+      {showTabs && tabs.length > 0 && (
+        <TabStrip
+          paneIndex={paneIndex}
+          tabs={tabs}
+          activeIndex={activeTabIndex}
+          focused={paneFocused}
+          onActivate={onActivateTab}
+          onClose={onCloseTab}
+          onCloseOthers={onCloseOtherTabs}
+          onPromote={onPromoteTab}
+          onShowInfo={onShowInfoFor}
+        />
+      )}
       {selectedId && (
         <PaneHeader
           title={title}

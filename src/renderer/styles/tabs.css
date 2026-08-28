@@ -1,0 +1,112 @@
+/* Tab strip above a pane's header. Strictly ink / paper / rule: cobalt means a session is ALIVE and
+   red means destructive, so "this tab is selected" gets neither. The one cobalt here is the shared
+   `.sb-dot`, which means exactly what it means everywhere else. */
+
+.sb-tabstrip {
+  /* Height of the tab row itself; the reserved scrollbar strip sits below it. */
+  --tab-h: 33px;
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  height: calc(var(--tab-h) + var(--bar-thin));
+  background: var(--paper-sunken);
+  border-bottom: 1px solid var(--rule);
+  /* `scroll`, not `auto`: the strip reserves the bar's height unconditionally, so adding the tab
+     that first overflows cannot shift every tab up by --bar-thin. Same reasoning as .md-pre in the
+     transcript. The bar itself still hides at rest (.sb-autoscroll). */
+  overflow-x: scroll;
+  overflow-y: hidden;
+}
+
+.sb-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--tab-h);
+  padding: 0 7px 0 11px;
+  /* Shrink before scrolling, but never below a width that can still show a few characters. */
+  flex: 0 1 auto;
+  min-width: 96px;
+  max-width: 210px;
+  border-right: 1px solid var(--rule);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  /* The three-step ink ladder used by every other control group in the app: rest --ink-faint,
+     hover --ink-soft, active --ink. */
+  color: var(--ink-faint);
+  cursor: default;
+  user-select: none;
+  position: relative;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.sb-tab:hover {
+  color: var(--ink-soft);
+  background: var(--paper-hover);
+}
+/* The active tab is lifted onto the surface of the content directly beneath it, so the tab and the
+   pane read as one sheet. In dark this makes it DARKER than the strip rather than lighter — the same
+   inverted elevation the pane already has against the rail, and correct for the same reason. */
+.sb-tab.active {
+  background: var(--paper-pane);
+  color: var(--ink-soft);
+}
+.sb-tab.active:hover {
+  background: var(--paper-pane);
+}
+/* Only the FOCUSED pane's active tab reads fully selected, so a split never shows two equally
+   selected tabs. The top edge is the marker; it is a neutral gray, never an accent. */
+.sb-tab.active.focused {
+  color: var(--ink);
+  box-shadow: inset 0 2px 0 0 var(--ink-ghost);
+}
+
+/* A preview tab is the one the next ordinary click replaces. Italic is the editor convention for it
+   and costs no width — which matters, because a tab is already the most width-starved thing here. */
+.sb-tab.preview .sb-tab-title {
+  font-style: italic;
+}
+
+.sb-tab-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Fixed-width trailing slot holding both the live dot and the close button, so a tab never changes
+   width under the pointer. Mirrors `.sb-row-gutter`: the marker at rest, the control on hover. */
+.sb-tab-gutter {
+  position: relative;
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.sb-tab .sb-dot {
+  transition: opacity var(--dur-fast);
+}
+.sb-tab:hover .sb-dot {
+  opacity: 0;
+}
+.sb-tab-close {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  color: var(--ink-faint);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast);
+}
+.sb-tab:hover .sb-tab-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sb-tab-close:hover {
+  background: var(--paper-active);
+  color: var(--ink);
+}

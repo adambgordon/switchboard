@@ -19,6 +19,11 @@ interface Props {
   onSelect: (id: string) => void
   /** When set and the row is live, clicking jumps to its terminal instead of previewing. */
   onJump?: (id: string) => void
+  /** Double-click — open it as a KEPT tab rather than the replaceable preview one. Absent when tabs
+   *  are switched off, which is what makes the gesture inert there rather than half-working. */
+  onStick?: (id: string) => void
+  /** ⌘+click — open a kept tab in the background, without going there (the browser gesture). */
+  onOpenInBackground?: (id: string) => void
   /** Option+click on a live row — always mark it unread (never toggles). */
   onMarkUnread?: (id: string) => void
   /** Open the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume) by clicking the ⋮
@@ -38,6 +43,8 @@ function ConversationRowImpl({
   card,
   onSelect,
   onJump,
+  onStick,
+  onOpenInBackground,
   onMarkUnread,
   onOpenMenu,
   onContextMenu
@@ -75,7 +82,20 @@ function ConversationRowImpl({
           if (live && onMarkUnread) onMarkUnread(meta.sessionId)
           return
         }
+        if (e.metaKey && onOpenInBackground) {
+          // ⌘+click = open a kept tab without going there. Checked before the live/not-live split
+          // because it means the same thing on either kind of row, and it must not also navigate.
+          onOpenInBackground(meta.sessionId)
+          return
+        }
         live && onJump ? onJump(meta.sessionId) : onSelect(meta.sessionId)
+      }}
+      // Double-click keeps the tab. The two ordinary clicks that precede it (DOM order is
+      // click, click, dblclick) each re-open the same conversation, which is idempotent — the second
+      // lands on the current history stop and changes nothing — so no click-count dedupe is needed.
+      onDoubleClick={(e) => {
+        if (e.altKey || e.metaKey || !onStick) return
+        onStick(meta.sessionId)
       }}
       onContextMenu={(e) => {
         if (!onContextMenu) return

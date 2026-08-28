@@ -43,6 +43,15 @@ export interface BindActions {
   retargetLiveOrder: boolean
   /** Re-request focus so the terminal stays hot across the id change. */
   focus: boolean
+  /** Tabs are session-keyed too, so a bind has to reach them or a tab keeps naming an id that no
+   *  longer means anything. `rekey` rewrites every tab holding the old id (right when it is a
+   *  placeholder); `retarget` moves only the tab the user is standing on (right when the old id is a
+   *  real conversation that still exists and other tabs on it are still correct).
+   *
+   *  Unlike `nav` / `view` / `focus`, this does NOT branch on `selectedId`: `paneReducer.retarget`
+   *  holds that guard, because it is the half that owns the pane state. Asking the same question in
+   *  both places is how the two answers drift apart. */
+  tabs: 'rekey' | 'retarget' | 'none'
 }
 
 const INERT: BindActions = {
@@ -50,7 +59,8 @@ const INERT: BindActions = {
   nav: 'none',
   view: 'none',
   retargetLiveOrder: false,
-  focus: false
+  focus: false,
+  tabs: 'none'
 }
 
 /**
@@ -63,7 +73,14 @@ export function bindActions(ev: BindEvent, selectedId: string | null): BindActio
   if (ev.kind === 'initial') {
     // The old id is a throwaway placeholder naming no conversation, and it is about to stop
     // existing. Everything keyed to it has to come along or it is orphaned.
-    return { rekeySeen: true, nav: 'rekey', view: 'move', retargetLiveOrder: true, focus: true }
+    return {
+      rekeySeen: true,
+      nav: 'rekey',
+      view: 'move',
+      retargetLiveOrder: true,
+      focus: true,
+      tabs: 'rekey'
+    }
   }
   // A correction. Both ids name durable conversations: the old one drops back to Recent with its
   // own history and read state, and the new one may already carry its own. Nothing durable moves.
@@ -73,6 +90,7 @@ export function bindActions(ev: BindEvent, selectedId: string | null): BindActio
     nav: 'retarget',
     view: selected ? 'copy' : 'none',
     retargetLiveOrder: true,
-    focus: selected
+    focus: selected,
+    tabs: 'retarget'
   }
 }

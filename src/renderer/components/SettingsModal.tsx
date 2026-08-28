@@ -222,6 +222,9 @@ interface Props {
   // --- App page: Markdown copy ---
   /** Whether ⌘C over a Formatted-view selection copies Markdown source rather than rendered text. */
   markdownCopy: boolean
+  /** The single switch governing tabs, the vertical split, and detached windows. */
+  tabsEnabled: boolean
+  onSetTabsEnabled: (value: boolean) => void
   /** Toggle the Markdown-copy behavior (an On / Off segmented control, like Theme). */
   onSetMarkdownCopy: (value: boolean) => void
 }
@@ -255,6 +258,8 @@ export default function SettingsModal({
   onSetMaxLive,
   onResetMaxLive,
   markdownCopy,
+  tabsEnabled,
+  onSetTabsEnabled,
   onSetMarkdownCopy
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -382,6 +387,36 @@ export default function SettingsModal({
               <>
                 <div className="sb-modal-group">
                   <UpdatesSetting updates={updates} />
+                </div>
+                <div className="sb-modal-group">
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">Tabs and split view</div>
+                    <div className="sb-seg" role="radiogroup" aria-label="Tabs and split view">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={tabsEnabled}
+                        className={`sb-seg-btn${tabsEnabled ? ' active' : ''}`}
+                        onClick={() => onSetTabsEnabled(true)}
+                      >
+                        On
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={!tabsEnabled}
+                        className={`sb-seg-btn${!tabsEnabled ? ' active' : ''}`}
+                        onClick={() => onSetTabsEnabled(false)}
+                      >
+                        Off
+                      </button>
+                    </div>
+                    <div className="sb-setting-desc">
+                      Keep several conversations open at once in a tab strip. Clicking a conversation
+                      previews it in a replaceable tab; double-click, ⌘-click, or resuming it keeps
+                      that tab. Turn this off to show one conversation at a time.
+                    </div>
+                  </div>
                 </div>
                 <div className="sb-modal-group">
                   <div className="sb-setting">

@@ -19,6 +19,7 @@ import {
   type AgentAvailability,
   type AgentKind,
   type PtyBindKind,
+  type TabMenuAction,
   type Transcript
 } from '../shared/types'
 import { indexConversations, type MetaCache } from './sessions/indexer'
@@ -201,6 +202,45 @@ export function popCodeContextMenu(code: string, win: BrowserWindow | null): voi
   ]).popup(win ? { window: win } : undefined)
 }
 
+/**
+ * Pop the NATIVE context menu for a tab and resolve with what was chosen (null if dismissed).
+ * Native for the same reasons as the link and code menus above, plus one specific to a strip: an OS
+ * menu isn't anchored to a DOM node, so the strip scrolling out from under it cannot close it.
+ *
+ * Resolution is settle-once. A click resolves immediately with its action; the close callback
+ * resolves `null` only if nothing was picked, and is deferred a tick because the ordering of a menu
+ * item's `click` against the popup's close callback is not something to rely on.
+ *
+ * No accelerator is attached to Close Tab here even though ⌘W performs it. A popup-menu accelerator
+ * would register a second binding for a chord the File menu already owns; the label alone is enough,
+ * and the item is reached by pointer anyway.
+ */
+export function popTabContextMenu(
+  opts: { closeOthers: boolean; details: boolean },
+  win: BrowserWindow | null
+): Promise<TabMenuAction | null> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (action: TabMenuAction | null): void => {
+      if (settled) return
+      settled = true
+      resolve(action)
+    }
+    const pick = (action: TabMenuAction) => () => finish(action)
+    const items: MenuItemConstructorOptions[] = [{ label: 'Close Tab', click: pick('close') }]
+    if (opts.closeOthers) items.push({ label: 'Close Other Tabs', click: pick('closeOthers') })
+    // Hidden rather than disabled for an unlinked terminal, matching the row menu: a control that
+    // silently does nothing is worse than an absent one.
+    if (opts.details) {
+      items.push({ type: 'separator' }, { label: 'Session Details…', click: pick('details') })
+    }
+    Menu.buildFromTemplate(items).popup({
+      ...(win ? { window: win } : {}),
+      callback: () => setTimeout(() => finish(null), 0)
+    })
+  })
+}
+
 export function registerIpc(): void {
   mgr = new PtyManager({
     claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') }
@@ -294,6 +334,13 @@ export function registerIpc(): void {
   ipcMain.on(IPC.codeContextMenu, (e, code: string) =>
     popCodeContextMenu(code, BrowserWindow.fromWebContents(e.sender))
   )
+  ipcMain.handle(
+    IPC.tabContextMenu,
+    (e, opts: { closeOthers: boolean; details: boolean }) =>
+      popTabContextMenu(opts, BrowserWindow.fromWebContents(e.sender))
+  )
+  // The ⌘W fallback: the renderer asks for its own window to close when it has no tab to close.
+  ipcMain.on(IPC.windowClose, (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   // Keep the OS window background in lockstep with the renderer's theme, so a live window resize
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.
   ipcMain.on(IPC.windowSetBackgroundColor, (e, color: string) =>

@@ -12,6 +12,11 @@ import { bindActions } from '../src/renderer/lib/bindPolicy'
  * history stops stay with the id that owns them, because both ids name conversations that continue to
  * exist. Terminal-owned state still follows the terminal: the selection, the current history stop,
  * the surface it is showing, and the row's Live slot.
+ *
+ * The whole-object `toEqual` assertions below are deliberate rather than lazy: every session-keyed
+ * store this policy has to reach is a field of the return, so adding a store without deciding what a
+ * bind does to it breaks these tests instead of silently stranding its state under an id that will
+ * never bind. Assert the whole object when adding one.
  */
 describe('bindActions', () => {
   const initial = { oldId: 'placeholder', newId: 'S1', kind: 'initial' as const }
@@ -23,7 +28,8 @@ describe('bindActions', () => {
       nav: 'rekey',
       view: 'move',
       retargetLiveOrder: true,
-      focus: true
+      focus: true,
+      tabs: 'rekey'
     })
   })
 
@@ -55,14 +61,16 @@ describe('bindActions', () => {
       nav: 'retarget',
       view: 'copy',
       retargetLiveOrder: true,
-      focus: true
+      focus: true,
+      tabs: 'retarget'
     })
     expect(bindActions(correction, 'other')).toEqual({
       rekeySeen: false,
       nav: 'retarget',
       view: 'none',
       retargetLiveOrder: true,
-      focus: false
+      focus: false,
+      tabs: 'retarget'
     })
   })
 
@@ -79,6 +87,19 @@ describe('bindActions', () => {
     expect(bindActions(correction, null).retargetLiveOrder).toBe(true)
   })
 
+  it('tabs follow the same asymmetry as history, and never branch on the selection', () => {
+    // A tab is session-keyed, so a bind has to reach it. `initial` rewrites every tab holding the
+    // placeholder — it names nothing and is about to stop existing. `correction` retargets, because
+    // an inactive tab on the old id is a view of a conversation that still exists.
+    expect(bindActions(initial, 'placeholder').tabs).toBe('rekey')
+    expect(bindActions(correction, 'S1').tabs).toBe('retarget')
+    // Deliberately independent of `selectedId`, unlike nav/view/focus above: `paneReducer.retarget`
+    // owns the "is the user actually on this terminal" guard, because it is the half holding the pane
+    // state. A second copy of that guard here is how the two answers drift apart.
+    expect(bindActions(correction, 'other').tabs).toBe('retarget')
+    expect(bindActions(correction, null).tabs).toBe('retarget')
+  })
+
   it('a no-op event does nothing at all', () => {
     for (const kind of ['initial', 'correction'] as const) {
       expect(bindActions({ oldId: 'X', newId: 'X', kind }, 'X')).toEqual({
@@ -86,7 +107,8 @@ describe('bindActions', () => {
         nav: 'none',
         view: 'none',
         retargetLiveOrder: false,
-        focus: false
+        focus: false,
+        tabs: 'none'
       })
     }
   })

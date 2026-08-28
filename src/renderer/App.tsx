@@ -6,6 +6,9 @@ import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
 import { bindActions } from './lib/bindPolicy'
 import { useLayout } from './lib/useLayout'
+import { usePaneLayout } from './lib/usePaneLayout'
+import { useTabsEnabled } from './lib/useTabsEnabled'
+import { stepTab, type OpenMode } from './lib/paneModel'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
 import { useNewConvoDefault } from './lib/useNewConvoDefault'
 import { useNewConvoDefaultAgent } from './lib/useNewConvoDefaultAgent'
@@ -25,6 +28,7 @@ import { currentInputRequestedAt } from './lib/liveness'
 import { displayTitleForRow, isUnlinkedRow, resolveRowLiveState } from './lib/rowIdentity'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
+import type { TabDescriptor } from './components/TabStrip'
 import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
 import ResizeHandle from './components/ResizeHandle'
 import SettingsModal from './components/SettingsModal'
@@ -134,8 +138,18 @@ export default function App() {
   } = useLayout()
   const dragStartRef = useRef(0)
 
+  // Tabs / split / detached windows, all behind one preference. OFF is a degenerate case of the SAME
+  // model — one pane holding one preview tab, so every open replaces it — which is what the app did
+  // before tabs existed. So the flag gates only the strip's presence, the promotion gestures, and the
+  // split / window commands; nothing below asks about it. See useTabsEnabled.
+  const { enabled: tabsEnabled, setEnabled: setTabsEnabled } = useTabsEnabled()
+  const panes = usePaneLayout()
+  const { layout: paneLayout } = panes
+  // THE selection: the active tab of the focused pane. Derived, never stored twice.
+  const selectedId = panes.selectedId
+
   const {
-    selectedId,
+    selectedId: navSelectedId,
     open,
     home,
     back,
@@ -188,6 +202,35 @@ export default function App() {
     initPtyStream()
   }, [])
 
+  // Read by subscriptions that must not re-subscribe on every layout change.
+  const paneLayoutRef = useRef(paneLayout)
+  paneLayoutRef.current = paneLayout
+  const tabsEnabledRef = useRef(tabsEnabled)
+  tabsEnabledRef.current = tabsEnabled
+
+  // Switching the preference off collapses to the shape the off path expects: one pane holding one
+  // preview tab, whatever was on screen. Fires on the transition only, so turning it back on starts
+  // from that single tab rather than resurrecting a stale set.
+  const tabsWereEnabled = useRef(tabsEnabled)
+  useEffect(() => {
+    if (tabsWereEnabled.current && !tabsEnabled) panes.collapseToSingle()
+    tabsWereEnabled.current = tabsEnabled
+  }, [tabsEnabled, panes.collapseToSingle])
+
+  // ⌘W arrives as a push from the File menu, not a keydown: a menu accelerator is consumed by the app
+  // and the key event never reaches the page. Close the focused pane's active tab; with none — no tabs
+  // open, or the feature switched off — close the window instead, so the chord still does what every
+  // other macOS app does with it.
+  useEffect(() => {
+    const off = window.api.onMenuCloseTab(() => {
+      const l = paneLayoutRef.current
+      const index = l.panes[l.focusIndex]?.activeIndex ?? -1
+      if (tabsEnabledRef.current && index >= 0) panes.closeTab(l.focusIndex, index)
+      else window.api.closeWindow()
+    })
+    return off
+  }, [panes.closeTab])
+
   // A Codex PTY's sessionId changed — an initial bind off a placeholder, or a correction between two
   // real conversations. The two need OPPOSITE handling of session-keyed state, and getting it wrong
   // destroys durable data, so the decision lives in pure, mutation-checked `bindActions` and this
@@ -199,6 +242,11 @@ export default function App() {
       else if (act.nav === 'retarget') retargetNav(oldId, newId)
       if (act.rekeySeen) rekeySeen(oldId, newId)
       if (act.retargetLiveOrder) retargetLiveOrder(oldId, newId)
+      // Tabs are session-keyed too. `rekey` rewrites every tab holding a placeholder that is ceasing
+      // to exist; `retarget` moves only the tab the user is standing on, leaving inactive tabs on the
+      // old id alone — that conversation is still real, only the terminal moved.
+      if (act.tabs === 'rekey') panes.rekeyTabs(oldId, newId)
+      else if (act.tabs === 'retarget') panes.retargetTabs(oldId, newId)
       if (act.view === 'move') {
         setViewBySession((prev) => {
           if (!(oldId in prev)) return prev
@@ -215,7 +263,15 @@ export default function App() {
       if (act.focus) requestFocus(newId)
     })
     return off
-  }, [rekeyNav, rekeySeen, requestFocus, retargetNav, retargetLiveOrder])
+  }, [
+    rekeyNav,
+    rekeySeen,
+    requestFocus,
+    retargetNav,
+    retargetLiveOrder,
+    panes.rekeyTabs,
+    panes.retargetTabs
+  ])
 
   // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
   // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of
@@ -236,6 +292,32 @@ export default function App() {
   useEffect(() => {
     if (selectedId) requestFocus(selectedId)
   }, [selectedId, requestFocus])
+
+  // --- the two halves of "what is selected" ---
+  //
+  // The pane layout is what is on screen; the back/forward history is a LOG of it. Every selection
+  // change goes through the layout — a row click, a tab click, closing a tab, moving pane focus — and
+  // this records the stop, so no action handler has to remember to. Re-recording the stop the user is
+  // already on is an identity no-op in navReducer, which is what keeps this from fighting the effect
+  // below.
+  useEffect(() => {
+    if (selectedId) open(selectedId)
+    else home()
+  }, [selectedId, open, home])
+
+  // The one direction that starts in the history: ⌘[ / ⌘] move its cursor, and the conversation it
+  // lands on has to be put into the focused pane. Preview mode, so retracing your steps does not
+  // accumulate tabs.
+  //
+  // Keyed on `navSelectedId` ALONE, reading the current selection through a ref. Depending on
+  // `selectedId` too would fire this in the same commit as a pane-driven change, where the effect
+  // above has dispatched but its state has not landed yet — so it would see the history "disagreeing",
+  // reconcile the wrong way, and bounce the user back to the conversation they just left.
+  useEffect(() => {
+    if (navSelectedId && navSelectedId !== selectedIdRef.current) {
+      panes.openTab(navSelectedId, 'preview')
+    }
+  }, [navSelectedId, panes.openTab])
 
   // Keep the main-process LRU cap in lockstep with the persisted preference — on mount and on each
   // change. Fire-and-forget, and runs after commit, so it never touches the render/paint path.
@@ -404,6 +486,41 @@ export default function App() {
     [ptys.bySession, metaById]
   )
 
+  // Per-pane tab descriptors for the strips. Resolved here rather than in TabStrip so the strip stays
+  // presentational, and so a tab's title comes from the SAME derivation the rail row and the pane
+  // header use — a tab must not name one thing while the row beside it names another.
+  const tabsByPane = useMemo<TabDescriptor[][]>(
+    () =>
+      paneLayout.panes.map((p) =>
+        p.tabs.map((tab) => {
+          const pty = ptys.bySession.get(tab.sessionId) ?? null
+          const meta = metaById.get(tab.sessionId) ?? (pty ? synthMeta(pty) : null)
+          return {
+            sessionId: tab.sessionId,
+            title: pty && meta ? displayTitleForRow(pty, meta) : meta?.title ?? 'Conversation',
+            agent: meta?.agent ?? pty?.agent ?? 'claude',
+            preview: tab.preview,
+            live: !!pty,
+            unlinked: isUnlinkedId(tab.sessionId)
+          }
+        })
+      ),
+    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId]
+  )
+
+  // Activating a tab is a landing like any other: it marks the conversation read and hands the pane
+  // the keyboard. The history stop is recorded by the selection effect, not here.
+  const goToTab = useCallback(
+    (pane: number, index: number) => {
+      const id = paneLayout.panes[pane]?.tabs[index]?.sessionId
+      if (!id) return
+      panes.activateTab(pane, index)
+      if (!isUnlinkedId(id)) markRead(id)
+      requestFocus(id)
+    },
+    [paneLayout.panes, panes.activateTab, isUnlinkedId, markRead, requestFocus]
+  )
+
   const selectedMeta = selectedId ? metaById.get(selectedId) ?? null : null
   const selectedPty = selectedId ? ptys.bySession.get(selectedId) ?? null : null
   const selectedInputRequestedAt = selectedPty
@@ -492,23 +609,40 @@ export default function App() {
     setViewBySession((prev) => (prev[id] === v ? prev : { ...prev, [id]: v }))
   }, [])
 
-  // Every landing on a conversation (click / ⌥⌘↑/↓ switch / Enter / resume / new) goes through
-  // useNavHistory's `open`, which records a back/forward stop.
+  /**
+   * Every landing on a conversation goes through here: it puts the conversation in a pane, and the
+   * effect above records the history stop.
+   *
+   * This is the ONE place the tabs preference changes behaviour. With tabs off every landing is a
+   * PREVIEW open, so the pane's single tab is replaced in place and the app behaves exactly as it did
+   * before tabs existed — which is why nothing downstream needs to know about the flag.
+   *
+   * `persistent` is for landings that ACT on a conversation rather than peek at it — Resume, New, and
+   * ⏎ into a live terminal. Acting on it is what makes a tab stick, the same way editing a file does
+   * in an editor.
+   */
+  const land = useCallback(
+    (id: string, mode: OpenMode, opts?: { pane?: number; focus?: boolean }) => {
+      panes.openTab(id, tabsEnabled ? mode : 'preview', opts)
+    },
+    [panes.openTab, tabsEnabled]
+  )
+
   const resume = useCallback(async (meta: ConversationMeta) => {
-    open(meta.sessionId)
+    land(meta.sessionId, 'persistent')
     setSessionView(meta.sessionId, 'terminal')
     requestFocus(meta.sessionId)
     await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
-  }, [open, requestFocus, setSessionView])
+  }, [land, requestFocus, setSessionView])
 
   const startNew = useCallback(async (cwd: string, agent: AgentKind) => {
     setMenuOpen(false)
     setLastAgent(agent) // starting an agent makes it the sticky menu default too
     const st = await window.api.startNew(cwd, agent)
-    open(st.sessionId)
+    land(st.sessionId, 'persistent')
     setSessionView(st.sessionId, 'terminal')
     requestFocus(st.sessionId)
-  }, [open, requestFocus, setSessionView])
+  }, [land, requestFocus, setSessionView])
 
   const pickOther = useCallback(
     async (agent: AgentKind) => {
@@ -571,15 +705,16 @@ export default function App() {
   const enterLive = useCallback((id?: string) => {
     const target = id ?? selectedId
     if (!target) return
-    open(target)
+    // Going into a live terminal is acting on the conversation, so its tab stops being a preview.
+    land(target, 'persistent')
     setSessionView(target, 'terminal')
     requestFocus(target)
-  }, [selectedId, open, setSessionView, requestFocus])
+  }, [selectedId, land, setSessionView, requestFocus])
   // Navigation restores each conversation's remembered surface. A live conversation with no choice
   // yet defaults to Terminal; explicit actions (Resume / New / Enter / Go live) still force Terminal.
   const openRemembered = useCallback(
-    (id: string) => {
-      open(id)
+    (id: string, mode: OpenMode = 'preview') => {
+      land(id, mode)
       // Deliberately opening a conversation IS attention, whatever the OS says about window focus —
       // so read state doesn't rest on that one signal, and losing it can't strand a row unread.
       // Gated like every other read-state write: an unlinked row must not persist a marker.
@@ -591,11 +726,28 @@ export default function App() {
         paneRef.current?.focus({ preventScroll: true })
       }
     },
-    [open, requestFocus, ptys.bySession, viewBySession, isUnlinkedId, markRead]
+    [land, requestFocus, ptys.bySession, viewBySession, isUnlinkedId, markRead]
   )
   const clickLive = useCallback((id: string) => openRemembered(id), [openRemembered])
   const clickConversation = useCallback((id: string) => openRemembered(id), [openRemembered])
   const switchTo = useCallback((id: string) => openRemembered(id), [openRemembered])
+  // Double-click a row: keep it. The editor gesture for promoting a preview tab, and the reason it
+  // needs no click-count dedupe is that the two ordinary clicks preceding it are idempotent here —
+  // they open (or re-activate) the same conversation, and re-opening the current history stop is an
+  // identity no-op. Inert when tabs are off, where every landing is a preview open anyway.
+  const stickConversation = useCallback(
+    (id: string) => openRemembered(id, 'persistent'),
+    [openRemembered]
+  )
+  // ⌘+click a row: open it as a kept tab WITHOUT going there — the browser's background-tab gesture,
+  // for queueing up several conversations without losing your place. No markRead and no focus request:
+  // you are deliberately not looking at it.
+  // Gated at the prop, not here: App passes this to the rail only while tabs are on, so the row's
+  // ⌘+click branch does not exist otherwise and a second guard here would be unreachable.
+  const openInBackground = useCallback(
+    (id: string) => land(id, 'persistent', { focus: false }),
+    [land]
+  )
   const showHistory = useCallback(() => {
     if (selectedId) setSessionView(selectedId, 'transcript')
   }, [selectedId, setSessionView])
@@ -812,6 +964,29 @@ export default function App() {
           const nid = orderedIds[next]
           if (nid) switchTo(nid)
         }
+      } else if (
+        tabsEnabled &&
+        mod &&
+        e.altKey &&
+        (e.code === 'ArrowLeft' || e.code === 'ArrowRight')
+      ) {
+        // ⌥⌘← / ⌥⌘→ — previous / next TAB, walking both panes' strips as one continuous line. The
+        // vertical pair above walks the rail; the horizontal pair walks the strip, which is the axis
+        // each one is laid out on. This WRAPS where the rail clamps — see stepTab for why a handful of
+        // tabs and a long list want opposite answers.
+        e.preventDefault()
+        const target = stepTab(paneLayout, e.code === 'ArrowRight' ? 1 : -1)
+        if (target) goToTab(target.pane, target.index)
+      } else if (tabsEnabled && e.metaKey && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+        // ⌘1…⌘9 — the Nth tab of the focused pane. ⌘0 is deliberately excluded: it is Reset Zoom.
+        //
+        // Bound on ⌘ ALONE, never this handler's `mod` (which is ⌘-or-⌃). ⌃1…⌃9 are meaningful inside
+        // a TUI, and swallowing them in the renderer would break the agent running in the terminal.
+        // Every chord added for tabs follows that rule.
+        e.preventDefault()
+        const index = Number(e.key) - 1
+        const pane = paneLayout.panes[paneLayout.focusIndex]
+        if (pane && index < pane.tabs.length) goToTab(paneLayout.focusIndex, index)
       } else if (mod && e.shiftKey && e.code === 'KeyU') {
         // ⇧⌘U — toggle read/unread on the selected conversation (macOS Mail's shortcut).
         e.preventDefault()
@@ -867,7 +1042,10 @@ export default function App() {
     forward,
     togglePane,
     toggleUnread,
-    newConversation
+    newConversation,
+    tabsEnabled,
+    paneLayout,
+    goToTab
   ])
 
   // Same derivation the rail uses, so the header can't name one thing while the row names another.
@@ -889,7 +1067,10 @@ export default function App() {
       <TitleBar
         paneCollapsed={paneCollapsed}
         onTogglePane={togglePane}
-        onHome={home}
+        // The wordmark goes back to the welcome screen. With tabs open that is a pane showing nothing
+        // rather than a window with nothing in it — the tabs stay put, which is why `deselect` exists
+        // instead of this either closing them or becoming a control that silently does nothing.
+        onHome={panes.deselect}
         onOpenSettings={() => setSettingsPage('appearance')}
         resolvedTheme={themeResolved}
         onToggleTheme={toggleTheme}
@@ -904,6 +1085,8 @@ export default function App() {
             selectedSessionId={selectedId}
             onJump={clickLive}
             onSelect={clickConversation}
+            onStick={tabsEnabled ? stickConversation : undefined}
+            onOpenInBackground={tabsEnabled ? openInBackground : undefined}
             onTogglePin={togglePinGated}
             query={query}
             onQueryChange={setQuery}
@@ -952,6 +1135,16 @@ export default function App() {
         )}
         <MainPane
           selectedId={selectedId}
+          paneIndex={paneLayout.focusIndex}
+          paneFocused
+          showTabs={tabsEnabled}
+          tabs={tabsByPane[paneLayout.focusIndex] ?? []}
+          activeTabIndex={paneLayout.panes[paneLayout.focusIndex]?.activeIndex ?? -1}
+          onActivateTab={goToTab}
+          onCloseTab={panes.closeTab}
+          onCloseOtherTabs={panes.closeOtherTabs}
+          onPromoteTab={panes.promoteTab}
+          onShowInfoFor={(id) => showInfo(id, false)}
           title={title}
           cwd={cwd}
           meta={selectedMeta}
@@ -1012,6 +1205,8 @@ export default function App() {
         onResetMaxLive={resetMaxLive}
         markdownCopy={markdownCopy}
         onSetMarkdownCopy={setMarkdownCopy}
+        tabsEnabled={tabsEnabled}
+        onSetTabsEnabled={setTabsEnabled}
       />
       <CapWarningModal capWarning={capWarning} onDismiss={() => setCapWarnDismissed(true)} />
       <ConversationInfoModal

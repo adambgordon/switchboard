@@ -269,6 +269,9 @@ export const IPC = {
   openExternal: 'shell:openExternal',
   linkContextMenu: 'shell:linkContextMenu', // renderer -> main: pop the native right-click menu for a link
   codeContextMenu: 'shell:codeContextMenu', // renderer -> main: pop the native right-click menu for inline code
+  tabContextMenu: 'shell:tabContextMenu', // renderer -> main: pop the native right-click menu for a tab; resolves with the chosen action
+  menuCloseTab: 'menu:closeTab', // push: ⌘W — the renderer closes the active tab, or asks main to close the window when there is none
+  windowClose: 'window:close', // renderer -> main: close the sender's window (⌘W with no tab to close)
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
@@ -304,6 +307,9 @@ export type UpdateCheck =
   | { status: 'current' }
   | { status: 'behind' }
   | { status: 'unknown'; reason: string }
+
+/** What the native tab context menu resolved to. */
+export type TabMenuAction = 'close' | 'closeOthers' | 'details'
 
 /** Terminal result of an in-app update run (git pull + npm run setup). */
 export interface UpdateRunResult {
@@ -364,6 +370,18 @@ export interface SwitchboardApi {
   /** Pop the NATIVE macOS context menu for an inline code span (Copy Code). Same reasoning as above,
    *  and the same one-gesture-one-payload intent: the code, without its backticks. */
   codeContextMenu(code: string): void
+  /** Pop the NATIVE macOS context menu for a tab and resolve with the chosen action (null if
+   *  dismissed). Native for the same reasons as the two above, plus one specific to a strip: an OS
+   *  menu is not anchored to a DOM node, so the strip scrolling out from under it cannot close it.
+   *  `closeOthers` / `details` gate the items that would otherwise be offered as no-ops. */
+  tabContextMenu(opts: { closeOthers: boolean; details: boolean }): Promise<TabMenuAction | null>
+  /** ⌘W: main pushes this to the focused window, which closes its active tab — or calls
+   *  `closeWindow()` when it has none, so the shortcut still behaves like macOS expects. Returns an
+   *  unsubscribe fn. */
+  onMenuCloseTab(cb: () => void): () => void
+  /** Close the window this renderer belongs to. The ⌘W fallback, and what makes a detached window
+   *  closable from inside. */
+  closeWindow(): void
   /** Match the window's native backgroundColor to the active theme's --paper, so a live resize
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void

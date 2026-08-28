@@ -66,6 +66,10 @@ interface Props {
   selectedSessionId: string | null
   onJump: (sessionId: string) => void
   onSelect: (sessionId: string) => void
+  /** Double-click a row — keep its tab. Undefined while tabs are switched off. */
+  onStick?: (sessionId: string) => void
+  /** ⌘+click a row — open a kept tab in the background. Undefined while tabs are switched off. */
+  onOpenInBackground?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
   // search — lives on the status line; opening it replaces the working/idle sub-label
   query: string
@@ -141,6 +145,8 @@ export default function TallyRail({
   selectedSessionId,
   onJump,
   onSelect,
+  onStick,
+  onOpenInBackground,
   onTogglePin,
   query,
   onQueryChange,
@@ -489,6 +495,8 @@ export default function TallyRail({
                     card={section.variant === 'card' && !!entry.pty}
                     onSelect={onSelect}
                     onJump={onJump}
+                    onStick={onStick}
+                    onOpenInBackground={onOpenInBackground}
                     onMarkUnread={onMarkUnread}
                     onOpenMenu={openRowMenuFromButton}
                     onContextMenu={openRowMenu}
