@@ -8,7 +8,7 @@ import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
 import { isUnlinkedRow } from '../lib/rowIdentity'
 import NewConversationMenu from './NewConversationMenu'
-import { Chevron, Close, Plus, Search, Pin, Info, Stop, Play } from './icons'
+import { Chevron, Close, Plus, Search, Pin, Info, SplitVertical, Stop, Play } from './icons'
 
 /** One row in the pane: a conversation that may be live, pinned, both, or neither. */
 export interface RailEntry {
@@ -70,6 +70,8 @@ interface Props {
   onStick?: (sessionId: string) => void
   /** ⌘+click a row — open a kept tab in the background. Undefined while tabs are switched off. */
   onOpenInBackground?: (sessionId: string) => void
+  /** ⇧+click a row, or the ⋮ menu's Open to the Side — show it in the other pane. */
+  onOpenToSide?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
   // search — lives on the status line; opening it replaces the working/idle sub-label
   query: string
@@ -147,6 +149,7 @@ export default function TallyRail({
   onSelect,
   onStick,
   onOpenInBackground,
+  onOpenToSide,
   onTogglePin,
   query,
   onQueryChange,
@@ -497,6 +500,7 @@ export default function TallyRail({
                     onJump={onJump}
                     onStick={onStick}
                     onOpenInBackground={onOpenInBackground}
+                    onOpenToSide={onOpenToSide}
                     onMarkUnread={onMarkUnread}
                     onOpenMenu={openRowMenuFromButton}
                     onContextMenu={openRowMenu}
@@ -555,6 +559,21 @@ export default function TallyRail({
             >
               <Info size={14} />
               <span>Session details…</span>
+            </button>
+          )}
+          {/* Sits with the benign items rather than behind the destructive divider: it opens a view,
+              it does not start or stop anything. Hidden on an unlinked row for the same reason the
+              three above are — a terminal with no conversation has no transcript to show beside one. */}
+          {onOpenToSide && !ctxMenu.unlinked && (
+            <button
+              className="sb-ctxmenu-item"
+              onClick={() => {
+                onOpenToSide(ctxMenu.id)
+                closeMenu()
+              }}
+            >
+              <SplitVertical size={14} />
+              <span>Open to the side</span>
             </button>
           )}
           {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**

@@ -1,4 +1,12 @@
-import { useCallback, useDeferredValue, useEffect, useRef, useState, type RefObject } from 'react'
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject
+} from 'react'
 import type { ConversationMeta, PtyState, Transcript } from '@shared/types'
 import type { ResolvedTheme } from '../lib/theme'
 import PaneHeader from './PaneHeader'
@@ -16,6 +24,13 @@ interface Props {
   paneIndex: number
   /** Whether this pane owns the keyboard — only its active tab reads fully selected. */
   paneFocused: boolean
+  /** Flex sizing for the split. Undefined when there is a single pane. */
+  style?: CSSProperties
+  /** A pointer landing anywhere in this pane hands it the keyboard. */
+  onPaneFocus?: () => void
+  /** Live, but its terminal is mounted in the other pane — one xterm per terminal, so this pane shows
+   *  the transcript and says where the terminal is rather than offering a toggle that cannot work. */
+  terminalElsewhere?: boolean
   /** Preferences → Application → Tabs and split view. False renders no strip at all. */
   showTabs: boolean
   tabs: TabDescriptor[]
@@ -117,6 +132,9 @@ export default function MainPane(props: Props) {
     selectedId,
     paneIndex,
     paneFocused,
+    style,
+    onPaneFocus,
+    terminalElsewhere,
     showTabs,
     tabs,
     activeTabIndex,
@@ -161,7 +179,11 @@ export default function MainPane(props: Props) {
   // not-live row click or ⌥⌘↑/↓ switch), so TranscriptView takes the keyboard like the terminal does
   // on a live one. Derived from selectedId — known instantly — so focus lands during the async
   // transcript load, not after.
-  const transcriptFocusKey = focusReq && focusReq.sessionId === selectedId ? focusReq.n : null
+  // Gated on `paneFocused` as well as the session: the same conversation can be the active tab of
+  // BOTH panes, and without this both transcripts would answer the same focus request and fight over
+  // the keyboard. Only the pane that has it may take it.
+  const transcriptFocusKey =
+    focusReq && focusReq.sessionId === selectedId && paneFocused ? focusReq.n : null
   // Dedup store for the transcript focus, kept HERE so it survives TranscriptView unmounting/remounting
   // (switching across a live conversation shown in its terminal unmounts it). Otherwise a remount resets
   // the dedup and a stale focusReq re-grabs focus on return — switching back to a previously-focused
@@ -233,7 +255,16 @@ export default function MainPane(props: Props) {
   }, [onEngage])
 
   return (
-    <main className="sb-pane" ref={paneRef} tabIndex={-1}>
+    <main
+      className={`sb-pane${paneFocused ? ' pane-focused' : ''}`}
+      ref={paneRef}
+      tabIndex={-1}
+      style={style}
+      // Capture phase: a pointer landing anywhere in this pane — strip, header, transcript, or the
+      // terminal — hands it the keyboard, before xterm or the transcript consume the event. It only
+      // records which pane is active, so nothing is prevented or stopped here.
+      onMouseDownCapture={onPaneFocus}
+    >
       {/* Tabs sit ABOVE the header: the strip says which conversations are open, the header describes
           the one you are in. The strip renders whenever the feature is on and this pane holds a tab —
           including while the welcome screen shows, since the tabs are still there to go back to. */}
@@ -259,6 +290,7 @@ export default function MainPane(props: Props) {
           view={view}
           pinned={pinned}
           unlinked={unlinked}
+          terminalElsewhere={terminalElsewhere}
           onTogglePin={onTogglePin}
           onResume={onResume}
           onShowHistory={onShowHistory}

@@ -24,6 +24,8 @@ interface Props {
   onStick?: (id: string) => void
   /** ⌘+click — open a kept tab in the background, without going there (the browser gesture). */
   onOpenInBackground?: (id: string) => void
+  /** ⇧+click — open it in the OTHER pane, creating the split if there isn't one. */
+  onOpenToSide?: (id: string) => void
   /** Option+click on a live row — always mark it unread (never toggles). */
   onMarkUnread?: (id: string) => void
   /** Open the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume) by clicking the ⋮
@@ -45,6 +47,7 @@ function ConversationRowImpl({
   onJump,
   onStick,
   onOpenInBackground,
+  onOpenToSide,
   onMarkUnread,
   onOpenMenu,
   onContextMenu
@@ -82,6 +85,12 @@ function ConversationRowImpl({
           if (live && onMarkUnread) onMarkUnread(meta.sessionId)
           return
         }
+        if (e.shiftKey && onOpenToSide) {
+          // ⇧+click = open beside. Checked before ⌘ so ⇧⌘+click reads as the side open rather than
+          // silently doing the background one.
+          onOpenToSide(meta.sessionId)
+          return
+        }
         if (e.metaKey && onOpenInBackground) {
           // ⌘+click = open a kept tab without going there. Checked before the live/not-live split
           // because it means the same thing on either kind of row, and it must not also navigate.
@@ -94,7 +103,7 @@ function ConversationRowImpl({
       // click, click, dblclick) each re-open the same conversation, which is idempotent — the second
       // lands on the current history stop and changes nothing — so no click-count dedupe is needed.
       onDoubleClick={(e) => {
-        if (e.altKey || e.metaKey || !onStick) return
+        if (e.altKey || e.metaKey || e.shiftKey || !onStick) return
         onStick(meta.sessionId)
       }}
       onContextMenu={(e) => {

@@ -19,6 +19,8 @@ interface Props {
    * so they are hidden rather than rendered as controls that quietly do nothing. Mirrors the ⋮ menu.
    */
   unlinked: boolean
+  /** Live, but its terminal is mounted in the other pane — disables the Terminal toggle here. */
+  terminalElsewhere?: boolean
   onTogglePin: () => void
   onResume: () => void
   onShowHistory: () => void
@@ -49,6 +51,7 @@ export default function PaneHeader({
   view,
   pinned,
   unlinked,
+  terminalElsewhere,
   onTogglePin,
   onResume,
   onShowHistory,
@@ -157,9 +160,14 @@ export default function PaneHeader({
                 <TranscriptIcon size={13} />
                 Formatted
               </button>
+              {/* A terminal exists in exactly one pane, so in the other pane this toggle is shown
+                  DISABLED with a tip saying where it is — rather than offered and then silently
+                  refusing, or hidden, which would make the pane look like it holds a dead session. */}
               <button
                 className={`sb-seg-btn${view === 'terminal' ? ' active' : ''}`}
                 onClick={onGoLive}
+                disabled={terminalElsewhere}
+                data-tip={terminalElsewhere ? 'Terminal is open in the other pane' : undefined}
               >
                 {/* a static solid cobalt dot — marks the live session; turn-state animation
                     lives on the left-pane rows, not here */}
