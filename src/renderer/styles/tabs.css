@@ -45,7 +45,9 @@
   /* The three-step ink ladder used by every other control group in the app: rest --ink-faint,
      hover --ink-soft, active --ink. */
   color: var(--ink-faint);
-  cursor: default;
+  /* The whole tab is the click target, so the whole tab shows the hand — not just the close button.
+     A default cursor over a control that activates on click reads as inert. */
+  cursor: pointer;
   user-select: none;
   position: relative;
   transition:

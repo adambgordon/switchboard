@@ -16,6 +16,13 @@
   min-width: 0;
   background: var(--paper-pane);
   position: relative;
+  /* The header collapses against the PANE's width, not the window's — the two part company the moment
+     there is a split, and it is the pane that actually crowds. A media query cannot see that.
+     Safe to establish here: `inline-size` containment makes this a containing block for fixed-position
+     descendants, and a pane has none — the tooltip, the launch veil, modal scrims and the row menus all
+     render at the app root or inside the rail. */
+  container-type: inline-size;
+  container-name: pane;
 }
 /* Which pane has the keyboard is shown IN the pane, never in the rail — the rail rings only the
    focused pane's active tab, so selection stays the single tier the design requires. The primary cue
@@ -42,6 +49,25 @@
   border-bottom: 1px solid var(--rule);
   flex-shrink: 0;
   background: var(--paper-pane);
+  /* A FIXED height, so two panes' headers line up by construction instead of by their contents
+     happening to measure the same. They did not: the action row never shrinks, so a narrow pane
+     squeezed it until a button label wrapped to a second line, and that pane's header grew while its
+     neighbour's did not — the content areas beside each other then started at different heights. */
+  height: 66px;
+  box-sizing: border-box;
+}
+/* Nothing in the action row may wrap. This is what actually caused the mismatch above, and with a
+   fixed height a wrapped label would now be clipped rather than merely misaligned. */
+.sb-pane-actions,
+.sb-pane-actions button {
+  white-space: nowrap;
+}
+/* A collapsible meta item and its own leading separator, so hiding the item takes the `·` with it. */
+.sb-pane-meta-part {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .sb-pane-id {
   flex: 1;
@@ -93,6 +119,42 @@
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+}
+
+/* ---- header collapse, in stages, against the PANE's width ----
+   Ordered by what a crowded header can most afford to lose. Each stage removes something whose
+   meaning is still available elsewhere, so narrowing costs legibility and never function. */
+
+/* Stage 1 — the path and the branch. The longest items in the meta row, and the least load-bearing:
+   the title above already says which conversation this is, and both are in Session Details. */
+@container pane (max-width: 560px) {
+  .sb-pane-part-cwd,
+  .sb-pane-part-branch {
+    display: none;
+  }
+}
+
+/* Stage 2 — the view toggle drops to icons. By far the widest control in the row, and its two icons
+   (a document, and the live dot) already carry the distinction; the labels are restated as tooltips
+   and aria-labels, so nothing is lost but width. */
+@container pane (max-width: 440px) {
+  .sb-seg-label {
+    display: none;
+  }
+  .sb-seg-btn {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+}
+
+/* Stage 3 — Find and Pin leave the header. Deliberately NOT folded into an overflow menu: both keep a
+   full equivalent already (⌘F opens find; pinning is on the rail row's own menu), so a new popover
+   would be a third way to reach two things that have two. */
+@container pane (max-width: 360px) {
+  .sb-pane-find,
+  .sb-pane-pin {
+    display: none;
+  }
 }
 .sb-pane-pin {
   display: inline-flex;

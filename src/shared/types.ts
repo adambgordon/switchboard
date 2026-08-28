@@ -339,7 +339,7 @@ export type UpdateCheck =
   | { status: 'unknown'; reason: string }
 
 /** What the native tab context menu resolved to. */
-export type TabMenuAction = 'close' | 'closeOthers' | 'details'
+export type TabMenuAction = 'close' | 'closeOthers' | 'details' | 'splitRight' | 'newWindow'
 
 /** What a freshly-created window should show. Requested once on mount via `IPC.windowGetInit`. */
 export interface WindowInit {
@@ -418,7 +418,14 @@ export interface SwitchboardApi {
    *  dismissed). Native for the same reasons as the two above, plus one specific to a strip: an OS
    *  menu is not anchored to a DOM node, so the strip scrolling out from under it cannot close it.
    *  `closeOthers` / `details` gate the items that would otherwise be offered as no-ops. */
-  tabContextMenu(opts: { closeOthers: boolean; details: boolean }): Promise<TabMenuAction | null>
+  tabContextMenu(opts: {
+    closeOthers: boolean
+    details: boolean
+    /** Offer to send this tab to the other pane — creating the split if there is none. Omitted when
+     *  the tab is already in the right-hand pane, or when moving it would just empty its own. */
+    splitRight: boolean
+    newWindow: boolean
+  }): Promise<TabMenuAction | null>
   /** ⌘W: main pushes this to the focused window, which closes its active tab — or calls
    *  `closeWindow()` when it has none, so the shortcut still behaves like macOS expects. Returns an
    *  unsubscribe fn. */

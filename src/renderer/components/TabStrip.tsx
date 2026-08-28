@@ -29,11 +29,18 @@ interface Props {
   /** Whether this pane owns the keyboard. Only the focused pane's active tab reads fully active, so
    *  a split never shows two equally-selected tabs. */
   focused: boolean
+  /** Whether sending a tab from THIS pane to the other one would change anything — false in the
+   *  right-hand pane, and false when the pane holds a single tab (moving it would only empty this
+   *  pane, which the layout then collapses, so the split never happens). */
+  canSplitRight: boolean
   onActivate: (paneIndex: number, index: number) => void
   onClose: (paneIndex: number, index: number) => void
   onCloseOthers: (paneIndex: number, index: number) => void
   onPromote: (sessionId: string, paneIndex: number) => void
   onShowInfo: (sessionId: string) => void
+  /** Move the tab to the other pane, creating the split when there is none. */
+  onSplitRight: (sessionId: string, paneIndex: number) => void
+  onOpenInNewWindow: (sessionId: string) => void
 }
 
 interface ItemProps {
@@ -130,11 +137,14 @@ export default function TabStrip({
   tabs,
   activeIndex,
   focused,
+  canSplitRight,
   onActivate,
   onClose,
   onCloseOthers,
   onPromote,
-  onShowInfo
+  onShowInfo,
+  onSplitRight,
+  onOpenInNewWindow
 }: Props) {
   const stripRef = useRef<HTMLDivElement>(null)
   // Past the row cap the strip becomes a vertical scroller, and it carries the same hide-at-rest
@@ -158,13 +168,17 @@ export default function TabStrip({
     if (!tab) return
     const choice = await window.api.tabContextMenu({
       closeOthers: tabs.length > 1,
-      // An unlinked terminal has no conversation, so there are no details to show — hide the item
-      // rather than offer one that silently does nothing.
-      details: !tab.unlinked
+      // An unlinked terminal has no conversation, so there are no details to show and nothing to
+      // reopen elsewhere by id — hide both rather than offer controls that silently do nothing.
+      details: !tab.unlinked,
+      splitRight: canSplitRight,
+      newWindow: !tab.unlinked
     })
     if (choice === 'close') onClose(paneIndex, index)
     else if (choice === 'closeOthers') onCloseOthers(paneIndex, index)
     else if (choice === 'details') onShowInfo(tab.sessionId)
+    else if (choice === 'splitRight') onSplitRight(tab.sessionId, paneIndex)
+    else if (choice === 'newWindow') onOpenInNewWindow(tab.sessionId)
   }
 
   return (

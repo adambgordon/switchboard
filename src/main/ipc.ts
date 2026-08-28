@@ -280,7 +280,7 @@ export function popCodeContextMenu(code: string, win: BrowserWindow | null): voi
  * and the item is reached by pointer anyway.
  */
 export function popTabContextMenu(
-  opts: { closeOthers: boolean; details: boolean },
+  opts: { closeOthers: boolean; details: boolean; splitRight: boolean; newWindow: boolean },
   win: BrowserWindow | null
 ): Promise<TabMenuAction | null> {
   return new Promise((resolve) => {
@@ -293,8 +293,18 @@ export function popTabContextMenu(
     const pick = (action: TabMenuAction) => () => finish(action)
     const items: MenuItemConstructorOptions[] = [{ label: 'Close Tab', click: pick('close') }]
     if (opts.closeOthers) items.push({ label: 'Close Other Tabs', click: pick('closeOthers') })
-    // Hidden rather than disabled for an unlinked terminal, matching the row menu: a control that
-    // silently does nothing is worse than an absent one.
+    // Where a tab can be sent. Both are hidden rather than disabled when they do not apply, matching
+    // `details` and the row menu: a control that silently does nothing is worse than an absent one.
+    // "Split Right" covers both creating the split and adding to an existing one — the renderer
+    // decides which, since only it knows the layout, and only offers the item when the result differs
+    // from where the tab already is.
+    if (opts.splitRight || opts.newWindow) {
+      items.push({ type: 'separator' })
+      if (opts.splitRight) items.push({ label: 'Split Right', click: pick('splitRight') })
+      if (opts.newWindow) {
+        items.push({ label: 'Open in New Window', click: pick('newWindow') })
+      }
+    }
     if (opts.details) {
       items.push({ type: 'separator' }, { label: 'Session Details…', click: pick('details') })
     }
@@ -417,8 +427,10 @@ export function registerIpc(): void {
   )
   ipcMain.handle(
     IPC.tabContextMenu,
-    (e, opts: { closeOthers: boolean; details: boolean }) =>
-      popTabContextMenu(opts, BrowserWindow.fromWebContents(e.sender))
+    (
+      e,
+      opts: { closeOthers: boolean; details: boolean; splitRight: boolean; newWindow: boolean }
+    ) => popTabContextMenu(opts, BrowserWindow.fromWebContents(e.sender))
   )
   // The ⌘W fallback: the renderer asks for its own window to close when it has no tab to close.
   ipcMain.on(IPC.windowClose, (e) => BrowserWindow.fromWebContents(e.sender)?.close())

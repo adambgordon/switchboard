@@ -24,8 +24,10 @@ interface Props {
   onStick?: (id: string) => void
   /** ⌘+click — open a kept tab in the background, without going there (the browser gesture). */
   onOpenInBackground?: (id: string) => void
-  /** ⇧+click — open it in the OTHER pane, creating the split if there isn't one. */
+  /** ⇧⌘+click — open it in the OTHER pane, creating the split if there isn't one. */
   onOpenToSide?: (id: string) => void
+  /** ⇧+click — open it in a NEW WINDOW, as ⇧+click does in a browser. */
+  onOpenInNewWindow?: (id: string) => void
   /** Option+click on a live row — always mark it unread (never toggles). */
   onMarkUnread?: (id: string) => void
   /** Open the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume) by clicking the ⋮
@@ -48,6 +50,7 @@ function ConversationRowImpl({
   onStick,
   onOpenInBackground,
   onOpenToSide,
+  onOpenInNewWindow,
   onMarkUnread,
   onOpenMenu,
   onContextMenu
@@ -75,10 +78,16 @@ function ConversationRowImpl({
           if (live && onMarkUnread) onMarkUnread(meta.sessionId)
           return
         }
-        if (e.shiftKey && onOpenToSide) {
-          // ⇧+click = open beside. Checked before ⌘ so ⇧⌘+click reads as the side open rather than
-          // silently doing the background one.
+        // The compound chord is tested BEFORE either of its parts, or ⇧⌘ would be swallowed by
+        // whichever single-modifier branch came first. Browser convention sets the two singles:
+        // ⌘ opens a tab, ⇧ opens a window. Side-by-side has no browser analogue, so it takes the
+        // compound — and it is on the ⋮ and right-click menus besides.
+        if (e.shiftKey && e.metaKey && onOpenToSide) {
           onOpenToSide(meta.sessionId)
+          return
+        }
+        if (e.shiftKey && onOpenInNewWindow) {
+          onOpenInNewWindow(meta.sessionId)
           return
         }
         if (e.metaKey && onOpenInBackground) {

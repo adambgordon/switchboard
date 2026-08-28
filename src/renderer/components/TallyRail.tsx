@@ -515,6 +515,7 @@ export default function TallyRail({
                     onStick={onStick}
                     onOpenInBackground={onOpenInBackground}
                     onOpenToSide={onOpenToSide}
+                    onOpenInNewWindow={onOpenInNewWindow}
                     onMarkUnread={onMarkUnread}
                     onOpenMenu={openRowMenuFromButton}
                     onContextMenu={openRowMenu}

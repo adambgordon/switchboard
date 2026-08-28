@@ -948,6 +948,34 @@ export default function App() {
     },
     [panes.splitPane, land, isUnlinkedId, markRead, requestFocus]
   )
+  // Send an EXISTING tab to the other pane, creating the split when there is none. Distinct from
+  // openToSide, which opens a conversation over there and leaves whatever was here alone: this is a
+  // move, so the source pane gives the tab up.
+  const splitRightTab = useCallback(
+    (sessionId: string, fromPane: number) => {
+      const l = paneLayoutRef.current
+      const index = l.panes[fromPane]?.tabs.findIndex((t) => t.sessionId === sessionId) ?? -1
+      if (index < 0) return
+      // "Right" is pane 1: the menu item is offered only from the left pane (see canSplitRight), so
+      // there is no other direction to resolve.
+      if (l.panes.length < 2) panes.splitPane()
+      panes.moveTab(
+        { pane: fromPane, index },
+        { pane: 1, index: l.panes[1]?.tabs.length ?? 0 }
+      )
+      panes.focusPane(1)
+      if (!isUnlinkedId(sessionId)) markRead(sessionId)
+      requestFocus(sessionId)
+    },
+    [panes.splitPane, panes.moveTab, panes.focusPane, isUnlinkedId, markRead, requestFocus]
+  )
+  // Whether "Split Right" from a given pane would change anything. False from the right pane, and
+  // false when the left holds a single tab: moving its only tab empties it, the layout then collapses
+  // the empty pane, and the net effect is an unsplit rather than a split.
+  const canSplitRightFrom = useCallback(
+    (index: number): boolean => index === 0 && (paneLayout.panes[0]?.tabs.length ?? 0) >= 2,
+    [paneLayout.panes]
+  )
   // Open a conversation in its own window. Explicitly does NOT move its terminal: the new window
   // shows the transcript and offers to bring the terminal over, so asking for a second view of a
   // session you are typing in never yanks the terminal out from under you.
@@ -1420,6 +1448,9 @@ export default function App() {
                   onCloseTab={panes.closeTab}
                   onCloseOtherTabs={panes.closeOtherTabs}
                   onPromoteTab={panes.promoteTab}
+                  canSplitRight={canSplitRightFrom(i)}
+                  onSplitRightTab={splitRightTab}
+                  onOpenTabInNewWindow={openInNewWindow}
                   onShowInfoFor={(id) => showInfo(id, false)}
                   title={v.title}
                   cwd={v.cwd}

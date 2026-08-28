@@ -41,6 +41,10 @@ interface Props {
   onCloseTab: (pane: number, index: number) => void
   onCloseOtherTabs: (pane: number, index: number) => void
   onPromoteTab: (sessionId: string, pane?: number) => void
+  /** Whether "Split Right" would change anything from this pane — see TabStrip.canSplitRight. */
+  canSplitRight: boolean
+  onSplitRightTab: (sessionId: string, pane: number) => void
+  onOpenTabInNewWindow: (sessionId: string) => void
   /** Open the conversation-info modal for an arbitrary conversation (the tab menu's Session Details). */
   onShowInfoFor: (sessionId: string) => void
   title: string
@@ -145,6 +149,9 @@ export default function MainPane(props: Props) {
     onCloseTab,
     onCloseOtherTabs,
     onPromoteTab,
+    canSplitRight,
+    onSplitRightTab,
+    onOpenTabInNewWindow,
     onShowInfoFor,
     title,
     cwd,
@@ -282,6 +289,9 @@ export default function MainPane(props: Props) {
           onCloseOthers={onCloseOtherTabs}
           onPromote={onPromoteTab}
           onShowInfo={onShowInfoFor}
+          canSplitRight={canSplitRight}
+          onSplitRight={onSplitRightTab}
+          onOpenInNewWindow={onOpenTabInNewWindow}
         />
       )}
       {selectedId && (
