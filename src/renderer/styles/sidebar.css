@@ -38,6 +38,14 @@
   align-self: center;
   flex-shrink: 0;
 }
+/* Marker for a conversation whose tab lives in another window. Ink, not cobalt — it says where the
+   conversation is, which is nothing to do with whether it is alive. */
+.sb-row-elsewhere {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-ghost);
+}
+
 .sb-row .sb-dot {
   transition: opacity var(--dur-fast);
 }

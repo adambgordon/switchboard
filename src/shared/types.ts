@@ -312,6 +312,15 @@ export const IPC = {
   tabDragOver: 'tab:dragOver', // push: this window is under a tab drag from elsewhere
   tabDragLeave: 'tab:dragLeave', // push: it no longer is
   tabDropHere: 'tab:dropHere', // push (sessionId): adopt this conversation as a tab
+  // One conversation holds ONE tab across the whole app. Only main can see every window, so it keeps
+  // the register of which window holds what and answers the two questions a renderer cannot: "is this
+  // open somewhere else" and "then show it / hand it over".
+  tabsChanged: 'tab:changed', // renderer -> main: the full set of conversations this window has tabs for
+  tabsElsewhere: 'tab:elsewhere', // push (sessionIds): conversations OTHER windows hold tabs for
+  conversationReveal: 'tab:reveal', // renderer -> main: focus the window holding this and show its tab
+  conversationClaim: 'tab:claim', // renderer -> main: tell that window to give the tab up
+  tabActivate: 'tab:activate', // push (sessionId): bring your tab for this conversation forward
+  tabRelease: 'tab:release', // push (sessionId): close your tab for this conversation
   ptyClaim: 'pty:claim', // renderer -> main: take ownership of a terminal from another window
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
@@ -483,6 +492,24 @@ export interface SwitchboardApi {
   onTabDragLeave(cb: () => void): () => void
   /** Adopt a conversation dragged in from another window, as a kept tab in the focused pane. */
   onTabDropHere(cb: (sessionId: string) => void): () => void
+
+  // ---- one tab per conversation, across every window ----
+  /** Report the full set of conversations this window holds tabs for. Sent whenever that set changes,
+   *  so main can keep its register without tracking individual opens and closes. */
+  tabsChanged(sessionIds: string[]): void
+  /** The conversations OTHER windows hold tabs for. Lets this window decide locally — and
+   *  synchronously — whether an open should reveal rather than duplicate. */
+  onTabsElsewhere(cb: (sessionIds: string[]) => void): () => void
+  /** Focus the window holding this conversation and bring its tab forward. For an implicit open ("show
+   *  me this"), where the tab already exists and should not be relocated. */
+  revealConversation(sessionId: string): void
+  /** Ask whichever window holds this conversation to give its tab up, because this window is about to
+   *  place it. For an explicit placement, where relocating IS what was asked for. */
+  claimConversation(sessionId: string): void
+  /** Another window asked for our tab to be shown. */
+  onTabActivate(cb: (sessionId: string) => void): () => void
+  /** Another window is taking this conversation — close our tab for it. */
+  onTabRelease(cb: (sessionId: string) => void): () => void
   /** Take ownership of a terminal currently owned by another window, so this one can show it. The
    *  previous owner's xterm unmounts; ours mounts and repaints on its first fit. */
   claimTerminal(ptyId: string): void

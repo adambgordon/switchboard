@@ -16,7 +16,14 @@ import { bindActions } from './lib/bindPolicy'
 import { useLayout } from './lib/useLayout'
 import { usePaneLayout } from './lib/usePaneLayout'
 import { useTabsEnabled } from './lib/useTabsEnabled'
-import { SPLIT_LIMITS, locateTab, paneActiveId, stepTab, type OpenMode } from './lib/paneModel'
+import {
+  SPLIT_LIMITS,
+  locateTab,
+  openSessionIds,
+  paneActiveId,
+  stepTab,
+  type OpenMode
+} from './lib/paneModel'
 import { nextPtyHomes, partitionPtys } from './lib/ptyHome'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
 import { useNewConvoDefault } from './lib/useNewConvoDefault'
@@ -248,6 +255,13 @@ export default function App() {
   // Read by subscriptions that must not re-subscribe on every layout change.
   const paneLayoutRef = useRef(paneLayout)
   paneLayoutRef.current = paneLayout
+
+  // Conversations OTHER windows hold tabs for, as reported by main. Held in a ref as well as state:
+  // `land` needs to consult it synchronously on every navigation, while the rail reads the state to
+  // mark the rows so a click that jumps to another window is expected rather than startling.
+  const [openElsewhere, setOpenElsewhere] = useState<Set<string>>(() => new Set())
+  const openElsewhereRef = useRef(openElsewhere)
+  openElsewhereRef.current = openElsewhere
   const tabsEnabledRef = useRef(tabsEnabled)
   tabsEnabledRef.current = tabsEnabled
 
@@ -797,6 +811,18 @@ export default function App() {
    */
   const land = useCallback(
     (id: string, mode: OpenMode, opts?: { pane?: number; focus?: boolean }) => {
+      // One conversation, one tab — across windows as well as across panes. Within this window the
+      // reducer handles it; another window's tab is only knowable through main, so it is decided here.
+      // The rule matches the reducer's exactly: an implicit open reveals the tab where it is, an
+      // explicit placement takes it. Read from a ref and answered synchronously — a round trip before
+      // opening a tab would put main's latency on the most-travelled path in the app.
+      if (openElsewhereRef.current.has(id) && !locateTab(paneLayoutRef.current, id)) {
+        if (opts?.pane === undefined) {
+          window.api.revealConversation(id)
+          return
+        }
+        window.api.claimConversation(id)
+      }
       panes.openTab(id, tabsEnabled ? mode : 'preview', opts)
     },
     [panes.openTab, tabsEnabled]
@@ -1031,6 +1057,39 @@ export default function App() {
       }),
     [land, isUnlinkedId, markRead, requestFocus]
   )
+  // Keep main's register of which window holds which conversation current. Keyed on the SET, not on the
+  // layout: activating a tab, reordering the strip and resizing the split all leave the set alone, and
+  // this should not chatter for any of them.
+  const openIdsKey = useMemo(
+    () => [...openSessionIds(paneLayout)].sort().join(' '),
+    [paneLayout]
+  )
+  useEffect(() => {
+    window.api.tabsChanged(openIdsKey ? openIdsKey.split(' ') : [])
+  }, [openIdsKey])
+
+  useEffect(() => {
+    const offElsewhere = window.api.onTabsElsewhere((ids: string[]) => {
+      setOpenElsewhere(new Set(ids))
+    })
+    // Another window asked us to show a conversation we hold. `openTab` on an existing tab activates
+    // it and focuses its pane — main has already raised the window.
+    const offActivate = window.api.onTabActivate((sessionId: string) => {
+      if (locateTab(paneLayoutRef.current, sessionId)) panes.openTab(sessionId, 'persistent')
+    })
+    // Another window is taking it. Give the tab up — that is what makes an explicit placement a move
+    // rather than a copy.
+    const offRelease = window.api.onTabRelease((sessionId: string) => {
+      const at = locateTab(paneLayoutRef.current, sessionId)
+      if (at) panes.closeTab(at.pane, at.index)
+    })
+    return () => {
+      offElsewhere()
+      offActivate()
+      offRelease()
+    }
+  }, [panes.openTab, panes.closeTab])
+
   // Show that this window will accept a tab currently being dragged over it. Driven by main, because
   // this window receives no pointer events at all while another one holds the drag.
   useEffect(() => {
@@ -1413,6 +1472,7 @@ export default function App() {
             onJump={clickLive}
             onSelect={clickConversation}
             onStick={tabsEnabled ? stickConversation : undefined}
+            openElsewhere={openElsewhere}
             onOpenToSide={tabsEnabled ? openToSide : undefined}
             onOpenInNewWindow={tabsEnabled ? moveToNewWindow : undefined}
             onTogglePin={togglePinGated}

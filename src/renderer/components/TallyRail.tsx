@@ -74,6 +74,9 @@ interface Props {
   }
   /** True during the initial conversation index, before sections are populated. */
   loading: boolean
+  /** Conversations another window holds tabs for — those rows are marked, since clicking one raises
+   *  that window instead of opening here. */
+  openElsewhere: Set<string>
   selectedSessionId: string | null
   onJump: (sessionId: string) => void
   onSelect: (sessionId: string) => void
@@ -155,6 +158,7 @@ export default function TallyRail({
   sections,
   live,
   loading,
+  openElsewhere,
   selectedSessionId,
   onJump,
   onSelect,
@@ -505,6 +509,7 @@ export default function TallyRail({
                     live={entry.pty}
                     liveState={entry.liveState}
                     pinned={entry.pinned}
+                    elsewhere={openElsewhere.has(entry.sessionId)}
                     showCwd
                     card={section.variant === 'card' && !!entry.pty}
                     onSelect={onSelect}

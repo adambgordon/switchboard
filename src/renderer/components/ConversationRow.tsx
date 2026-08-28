@@ -3,7 +3,7 @@ import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { displayTitleForRow, isParkedOnlyRow, liveDotClass } from '../lib/rowIdentity'
-import { DashedCircle, Dots } from './icons'
+import { DashedCircle, Dots, NewWindow } from './icons'
 import AgentLogo from './AgentLogo'
 
 interface Props {
@@ -13,6 +13,10 @@ interface Props {
   /** Resolved liveness for the dot (working / asking / awaiting / quiet); null when not live. */
   liveState?: LiveState | null
   pinned: boolean
+  /** Another window holds this conversation's tab, so clicking the row raises THAT window rather than
+   *  opening it here. Marked, because a click that brings a different window forward is startling
+   *  when nothing said it would. */
+  elsewhere?: boolean
   showCwd?: boolean
   /** Raised card chrome — used by the rail's Pinned/Live sections. */
   card?: boolean
@@ -42,6 +46,7 @@ function ConversationRowImpl({
   live,
   liveState,
   pinned,
+  elsewhere,
   showCwd,
   card,
   onSelect,
@@ -136,6 +141,19 @@ function ConversationRowImpl({
           </span>
           <span className="sb-sep">·</span>
           <span className="mono">{meta.messageCount} msg</span>
+          {elsewhere && (
+            <>
+              <span className="sb-sep">·</span>
+              <span
+                className="sb-row-elsewhere"
+                data-tip="Open in another window — click to go there"
+                role="img"
+                aria-label="Open in another window"
+              >
+                <NewWindow size={11} />
+              </span>
+            </>
+          )}
           {showCwd && (
             <>
               <span className="sb-sep">·</span>

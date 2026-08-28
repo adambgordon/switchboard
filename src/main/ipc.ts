@@ -75,6 +75,40 @@ export function setWindowOpener(fn: (init?: WindowInit) => void): void {
  */
 let tabDrag: { sourceId: number; sessionId: string; hoveringId: number | null } | null = null
 
+/**
+ * Which window holds the tab for each conversation.
+ *
+ * One conversation holds one tab across the whole app, and no renderer can enforce that alone — a
+ * window can see its own panes and nothing else. Main keeps the register instead, built from each
+ * window reporting its full set on change rather than from individual opens and closes: a set is
+ * idempotent, so a dropped or reordered message cannot leave the register describing tabs that no
+ * longer exist. Same shape as `ptyOwner` above, and released by the same hook.
+ */
+const tabOwner = new Map<string, number>()
+
+/** Tell every window which conversations the OTHERS hold, so each can decide locally. */
+function emitTabsElsewhere(): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed()) continue
+    const mine = w.webContents.id
+    const elsewhere: string[] = []
+    for (const [sessionId, owner] of tabOwner) {
+      if (owner !== mine) elsewhere.push(sessionId)
+    }
+    // Per-recipient rather than broadcast: "elsewhere" means something different to each window, so
+    // there is no one message to send. Mirrors `emitActive`, and for the same reason.
+    w.webContents.send(IPC.tabsElsewhere, elsewhere)
+  }
+}
+
+function setWindowTabs(wcId: number, sessionIds: string[]): void {
+  for (const [sessionId, owner] of tabOwner) {
+    if (owner === wcId) tabOwner.delete(sessionId)
+  }
+  for (const sessionId of sessionIds) tabOwner.set(sessionId, wcId)
+  emitTabsElsewhere()
+}
+
 function sendToWindow(wcId: number | null, channel: string, ...args: unknown[]): void {
   if (wcId == null) return
   for (const w of BrowserWindow.getAllWindows()) {
@@ -126,6 +160,17 @@ export function releaseWindow(webContentsId: number): void {
   if (tabDrag && (tabDrag.sourceId === webContentsId || tabDrag.hoveringId === webContentsId)) {
     endTabDrag()
   }
+  // A closed window's tabs are gone with it. Without this the register keeps claiming it holds them,
+  // and every surviving window would refuse to open those conversations — revealing into a window
+  // that no longer exists.
+  let forgot = false
+  for (const [sessionId, owner] of tabOwner) {
+    if (owner === webContentsId) {
+      tabOwner.delete(sessionId)
+      forgot = true
+    }
+  }
+  if (forgot) emitTabsElsewhere()
   if (released) emitActive()
 }
 
@@ -533,6 +578,35 @@ export function registerIpc(): void {
     return 'detached'
   })
   ipcMain.on(IPC.tabDragCancel, () => endTabDrag())
+
+  // ---- one tab per conversation, across every window ----
+  ipcMain.on(IPC.tabsChanged, (e, sessionIds: string[]) => {
+    if (!Array.isArray(sessionIds)) return
+    setWindowTabs(
+      e.sender.id,
+      sessionIds.filter((id): id is string => typeof id === 'string' && !!id)
+    )
+  })
+  // "Show me this" for a conversation another window already holds: focus that window and bring its
+  // tab forward. The tab does NOT come here — the user asked to see the conversation, not to
+  // rearrange their windows.
+  ipcMain.on(IPC.conversationReveal, (e, sessionId: string) => {
+    const owner = tabOwner.get(sessionId)
+    if (owner == null || owner === e.sender.id) return
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w.isDestroyed() || w.webContents.id !== owner) continue
+      w.focus()
+      w.webContents.send(IPC.tabActivate, sessionId)
+    }
+  })
+  // An explicit placement (Open to the Side) for a conversation another window holds. Relocating is
+  // what was asked for, so that window gives the tab up; the caller opens it locally itself, and the
+  // register corrects itself when both windows report their sets.
+  ipcMain.on(IPC.conversationClaim, (e, sessionId: string) => {
+    const owner = tabOwner.get(sessionId)
+    if (owner == null || owner === e.sender.id) return
+    sendToWindow(owner, IPC.tabRelease, sessionId)
+  })
 
   // The ⌘W fallback: the renderer asks for its own window to close when it has no tab to close.
   ipcMain.on(IPC.windowClose, (e) => BrowserWindow.fromWebContents(e.sender)?.close())
