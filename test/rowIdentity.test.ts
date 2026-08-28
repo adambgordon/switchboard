@@ -4,6 +4,7 @@ import {
   displayTitleForRow,
   isParkedOnlyRow,
   isUnlinkedRow,
+  liveDotClass,
   resolveRowLiveState
 } from '../src/renderer/lib/rowIdentity'
 
@@ -170,5 +171,50 @@ describe('resolveRowLiveState', () => {
     expect(resolveRowLiveState(pty(), seen, 200, false, undefined)).toBe('quiet')
     expect(resolveRowLiveState(pty(), seen, 200, false, 150)).toBe('awaiting')
     expect(resolveRowLiveState(pty(), seen, 200, false, 50)).toBe('quiet')
+  })
+})
+
+describe('liveDotClass', () => {
+  // The same session is drawn in two places at once — a rail row and a tab — and a viewer reads the
+  // two as one claim about one session. This function is what makes them one claim rather than two,
+  // so what it pins is agreement: given identical inputs there is exactly one answer, and the
+  // unlinked gate cannot be skipped by whichever surface asks second.
+
+  it('gives no dot at all without a live terminal', () => {
+    // Asserted with a state that WOULD map to something, so this cannot pass by the state being empty.
+    expect(liveDotClass(null, meta(), 'working')).toBe(null)
+  })
+
+  it('maps each resolved liveness to its dot class', () => {
+    expect(liveDotClass(pty(), meta(), 'working')).toBe('busy')
+    expect(liveDotClass(pty(), meta(), 'asking')).toBe('asking')
+    expect(liveDotClass(pty(), meta(), 'quiet')).toBe('quiet')
+    expect(liveDotClass(pty(), meta(), 'awaiting')).toBe('awaiting')
+  })
+
+  it('marks an unlinked terminal unlinked, whatever state was resolved for it', () => {
+    // The gate has to run BEFORE the mapping. Each case passes a state that maps to a *different*
+    // class, so a version that mapped first and only then checked would return 'busy' / 'asking' here
+    // — the two orderings cannot produce the same answer, which is the point.
+    expect(
+      liveDotClass(pty({ agent: 'codex', provisional: true }), meta({ messageCount: 0 }), 'working')
+    ).toBe('unlinked')
+    expect(liveDotClass(pty({ parkedJob: PARKED }), meta({ messageCount: 0 }), 'asking')).toBe(
+      'unlinked'
+    )
+  })
+
+  it('still gives a real dot to a conversation that merely launched an agent', () => {
+    // The parked marker is never cleared, so an ordinary conversation carries it for life. Pinned
+    // here as well as on the predicate itself, because this is the surface a viewer actually sees.
+    expect(liveDotClass(pty({ parkedJob: PARKED }), meta({ messageCount: 3 }), 'working')).toBe('busy')
+  })
+
+  it('falls back to the process status when no state was resolved', () => {
+    // Both directions, so the fallback cannot be a constant. It is deliberately coarse — the process
+    // knows only whether it is working — which is why a resolved state is preferred: this branch
+    // cannot see `quiet` and so reports a seen session as unread.
+    expect(liveDotClass(pty({ status: 'busy' }), meta(), undefined)).toBe('busy')
+    expect(liveDotClass(pty({ status: 'idle' }), meta(), undefined)).toBe('awaiting')
   })
 })

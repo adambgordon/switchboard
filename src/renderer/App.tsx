@@ -34,7 +34,13 @@ import { searchConversations } from './lib/fuzzy'
 import { basename } from './lib/format'
 import { initPtyStream } from './lib/ptyStream'
 import { currentInputRequestedAt } from './lib/liveness'
-import { displayTitleForRow, isUnlinkedRow, resolveRowLiveState } from './lib/rowIdentity'
+import {
+  displayTitleForRow,
+  isParkedOnlyRow,
+  isUnlinkedRow,
+  liveDotClass,
+  resolveRowLiveState
+} from './lib/rowIdentity'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
 import type { TabDescriptor } from './components/TabStrip'
@@ -502,6 +508,19 @@ export default function App() {
     return s
   }, [view0.id, view1.id])
 
+  // THE composition of liveness for one session, hoisted so every surface reading it reads the same
+  // value: the rail's sections, the Live tally, both tab strips, and the read/unread toggle. It was
+  // previously hand-copied at each site, and `resolveRowLiveState` exists because one of those copies
+  // was written without the unlinked gate. The tab strip then repeated the mistake one level up —
+  // deriving `live: !!pty` and drawing a solid "finished, unseen" dot next to a rail row showing the
+  // hollow "idle" one, for the same session at the same moment. Two derivations of one fact are two
+  // claims about it, so there is one.
+  const liveStateFor = useCallback(
+    (pty: PtyState | null, meta: ConversationMeta, id: string): LiveState | null =>
+      resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && visibleIds.has(id), unread[id]),
+    [seen, unread, focused, visibleIds]
+  )
+
   // Live terminals partitioned by the pane that owns them. A terminal with no home yet appears in
   // NEITHER pane for one frame: mounting it in the wrong pane and moving it next frame would blank it,
   // and while it is unmounted the pty stream buffers its output rather than losing it.
@@ -519,13 +538,6 @@ export default function App() {
   )
 
   const railSections = useMemo<RailSection[]>(() => {
-    // Resolve a live row's liveness — null for rows with no live process, and null for an unlinked
-    // one (see resolveRowLiveState, which both other call sites in this file share). Such a row wears
-    // the hollow nothing-unread marker alongside `quiet`, while staying a distinct unlinked state in
-    // behavior and in the Live tally.
-    const stateFor = (pty: PtyState | null, meta: ConversationMeta, id: string): LiveState | null =>
-      resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && visibleIds.has(id), unread[id])
-
     const pinnedEntries: RailEntry[] = pinnedOrder
       .map((id) => {
         const pty = ptys.bySession.get(id) ?? null
@@ -533,7 +545,7 @@ export default function App() {
         // unindexed session still renders a full row. Drop truly stale pins.
         const meta = metaById.get(id) ?? (pty ? synthMeta(pty) : null)
         return meta
-          ? { sessionId: id, pty, meta, pinned: true, liveState: stateFor(pty, meta, id) }
+          ? { sessionId: id, pty, meta, pinned: true, liveState: liveStateFor(pty, meta, id) }
           : null
       })
       .filter((e): e is RailEntry => e !== null)
@@ -547,7 +559,7 @@ export default function App() {
         const pty = ptys.bySession.get(id)
         if (!pty || pinned.has(id)) return null
         const meta = metaById.get(id) ?? synthMeta(pty)
-        return { sessionId: id, pty, meta, pinned: false, liveState: stateFor(pty, meta, id) }
+        return { sessionId: id, pty, meta, pinned: false, liveState: liveStateFor(pty, meta, id) }
       })
       .filter((e): e is RailEntry => e !== null)
 
@@ -565,7 +577,7 @@ export default function App() {
       ? all.map((s) => ({ ...s, entries: s.entries.filter((e) => matchIds.has(e.sessionId)) }))
       : all
     return scoped.filter((s) => s.entries.length > 0)
-  }, [pinned, pinnedOrder, liveOrder, metaById, ptys.bySession, allConversations, matchIds, seen, unread, visibleIds, focused])
+  }, [pinned, pinnedOrder, liveOrder, metaById, ptys.bySession, allConversations, matchIds, liveStateFor])
 
   // Live-session tally over ALL live sessions — never the search-filtered rail set, so the rail's
   // count + status line reflect everything running even while a query narrows the visible rows.
@@ -582,13 +594,7 @@ export default function App() {
     // wrong-dot report this work exists to fix. Sharing the hollow visual does not fold it into idle.
     let unlinked = 0
     for (const p of ptys.active) {
-      const st = resolveRowLiveState(
-        p,
-        metaById.get(p.sessionId) ?? synthMeta(p),
-        seen[p.sessionId] ?? 0,
-        focused && visibleIds.has(p.sessionId),
-        unread[p.sessionId]
-      )
+      const st = liveStateFor(p, metaById.get(p.sessionId) ?? synthMeta(p), p.sessionId)
       // Every `p` here is live by construction, so the only way to get no state is the unlinked
       // gate — which makes this bucket definitionally "the rows that were given no dot" rather
       // than a second reading of the predicate that could drift from the first.
@@ -599,7 +605,7 @@ export default function App() {
       else idle++
     }
     return { count: ptys.active.length, working, asking, unread: unreadCount, idle, unlinked }
-  }, [ptys.active, metaById, seen, unread, focused, visibleIds])
+  }, [ptys.active, metaById, liveStateFor])
 
   // Capacity modal: warn once the live set reaches the configured cap (maxLive). `capWarnDismissed`
   // silences only the current episode — the re-arm effect clears it once the count drops back below
@@ -643,14 +649,23 @@ export default function App() {
           return {
             sessionId: tab.sessionId,
             title: pty && meta ? displayTitleForRow(pty, meta) : meta?.title ?? 'Conversation',
-            agent: meta?.agent ?? pty?.agent ?? 'claude',
+            // The hover carries the rail row's preview line, since a tab truncates far harder than a
+            // row does. A row falls back to a "No preview" placeholder to hold its height; a tooltip
+            // has no height to hold, so absent a real preview the second line is simply omitted
+            // rather than spending it saying there is nothing to say.
+            subtitle:
+              meta && pty && isParkedOnlyRow(pty, meta)
+                ? 'Terminal only — work is in a background agent'
+                : meta?.preview ?? null,
             preview: tab.preview,
-            live: !!pty,
+            // Null meta implies null pty (meta falls back to the pty's stand-in whenever one exists),
+            // so this resolves to "no dot" for exactly the sessions that have no state to report.
+            dot: meta ? liveDotClass(pty, meta, liveStateFor(pty, meta, tab.sessionId)) : null,
             unlinked: isUnlinkedId(tab.sessionId)
           }
         })
       ),
-    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId]
+    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor]
   )
 
   // Activating a tab is a landing like any other: it marks the conversation read and hands the pane
@@ -1025,10 +1040,9 @@ export default function App() {
     (id: string): LiveState | null => {
       const pty = ptys.bySession.get(id) ?? null
       if (!pty) return null
-      const meta = metaById.get(id) ?? synthMeta(pty)
-      return resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && visibleIds.has(id), unread[id])
+      return liveStateFor(pty, metaById.get(id) ?? synthMeta(pty), id)
     },
-    [ptys.bySession, metaById, seen, unread, focused, visibleIds]
+    [ptys.bySession, metaById, liveStateFor]
   )
 
   // Toggle a live conversation read/unread: a solid (awaiting) OR pulsing (asking) dot → read;

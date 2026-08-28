@@ -2,7 +2,7 @@ import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
-import { displayTitleForRow, isParkedOnlyRow, isUnlinkedRow } from '../lib/rowIdentity'
+import { displayTitleForRow, isParkedOnlyRow, liveDotClass } from '../lib/rowIdentity'
 import { DashedCircle, Dots } from './icons'
 import AgentLogo from './AgentLogo'
 
@@ -60,19 +60,9 @@ function ConversationRowImpl({
   // Visually it shares the hollow marker with `quiet` because there are no linked messages to be
   // unread, plus the ordinary empty-row placeholder.
   const parkedOnly = isParkedOnlyRow(live, meta)
-  const unlinked = isUnlinkedRow(live, meta)
-  // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe).
-  const liveDotState: LiveState | null =
-    live && !unlinked ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting') : null
-  const dotClass = unlinked
-    ? 'unlinked'
-    : liveDotState === 'working'
-      ? 'busy'
-      : liveDotState === 'asking'
-        ? 'asking'
-        : liveDotState === 'quiet'
-          ? 'quiet'
-          : 'awaiting'
+  // Which dot to draw. Shared with the tab strip, which draws the SAME session at the same moment —
+  // see liveDotClass for why that has to be one derivation rather than two agreeing ones.
+  const dotClass = liveDotClass(live, meta, liveState)
   // Phase-lock the breathing/ripple to the app-wide beat (a no-op for the static quiet/awaiting dots).
   const dotRef = useSyncedAnimation<HTMLSpanElement>(dotClass)
   return (
@@ -167,7 +157,7 @@ function ConversationRowImpl({
         </span>
       </span>
       <span className="sb-row-gutter">
-        {live && (
+        {dotClass && (
           <span
             ref={dotRef}
             className={`sb-dot ${dotClass}`}
@@ -178,13 +168,13 @@ function ConversationRowImpl({
             aria-label={
               parkedOnly
                 ? 'live terminal, work is in a background agent'
-                : unlinked
+                : dotClass === 'unlinked'
                   ? 'live terminal, transcript not linked'
-                  : liveDotState === 'working'
+                  : dotClass === 'busy'
                     ? 'live, working'
-                    : liveDotState === 'asking'
+                    : dotClass === 'asking'
                       ? 'live, waiting for your reply'
-                      : liveDotState === 'quiet'
+                      : dotClass === 'quiet'
                         ? 'live, idle'
                         : 'live, finished — not yet seen'
             }

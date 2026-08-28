@@ -161,7 +161,20 @@ input::placeholder {
   position: fixed;
   z-index: 1100;
   pointer-events: none;
+  /* Size to the TEXT, capped — never to the room left beside it. A fixed box carrying a `left` and no
+     width shrink-wraps to whatever space remains on that side, which near the right edge is a few
+     pixels; that is why this rule once said `white-space: nowrap`, to stop a label by the title-bar
+     gear collapsing into a one-character-per-line column. But nowrap only moved the failure: the box
+     still obeyed `max-width` while the text ran straight out of it, so a long label painted past its
+     own background as pale text on the page and read as though it had been cut off mid-word.
+     `max-content` makes the width a property of the text rather than of the position, so a short
+     label is one tight line and a long one wraps at the cap — with no overflow either way. */
+  width: max-content;
   max-width: 360px;
+  white-space: normal;
+  /* Long unbroken tokens (a URL, a path) have no break opportunity of their own, and without this
+     they are the one case that can still exceed the cap. */
+  overflow-wrap: anywhere;
   padding: 4px 8px;
   background: var(--ink);
   color: var(--paper);
@@ -170,21 +183,27 @@ input::placeholder {
   line-height: 1.35;
   border-radius: var(--r-sm);
   box-shadow: var(--shadow-pop);
-  /* Never wrap: TooltipLayer shifts the centered label left to fit near the right edge (e.g. the
-     title-bar gear in the top-right corner) — without this it wrapped per-character into a narrow
-     column before the JS clamp could measure + reposition it. */
-  white-space: nowrap;
   animation: sb-fade-in var(--dur-fast) var(--ease);
 }
-/* Wide variant (data-tip-wide): wraps to a readable column for paragraph-length copy or long URLs.
-   Overrides the nowrap default; the JS clamp still keeps it on-screen. */
+/* Wide variant (data-tip-wide): a narrower measure and roomier padding for paragraph-length copy,
+   which reads better in a column than across the full cap. */
 .sb-tip-wide {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  width: max-content;
   max-width: 260px;
   padding: 8px 10px;
   line-height: 1.45;
+}
+
+/* Two-line variant (data-tip-sub): a title with a supporting line beneath it, so a hover can carry
+   what a truncated host cannot — a tab shows the conversation's preview exactly as its rail row does.
+   The sub line is dimmed by opacity rather than a token, so it holds in both themes against the
+   inverted `--ink` background without needing a paper-side ink scale. */
+.sb-tip-title {
+  font-weight: 600;
+}
+.sb-tip-sub {
+  margin-top: 3px;
+  font-weight: 400;
+  opacity: 0.72;
 }
 
 .sb-tip-compact {

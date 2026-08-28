@@ -9,6 +9,24 @@
 type Writer = (data: string) => void
 
 /**
+ * The one thing this module needs from the preload bridge, declared locally.
+ *
+ * This module is imported by a unit test, and tests compile under the node tsconfig — which carries no
+ * DOM lib, so the ambient `window` does not exist there. Declaring the dependency here states exactly
+ * which member is used instead of pulling the whole DOM in to get it, and it shadows the global in
+ * this file only.
+ *
+ * It is a declaration, not an injection seam: the subscription cannot be handed in at startup because
+ * `attachPty` self-starts. `initPtyStream` runs in an App effect and `attachPty` in a TerminalView
+ * one, and React runs child effects first — so a terminal mounting in the same commit as the app
+ * genuinely attaches before init, and the lazy start is what makes that ordering safe rather than
+ * silently unsubscribed.
+ */
+declare const window: {
+  api: { onPtyData: (cb: (id: string, data: string) => void) => void }
+}
+
+/**
  * How much output to hold for a terminal with no writer attached, per terminal.
  *
  * Bounded in BYTES rather than chunks because chunk sizes vary by orders of magnitude, and because
