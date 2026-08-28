@@ -350,7 +350,14 @@ export type UpdateCheck =
   | { status: 'unknown'; reason: string }
 
 /** What the native tab context menu resolved to. */
-export type TabMenuAction = 'close' | 'closeOthers' | 'details' | 'splitRight' | 'newWindow'
+export type TabMenuAction =
+  | 'close'
+  | 'closeOthers'
+  | 'details'
+  | 'splitRight'
+  | 'moveRight'
+  | 'moveLeft'
+  | 'newWindow'
 
 /** What became of a tab released outside its own window's strips. See `tabDragDrop`. */
 export type TabDropOutcome = 'moved' | 'detached' | 'cancelled'
@@ -435,9 +442,15 @@ export interface SwitchboardApi {
   tabContextMenu(opts: {
     closeOthers: boolean
     details: boolean
-    /** Offer to send this tab to the other pane — creating the split if there is none. Omitted when
-     *  the tab is already in the right-hand pane, or when moving it would just empty its own. */
+    /**
+     * Sending the tab sideways, as three mutually exclusive offers. Which one applies is the
+     * renderer's call, since only it knows the layout — and they are named for what actually happens:
+     * `splitRight` CREATES the second pane, while `moveRight` / `moveLeft` move between panes that
+     * already exist. Calling the latter "Split" would promise a split that is already there.
+     */
     splitRight: boolean
+    moveRight: boolean
+    moveLeft: boolean
     newWindow: boolean
   }): Promise<TabMenuAction | null>
   /** ⌘W: main pushes this to the focused window, which closes its active tab — or calls

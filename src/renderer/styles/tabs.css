@@ -8,6 +8,9 @@
      still obviously chrome. */
   --tab-h: 32px;
   --tab-rows: 3;
+  /* Indirected so the unfocused pane can soften every row rule at once (see pane.css) — the rules are
+     painted as a gradient, which cannot be targeted the way a border-color can. */
+  --tab-rule: var(--rule);
   display: flex;
   /* Tabs WRAP rather than scrolling sideways: sideways overflow hides the tab you want behind an edge,
      in a direction you cannot see, which defeats the point of having tabs at all. */
@@ -16,8 +19,23 @@
   align-content: flex-start;
   flex-shrink: 0;
   max-height: calc(var(--tab-h) * var(--tab-rows));
-  background: var(--paper-sunken);
-  border-bottom: 1px solid var(--rule);
+  background-color: var(--paper-sunken);
+  /* Row separators, drawn as a rule at the foot of every row band rather than as a border on each tab.
+     A border per tab cannot complete the line: the last row is usually ragged, so the line would stop
+     where the tabs stop and leave the remainder bare — and under a FULL row it would double up against
+     the strip's own bottom border. A repeating gradient spans the whole width regardless of how many
+     tabs sit in a row, and its final line lands exactly where the strip ends, so it serves as the
+     bottom border too (hence there is no `border-bottom` here).
+     `local` attachment is what keeps the lines pinned to the rows once the strip scrolls past its row
+     cap; the default would hold them still while the rows moved underneath. */
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--tab-h) - 1px),
+    var(--tab-rule) calc(var(--tab-h) - 1px),
+    var(--tab-rule) var(--tab-h)
+  );
+  background-attachment: local;
   /* Only the row cap can overflow, and only downward. There is deliberately NO reserved scrollbar
      strip here: the previous horizontal scroller reserved one unconditionally so that adding the tab
      which first overflowed could not shift every tab up, and that reservation was itself visible as a
@@ -63,14 +81,15 @@ body.sb-dragging-tab * {
 }
 /* The strip currently under the drag. Deliberately quiet: the caret says WHERE, this only says which
    strip is answering, which matters when there are two side by side. */
+/* background-COLOR, not the shorthand: the shorthand would drop the row-separator gradient. */
 .sb-tabstrip.sb-drop-target {
-  background: var(--paper-hover);
+  background-color: var(--paper-hover);
 }
 /* This WINDOW will take a tab dragged from another one. It cannot show a caret — the drop appends,
    because the cursor's position inside this window is not knowable while another window holds the
    pointer — so the whole window answers instead. */
 body.sb-window-drop-target .sb-tabstrip {
-  background: var(--paper-hover);
+  background-color: var(--paper-hover);
   box-shadow: inset 0 0 0 1px var(--rule-strong);
 }
 

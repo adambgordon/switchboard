@@ -29,9 +29,12 @@
    is the tab strip's own active-tab marker (see .sb-tab.active.focused); this softens the unfocused
    pane's rules as a quieter second signal, which also covers a pane holding no tabs at all. Scoped to
    `.split` because a lone pane is always the focused one and must look untouched. */
-.sb-panes.split .sb-pane:not(.pane-focused) .sb-tabstrip,
 .sb-panes.split .sb-pane:not(.pane-focused) .sb-pane-header {
   border-bottom-color: var(--rule-soft);
+}
+/* The strip's rules are a gradient, not a border, so they soften through their own custom property. */
+.sb-panes.split .sb-pane:not(.pane-focused) .sb-tabstrip {
+  --tab-rule: var(--rule-soft);
 }
 /* The pane is programmatically focusable (tabIndex -1) so a conversation click can hand it the
    keyboard immediately — quiet selection + ⌘F routing — before the transcript mounts/loads. No
@@ -56,11 +59,17 @@
   height: 66px;
   box-sizing: border-box;
 }
-/* Nothing in the action row may wrap. This is what actually caused the mismatch above, and with a
-   fixed height a wrapped label would now be clipped rather than merely misaligned. */
-.sb-pane-actions,
-.sb-pane-actions button {
+/* NOTHING in the header may wrap — not the action row, not the meta line, not a unit label. Scoped to
+   the whole subtree rather than to the controls, because the first attempt covered only the actions and
+   a meta item still broke ("8 msg" split across two lines under pressure). Text that runs out of room
+   truncates or is dropped by a stage below; it never reflows. */
+.sb-pane-header,
+.sb-pane-header * {
   white-space: nowrap;
+}
+/* Give the meta line somewhere to put the overflow: it truncates rather than pushing the actions. */
+.sb-pane-meta {
+  overflow: hidden;
 }
 /* A collapsible meta item and its own leading separator, so hiding the item takes the `·` with it. */
 .sb-pane-meta-part {
@@ -125,19 +134,10 @@
    Ordered by what a crowded header can most afford to lose. Each stage removes something whose
    meaning is still available elsewhere, so narrowing costs legibility and never function. */
 
-/* Stage 1 — the path and the branch. The longest items in the meta row, and the least load-bearing:
-   the title above already says which conversation this is, and both are in Session Details. */
-@container pane (max-width: 560px) {
-  .sb-pane-part-cwd,
-  .sb-pane-part-branch {
-    display: none;
-  }
-}
-
-/* Stage 2 — the view toggle drops to icons. By far the widest control in the row, and its two icons
-   (a document, and the live dot) already carry the distinction; the labels are restated as tooltips
-   and aria-labels, so nothing is lost but width. */
-@container pane (max-width: 440px) {
+/* Stage 1 — the view toggle drops to icons, FIRST. It is by far the widest control in the row, so it
+   buys the most room per thing given up, and it gives up the least: the two icons (a document, and the
+   live dot) already carry the distinction, restated as tooltips and aria-labels. */
+@container pane (max-width: 640px) {
   .sb-seg-label {
     display: none;
   }
@@ -147,10 +147,19 @@
   }
 }
 
+/* Stage 2 — the path and the branch. The longest items in the meta row, and the least load-bearing:
+   the title above already says which conversation this is, and both are in Session Details. */
+@container pane (max-width: 520px) {
+  .sb-pane-part-cwd,
+  .sb-pane-part-branch {
+    display: none;
+  }
+}
+
 /* Stage 3 — Find and Pin leave the header. Deliberately NOT folded into an overflow menu: both keep a
    full equivalent already (⌘F opens find; pinning is on the rail row's own menu), so a new popover
    would be a third way to reach two things that have two. */
-@container pane (max-width: 360px) {
+@container pane (max-width: 400px) {
   .sb-pane-find,
   .sb-pane-pin {
     display: none;

@@ -969,11 +969,28 @@ export default function App() {
     },
     [panes.splitPane, panes.moveTab, panes.focusPane, isUnlinkedId, markRead, requestFocus]
   )
-  // Whether "Split Right" from a given pane would change anything. False from the right pane, and
-  // false when the left holds a single tab: moving its only tab empties it, the layout then collapses
-  // the empty pane, and the net effect is an unsplit rather than a split.
+  // Move a tab to the pane it is not in. Only reachable when a split already exists, so "the other
+  // pane" is unambiguous — which is why one handler serves both Move Right and Move Left.
+  const moveTabToOtherPane = useCallback(
+    (sessionId: string, fromPane: number) => {
+      const l = paneLayoutRef.current
+      if (l.panes.length < 2) return
+      const index = l.panes[fromPane]?.tabs.findIndex((t) => t.sessionId === sessionId) ?? -1
+      if (index < 0) return
+      const to = fromPane === 0 ? 1 : 0
+      panes.moveTab({ pane: fromPane, index }, { pane: to, index: l.panes[to]?.tabs.length ?? 0 })
+      panes.focusPane(to)
+      if (!isUnlinkedId(sessionId)) markRead(sessionId)
+      requestFocus(sessionId)
+    },
+    [panes.moveTab, panes.focusPane, isUnlinkedId, markRead, requestFocus]
+  )
+  // "Split Right" CREATES the second pane, so it is offered only when there is not one — otherwise the
+  // action is a move and says so. Also requires two tabs here: moving the only one empties this pane,
+  // the layout collapses it, and the net effect would be no split at all.
   const canSplitRightFrom = useCallback(
-    (index: number): boolean => index === 0 && (paneLayout.panes[0]?.tabs.length ?? 0) >= 2,
+    (index: number): boolean =>
+      paneLayout.panes.length === 1 && index === 0 && (paneLayout.panes[0]?.tabs.length ?? 0) >= 2,
     [paneLayout.panes]
   )
   // A tab was dragged onto a strip in THIS window: a reorder, or a move between panes.
@@ -993,12 +1010,21 @@ export default function App() {
     },
     [panes.closeTab]
   )
-  // Open a conversation in its own window. Explicitly does NOT move its terminal: the new window
-  // shows the transcript and offers to bring the terminal over, so asking for a second view of a
-  // session you are typing in never yanks the terminal out from under you.
-  const openInNewWindow = useCallback((id: string) => {
-    window.api.openConversationWindow(id)
-  }, [])
+  // MOVE a conversation into its own window: the new window opens with it, and this window gives up
+  // its tab. A move rather than a copy, matching every other way a tab travels here (drag, Move Right,
+  // Move Left) — and it is what keeps one conversation from being open in two places at once.
+  //
+  // The tab is what moves; the live TERMINAL does not follow. One xterm per terminal app-wide, and
+  // yanking it would blank the session someone may be typing in — so the new window shows the
+  // transcript and offers to bring the terminal over, which is now a repaint rather than a loss.
+  const moveToNewWindow = useCallback(
+    (id: string) => {
+      window.api.openConversationWindow(id)
+      const at = locateTab(paneLayoutRef.current, id)
+      if (at) panes.closeTab(at.pane, at.index)
+    },
+    [panes.closeTab]
+  )
   // A tab dragged in from ANOTHER window. It lands as a KEPT tab in the focused pane: a drop is a
   // deliberate act, so it should not be replaceable by the next ordinary click the way a preview is.
   // Its position within the strip is deliberately not honoured — the OS gave the source window the
@@ -1226,7 +1252,7 @@ export default function App() {
         // otherwise swallow this chord and start a new conversation instead. (The same shadowing
         // still applies to ⇧⌘F and ⇧⌘B, which nothing binds.)
         e.preventDefault()
-        if (selectedId && !selectedUnlinked) openInNewWindow(selectedId)
+        if (selectedId && !selectedUnlinked) moveToNewWindow(selectedId)
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         newConversation()
@@ -1351,7 +1377,7 @@ export default function App() {
     paneLayout,
     goToTab,
     toggleSplit,
-    openInNewWindow,
+    moveToNewWindow,
     selectedUnlinked
   ])
 
@@ -1397,7 +1423,7 @@ export default function App() {
             onStick={tabsEnabled ? stickConversation : undefined}
             onOpenInBackground={tabsEnabled ? openInBackground : undefined}
             onOpenToSide={tabsEnabled ? openToSide : undefined}
-            onOpenInNewWindow={tabsEnabled ? openInNewWindow : undefined}
+            onOpenInNewWindow={tabsEnabled ? moveToNewWindow : undefined}
             onTogglePin={togglePinGated}
             query={query}
             onQueryChange={setQuery}
@@ -1494,8 +1520,10 @@ export default function App() {
                   onCloseOtherTabs={panes.closeOtherTabs}
                   onPromoteTab={panes.promoteTab}
                   canSplitRight={canSplitRightFrom(i)}
+                  canMoveToOtherPane={paneLayout.panes.length === 2}
                   onSplitRightTab={splitRightTab}
-                  onOpenTabInNewWindow={openInNewWindow}
+                  onMoveTabToOtherPane={moveTabToOtherPane}
+                  onOpenTabInNewWindow={moveToNewWindow}
                   onMoveTab={moveTabHere}
                   onTabLeftWindow={tabLeftWindow}
                   onShowInfoFor={(id) => showInfo(id, false)}

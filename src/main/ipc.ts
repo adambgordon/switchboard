@@ -329,7 +329,14 @@ export function popCodeContextMenu(code: string, win: BrowserWindow | null): voi
  * and the item is reached by pointer anyway.
  */
 export function popTabContextMenu(
-  opts: { closeOthers: boolean; details: boolean; splitRight: boolean; newWindow: boolean },
+  opts: {
+    closeOthers: boolean
+    details: boolean
+    splitRight: boolean
+    moveRight: boolean
+    moveLeft: boolean
+    newWindow: boolean
+  },
   win: BrowserWindow | null
 ): Promise<TabMenuAction | null> {
   return new Promise((resolve) => {
@@ -342,16 +349,17 @@ export function popTabContextMenu(
     const pick = (action: TabMenuAction) => () => finish(action)
     const items: MenuItemConstructorOptions[] = [{ label: 'Close Tab', click: pick('close') }]
     if (opts.closeOthers) items.push({ label: 'Close Other Tabs', click: pick('closeOthers') })
-    // Where a tab can be sent. Both are hidden rather than disabled when they do not apply, matching
-    // `details` and the row menu: a control that silently does nothing is worse than an absent one.
-    // "Split Right" covers both creating the split and adding to an existing one — the renderer
-    // decides which, since only it knows the layout, and only offers the item when the result differs
-    // from where the tab already is.
-    if (opts.splitRight || opts.newWindow) {
+    // Where a tab can be sent. Hidden rather than disabled when it does not apply, matching `details`
+    // and the row menu: a control that silently does nothing is worse than an absent one. The label
+    // says what will actually happen — "Split" only when a pane is about to be created, "Move" when
+    // both already exist.
+    if (opts.splitRight || opts.moveRight || opts.moveLeft || opts.newWindow) {
       items.push({ type: 'separator' })
       if (opts.splitRight) items.push({ label: 'Split Right', click: pick('splitRight') })
+      if (opts.moveRight) items.push({ label: 'Move Right', click: pick('moveRight') })
+      if (opts.moveLeft) items.push({ label: 'Move Left', click: pick('moveLeft') })
       if (opts.newWindow) {
-        items.push({ label: 'Open in New Window', click: pick('newWindow') })
+        items.push({ label: 'Move to New Window', click: pick('newWindow') })
       }
     }
     if (opts.details) {
@@ -478,7 +486,14 @@ export function registerIpc(): void {
     IPC.tabContextMenu,
     (
       e,
-      opts: { closeOthers: boolean; details: boolean; splitRight: boolean; newWindow: boolean }
+      opts: {
+        closeOthers: boolean
+        details: boolean
+        splitRight: boolean
+        moveRight: boolean
+        moveLeft: boolean
+        newWindow: boolean
+      }
     ) => popTabContextMenu(opts, BrowserWindow.fromWebContents(e.sender))
   )
   // ---- dragging a tab between windows ----

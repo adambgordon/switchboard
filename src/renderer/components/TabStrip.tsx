@@ -30,17 +30,20 @@ interface Props {
   /** Whether this pane owns the keyboard. Only the focused pane's active tab reads fully active, so
    *  a split never shows two equally-selected tabs. */
   focused: boolean
-  /** Whether sending a tab from THIS pane to the other one would change anything — false in the
-   *  right-hand pane, and false when the pane holds a single tab (moving it would only empty this
-   *  pane, which the layout then collapses, so the split never happens). */
+  /** There is no split yet, and this pane has enough tabs that creating one leaves both populated. */
   canSplitRight: boolean
+  /** A split already exists, so the tab can move to the pane that is not this one. With two panes,
+   *  "the other pane" is unambiguous — only the LABEL differs by side. */
+  canMoveToOtherPane: boolean
   onActivate: (paneIndex: number, index: number) => void
   onClose: (paneIndex: number, index: number) => void
   onCloseOthers: (paneIndex: number, index: number) => void
   onPromote: (sessionId: string, paneIndex: number) => void
   onShowInfo: (sessionId: string) => void
-  /** Move the tab to the other pane, creating the split when there is none. */
+  /** Create the split and put this tab in the new right-hand pane. */
   onSplitRight: (sessionId: string, paneIndex: number) => void
+  /** Move this tab to the pane it is not currently in. */
+  onMoveToOtherPane: (sessionId: string, paneIndex: number) => void
   onOpenInNewWindow: (sessionId: string) => void
   /** A drag landed on a strip in THIS window — reorder, or move between panes. */
   onMoveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
@@ -100,6 +103,10 @@ function Tab({ tab, active, focused, onActivate, onPromote, onClose, onContextMe
         {tab.dot && <span ref={dotRef} className={`sb-dot ${tab.dot}`} aria-label="live" role="img" />}
         <button
           className="sb-tab-close"
+          // The tooltip is generic while the accessible name is specific: the tip appears under the
+          // pointer, where which tab is meant is already obvious, whereas a screen reader announces the
+          // button with no such context.
+          data-tip="Close tab"
           aria-label={`Close ${tab.title}`}
           onClick={(e) => {
             e.stopPropagation()
@@ -143,12 +150,14 @@ export default function TabStrip({
   activeIndex,
   focused,
   canSplitRight,
+  canMoveToOtherPane,
   onActivate,
   onClose,
   onCloseOthers,
   onPromote,
   onShowInfo,
   onSplitRight,
+  onMoveToOtherPane,
   onOpenInNewWindow,
   onMoveTab,
   onTabLeftWindow
@@ -190,13 +199,18 @@ export default function TabStrip({
       // reopen elsewhere by id — hide both rather than offer controls that silently do nothing.
       details: !tab.unlinked,
       splitRight: canSplitRight,
+      // Same action either way; the side this pane is on decides which direction to name it.
+      moveRight: canMoveToOtherPane && paneIndex === 0,
+      moveLeft: canMoveToOtherPane && paneIndex === 1,
       newWindow: !tab.unlinked
     })
     if (choice === 'close') onClose(paneIndex, index)
     else if (choice === 'closeOthers') onCloseOthers(paneIndex, index)
     else if (choice === 'details') onShowInfo(tab.sessionId)
     else if (choice === 'splitRight') onSplitRight(tab.sessionId, paneIndex)
-    else if (choice === 'newWindow') onOpenInNewWindow(tab.sessionId)
+    else if (choice === 'moveRight' || choice === 'moveLeft') {
+      onMoveToOtherPane(tab.sessionId, paneIndex)
+    } else if (choice === 'newWindow') onOpenInNewWindow(tab.sessionId)
   }
 
   return (

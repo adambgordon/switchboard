@@ -41,9 +41,11 @@ interface Props {
   onCloseTab: (pane: number, index: number) => void
   onCloseOtherTabs: (pane: number, index: number) => void
   onPromoteTab: (sessionId: string, pane?: number) => void
-  /** Whether "Split Right" would change anything from this pane — see TabStrip.canSplitRight. */
+  /** See TabStrip: whether the tab can create the split, and whether it can cross an existing one. */
   canSplitRight: boolean
+  canMoveToOtherPane: boolean
   onSplitRightTab: (sessionId: string, pane: number) => void
+  onMoveTabToOtherPane: (sessionId: string, pane: number) => void
   onOpenTabInNewWindow: (sessionId: string) => void
   /** A tab was dragged onto a strip in this window. */
   onMoveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
@@ -154,7 +156,9 @@ export default function MainPane(props: Props) {
     onCloseOtherTabs,
     onPromoteTab,
     canSplitRight,
+    canMoveToOtherPane,
     onSplitRightTab,
+    onMoveTabToOtherPane,
     onOpenTabInNewWindow,
     onMoveTab,
     onTabLeftWindow,
@@ -296,7 +300,9 @@ export default function MainPane(props: Props) {
           onPromote={onPromoteTab}
           onShowInfo={onShowInfoFor}
           canSplitRight={canSplitRight}
+          canMoveToOtherPane={canMoveToOtherPane}
           onSplitRight={onSplitRightTab}
+          onMoveToOtherPane={onMoveTabToOtherPane}
           onOpenInNewWindow={onOpenTabInNewWindow}
           onMoveTab={onMoveTab}
           onTabLeftWindow={onTabLeftWindow}
