@@ -373,8 +373,13 @@ export type TabDropOutcome = 'moved' | 'detached' | 'cancelled'
 
 /** What a freshly-created window should show. Requested once on mount via `IPC.windowGetInit`. */
 export interface WindowInit {
-  /** The conversation to open as this window's only tab, or null for an ordinary browser window. */
-  sessionId: string | null
+  /**
+   * The conversations to open as this window's tabs — empty for an ordinary browser window.
+   *
+   * A list rather than a single id because a multi-selection moved to a new window belongs in ONE
+   * window holding all of them, not one window each. The first becomes the active tab.
+   */
+  sessionIds: string[]
   /**
    * Start with the left rail hidden. A detached window is a working surface for one conversation, so
    * it opens without the browser — ⌘B brings it back. It is a starting state, not a mode: the choice
@@ -449,6 +454,10 @@ export interface SwitchboardApi {
    *  menu is not anchored to a DOM node, so the strip scrolling out from under it cannot close it.
    *  `closeOthers` / `details` gate the items that would otherwise be offered as no-ops. */
   tabContextMenu(opts: {
+    /** How many tabs the chosen command will act on — 1 unless a multi-selection is in effect and the
+     *  right-clicked tab belongs to it. Labels are pluralised from this, so a group action cannot read
+     *  as a single-tab one. */
+    count: number
     closeOthers: boolean
     details: boolean
     /**
@@ -469,8 +478,9 @@ export interface SwitchboardApi {
   /** Close the window this renderer belongs to. The ⌘W fallback, and what makes a detached window
    *  closable from inside. */
   closeWindow(): void
-  /** Open a NEW window showing one conversation, with the rail hidden. Fire-and-forget. */
-  openConversationWindow(sessionId: string): void
+  /** Open a NEW window showing these conversations, with the rail hidden. Fire-and-forget. A group
+   *  goes to one window holding all of them, so this takes a list. */
+  openConversationWindow(sessionIds: string[]): void
 
   // ---- dragging a tab between windows ----
   /** Tell main a tab drag started here, so it can referee where the cursor goes. */

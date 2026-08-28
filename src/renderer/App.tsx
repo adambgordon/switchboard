@@ -24,6 +24,15 @@ import {
   stepTab,
   type OpenMode
 } from './lib/paneModel'
+import {
+  NO_SELECTION,
+  actionTargets,
+  extendSelection,
+  pruneSelection,
+  selectOnly,
+  toggleSelected,
+  type TabSelection
+} from './lib/tabSelection'
 import { nextPtyHomes, partitionPtys } from './lib/ptyHome'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
 import { useNewConvoDefault } from './lib/useNewConvoDefault'
@@ -156,8 +165,8 @@ export default function App() {
   // Optional-chained on purpose: editing the preload does not hot-reload, so a dev instance that was
   // already running when this was added would otherwise throw here and white-screen the whole app
   // rather than simply behaving like an ordinary window.
-  const windowInit = window.sbWindow ?? { sessionId: null, collapseRail: false }
-  const detached = windowInit.sessionId !== null
+  const windowInit = window.sbWindow ?? { sessionIds: [], collapseRail: false }
+  const detached = windowInit.sessionIds.length > 0
   const {
     paneWidth,
     paneCollapsed,
@@ -262,6 +271,50 @@ export default function App() {
   const [openElsewhere, setOpenElsewhere] = useState<Set<string>>(() => new Set())
   const openElsewhereRef = useRef(openElsewhere)
   openElsewhereRef.current = openElsewhere
+
+  // Several tabs acted on as one. Kept beside the layout rather than inside it: a selection is about
+  // what the user has picked out, not about what exists, and folding it into the reducer would make
+  // every open and close have to say something about it.
+  const [tabSelection, setTabSelection] = useState<TabSelection>(NO_SELECTION)
+  const tabSelectionRef = useRef(tabSelection)
+  tabSelectionRef.current = tabSelection
+  // Tabs close, move panes and get rekeyed underneath a selection, so it is re-checked against the
+  // layout after every change rather than at each call site — no path can forget. `pruneSelection`
+  // returns its input by identity when nothing went, so the common case costs no render.
+  useEffect(() => {
+    setTabSelection((s) =>
+      pruneSelection(
+        s,
+        paneLayout.panes.map((p) => p.tabs.map((t) => t.sessionId))
+      )
+    )
+  }, [paneLayout])
+
+  // ---- the two selection gestures, on TABS only ----
+  // ⌘ and ⇧ are free here in a way they are not on a rail row: picking several out of a list is what
+  // every editor and file browser uses them for, so on a tab strip they read as the convention rather
+  // than as a borrowed browser trick.
+  //
+  // Declared HERE, beside the state, rather than beside the drag handlers where they are used — the
+  // group-capable actions further down all call `targetsFor`, and a `const` defined after them is not
+  // hoisted, so it would be a temporal-dead-zone error at the first one.
+  const toggleTabSelected = useCallback((pane: number, sessionId: string) => {
+    const p = paneLayoutRef.current.panes[pane]
+    setTabSelection((s) => toggleSelected(s, pane, p ? paneActiveId(p) : null, sessionId))
+  }, [])
+  const extendTabSelection = useCallback((pane: number, sessionId: string) => {
+    const order = paneLayoutRef.current.panes[pane]?.tabs.map((t) => t.sessionId) ?? []
+    setTabSelection((s) => extendSelection(s, pane, order, sessionId))
+  }, [])
+
+  // What a command invoked on ONE tab should actually act on: the group when that tab belongs to one,
+  // and just that tab otherwise. Every group-capable action goes through this, so "acts on the
+  // selection" is one rule rather than a condition repeated at each of them.
+  const targetsFor = useCallback(
+    (pane: number, sessionId: string): string[] =>
+      actionTargets(tabSelectionRef.current, pane, sessionId),
+    []
+  )
   const tabsEnabledRef = useRef(tabsEnabled)
   tabsEnabledRef.current = tabsEnabled
 
@@ -279,10 +332,13 @@ export default function App() {
   // loaded yet, which is fine, because a tab holds an id and the title fills in when it arrives.
   const openedInitialRef = useRef(false)
   useEffect(() => {
-    const target = windowInit.sessionId
-    if (!target || openedInitialRef.current) return
+    const targets = windowInit.sessionIds
+    if (targets.length === 0 || openedInitialRef.current) return
     openedInitialRef.current = true
-    panes.openTab(target, 'persistent')
+    // In reverse, because `open` inserts AFTER the active tab: opening them front-to-back would land
+    // each one before the last and reverse the group. The final iteration is the first id, which
+    // therefore also ends up active — the tab the user was on when the group left.
+    for (const id of [...targets].reverse()) panes.openTab(id, 'persistent')
   }, [panes.openTab])
 
   // ⌘W arrives as a push from the File menu, not a keydown: a menu accelerator is consumed by the app
@@ -696,11 +752,26 @@ export default function App() {
     (pane: number, index: number) => {
       const id = paneLayout.panes[pane]?.tabs[index]?.sessionId
       if (!id) return
+      // A plain click means "just this one", so it is also the way out of a multi-selection.
+      setTabSelection(selectOnly())
       panes.activateTab(pane, index)
       if (!isUnlinkedId(id)) markRead(id)
       requestFocus(id)
     },
     [paneLayout.panes, panes.activateTab, isUnlinkedId, markRead, requestFocus]
+  )
+
+  // Closing a tab that belongs to a group closes the group — including from the ✕ and middle-click,
+  // not just the menu, since those are the same act on the same tab.
+  const closeTabsFrom = useCallback(
+    (pane: number, index: number) => {
+      const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
+      if (!id) return
+      const ids = targetsFor(pane, id)
+      if (ids.length > 1) panes.closeTabs(ids)
+      else panes.closeTab(pane, index)
+    },
+    [panes.closeTab, panes.closeTabs, targetsFor]
   )
 
   const selectedMeta = focusedView.meta
@@ -972,20 +1043,17 @@ export default function App() {
   const splitRightTab = useCallback(
     (sessionId: string, fromPane: number) => {
       const l = paneLayoutRef.current
-      const index = l.panes[fromPane]?.tabs.findIndex((t) => t.sessionId === sessionId) ?? -1
-      if (index < 0) return
+      const ids = targetsFor(fromPane, sessionId)
+      if (ids.length === 0) return
       // "Right" is pane 1: the menu item is offered only from the left pane (see canSplitRight), so
       // there is no other direction to resolve.
       if (l.panes.length < 2) panes.splitPane()
-      panes.moveTab(
-        { pane: fromPane, index },
-        { pane: 1, index: l.panes[1]?.tabs.length ?? 0 }
-      )
+      panes.moveTabs(ids, { pane: 1, index: l.panes[1]?.tabs.length ?? 0 })
       panes.focusPane(1)
       if (!isUnlinkedId(sessionId)) markRead(sessionId)
       requestFocus(sessionId)
     },
-    [panes.splitPane, panes.moveTab, panes.focusPane, isUnlinkedId, markRead, requestFocus]
+    [panes.splitPane, panes.moveTabs, panes.focusPane, targetsFor, isUnlinkedId, markRead, requestFocus]
   )
   // Move a tab to the pane it is not in. Only reachable when a split already exists, so "the other
   // pane" is unambiguous — which is why one handler serves both Move Right and Move Left.
@@ -993,15 +1061,15 @@ export default function App() {
     (sessionId: string, fromPane: number) => {
       const l = paneLayoutRef.current
       if (l.panes.length < 2) return
-      const index = l.panes[fromPane]?.tabs.findIndex((t) => t.sessionId === sessionId) ?? -1
-      if (index < 0) return
+      const ids = targetsFor(fromPane, sessionId)
+      if (ids.length === 0) return
       const to = fromPane === 0 ? 1 : 0
-      panes.moveTab({ pane: fromPane, index }, { pane: to, index: l.panes[to]?.tabs.length ?? 0 })
+      panes.moveTabs(ids, { pane: to, index: l.panes[to]?.tabs.length ?? 0 })
       panes.focusPane(to)
       if (!isUnlinkedId(sessionId)) markRead(sessionId)
       requestFocus(sessionId)
     },
-    [panes.moveTab, panes.focusPane, isUnlinkedId, markRead, requestFocus]
+    [panes.moveTabs, panes.focusPane, targetsFor, isUnlinkedId, markRead, requestFocus]
   )
   // "Split Right" CREATES the second pane, so it is offered only when there is not one — otherwise the
   // action is a move and says so. Also requires two tabs here: moving the only one empties this pane,
@@ -1018,6 +1086,14 @@ export default function App() {
       panes.focusPane(to.pane)
     },
     [panes.moveTab, panes.focusPane]
+  )
+  // A dragged multi-selection landed on a strip in this window.
+  const moveTabGroupHere = useCallback(
+    (sessionIds: string[], to: { pane: number; index: number }) => {
+      panes.moveTabs(sessionIds, to)
+      panes.focusPane(to.pane)
+    },
+    [panes.moveTabs, panes.focusPane]
   )
   // A tab was dragged OUT of this window — another window took it, or it became a window of its own.
   // Either way this window gives it up, which is what makes the gesture a move rather than a copy.
@@ -1037,11 +1113,13 @@ export default function App() {
   // transcript and offers to bring the terminal over, which is now a repaint rather than a loss.
   const moveToNewWindow = useCallback(
     (id: string) => {
-      window.api.openConversationWindow(id)
       const at = locateTab(paneLayoutRef.current, id)
-      if (at) panes.closeTab(at.pane, at.index)
+      // A group goes to ONE new window holding all of it, not one window each.
+      const ids = at ? targetsFor(at.pane, id) : [id]
+      window.api.openConversationWindow(ids)
+      panes.closeTabs(ids)
     },
-    [panes.closeTab]
+    [panes.closeTabs, targetsFor]
   )
   // A tab dragged in from ANOTHER window. It lands as a KEPT tab in the focused pane: a drop is a
   // deliberate act, so it should not be replaceable by the next ordinary click the way a preview is.
@@ -1567,7 +1645,7 @@ export default function App() {
                   tabs={tabsByPane[i] ?? []}
                   activeTabIndex={pane.activeIndex}
                   onActivateTab={goToTab}
-                  onCloseTab={panes.closeTab}
+                  onCloseTab={closeTabsFrom}
                   onCloseOtherTabs={panes.closeOtherTabs}
                   onPromoteTab={panes.promoteTab}
                   canSplitRight={canSplitRightFrom(i)}
@@ -1577,6 +1655,11 @@ export default function App() {
                   onOpenTabInNewWindow={moveToNewWindow}
                   onMoveTab={moveTabHere}
                   onTabLeftWindow={tabLeftWindow}
+                  selectedTabIds={tabSelection.ids}
+                  onToggleTabSelect={toggleTabSelected}
+                  onExtendTabSelect={extendTabSelection}
+                  onMoveTabGroup={moveTabGroupHere}
+                  onResolveTabTargets={targetsFor}
                   onShowInfoFor={(id) => showInfo(id, false)}
                   title={v.title}
                   cwd={v.cwd}

@@ -375,6 +375,7 @@ export function popCodeContextMenu(code: string, win: BrowserWindow | null): voi
  */
 export function popTabContextMenu(
   opts: {
+    count: number
     closeOthers: boolean
     details: boolean
     splitRight: boolean
@@ -392,7 +393,14 @@ export function popTabContextMenu(
       resolve(action)
     }
     const pick = (action: TabMenuAction) => () => finish(action)
-    const items: MenuItemConstructorOptions[] = [{ label: 'Close Tab', click: pick('close') }]
+    // Every label counts its targets, so a command that will act on a whole selection says so. The
+    // suffix is empty for one tab, which keeps the ordinary menu reading exactly as it did.
+    const n = Math.max(1, opts.count)
+    const many = n > 1
+    const tabs = many ? `${n} Tabs` : 'Tab'
+    const items: MenuItemConstructorOptions[] = [
+      { label: `Close ${tabs}`, click: pick('close') }
+    ]
     if (opts.closeOthers) items.push({ label: 'Close Other Tabs', click: pick('closeOthers') })
     // Where a tab can be sent. Hidden rather than disabled when it does not apply, matching `details`
     // and the row menu: a control that silently does nothing is worse than an absent one. The label
@@ -404,7 +412,11 @@ export function popTabContextMenu(
       if (opts.moveRight) items.push({ label: 'Move Right', click: pick('moveRight') })
       if (opts.moveLeft) items.push({ label: 'Move Left', click: pick('moveLeft') })
       if (opts.newWindow) {
-        items.push({ label: 'Move to New Window', click: pick('newWindow') })
+        // Singular window either way: a group moves into ONE new window, not one each.
+        items.push({
+          label: many ? `Move ${n} Tabs to New Window` : 'Move to New Window',
+          click: pick('newWindow')
+        })
       }
     }
     if (opts.details) {
@@ -532,6 +544,7 @@ export function registerIpc(): void {
     (
       e,
       opts: {
+        count: number
         closeOthers: boolean
         details: boolean
         splitRight: boolean
@@ -574,7 +587,7 @@ export function registerIpc(): void {
     // means nothing, so it means nothing.
     if (target) return 'cancelled'
     // Over no window at all: released on the desktop, which is the detach gesture.
-    openWindow?.({ sessionId: drag.sessionId, collapseRail: true })
+    openWindow?.({ sessionIds: [drag.sessionId], collapseRail: true })
     return 'detached'
   })
   ipcMain.on(IPC.tabDragCancel, () => endTabDrag())
@@ -610,11 +623,15 @@ export function registerIpc(): void {
 
   // The ⌘W fallback: the renderer asks for its own window to close when it has no tab to close.
   ipcMain.on(IPC.windowClose, (e) => BrowserWindow.fromWebContents(e.sender)?.close())
-  // Open a conversation in its own window. The new window is the same app with the rail hidden — the
-  // browser is one ⌘B away — rather than a second, cut-down shell that would have to reimplement it.
-  ipcMain.on(IPC.windowOpenConversation, (_e, sessionId: string) => {
-    if (typeof sessionId !== 'string' || !sessionId) return
-    openWindow?.({ sessionId, collapseRail: true })
+  // Open one or more conversations in a new window — the same app with the rail hidden, the browser
+  // one ⌘B away, rather than a second cut-down shell that would have to reimplement it. A group moved
+  // here lands in ONE window holding all of them, not one window each.
+  ipcMain.on(IPC.windowOpenConversation, (_e, sessionIds: string[]) => {
+    const ids = Array.isArray(sessionIds)
+      ? sessionIds.filter((id): id is string => typeof id === 'string' && !!id)
+      : []
+    if (ids.length === 0) return
+    openWindow?.({ sessionIds: ids, collapseRail: true })
   })
   // Keep the OS window background in lockstep with the renderer's theme, so a live window resize
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.

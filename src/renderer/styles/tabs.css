@@ -148,6 +148,23 @@ body.sb-window-drop-target .sb-tabstrip {
   color: var(--ink);
 }
 
+/* Part of a multi-selection. Ink, never cobalt — cobalt means a session is alive, and which tabs the
+   next command will act on has nothing to do with that. A wash plus a heavier label, so a selected tab
+   reads as picked-out without competing with the ACTIVE tab, which is a different claim and keeps its
+   own lifted surface. */
+.sb-tab.picked {
+  background: var(--paper-active);
+  color: var(--ink);
+}
+.sb-tab.picked .sb-tab-title {
+  font-weight: 600;
+}
+/* The active tab stays lifted onto the pane's surface even inside a selection — being acted on next
+   and being the one on screen are separate things, and the active tab must not lose its place. */
+.sb-tab.picked.active {
+  background: var(--paper-pane);
+}
+
 /* A preview tab is the one the next ordinary click replaces. Italic is the editor convention for it
    and costs no width — which matters, because a tab is already the most width-starved thing here.
    The padding is not cosmetic: a tab sizes to its content, so the title's box ends exactly where the

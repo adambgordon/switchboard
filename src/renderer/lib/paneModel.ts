@@ -61,6 +61,16 @@ export type PaneAction =
   | { type: 'promote'; sessionId: string; pane?: number }
   | { type: 'close'; pane: number; index: number }
   | { type: 'closeOthers'; pane: number; index: number }
+  /**
+   * Close, or move, a whole multi-selection at once.
+   *
+   * By session id rather than by index, and as ONE action rather than a loop of `close`/`move`,
+   * because indices shift as each tab goes: a caller dispatching several in a row computes them all
+   * against the layout it can see, which stops being true after the first one lands. Only the reducer
+   * sees the states in between, so the batch has to happen here.
+   */
+  | { type: 'closeMany'; sessionIds: string[] }
+  | { type: 'moveMany'; sessionIds: string[]; to: { pane: number; index: number } }
   | { type: 'activate'; pane: number; index: number }
   /** Show the welcome screen in the focused pane without disturbing its tabs. */
   | { type: 'deselect' }
@@ -189,6 +199,23 @@ function activeAfterRemoval(activeIndex: number, removed: number, newLength: num
   if (removed < activeIndex) return activeIndex - 1
   if (removed > activeIndex) return activeIndex
   return Math.min(removed, newLength - 1)
+}
+
+/**
+ * Where the selection lands after several tabs leave a pane at once.
+ *
+ * The same intent as `activeAfterRemoval`, but it cannot be expressed as index arithmetic: with an
+ * arbitrary set removed there is no single "removed index" to compare against. So it is stated in
+ * terms of the conversation instead — if the one that was active is still here, it stays active
+ * wherever it now sits; otherwise the slot is clamped to what remains, which lands on the nearest
+ * surviving neighbour.
+ */
+function activeAfterKeep(pane: Pane, keep: Tab[]): number {
+  if (keep.length === 0) return -1
+  if (pane.activeIndex < 0) return -1
+  const activeId = paneActiveId(pane)
+  const stillHere = activeId ? keep.findIndex((t) => t.sessionId === activeId) : -1
+  return stillHere >= 0 ? stillHere : Math.min(pane.activeIndex, keep.length - 1)
 }
 
 /**
@@ -392,6 +419,47 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
         if (i === dstIndex) return { ...p, tabs: dstTabs, activeIndex: landed }
         return p
       })
+      return pruneEmptyPanes({ ...state, panes, focusIndex: dstIndex })
+    }
+
+    case 'closeMany': {
+      const kill = new Set(action.sessionIds)
+      if (kill.size === 0) return state
+      let changed = false
+      const panes = state.panes.map((pane) => {
+        const keep = pane.tabs.filter((t) => !kill.has(t.sessionId))
+        if (keep.length === pane.tabs.length) return pane
+        changed = true
+        return { ...pane, tabs: keep, activeIndex: activeAfterKeep(pane, keep) }
+      })
+      if (!changed) return state
+      return pruneEmptyPanes({ ...state, panes })
+    }
+
+    case 'moveMany': {
+      const kill = new Set(action.sessionIds)
+      const dstIndex = action.to.pane
+      if (kill.size === 0 || !state.panes[dstIndex]) return state
+      // Gathered by walking the panes in order, so the group arrives laid out the way it looked —
+      // taking them in the caller's argument order would let the strip silently rearrange itself.
+      const moving: Tab[] = []
+      for (const pane of state.panes) {
+        for (const tab of pane.tabs) {
+          // Promoted on arrival, like a single cross-pane move: a deliberate placement is not a
+          // preview, and several preview tabs landing together would break the one-preview rule.
+          if (kill.has(tab.sessionId)) moving.push({ ...tab, preview: false })
+        }
+      }
+      if (moving.length === 0) return state
+      const stripped = state.panes.map((pane) => pane.tabs.filter((t) => !kill.has(t.sessionId)))
+      const dstTabs = stripped[dstIndex]
+      const at = clamp(action.to.index, 0, dstTabs.length)
+      const merged = [...dstTabs.slice(0, at), ...moving, ...dstTabs.slice(at)]
+      const panes = state.panes.map((pane, i) =>
+        i === dstIndex
+          ? { ...pane, tabs: merged, activeIndex: at }
+          : { ...pane, tabs: stripped[i], activeIndex: activeAfterKeep(pane, stripped[i]) }
+      )
       return pruneEmptyPanes({ ...state, panes, focusIndex: dstIndex })
     }
 

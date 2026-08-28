@@ -49,13 +49,25 @@ interface Props {
   onMoveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
   /** A drag left this window: another window took the tab, or it became a window of its own. */
   onTabLeftWindow: (sessionId: string) => void
+  /** Conversations in the current multi-selection — empty unless one is in effect. */
+  selectedIds: Set<string>
+  /** Drop a whole group at once (a drag carrying a multi-selection). */
+  onMoveTabGroup: (sessionIds: string[], to: { pane: number; index: number }) => void
+  /** What a gesture on this tab should act on — the group when it belongs to one, else just it. */
+  onResolveTargets: (paneIndex: number, sessionId: string) => string[]
+  /** ⌘-click: add or remove one tab. */
+  onToggleSelect: (paneIndex: number, sessionId: string) => void
+  /** ⇧-click: select the run from the anchor to here. */
+  onExtendSelect: (paneIndex: number, sessionId: string) => void
 }
 
 interface ItemProps {
   tab: TabDescriptor
   active: boolean
   focused: boolean
-  onActivate: () => void
+  /** Part of the current multi-selection. */
+  selected: boolean
+  onActivate: (e: MouseEvent) => void
   onPromote: () => void
   onClose: () => void
   onContextMenu: (e: MouseEvent) => void
@@ -65,16 +77,29 @@ interface ItemProps {
  * One tab. Its own component solely so the liveness dot can hold a `useSyncedAnimation` ref — a hook
  * cannot be called inside the strip's `map`.
  */
-function Tab({ tab, active, focused, onActivate, onPromote, onClose, onContextMenu }: ItemProps) {
+function Tab({
+  tab,
+  active,
+  focused,
+  selected,
+  onActivate,
+  onPromote,
+  onClose,
+  onContextMenu
+}: ItemProps) {
   // Phase-lock the breathing / ripple forms to the app-wide beat, exactly as a rail row does. Without
   // this a tab's dot and its row's dot would run the same animation out of step, which reads as two
   // different things happening rather than one session doing one thing.
   const dotRef = useSyncedAnimation<HTMLSpanElement>(tab.dot)
   return (
     <div
-      className={`sb-tab${active ? ' active' : ''}${active && focused ? ' focused' : ''}${tab.preview ? ' preview' : ''}`}
+      className={`sb-tab${active ? ' active' : ''}${active && focused ? ' focused' : ''}${tab.preview ? ' preview' : ''}${selected ? ' picked' : ''}`}
       role="tab"
+      // `aria-selected` stays the ACTIVE tab — it is what the tablist role means by selected, and the
+      // scroll-into-view effect keys off it. Multi-selection is a different idea, so it gets its own
+      // attribute rather than overloading one whose meaning is fixed.
       aria-selected={active}
+      data-picked={selected || undefined}
       tabIndex={-1}
       // A tab truncates aggressively, so the full title lives in the shared tooltip layer — never a
       // native `title`, which lags and resets on the slightest pointer move. `data-tip-sub` adds the
@@ -82,6 +107,7 @@ function Tab({ tab, active, focused, onActivate, onPromote, onClose, onContextMe
       data-tip={tab.title}
       {...(tab.subtitle ? { 'data-tip-sub': tab.subtitle } : {})}
       onClick={onActivate}
+      // A ⌘- or ⇧-click must not also start a drag-reorder; the hook checks the same modifiers.
       // Double-click is the editor gesture for "keep this one". The two ordinary clicks that precede
       // it only activate an already-open tab, which is idempotent, so no dedupe is needed here —
       // unlike the same gesture on a rail row, which records history stops.
@@ -160,7 +186,12 @@ export default function TabStrip({
   onMoveToOtherPane,
   onOpenInNewWindow,
   onMoveTab,
-  onTabLeftWindow
+  onTabLeftWindow,
+  selectedIds,
+  onMoveTabGroup,
+  onResolveTargets,
+  onToggleSelect,
+  onExtendSelect
 }: Props) {
   const stripRef = useRef<HTMLDivElement>(null)
   // Dragging: reorder here, move to the other pane, move to another window, or off into a new one.
@@ -172,6 +203,8 @@ export default function TabStrip({
     // the other pane or another window is still meaningful — this pane just ends up empty.
     enabled: tabs.length > 0,
     onMove: onMoveTab,
+    onMoveGroup: onMoveTabGroup,
+    targetsFor: (sessionId) => onResolveTargets(paneIndex, sessionId),
     onLeaveWindow: onTabLeftWindow
   })
   // Past the row cap the strip becomes a vertical scroller, and it carries the same hide-at-rest
@@ -193,7 +226,11 @@ export default function TabStrip({
     e.stopPropagation()
     const tab = tabs[index]
     if (!tab) return
+    // How many tabs the chosen command will act on, so the menu can say so rather than quietly
+    // closing five conversations under a label that reads like it means one.
+    const groupSize = selectedIds.has(tab.sessionId) && selectedIds.size > 1 ? selectedIds.size : 1
     const choice = await window.api.tabContextMenu({
+      count: groupSize,
       closeOthers: tabs.length > 1,
       // An unlinked terminal has no conversation, so there are no details to show and nothing to
       // reopen elsewhere by id — hide both rather than offer controls that silently do nothing.
@@ -228,7 +265,15 @@ export default function TabStrip({
           tab={tab}
           active={i === activeIndex}
           focused={focused}
-          onActivate={() => onActivate(paneIndex, i)}
+          selected={selectedIds.has(tab.sessionId)}
+          // ⇧ is tested before ⌘ so ⇧⌘-click extends rather than toggling — extending is the more
+          // destructive of the two (it replaces the run), so it should be the one that wins outright
+          // rather than being reachable only by accident.
+          onActivate={(e) => {
+            if (e.shiftKey) onExtendSelect(paneIndex, tab.sessionId)
+            else if (e.metaKey) onToggleSelect(paneIndex, tab.sessionId)
+            else onActivate(paneIndex, i)
+          }}
           onPromote={() => onPromote(tab.sessionId, paneIndex)}
           onClose={() => onClose(paneIndex, i)}
           onContextMenu={(e) => void contextMenu(e, i)}

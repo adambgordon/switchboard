@@ -38,6 +38,15 @@ export interface TabReorderOpts {
   enabled: boolean
   /** Reorder within this strip, or move to the other pane in this window. */
   onMove: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
+  /**
+   * The conversations that should travel with the dragged tab — the multi-selection when it belongs to
+   * one, otherwise just itself. Resolved at drag START and used for the whole gesture, so a selection
+   * changing mid-drag cannot alter what is being carried.
+   */
+  targetsFor: (sessionId: string) => string[]
+  /** Move a whole group at once. Separate from `onMove` because a group cannot be expressed as a
+   *  from-index: the tabs are scattered, and their indices shift as each one lands. */
+  onMoveGroup: (sessionIds: string[], to: { pane: number; index: number }) => void
   /** The tab went to another window, or off into a new one — drop it from this window. */
   onLeaveWindow: (sessionId: string) => void
 }
@@ -56,6 +65,8 @@ export function useTabReorder(
     let pressed: HTMLElement | null = null
     let sessionId = ''
     let fromIndex = -1
+    /** What this drag carries. Fixed when the drag begins — see TabReorderOpts.targetsFor. */
+    let carrying: string[] = []
     let startX = 0
     let startY = 0
     let dragging = false
@@ -161,6 +172,9 @@ export function useTabReorder(
 
     const onPointerDown = (e: PointerEvent): void => {
       if (e.button !== 0 || !optsRef.current.enabled) return
+      // ⌘ and ⇧ build a multi-selection; they must not also arm a drag, or picking out several tabs
+      // would drag whichever one the pointer wandered off first.
+      if (e.metaKey || e.shiftKey) return
       const t = e.target as HTMLElement | null
       // The close button owns its own click.
       if (t?.closest('.sb-tab-close')) return
@@ -184,6 +198,7 @@ export function useTabReorder(
           return
         }
         dragging = true
+        carrying = optsRef.current.targetsFor(sessionId)
         pressed.setPointerCapture?.(e.pointerId)
         const r = pressed.getBoundingClientRect()
         const c = pressed.cloneNode(true) as HTMLElement
@@ -220,10 +235,20 @@ export function useTabReorder(
       updateTarget(e.clientX, e.clientY)
       const landed = target
       const id = sessionId
+      const group = carrying
       const from = { pane: optsRef.current.paneIndex, index: fromIndex }
       finish()
       if (landed) {
         window.api.tabDragCancel()
+        if (group.length > 1) {
+          // A group's tabs are scattered, so there is no single from-index to shift against; the
+          // reducer takes them all out and reinserts them together. `tabDropIndex` already excluded
+          // only the dragged tab, so the target can be off by the others — accepted, because the
+          // alternative is excluding every carried tab from the geometry and leaving the caret
+          // pointing somewhere the group cannot actually land.
+          optsRef.current.onMoveGroup(group, landed)
+          return
+        }
         // `to.index` needs NO adjustment for the removal that precedes the insertion. `tabDropIndex`
         // was given the dragged tab as `skipIndex`, so it never counted it — its result is already an
         // index into the list without it, which is exactly what the reducer splices into (it removes
@@ -237,7 +262,13 @@ export function useTabReorder(
       }
       // Released outside this window's strips — main resolves it against the cursor.
       void window.api.tabDragDrop().then((outcome) => {
-        if (outcome !== 'cancelled') optsRef.current.onLeaveWindow(id)
+        if (outcome === 'cancelled') return
+        // Only the dragged tab crosses. Main was told about one conversation at dragBegin, so the
+        // rest of a group would be closed here without ever arriving anywhere — losing tabs to a
+        // gesture is far worse than moving fewer than expected. Dragging a group between windows is
+        // deliberately left out rather than half-done; the menu moves a whole group to a new window.
+        void group
+        optsRef.current.onLeaveWindow(id)
       })
     }
 

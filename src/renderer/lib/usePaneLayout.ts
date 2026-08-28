@@ -31,6 +31,10 @@ export interface PaneLayoutApi {
   closeTab: (pane: number, index: number) => void
   closeOtherTabs: (pane: number, index: number) => void
   moveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
+  /** Bulk forms for a multi-selection, by session id — see the `closeMany` / `moveMany` actions for
+   *  why a loop of the single-tab calls above cannot stand in for them. */
+  closeTabs: (sessionIds: string[]) => void
+  moveTabs: (sessionIds: string[], to: { pane: number; index: number }) => void
   splitPane: () => void
   unsplit: () => void
   focusPane: (index: number) => void
@@ -72,6 +76,17 @@ export function usePaneLayout(): PaneLayoutApi {
       dispatch({ type: 'move', from, to }),
     []
   )
+  // Bulk forms for a multi-selection. One dispatch, not a loop: see the action definitions for why
+  // closing or moving several tabs cannot be expressed as repeated single-tab calls.
+  const closeTabs = useCallback(
+    (sessionIds: string[]) => dispatch({ type: 'closeMany', sessionIds }),
+    []
+  )
+  const moveTabs = useCallback(
+    (sessionIds: string[], to: { pane: number; index: number }) =>
+      dispatch({ type: 'moveMany', sessionIds, to }),
+    []
+  )
   const splitPane = useCallback(() => {
     dispatch({ type: 'split', paneId: `p${nextPaneId.current}` })
     nextPaneId.current += 1
@@ -103,7 +118,9 @@ export function usePaneLayout(): PaneLayoutApi {
     deselect,
     closeTab,
     closeOtherTabs,
+    closeTabs,
     moveTab,
+    moveTabs,
     splitPane,
     unsplit,
     focusPane,

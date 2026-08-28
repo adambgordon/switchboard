@@ -51,6 +51,13 @@ interface Props {
   onMoveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
   /** A tab was dragged out of this window entirely. */
   onTabLeftWindow: (sessionId: string) => void
+  /** Multi-selection: which tabs are in it, the two gestures that build it, and the group forms of
+   *  drop and target-resolution. */
+  selectedTabIds: Set<string>
+  onToggleTabSelect: (pane: number, sessionId: string) => void
+  onExtendTabSelect: (pane: number, sessionId: string) => void
+  onMoveTabGroup: (sessionIds: string[], to: { pane: number; index: number }) => void
+  onResolveTabTargets: (pane: number, sessionId: string) => string[]
   /** Open the conversation-info modal for an arbitrary conversation (the tab menu's Session Details). */
   onShowInfoFor: (sessionId: string) => void
   title: string
@@ -162,6 +169,11 @@ export default function MainPane(props: Props) {
     onOpenTabInNewWindow,
     onMoveTab,
     onTabLeftWindow,
+    selectedTabIds,
+    onToggleTabSelect,
+    onExtendTabSelect,
+    onMoveTabGroup,
+    onResolveTabTargets,
     onShowInfoFor,
     title,
     cwd,
@@ -306,6 +318,11 @@ export default function MainPane(props: Props) {
           onOpenInNewWindow={onOpenTabInNewWindow}
           onMoveTab={onMoveTab}
           onTabLeftWindow={onTabLeftWindow}
+          selectedIds={selectedTabIds}
+          onToggleSelect={onToggleTabSelect}
+          onExtendSelect={onExtendTabSelect}
+          onMoveTabGroup={onMoveTabGroup}
+          onResolveTargets={onResolveTabTargets}
         />
       )}
       {selectedId && (

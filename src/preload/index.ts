@@ -34,8 +34,8 @@ const api: SwitchboardApi = {
   tabContextMenu: (opts) => ipcRenderer.invoke(IPC.tabContextMenu, opts),
   onMenuCloseTab: (cb) => subscribe(IPC.menuCloseTab, cb as never),
   closeWindow: () => ipcRenderer.send(IPC.windowClose),
-  openConversationWindow: (sessionId) =>
-    ipcRenderer.send(IPC.windowOpenConversation, sessionId),
+  openConversationWindow: (sessionIds) =>
+    ipcRenderer.send(IPC.windowOpenConversation, sessionIds),
   tabDragBegin: (sessionId) => ipcRenderer.send(IPC.tabDragBegin, sessionId),
   tabDragHover: () => ipcRenderer.send(IPC.tabDragHover),
   tabDragDrop: () => ipcRenderer.invoke(IPC.tabDragDrop),
@@ -85,15 +85,17 @@ contextBridge.exposeInMainWorld('devLabel', process.env.SWITCHBOARD_DEV_LABEL?.t
 const WINDOW_FLAG = '--sb-window='
 function readWindowInit(): WindowInit {
   const arg = process.argv.find((a) => a.startsWith(WINDOW_FLAG))
-  if (!arg) return { sessionId: null, collapseRail: false }
+  if (!arg) return { sessionIds: [], collapseRail: false }
   try {
     const parsed = JSON.parse(arg.slice(WINDOW_FLAG.length)) as Partial<WindowInit>
     return {
-      sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : null,
+      sessionIds: Array.isArray(parsed.sessionIds)
+        ? parsed.sessionIds.filter((id): id is string => typeof id === 'string' && !!id)
+        : [],
       collapseRail: parsed.collapseRail === true
     }
   } catch {
-    return { sessionId: null, collapseRail: false }
+    return { sessionIds: [], collapseRail: false }
   }
 }
 contextBridge.exposeInMainWorld('sbWindow', readWindowInit())

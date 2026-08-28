@@ -547,6 +547,92 @@ describe('focusPane and setSplitFraction', () => {
   })
 })
 
+describe('closeMany / moveMany — acting on a multi-selection', () => {
+  // These exist because a loop of single-tab actions cannot do the job: the caller resolves every
+  // index against the layout it can see, and that stops being true the moment the first one lands.
+  // Each test therefore uses NON-ADJACENT tabs, so an implementation that closed or moved by stale
+  // index takes the wrong ones rather than coincidentally the right ones.
+
+  it('closes a scattered set, not the ones their indices used to point at', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 0)])
+    const after = step(before, { type: 'closeMany', sessionIds: ['A', 'C', 'E'] })
+    expect(after.panes[0].tabs).toEqual([t('B'), t('D')])
+  })
+
+  it('keeps the active conversation selected when it survives', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D')], 3)])
+    const after = step(before, { type: 'closeMany', sessionIds: ['A', 'B'] })
+    expect(activeTabId(after)).toBe('D')
+  })
+
+  it('falls back to a neighbour when the active one was closed', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D')], 1)])
+    const after = step(before, { type: 'closeMany', sessionIds: ['B', 'D'] })
+    expect(after.panes[0].tabs).toEqual([t('A'), t('C')])
+    expect(after.panes[0].activeIndex).toBe(1)
+  })
+
+  it('collapses a pane it empties', () => {
+    const before = layout([pane('p0', [t('A'), t('B')], 0), pane('p1', [t('C')], 0)], 0)
+    const after = step(before, { type: 'closeMany', sessionIds: ['A', 'B'] })
+    expect(after.panes).toHaveLength(1)
+    expect(after.panes[0].tabs).toEqual([t('C')])
+  })
+
+  it('is a no-op for an empty set or ids that are not open', () => {
+    const before = layout([pane('p0', [t('A')], 0)])
+    expect(paneReducer(before, { type: 'closeMany', sessionIds: [] })).toBe(before)
+    expect(paneReducer(before, { type: 'closeMany', sessionIds: ['ZZ'] })).toBe(before)
+  })
+
+  it('moves a scattered set across, keeping their DISPLAY order', () => {
+    // Order comes from the strip, not from the caller's array — passed here deliberately jumbled, so
+    // an implementation that trusted the argument order would land them E, A, C.
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 0), pane('p1', [t('Z')], 0)], 0)
+    const after = step(before, { type: 'moveMany', sessionIds: ['E', 'A', 'C'], to: { pane: 1, index: 1 } })
+    expect(after.panes[0].tabs).toEqual([t('B'), t('D')])
+    expect(after.panes[1].tabs.map((x) => x.sessionId)).toEqual(['Z', 'A', 'C', 'E'])
+  })
+
+  it('promotes everything it moves', () => {
+    // A deliberate placement is not a preview — and two preview tabs in one pane would break the
+    // one-preview rule outright.
+    const before = layout([pane('p0', [t('A', true), t('B')], 0), pane('p1', [t('Z')], 0)], 0)
+    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'B'], to: { pane: 1, index: 1 } })
+    // Moving EVERY tab out empties the source, which then collapses — so one pane remains, and it is
+    // the destination's list. `t()` defaults to preview:false, so this also asserts the promotion.
+    expect(after.panes).toHaveLength(1)
+    expect(after.panes[0].tabs).toEqual([t('Z'), t('A'), t('B')])
+  })
+
+  it('activates the arrival and focuses the destination', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C')], 0), pane('p1', [t('Z')], 0)], 0)
+    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'B'], to: { pane: 1, index: 1 } })
+    expect(after.focusIndex).toBe(1)
+    expect(activeTabId(after)).toBe('A')
+  })
+
+  it('reorders within one pane', () => {
+    // Destination index is resolved AFTER the movers are taken out, matching single-tab `move`.
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D')], 0)])
+    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'C'], to: { pane: 0, index: 1 } })
+    expect(after.panes[0].tabs.map((x) => x.sessionId)).toEqual(['B', 'A', 'C', 'D'])
+  })
+
+  it('clamps a destination index past the end', () => {
+    const before = layout([pane('p0', [t('A'), t('B')], 0), pane('p1', [t('Z')], 0)], 0)
+    const after = step(before, { type: 'moveMany', sessionIds: ['A'], to: { pane: 1, index: 99 } })
+    expect(after.panes[1].tabs.map((x) => x.sessionId)).toEqual(['Z', 'A'])
+  })
+
+  it('is a no-op for an empty set, unknown ids, or a pane that does not exist', () => {
+    const before = layout([pane('p0', [t('A')], 0)])
+    expect(paneReducer(before, { type: 'moveMany', sessionIds: [], to: { pane: 0, index: 0 } })).toBe(before)
+    expect(paneReducer(before, { type: 'moveMany', sessionIds: ['ZZ'], to: { pane: 0, index: 0 } })).toBe(before)
+    expect(paneReducer(before, { type: 'moveMany', sessionIds: ['A'], to: { pane: 5, index: 0 } })).toBe(before)
+  })
+})
+
 describe('rekey — a placeholder id became real', () => {
   it('rewrites the id in every pane and every slot, without moving anything', () => {
     // The placeholder named no conversation and is ceasing to exist, so nothing keyed to it may be
