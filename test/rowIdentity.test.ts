@@ -21,6 +21,9 @@ function pty(over: Partial<PtyState> = {}): PtyState {
     origin: 'new',
     provisional: false,
     parkedJob: null,
+    // Row identity is about the conversation, not about which window renders the terminal — so the
+    // fixture owns its terminal and none of the assertions here depend on that.
+    ownedHere: true,
     ...over
   }
 }

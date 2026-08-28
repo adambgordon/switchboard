@@ -8,7 +8,18 @@ import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
 import { isUnlinkedRow } from '../lib/rowIdentity'
 import NewConversationMenu from './NewConversationMenu'
-import { Chevron, Close, Plus, Search, Pin, Info, SplitVertical, Stop, Play } from './icons'
+import {
+  Chevron,
+  Close,
+  Plus,
+  Search,
+  Pin,
+  Info,
+  NewWindow,
+  SplitVertical,
+  Stop,
+  Play
+} from './icons'
 
 /** One row in the pane: a conversation that may be live, pinned, both, or neither. */
 export interface RailEntry {
@@ -72,6 +83,8 @@ interface Props {
   onOpenInBackground?: (sessionId: string) => void
   /** ⇧+click a row, or the ⋮ menu's Open to the Side — show it in the other pane. */
   onOpenToSide?: (sessionId: string) => void
+  /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
+  onOpenInNewWindow?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
   // search — lives on the status line; opening it replaces the working/idle sub-label
   query: string
@@ -150,6 +163,7 @@ export default function TallyRail({
   onStick,
   onOpenInBackground,
   onOpenToSide,
+  onOpenInNewWindow,
   onTogglePin,
   query,
   onQueryChange,
@@ -574,6 +588,18 @@ export default function TallyRail({
             >
               <SplitVertical size={14} />
               <span>Open to the side</span>
+            </button>
+          )}
+          {onOpenInNewWindow && !ctxMenu.unlinked && (
+            <button
+              className="sb-ctxmenu-item"
+              onClick={() => {
+                onOpenInNewWindow(ctxMenu.id)
+                closeMenu()
+              }}
+            >
+              <NewWindow size={14} />
+              <span>Open in new window</span>
             </button>
           )}
           {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**

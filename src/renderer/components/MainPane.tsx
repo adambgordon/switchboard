@@ -28,9 +28,11 @@ interface Props {
   style?: CSSProperties
   /** A pointer landing anywhere in this pane hands it the keyboard. */
   onPaneFocus?: () => void
-  /** Live, but its terminal is mounted in the other pane — one xterm per terminal, so this pane shows
-   *  the transcript and says where the terminal is rather than offering a toggle that cannot work. */
-  terminalElsewhere?: boolean
+  /** Where this conversation's live terminal is. One xterm per terminal, so a pane that does not hold
+   *  it shows the transcript and says where it is — and, across windows, offers to move it. */
+  terminalAt?: 'here' | 'other-pane' | 'other-window' | null
+  /** Bring the terminal into this window and show it here. */
+  onClaimTerminal?: () => void
   /** Preferences → Application → Tabs and split view. False renders no strip at all. */
   showTabs: boolean
   tabs: TabDescriptor[]
@@ -134,7 +136,8 @@ export default function MainPane(props: Props) {
     paneFocused,
     style,
     onPaneFocus,
-    terminalElsewhere,
+    terminalAt,
+    onClaimTerminal,
     showTabs,
     tabs,
     activeTabIndex,
@@ -290,7 +293,8 @@ export default function MainPane(props: Props) {
           view={view}
           pinned={pinned}
           unlinked={unlinked}
-          terminalElsewhere={terminalElsewhere}
+          terminalAt={terminalAt}
+          onClaimTerminal={onClaimTerminal}
           onTogglePin={onTogglePin}
           onResume={onResume}
           onShowHistory={onShowHistory}

@@ -205,7 +205,8 @@ export type PtyBindKind = 'initial' | 'correction'
  */
 export type LiveState = 'working' | 'asking' | 'awaiting' | 'quiet'
 
-export interface PtyState {
+/** A live terminal as `PtyManager` tracks it — lifecycle only, no notion of windows. */
+export interface PtySession {
   /** Stable handle for this live process (distinct from sessionId). */
   ptyId: string
   /** The conversation Switchboard associated with this PTY at launch (or Codex late-bind). */
@@ -247,6 +248,33 @@ export interface PtyState {
   exitCode?: number | null
 }
 
+/**
+ * A live terminal as the renderer sees it: the session above, plus which window may render it.
+ *
+ * The split is deliberate. `PtyManager` owns terminal LIFECYCLE and knows nothing about windows — it
+ * streams bytes to every renderer. Which window is allowed to mount an xterm is a window-layer
+ * concern, stamped on by `ipc.ts`, which is also the only place that can know it (the spawning
+ * window is the IPC sender).
+ */
+export interface PtyState extends PtySession {
+  /**
+   * Whether THIS window may mount an xterm for this terminal.
+   *
+   * A terminal has exactly one owner across the whole app, and this is what enforces it. Two windows
+   * rendering the same terminal would each fit their own geometry and push it to the pty, which has a
+   * single size: the loser reflows the agent's output to the wrong width and — because a terminal only
+   * re-pushes when its OWN pixel size changes — never recovers. So a non-owning window shows that
+   * conversation's transcript and offers to take the terminal over, rather than racing for it.
+   *
+   * Deliberately a boolean answered PER WINDOW rather than an owner id the renderer compares against
+   * its own: the live set is sent to each window separately with this already resolved, so there is no
+   * identity for a renderer to get wrong, and no need for it to know its own window at all.
+   *
+   * True for the window that spawned it; moved only by an explicit `IPC.ptyClaim`.
+   */
+  ownedHere: boolean
+}
+
 /** IPC channel identifiers. invoke/handle unless noted as a main->renderer push. */
 export const IPC = {
   sessionsList: 'sessions:list',
@@ -272,6 +300,8 @@ export const IPC = {
   tabContextMenu: 'shell:tabContextMenu', // renderer -> main: pop the native right-click menu for a tab; resolves with the chosen action
   menuCloseTab: 'menu:closeTab', // push: ⌘W — the renderer closes the active tab, or asks main to close the window when there is none
   windowClose: 'window:close', // renderer -> main: close the sender's window (⌘W with no tab to close)
+  windowOpenConversation: 'window:openConversation', // renderer -> main: open a NEW window showing one conversation
+  ptyClaim: 'pty:claim', // renderer -> main: take ownership of a terminal from another window
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
@@ -310,6 +340,20 @@ export type UpdateCheck =
 
 /** What the native tab context menu resolved to. */
 export type TabMenuAction = 'close' | 'closeOthers' | 'details'
+
+/** What a freshly-created window should show. Requested once on mount via `IPC.windowGetInit`. */
+export interface WindowInit {
+  /** The conversation to open as this window's only tab, or null for an ordinary browser window. */
+  sessionId: string | null
+  /**
+   * Start with the left rail hidden. A detached window is a working surface for one conversation, so
+   * it opens without the browser — ⌘B brings it back. It is a starting state, not a mode: the choice
+   * is deliberately NOT persisted from such a window, because layout lives in localStorage and is
+   * shared by every window of the app.
+   */
+  collapseRail: boolean
+}
+
 
 /** Terminal result of an in-app update run (git pull + npm run setup). */
 export interface UpdateRunResult {
@@ -382,6 +426,11 @@ export interface SwitchboardApi {
   /** Close the window this renderer belongs to. The ⌘W fallback, and what makes a detached window
    *  closable from inside. */
   closeWindow(): void
+  /** Open a NEW window showing one conversation, with the rail hidden. Fire-and-forget. */
+  openConversationWindow(sessionId: string): void
+  /** Take ownership of a terminal currently owned by another window, so this one can show it. The
+   *  previous owner's xterm unmounts; ours mounts and repaints on its first fit. */
+  claimTerminal(ptyId: string): void
   /** Match the window's native backgroundColor to the active theme's --paper, so a live resize
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void

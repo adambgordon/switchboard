@@ -8,7 +8,18 @@
  */
 type Writer = (data: string) => void
 
+/**
+ * How much output to hold for a terminal with no writer attached, per terminal.
+ *
+ * Bounded in BYTES rather than chunks because chunk sizes vary by orders of magnitude, and because
+ * every window receives every terminal's output: a window showing one conversation still sees the
+ * rest, and those have no writer in it to consume them. A chunk count leaves the real ceiling
+ * unstated; this states it.
+ */
+const MAX_BUFFER_BYTES = 256 * 1024
+
 const buffers = new Map<string, string[]>()
+const bufferBytes = new Map<string, number>()
 const writers = new Map<string, Writer>()
 let started = false
 
@@ -19,12 +30,15 @@ function ensureStarted(): void {
     const w = writers.get(id)
     if (w) {
       w(data)
-    } else {
-      const b = buffers.get(id) ?? []
-      b.push(data)
-      if (b.length > 4000) b.shift()
-      buffers.set(id, b)
+      return
     }
+    const b = buffers.get(id) ?? []
+    b.push(data)
+    let bytes = (bufferBytes.get(id) ?? 0) + data.length
+    // Drop from the FRONT: the newest output is what a terminal attaching later needs to show.
+    while (bytes > MAX_BUFFER_BYTES && b.length > 1) bytes -= b.shift()!.length
+    buffers.set(id, b)
+    bufferBytes.set(id, bytes)
   })
 }
 
@@ -40,6 +54,7 @@ export function attachPty(id: string, writer: Writer): () => void {
   if (backlog) {
     for (const d of backlog) writer(d)
     buffers.delete(id)
+    bufferBytes.delete(id)
   }
   writers.set(id, writer)
   return () => {

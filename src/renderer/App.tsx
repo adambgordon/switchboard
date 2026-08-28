@@ -136,6 +136,11 @@ export default function App() {
   const darkIcon = useDarkIcon()
   const updates = useUpdates()
   const focused = useWindowFocus()
+  // A window opened to show one conversation. It is the same app with the rail hidden — ⌘B brings the
+  // browser back — rather than a second, cut-down shell. `persist: false` is load-bearing: layout
+  // lives in localStorage, which every window of the app shares, so a detached window writing its
+  // collapsed rail there would hand that state to the browser window on the next launch.
+  const detached = window.sbWindow.sessionId !== null
   const {
     paneWidth,
     paneCollapsed,
@@ -144,7 +149,7 @@ export default function App() {
     togglePane,
     resetPane,
     toggleSection
-  } = useLayout()
+  } = useLayout({ collapseRail: window.sbWindow.collapseRail, persist: !detached })
   const dragStartRef = useRef(0)
   // The split divider reports a pointer delta, so a drag needs the fraction it began at AND the
   // container width that delta is a fraction of.
@@ -236,6 +241,17 @@ export default function App() {
     if (tabsWereEnabled.current && !tabsEnabled) panes.collapseToSingle()
     tabsWereEnabled.current = tabsEnabled
   }, [tabsEnabled, panes.collapseToSingle])
+
+  // A detached window opens straight onto the conversation it was created for, as a kept tab — it was
+  // asked for by name, so it is not a preview. Runs once; the conversation index has not necessarily
+  // loaded yet, which is fine, because a tab holds an id and the title fills in when it arrives.
+  const openedInitialRef = useRef(false)
+  useEffect(() => {
+    const target = window.sbWindow.sessionId
+    if (!target || openedInitialRef.current) return
+    openedInitialRef.current = true
+    panes.openTab(target, 'persistent')
+  }, [panes.openTab])
 
   // ⌘W arrives as a push from the File menu, not a keydown: a menu accelerator is consumed by the app
   // and the key event never reaches the page. Close the focused pane's active tab; with none — no tabs
@@ -430,7 +446,17 @@ export default function App() {
     const id = pane ? paneActiveId(pane) : null
     const meta = id ? metaById.get(id) ?? null : null
     const pty = id ? ptys.bySession.get(id) ?? null : null
-    const ownsTerminal = !!pty && ptyHome[pty.ptyId] === index
+    // A terminal renders here only if this WINDOW owns it (main decides, one owner app-wide) and this
+    // PANE is its home within the window. The two are independent gates, and the reason they differ
+    // matters to the user: across windows the terminal can be moved here, across panes it cannot yet.
+    const ownsTerminal = !!pty && pty.ownedHere && ptyHome[pty.ptyId] === index
+    const terminalAt: 'here' | 'other-pane' | 'other-window' | null = !pty
+      ? null
+      : ownsTerminal
+        ? 'here'
+        : pty.ownedHere
+          ? 'other-pane'
+          : 'other-window'
     const requested: View = id
       ? viewBySession[id] ?? (pty ? 'terminal' : 'transcript')
       : 'transcript'
@@ -439,9 +465,7 @@ export default function App() {
       id,
       meta,
       pty,
-      // Live, but its terminal is mounted in the other pane — the header says so rather than offering
-      // a Terminal toggle that cannot work.
-      terminalElsewhere: !!pty && !ownsTerminal,
+      terminalAt,
       view: (requested === 'terminal' && ownsTerminal ? 'terminal' : 'transcript') as View,
       title: pty ? displayTitleForRow(pty, meta ?? synthMeta(pty)) : meta?.title ?? 'Conversation',
       cwd: meta?.cwd ?? pty?.cwd ?? ''
@@ -474,8 +498,16 @@ export default function App() {
   // Live terminals partitioned by the pane that owns them. A terminal with no home yet appears in
   // NEITHER pane for one frame: mounting it in the wrong pane and moving it next frame would blank it,
   // and while it is unmounted the pty stream buffers its output rather than losing it.
+  // Only terminals THIS window owns are candidates: one xterm per terminal app-wide, and main is the
+  // authority on which window that is. A terminal owned elsewhere is mounted nowhere here, and the
+  // pane showing its conversation offers to bring it over instead.
   const ptysByPane = useMemo<PtyState[][]>(
-    () => partitionPtys(ptys.active, ptyHome, paneLayout.panes.length),
+    () =>
+      partitionPtys(
+        ptys.active.filter((p) => p.ownedHere),
+        ptyHome,
+        paneLayout.panes.length
+      ),
     [ptys.active, ptyHome, paneLayout.panes.length]
   )
 
@@ -886,6 +918,21 @@ export default function App() {
     },
     [panes.splitPane, land, isUnlinkedId, markRead, requestFocus]
   )
+  // Open a conversation in its own window. Explicitly does NOT move its terminal: the new window
+  // shows the transcript and offers to bring the terminal over, so asking for a second view of a
+  // session you are typing in never yanks the terminal out from under you.
+  const openInNewWindow = useCallback((id: string) => {
+    window.api.openConversationWindow(id)
+  }, [])
+  // Take a live terminal over from whichever window currently holds it, then show it. One xterm per
+  // terminal app-wide, so this is a move, not a copy — the other window falls back to the transcript.
+  const claimTerminal = useCallback(
+    (ptyId: string, pane: number) => {
+      window.api.claimTerminal(ptyId)
+      goLive(pane)
+    },
+    [goLive]
+  )
   const toggleSplit = useCallback(() => {
     if (paneLayoutRef.current.panes.length > 1) panes.unsplit()
     else panes.splitPane()
@@ -1071,7 +1118,14 @@ export default function App() {
         }
         return
       }
-      if (mod && e.key.toLowerCase() === 'n') {
+      if (tabsEnabled && e.metaKey && e.shiftKey && !e.altKey && e.code === 'KeyN') {
+        // ⇧⌘N — open the selected conversation in its own window. Must come BEFORE the ⌘N branch:
+        // that one matches on `e.key.toLowerCase()`, so Shift+N lowercases to 'n' and it would
+        // otherwise swallow this chord and start a new conversation instead. (The same shadowing
+        // still applies to ⇧⌘F and ⇧⌘B, which nothing binds.)
+        e.preventDefault()
+        if (selectedId && !selectedUnlinked) openInNewWindow(selectedId)
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         newConversation()
       } else if (mod && e.key.toLowerCase() === 'f') {
@@ -1194,7 +1248,9 @@ export default function App() {
     tabsEnabled,
     paneLayout,
     goToTab,
-    toggleSplit
+    toggleSplit,
+    openInNewWindow,
+    selectedUnlinked
   ])
 
   // Find belongs to whichever pane has the keyboard. Moving to the other pane closes it rather than
@@ -1239,6 +1295,7 @@ export default function App() {
             onStick={tabsEnabled ? stickConversation : undefined}
             onOpenInBackground={tabsEnabled ? openInBackground : undefined}
             onOpenToSide={tabsEnabled ? openToSide : undefined}
+            onOpenInNewWindow={tabsEnabled ? openInNewWindow : undefined}
             onTogglePin={togglePinGated}
             query={query}
             onQueryChange={setQuery}
@@ -1323,7 +1380,10 @@ export default function App() {
                   paneFocused={isFocused}
                   style={split ? { flexGrow: grow, flexBasis: 0 } : undefined}
                   onPaneFocus={split ? () => panes.focusPane(i) : undefined}
-                  terminalElsewhere={v.terminalElsewhere}
+                  terminalAt={v.terminalAt}
+                  onClaimTerminal={() => {
+                    if (v.pty) claimTerminal(v.pty.ptyId, i)
+                  }}
                   showTabs={tabsEnabled}
                   tabs={tabsByPane[i] ?? []}
                   activeTabIndex={pane.activeIndex}

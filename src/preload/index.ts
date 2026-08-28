@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import { IPC, type SwitchboardApi } from '../shared/types'
+import { IPC, type SwitchboardApi, type WindowInit } from '../shared/types'
 
 function subscribe(channel: string, cb: (...args: never[]) => void): () => void {
   const handler = (_e: IpcRendererEvent, ...args: unknown[]): void =>
@@ -34,6 +34,9 @@ const api: SwitchboardApi = {
   tabContextMenu: (opts) => ipcRenderer.invoke(IPC.tabContextMenu, opts),
   onMenuCloseTab: (cb) => subscribe(IPC.menuCloseTab, cb as never),
   closeWindow: () => ipcRenderer.send(IPC.windowClose),
+  openConversationWindow: (sessionId) =>
+    ipcRenderer.send(IPC.windowOpenConversation, sessionId),
+  claimTerminal: (ptyId) => ipcRenderer.send(IPC.ptyClaim, ptyId),
   setBackgroundColor: (color) => ipcRenderer.send(IPC.windowSetBackgroundColor, color),
   syncTrafficLights: () => ipcRenderer.send(IPC.windowSyncTrafficLights),
   onRefreshStart: (cb) => subscribe(IPC.appRefreshStart, cb as never),
@@ -57,5 +60,29 @@ contextBridge.exposeInMainWorld('platform', process.platform)
 // renderer can badge the wordmark — distinguishes parallel `npm run dev` windows. null in
 // normal/packaged runs. (Preload has process access; sandbox is off for the ESM preload.)
 contextBridge.exposeInMainWorld('devLabel', process.env.SWITCHBOARD_DEV_LABEL?.trim() || null)
+
+/**
+ * What this window was opened to show, delivered through `webPreferences.additionalArguments` rather
+ * than an IPC round trip.
+ *
+ * Synchronous is the whole point: the rail's collapsed state has to be known for the FIRST render of a
+ * detached window, and an async answer would show the browser for a frame and then snap it shut. Falls
+ * back to an ordinary browser window when the flag is absent.
+ */
+const WINDOW_FLAG = '--sb-window='
+function readWindowInit(): WindowInit {
+  const arg = process.argv.find((a) => a.startsWith(WINDOW_FLAG))
+  if (!arg) return { sessionId: null, collapseRail: false }
+  try {
+    const parsed = JSON.parse(arg.slice(WINDOW_FLAG.length)) as Partial<WindowInit>
+    return {
+      sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : null,
+      collapseRail: parsed.collapseRail === true
+    }
+  } catch {
+    return { sessionId: null, collapseRail: false }
+  }
+}
+contextBridge.exposeInMainWorld('sbWindow', readWindowInit())
 // Dev-only: hold the updater UI in its in-flight state for visual checks.
 contextBridge.exposeInMainWorld('fakeUpdating', process.env.SWITCHBOARD_FAKE_UPDATING === '1')

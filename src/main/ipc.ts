@@ -19,8 +19,11 @@ import {
   type AgentAvailability,
   type AgentKind,
   type PtyBindKind,
+  type PtySession,
+  type PtyState,
   type TabMenuAction,
-  type Transcript
+  type Transcript,
+  type WindowInit
 } from '../shared/types'
 import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
@@ -37,6 +40,67 @@ const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 let watcher: SessionWatcher | null = null
 let mgr: PtyManager | null = null
 let liveTick: ReturnType<typeof setInterval> | null = null
+
+// --- the window layer ---------------------------------------------------------------------------
+//
+// `PtyManager` owns terminal lifecycle and knows nothing about windows; it streams bytes to every
+// renderer. Everything below is the part that only this module can know, because the spawning window
+// is the IPC sender.
+
+/**
+ * ptyId → the webContents id of the window allowed to mount an xterm for it.
+ *
+ * Exactly one owner per terminal, app-wide. Two windows rendering the same terminal would each fit
+ * their own geometry and push it to a pty that has a single size; the loser then renders the agent's
+ * output at the wrong width and never recovers, because a terminal only re-pushes when its own pixel
+ * size changes. A non-owning window shows the transcript and offers to take the terminal over.
+ */
+const ptyOwner = new Map<string, number>()
+
+/** Supplied by `index.ts`, which owns geometry and first-window bookkeeping. */
+let openWindow: ((init?: WindowInit) => void) | null = null
+
+export function setWindowOpener(fn: (init?: WindowInit) => void): void {
+  openWindow = fn
+}
+
+/**
+ * A window closed. Its claims are released so a surviving window can take those terminals over —
+ * without this a live session whose window was closed would stay unreachable for the rest of the run,
+ * still running, with no window permitted to show it.
+ */
+export function releaseWindow(webContentsId: number): void {
+  let released = false
+  for (const [ptyId, owner] of ptyOwner) {
+    if (owner === webContentsId) {
+      ptyOwner.delete(ptyId)
+      released = true
+    }
+  }
+  if (released) emitActive()
+}
+
+/** Resolve ownership FROM ONE WINDOW'S POINT OF VIEW, so the renderer gets a boolean it can act on
+ *  rather than an id it has to compare against its own. */
+function forWindow(sessions: PtySession[], webContentsId: number): PtyState[] {
+  return sessions.map((s) => ({ ...s, ownedHere: ptyOwner.get(s.ptyId) === webContentsId }))
+}
+
+/**
+ * Push the current live set to every window, each with its own ownership view.
+ *
+ * Deliberately NOT `broadcast`, which sends one identical payload: `ownedHere` is per-recipient by
+ * construction, so one shared payload could not express it.
+ */
+function emitActive(): void {
+  if (!mgr) return
+  const sessions = mgr.list()
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) {
+      w.webContents.send(IPC.ptyActiveChanged, forWindow(sessions, w.webContents.id))
+    }
+  }
+}
 
 /** Persistent per-file meta cache shared across every re-index, so the frequent live-turn poll
  *  re-parses only the transcript(s) actually changing rather than re-reading the whole index each
@@ -247,7 +311,7 @@ export function registerIpc(): void {
   })
   mgr.on('data', (ptyId: string, data: string) => broadcast(IPC.ptyData, ptyId, data))
   mgr.on('exit', (ptyId: string, code: number | null) => broadcast(IPC.ptyExit, ptyId, code))
-  mgr.on('active-changed', (states) => broadcast(IPC.ptyActiveChanged, states))
+  mgr.on('active-changed', () => emitActive())
   // A Codex PTY's sessionId changed. `kind` must be forwarded: it tells the renderer whether this
   // replaced a placeholder (everything keyed to it migrates) or corrected a terminal onto a different
   // real conversation (CONVERSATION-owned state — persisted seen/unread, earlier history stops —
@@ -300,14 +364,31 @@ export function registerIpc(): void {
   })
 
   // --- live sessions (explicit spawn only) ---
-  ipcMain.handle(IPC.ptyResume, (_e, sessionId: string, cwd: string, agent: AgentKind, title?: string) =>
-    mgr!.resume(sessionId, cwd, agent, title)
-  )
-  ipcMain.handle(IPC.ptyStartNew, (_e, cwd: string, agent: AgentKind) => {
+  // The spawning window owns the terminal it started. That is the only implicit assignment; every
+  // later move is an explicit claim.
+  ipcMain.handle(IPC.ptyResume, (e, sessionId: string, cwd: string, agent: AgentKind, title?: string) => {
+    const st = mgr!.resume(sessionId, cwd, agent, title)
+    ptyOwner.set(st.ptyId, e.sender.id)
+    emitActive()
+    return forWindow([st], e.sender.id)[0]
+  })
+  ipcMain.handle(IPC.ptyStartNew, (e, cwd: string, agent: AgentKind) => {
     // Guard a stale default folder: if it's been deleted/renamed since it was chosen in Preferences,
     // reject so the renderer can fall back to the chooser instead of node-pty throwing on a bad cwd.
     if (!existsSync(cwd)) throw new Error(`Directory no longer exists: ${cwd}`)
-    return mgr!.startNew(cwd, agent)
+    const st = mgr!.startNew(cwd, agent)
+    ptyOwner.set(st.ptyId, e.sender.id)
+    emitActive()
+    return forWindow([st], e.sender.id)[0]
+  })
+  // Take a terminal over from another window. The previous owner's xterm unmounts and ours mounts;
+  // the fresh xterm starts empty, and its first fit pushes this window's geometry, which is what makes
+  // the agent repaint into it.
+  ipcMain.on(IPC.ptyClaim, (e, ptyId: string) => {
+    if (!mgr?.list().some((s) => s.ptyId === ptyId)) return
+    if (ptyOwner.get(ptyId) === e.sender.id) return
+    ptyOwner.set(ptyId, e.sender.id)
+    emitActive()
   })
   ipcMain.on(IPC.ptyInput, (_e, ptyId: string, data: string) => mgr!.write(ptyId, data))
   ipcMain.on(IPC.ptyResize, (_e, ptyId: string, cols: number, rows: number) =>
@@ -315,7 +396,7 @@ export function registerIpc(): void {
   )
   ipcMain.on(IPC.ptyKill, (_e, ptyId: string) => mgr!.kill(ptyId))
   ipcMain.on(IPC.ptySetMaxLive, (_e, n: number) => mgr!.setMaxLive(n))
-  ipcMain.handle(IPC.ptyActiveList, () => mgr!.list())
+  ipcMain.handle(IPC.ptyActiveList, (e) => forWindow(mgr!.list(), e.sender.id))
   ipcMain.handle(IPC.agentsAvailable, () => listAgents())
 
   // --- misc ---
@@ -341,6 +422,12 @@ export function registerIpc(): void {
   )
   // The ⌘W fallback: the renderer asks for its own window to close when it has no tab to close.
   ipcMain.on(IPC.windowClose, (e) => BrowserWindow.fromWebContents(e.sender)?.close())
+  // Open a conversation in its own window. The new window is the same app with the rail hidden — the
+  // browser is one ⌘B away — rather than a second, cut-down shell that would have to reimplement it.
+  ipcMain.on(IPC.windowOpenConversation, (_e, sessionId: string) => {
+    if (typeof sessionId !== 'string' || !sessionId) return
+    openWindow?.({ sessionId, collapseRail: true })
+  })
   // Keep the OS window background in lockstep with the renderer's theme, so a live window resize
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.
   ipcMain.on(IPC.windowSetBackgroundColor, (e, color: string) =>

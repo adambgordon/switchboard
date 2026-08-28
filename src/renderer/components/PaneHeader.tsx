@@ -19,8 +19,11 @@ interface Props {
    * so they are hidden rather than rendered as controls that quietly do nothing. Mirrors the ⋮ menu.
    */
   unlinked: boolean
-  /** Live, but its terminal is mounted in the other pane — disables the Terminal toggle here. */
-  terminalElsewhere?: boolean
+  /** Where this conversation's live terminal is: rendered here, in this window's other pane, or in
+   *  another window (from which it can be moved). Null when there is no live terminal. */
+  terminalAt?: 'here' | 'other-pane' | 'other-window' | null
+  /** Bring the terminal into this window and show it. */
+  onClaimTerminal?: () => void
   onTogglePin: () => void
   onResume: () => void
   onShowHistory: () => void
@@ -51,7 +54,8 @@ export default function PaneHeader({
   view,
   pinned,
   unlinked,
-  terminalElsewhere,
+  terminalAt,
+  onClaimTerminal,
   onTogglePin,
   onResume,
   onShowHistory,
@@ -160,14 +164,23 @@ export default function PaneHeader({
                 <TranscriptIcon size={13} />
                 Formatted
               </button>
-              {/* A terminal exists in exactly one pane, so in the other pane this toggle is shown
-                  DISABLED with a tip saying where it is — rather than offered and then silently
-                  refusing, or hidden, which would make the pane look like it holds a dead session. */}
+              {/* A terminal exists in exactly one place, and WHERE decides what this button does.
+                  Here: switch to it. In another WINDOW: bring it over — clicking "Terminal" in a
+                  window that does not hold it plainly means "show it here", so that is what it does.
+                  In the other PANE of this window: disabled with a tip, because moving a terminal
+                  between panes is not supported yet, and a control that silently refuses is worse
+                  than one that says why. */}
               <button
                 className={`sb-seg-btn${view === 'terminal' ? ' active' : ''}`}
-                onClick={onGoLive}
-                disabled={terminalElsewhere}
-                data-tip={terminalElsewhere ? 'Terminal is open in the other pane' : undefined}
+                onClick={terminalAt === 'other-window' ? onClaimTerminal : onGoLive}
+                disabled={terminalAt === 'other-pane'}
+                data-tip={
+                  terminalAt === 'other-pane'
+                    ? 'Terminal is open in the other pane'
+                    : terminalAt === 'other-window'
+                      ? 'Terminal is open in another window — click to move it here'
+                      : undefined
+                }
               >
                 {/* a static solid cobalt dot — marks the live session; turn-state animation
                     lives on the left-pane rows, not here */}

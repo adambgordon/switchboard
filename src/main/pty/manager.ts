@@ -5,7 +5,7 @@ import {
   CONFIG,
   type AgentKind,
   type PtyBindKind,
-  type PtyState,
+  type PtySession,
   type PtyStatus
 } from '../../shared/types'
 import { cleanAgentEnv } from './agentEnv'
@@ -79,7 +79,7 @@ interface Live {
   // placeholder sessionId and stays `provisional` until an lsof probe PROVES which rollout the Codex
   // process in this terminal has open (see codexIdentity + probeCodexIdentity). Cleared on bind (or
   // when the PTY exits). While set, the row is a terminal with no known transcript — the renderer
-  // surfaces that rather than guessing, so this crosses IPC on PtyState.
+  // surfaces that rather than guessing, so this crosses IPC on PtySession.
   provisional: boolean
   // [Codex] Has the OS ever positively identified this terminal's conversation? Deliberately separate
   // from `provisional`, which is about what the RENDERER shows: a RESUMED PTY is not provisional (the
@@ -183,11 +183,11 @@ export class PtyManager extends EventEmitter {
     this.maxLive = Math.max(CONFIG.liveSessionsMin, Math.min(CONFIG.liveSessionsMax, Math.floor(n)))
   }
 
-  resume(sessionId: string, cwd: string, agent: AgentKind, title = 'Conversation'): PtyState {
+  resume(sessionId: string, cwd: string, agent: AgentKind, title = 'Conversation'): PtySession {
     return this.spawn({ sessionId, cwd, title, origin: 'resume', agent })
   }
 
-  startNew(cwd: string, agent: AgentKind): PtyState {
+  startNew(cwd: string, agent: AgentKind): PtySession {
     if (agent === 'codex') return this.startNewCodex(cwd)
     // Claude gets a pre-assigned id and is live (and renamable) immediately.
     return this.spawn({
@@ -205,7 +205,7 @@ export class PtyManager extends EventEmitter {
    * is swapped in later by probeCodexIdentity, once the OS can prove which rollout the Codex process
    * in this terminal has open — and stays a placeholder if it never can.
    */
-  private startNewCodex(cwd: string): PtyState {
+  private startNewCodex(cwd: string): PtySession {
     return this.spawn({
       sessionId: randomUUID(), // placeholder; swapped for the real rollout id on bind
       cwd,
@@ -267,12 +267,12 @@ export class PtyManager extends EventEmitter {
     this.parkedJobs?.dispose()
   }
 
-  list(): PtyState[] {
+  list(): PtySession[] {
     return [...this.live.values()].map((e) => this.toState(e))
   }
 
   /** Find a live PTY already driving a session, if any. */
-  findBySession(sessionId: string): PtyState | null {
+  findBySession(sessionId: string): PtySession | null {
     for (const e of this.live.values()) {
       if (e.sessionId === sessionId) return this.toState(e)
     }
@@ -476,7 +476,7 @@ export class PtyManager extends EventEmitter {
     origin: 'resume' | 'new'
     agent: AgentKind
     provisional?: boolean
-  }): PtyState {
+  }): PtySession {
     // Don't double-spawn a session that's already live — just hand back the existing one.
     const existing = this.findBySession(o.sessionId)
     if (existing) return existing
@@ -604,7 +604,7 @@ export class PtyManager extends EventEmitter {
     if (idle.length > 0) this.kill(idle[0].ptyId)
   }
 
-  private toState(e: Live): PtyState {
+  private toState(e: Live): PtySession {
     return {
       ptyId: e.ptyId,
       sessionId: e.sessionId,
