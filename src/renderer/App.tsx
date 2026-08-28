@@ -140,7 +140,11 @@ export default function App() {
   // browser back — rather than a second, cut-down shell. `persist: false` is load-bearing: layout
   // lives in localStorage, which every window of the app shares, so a detached window writing its
   // collapsed rail there would hand that state to the browser window on the next launch.
-  const detached = window.sbWindow.sessionId !== null
+  // Optional-chained on purpose: editing the preload does not hot-reload, so a dev instance that was
+  // already running when this was added would otherwise throw here and white-screen the whole app
+  // rather than simply behaving like an ordinary window.
+  const windowInit = window.sbWindow ?? { sessionId: null, collapseRail: false }
+  const detached = windowInit.sessionId !== null
   const {
     paneWidth,
     paneCollapsed,
@@ -149,7 +153,7 @@ export default function App() {
     togglePane,
     resetPane,
     toggleSection
-  } = useLayout({ collapseRail: window.sbWindow.collapseRail, persist: !detached })
+  } = useLayout({ collapseRail: windowInit.collapseRail, persist: !detached })
   const dragStartRef = useRef(0)
   // The split divider reports a pointer delta, so a drag needs the fraction it began at AND the
   // container width that delta is a fraction of.
@@ -247,7 +251,7 @@ export default function App() {
   // loaded yet, which is fine, because a tab holds an id and the title fills in when it arrives.
   const openedInitialRef = useRef(false)
   useEffect(() => {
-    const target = window.sbWindow.sessionId
+    const target = windowInit.sessionId
     if (!target || openedInitialRef.current) return
     openedInitialRef.current = true
     panes.openTab(target, 'persistent')
@@ -419,18 +423,21 @@ export default function App() {
   //
   // A terminal is therefore assigned a pane ONCE, when first seen, and moves only if that pane goes
   // away (an unsplit, which changes the surviving pane's width and so repaints it anyway).
-  // The rule itself is pure and mutation-checked in lib/ptyHome.ts — this is only the wiring. It
-  // returns the previous map by identity when nothing changes, which matters: this runs on every
-  // re-index while any session is live.
-  const [ptyHome, setPtyHome] = useState<Record<string, number>>({})
-  useEffect(() => {
-    setPtyHome((prev) =>
-      nextPtyHomes(prev, ptys.active, {
-        paneCount: paneLayout.panes.length,
-        focusIndex: paneLayout.focusIndex,
-        paneOfSession: (id) => locateTab(paneLayout, id)?.pane ?? null
-      })
-    )
+  // The rule itself is pure and mutation-checked in lib/ptyHome.ts — this is only the wiring.
+  //
+  // Resolved DURING render, against a ref, rather than in an effect writing state. An effect would
+  // leave a newly-spawned terminal homeless for one committed frame, and this pane would render it as
+  // "the terminal is in the other pane" — a wrong message about a session that had only just started.
+  // Writing the ref here is safe because `nextPtyHomes` is idempotent and returns its input by
+  // identity when nothing changes, so a repeated render produces the same map and the same object.
+  const ptyHomeRef = useRef<Record<string, number>>({})
+  const ptyHome = useMemo(() => {
+    ptyHomeRef.current = nextPtyHomes(ptyHomeRef.current, ptys.active, {
+      paneCount: paneLayout.panes.length,
+      focusIndex: paneLayout.focusIndex,
+      paneOfSession: (id) => locateTab(paneLayout, id)?.pane ?? null
+    })
+    return ptyHomeRef.current
   }, [ptys.active, paneLayout])
 
   /**

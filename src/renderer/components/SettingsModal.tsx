@@ -77,39 +77,70 @@ function LivenessLegend() {
   )
 }
 
-// The Shortcuts page mirrors the README keyboard table. ⌘Q / zoom are macOS default-menu
-// shortcuts (no app code) — surfaced here because they're useful and undocumented.
-const GROUPS: Group[] = [
-  {
-    title: 'Navigation',
-    items: [
-      { keys: ['⌘[', '⌘]'], desc: 'Back / forward' },
-      { keys: ['⌥⌘↑', '⌥⌘↓'], desc: 'Previous / next conversation' },
-      { keys: ['⏎'], desc: 'Resume conversation' }
-    ]
-  },
-  {
-    title: 'Conversations',
-    items: [
-      { keys: ['⌘N'], desc: 'New conversation' },
-      { keys: ['⌘F'], desc: 'Search' },
-      { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
-      { keys: ['⌥-click'], desc: 'Mark conversation unread' }
-    ]
-  },
-  {
-    title: 'Window & app',
-    items: [
-      { keys: ['⌘Q'], desc: 'Quit — ends all live sessions' },
-      { keys: ['⌘B'], desc: 'Toggle the sidebar' },
-      { keys: ['⌘+', '⌘−'], desc: 'Zoom in / out' },
-      { keys: ['⌘0'], desc: 'Reset zoom' },
-      { keys: ['⌘R'], desc: 'Refresh the terminal (does not reload)' },
-      { keys: ['⌘,'], desc: 'Open Preferences' },
-      { keys: ['⌘?'], desc: 'Show keyboard shortcuts' }
-    ]
-  }
-]
+/**
+ * The Shortcuts page. ⌘Q / zoom are macOS default-menu shortcuts (no app code) — surfaced here
+ * because they're useful and undocumented.
+ *
+ * A function of the tabs preference rather than a constant: with tabs off, ⌘W closes the window and
+ * none of the tab or split chords exist, so listing them would be listing shortcuts that do nothing.
+ */
+function groupsFor(tabsEnabled: boolean): Group[] {
+  return [
+    {
+      title: 'Navigation',
+      items: [
+        { keys: ['⌘[', '⌘]'], desc: 'Back / forward' },
+        { keys: ['⌥⌘↑', '⌥⌘↓'], desc: 'Previous / next conversation' },
+        ...(tabsEnabled
+          ? [{ keys: ['⌥⌘←', '⌥⌘→'], desc: 'Previous / next tab' }]
+          : []),
+        ...(tabsEnabled ? [{ keys: ['⌘1', '…', '⌘9'], desc: 'Go to tab' }] : []),
+        { keys: ['⏎'], desc: 'Resume conversation' }
+      ]
+    },
+    {
+      title: 'Conversations',
+      items: [
+        { keys: ['⌘N'], desc: 'New conversation' },
+        { keys: ['⌘F'], desc: 'Search' },
+        { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
+        { keys: ['⌥-click'], desc: 'Mark conversation unread' },
+        ...(tabsEnabled
+          ? [
+              { keys: ['double-click'], desc: 'Keep a conversation’s tab' },
+              { keys: ['⌘-click'], desc: 'Open in a kept tab, in the background' },
+              { keys: ['⇧-click'], desc: 'Open to the side' }
+            ]
+          : [])
+      ]
+    },
+    ...(tabsEnabled
+      ? [
+          {
+            title: 'Tabs & panes',
+            items: [
+              { keys: ['⌘W'], desc: 'Close tab' },
+              { keys: ['⌘\\'], desc: 'Split / unsplit the view' },
+              { keys: ['⇧⌘N'], desc: 'Open the conversation in a new window' }
+            ]
+          }
+        ]
+      : []),
+    {
+      title: 'Window & app',
+      items: [
+        { keys: ['⌘Q'], desc: 'Quit — ends all live sessions' },
+        { keys: [tabsEnabled ? '⇧⌘W' : '⌘W'], desc: 'Close window' },
+        { keys: ['⌘B'], desc: 'Toggle the sidebar' },
+        { keys: ['⌘+', '⌘−'], desc: 'Zoom in / out' },
+        { keys: ['⌘0'], desc: 'Reset zoom' },
+        { keys: ['⌘R'], desc: 'Refresh the terminal (does not reload)' },
+        { keys: ['⌘,'], desc: 'Open Preferences' },
+        { keys: ['⌘?'], desc: 'Show keyboard shortcuts' }
+      ]
+    }
+  ]
+}
 
 // A few orientation notes for the FAQ page — the non-obvious interactions worth surfacing.
 const FAQ: Faq[] = [
@@ -583,7 +614,7 @@ export default function SettingsModal({
                 </div>
               </>
             ) : page === 'shortcuts' ? (
-              GROUPS.map((group) => (
+              groupsFor(tabsEnabled).map((group) => (
                 <div className="sb-modal-group" key={group.title}>
                   <div className="sb-modal-group-label">{group.title}</div>
                   <div className="sb-shortcuts">
