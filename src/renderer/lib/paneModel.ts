@@ -441,24 +441,32 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       // A placeholder id was replaced by the real one it turned out to name. The placeholder named
       // no conversation, so every tab holding it follows — there is nothing left for it to mean.
       if (action.from === action.to) return state
+      // Where the real id already lives, if anywhere. Searched across the WHOLE layout: consulting
+      // only the pane being visited left a hole, because a placeholder in one pane would happily
+      // rename itself while the OTHER pane already held the real id — producing two tabs for one
+      // conversation, the very state one-tab-per-conversation exists to prevent.
+      const already = locateTab(state, action.to)
       let touched = false
-      const panes = state.panes.map((pane) => {
+      const panes = state.panes.map((pane, p) => {
         const i = findTab(pane, action.from)
         if (i < 0) return pane
         touched = true
         const existing = findTab(pane, action.to)
-        if (existing >= 0 && existing !== i) {
-          // The real id is already open here; keep that tab and drop the placeholder's, rather than
-          // leaving the pane with two tabs for one conversation. If the placeholder's tab was the
-          // active one, the selection moves to the surviving tab — which is the same conversation,
-          // now under the name it turned out to have.
+        const collidesHere = existing >= 0 && existing !== i
+        const collidesElsewhere = !!already && already.pane !== p
+        if (collidesHere || collidesElsewhere) {
+          // The real id is already open; keep that tab and drop the placeholder's, rather than
+          // leaving the window with two tabs for one conversation. If the placeholder's tab was the
+          // active one AND the survivor is in this pane, the selection moves to it — the same
+          // conversation, now under the name it turned out to have. When the survivor is in the other
+          // pane there is nothing here to select, so the pane falls back to a neighbour.
           const tabs = pane.tabs.filter((_, k) => k !== i)
-          const survivor = existing > i ? existing - 1 : existing
+          const survivor = collidesHere ? (existing > i ? existing - 1 : existing) : -1
           return {
             ...pane,
             tabs,
             activeIndex:
-              pane.activeIndex === i
+              pane.activeIndex === i && survivor >= 0
                 ? survivor
                 : activeAfterRemoval(pane.activeIndex, i, tabs.length)
           }
@@ -480,11 +488,15 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       const target = state.focusIndex
       const pane = state.panes[target]
       if (!pane || paneActiveId(pane) !== action.from) return state
-      const existing = findTab(pane, action.to)
-      if (existing >= 0) {
-        // Already open in this pane — show it, and leave the old tab alone. Its conversation did
-        // not go anywhere; only the terminal moved.
-        return withPane(state, target, { ...pane, activeIndex: existing })
+      // Searched across the whole layout, for the same reason as `rekey`: a check confined to this
+      // pane would rename this tab onto an id the OTHER pane already holds.
+      const already = locateTab(state, action.to)
+      if (already) {
+        // Already open — show that tab, in whichever pane holds it, and leave the old one alone. Its
+        // conversation did not go anywhere; only the terminal moved.
+        const home = state.panes[already.pane]
+        const next = withPane(state, already.pane, { ...home, activeIndex: already.index })
+        return already.pane === target ? next : { ...next, focusIndex: already.pane }
       }
       return withPane(state, target, {
         ...pane,
