@@ -221,22 +221,39 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       const target = resolvePane(state, action.pane)
       const pane = state.panes[target]
       const focus = action.focus !== false
-      const existing = findTab(pane, action.sessionId)
+      const found = locateTab(state, action.sessionId)
 
-      // Already open here: activate it rather than opening a second tab for one conversation. A
-      // persistent open also makes it stick — clicking through to a preview tab and then acting on
-      // it is the ordinary way a tab earns its place.
-      if (existing >= 0) {
+      // ONE conversation holds ONE tab, so an open never produces a second — not in this pane, and
+      // not in the other one either. Where it ends up turns on whether the caller named a pane:
+      //
+      //  - An EXPLICIT target is a placement instruction (Split Right, open-to-side, a drop), so the
+      //    tab MOVES there. Delegated to `move`, which already resolves everything a relocation
+      //    implies — the source's next active tab, promoting the arrival, pruning an emptied pane.
+      //  - An IMPLICIT open only means "show me this" (a rail click, a resume, ⌘1-9). The tab already
+      //    exists, so it is revealed where it is rather than dragged to wherever focus happens to be.
+      //    Relocating someone's layout is not what asking to see a conversation asked for.
+      //
+      // A persistent open also makes the tab stick: clicking through to a preview tab and then acting
+      // on it is the ordinary way a tab earns its place.
+      if (found) {
+        if (found.pane !== target && action.pane !== undefined) {
+          return paneReducer(state, {
+            type: 'move',
+            from: found,
+            to: { pane: target, index: state.panes[target].tabs.length }
+          })
+        }
+        const home = state.panes[found.pane]
         const tabs =
-          action.mode === 'persistent' && pane.tabs[existing].preview
-            ? pane.tabs.map((t, i) => (i === existing ? { ...t, preview: false } : t))
-            : pane.tabs
-        const next = withPane(state, target, {
-          ...pane,
+          action.mode === 'persistent' && home.tabs[found.index].preview
+            ? home.tabs.map((t, i) => (i === found.index ? { ...t, preview: false } : t))
+            : home.tabs
+        const next = withPane(state, found.pane, {
+          ...home,
           tabs,
-          activeIndex: focus ? existing : pane.activeIndex
+          activeIndex: focus ? found.index : home.activeIndex
         })
-        return focus ? { ...next, focusIndex: target } : next
+        return focus ? { ...next, focusIndex: found.pane } : next
       }
 
       if (action.mode === 'preview') {

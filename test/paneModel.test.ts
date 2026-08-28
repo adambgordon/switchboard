@@ -60,6 +60,11 @@ function expectInvariants(l: PaneLayout): void {
     expect(new Set(p.tabs.map((x) => x.sessionId)).size).toBe(p.tabs.length)
     expect(p.tabs.filter((x) => x.preview).length).toBeLessThanOrEqual(1)
   }
+  // NOTE: there is deliberately NO window-wide uniqueness assertion here, though `open` now upholds
+  // it (see the "one tab per conversation" tests). It would not be true as a blanket invariant: a
+  // `rekey` still collapses a placeholder id onto a real one, and if that real id already has a tab in
+  // the other pane the result is two tabs for one conversation. Asserting it globally would claim a
+  // guarantee the model does not yet make — so it is asserted at the door that does make it.
 }
 
 /** Apply one action and assert the invariants survived it. */
@@ -167,6 +172,53 @@ describe('open — a conversation already open here', () => {
     const after = step(before, { type: 'open', sessionId: 'B', mode: 'preview' })
     expect(after.panes[0].tabs).toEqual([t('A'), t('B')])
     expect(after.panes[0].activeIndex).toBe(1)
+  })
+})
+
+describe('open — one tab per conversation, wherever it already is', () => {
+  // A conversation holds ONE tab in the window. What an open does when it already has one depends on
+  // whether the caller named a pane, and the two cases are opposites — so each is asserted against a
+  // fixture where the other answer would be visibly different.
+
+  it('REVEALS it in the other pane when no pane was named', () => {
+    // A rail click, a resume, ⌘1-9: "show me this". It is already open, so focus goes to it — the tab
+    // does not come to the user, and no second tab appears.
+    const before = layout([pane('p0', [t('A')], 0), pane('p1', [t('B'), t('C')], 0)], 0)
+    const after = step(before, { type: 'open', sessionId: 'C', mode: 'preview' })
+    expect(after.panes[0].tabs).toEqual([t('A')])
+    expect(after.panes[1].tabs).toEqual([t('B'), t('C')])
+    // Focus followed the conversation into the pane that holds it.
+    expect(after.focusIndex).toBe(1)
+    expect(after.panes[1].activeIndex).toBe(1)
+  })
+
+  it('MOVES it when a pane was named explicitly', () => {
+    // Split Right, open-to-side, a drop: a placement instruction, so the tab relocates.
+    const before = layout([pane('p0', [t('A')], 0), pane('p1', [t('B'), t('C')], 0)], 0)
+    const after = step(before, { type: 'open', sessionId: 'C', mode: 'preview', pane: 0 })
+    expect(after.panes[0].tabs.map((x) => x.sessionId)).toEqual(['A', 'C'])
+    expect(after.panes[1].tabs).toEqual([t('B')])
+    expect(after.focusIndex).toBe(0)
+  })
+
+  it('never leaves two tabs for one conversation', () => {
+    // The property both cases exist to protect, asserted on the whole window rather than per pane.
+    const before = layout([pane('p0', [t('A')], 0), pane('p1', [t('B')], 0)], 0)
+    for (const id of ['A', 'B']) {
+      for (const p of [undefined, 0, 1]) {
+        const after = step(before, { type: 'open', sessionId: id, mode: 'preview', pane: p })
+        const all = after.panes.flatMap((x) => x.tabs.map((y) => y.sessionId))
+        expect(new Set(all).size).toBe(all.length)
+      }
+    }
+  })
+
+  it('promotes where the tab actually is, not where focus was', () => {
+    // A persistent open on a tab living in the unfocused pane must clear ITS preview flag — reaching
+    // into the pane that holds the tab, not the one the user happened to be in.
+    const before = layout([pane('p0', [t('A')], 0), pane('p1', [t('B', true)], 0)], 0)
+    const after = step(before, { type: 'open', sessionId: 'B', mode: 'persistent' })
+    expect(after.panes[1].tabs).toEqual([t('B')])
   })
 
   it('opens into the focused pane when the requested pane no longer exists', () => {
