@@ -105,13 +105,10 @@ function groupsFor(tabsEnabled: boolean): Group[] {
         { keys: ['⌘F'], desc: 'Search' },
         { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
         { keys: ['⌥-click'], desc: 'Mark conversation unread' },
-        ...(tabsEnabled
-          ? [
-              { keys: ['double-click'], desc: 'Keep a conversation’s tab' },
-              { keys: ['⌘-click'], desc: 'Open in a kept tab, in the background' },
-              { keys: ['⇧-click'], desc: 'Open to the side' }
-            ]
-          : [])
+        // Double-click is the only click gesture tabs add. The ⌘/⇧ variants were removed: they came
+        // from browsers, and in an editor-shaped app they read as arbitrary rather than familiar.
+        // Opening to the side or in a new window lives on the ⋮ and right-click menus, which say so.
+        ...(tabsEnabled ? [{ keys: ['double-click'], desc: 'Keep a conversation’s tab' }] : [])
       ]
     },
     ...(tabsEnabled
@@ -444,8 +441,8 @@ export default function SettingsModal({
                     </div>
                     <div className="sb-setting-desc">
                       Keep several conversations open at once in a tab strip. Clicking a conversation
-                      previews it in a replaceable tab; double-click, ⌘-click, or resuming it keeps
-                      that tab. Turn this off to show one conversation at a time.
+                      previews it in a replaceable tab; double-clicking or resuming it keeps that tab.
+                      Turn this off to show one conversation at a time.
                     </div>
                   </div>
                 </div>

@@ -79,9 +79,7 @@ interface Props {
   onSelect: (sessionId: string) => void
   /** Double-click a row — keep its tab. Undefined while tabs are switched off. */
   onStick?: (sessionId: string) => void
-  /** ⌘+click a row — open a kept tab in the background. Undefined while tabs are switched off. */
-  onOpenInBackground?: (sessionId: string) => void
-  /** ⇧+click a row, or the ⋮ menu's Open to the Side — show it in the other pane. */
+  /** The ⋮ menu's Open to the Side — show it in the other pane. */
   onOpenToSide?: (sessionId: string) => void
   /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
   onOpenInNewWindow?: (sessionId: string) => void
@@ -161,7 +159,6 @@ export default function TallyRail({
   onJump,
   onSelect,
   onStick,
-  onOpenInBackground,
   onOpenToSide,
   onOpenInNewWindow,
   onTogglePin,
@@ -513,9 +510,9 @@ export default function TallyRail({
                     onSelect={onSelect}
                     onJump={onJump}
                     onStick={onStick}
-                    onOpenInBackground={onOpenInBackground}
-                    onOpenToSide={onOpenToSide}
-                    onOpenInNewWindow={onOpenInNewWindow}
+                    // onOpenToSide / onOpenInNewWindow are deliberately NOT passed down: they are
+                    // menu actions now, not click gestures. The rail still holds them for its own ⋮
+                    // and right-click menus below.
                     onMarkUnread={onMarkUnread}
                     onOpenMenu={openRowMenuFromButton}
                     onContextMenu={openRowMenu}

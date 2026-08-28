@@ -925,18 +925,10 @@ export default function App() {
     (id: string) => openRemembered(id, 'persistent'),
     [openRemembered]
   )
-  // ⌘+click a row: open it as a kept tab WITHOUT going there — the browser's background-tab gesture,
-  // for queueing up several conversations without losing your place. No markRead and no focus request:
-  // you are deliberately not looking at it.
-  // Gated at the prop, not here: App passes this to the rail only while tabs are on, so the row's
-  // ⌘+click branch does not exist otherwise and a second guard here would be unreachable.
-  const openInBackground = useCallback(
-    (id: string) => land(id, 'persistent', { focus: false }),
-    [land]
-  )
-  // ⇧+click a row, or the ⋮ menu's "Open to the Side": show it in the OTHER pane, creating the split
-  // if there isn't one yet. Both dispatches queue on the same reducer and apply in order, so the new
-  // pane exists by the time the open lands in it.
+  // The ⋮ menu's "Open to the Side": show it in the OTHER pane, creating the split if there isn't one
+  // yet. Both dispatches queue on the same reducer and apply in order, so the new pane exists by the
+  // time the open lands in it. Passing an explicit `pane` also makes this a PLACEMENT, so a
+  // conversation already open elsewhere moves here rather than merely being revealed.
   const openToSide = useCallback(
     (id: string) => {
       const l = paneLayoutRef.current
@@ -1421,7 +1413,6 @@ export default function App() {
             onJump={clickLive}
             onSelect={clickConversation}
             onStick={tabsEnabled ? stickConversation : undefined}
-            onOpenInBackground={tabsEnabled ? openInBackground : undefined}
             onOpenToSide={tabsEnabled ? openToSide : undefined}
             onOpenInNewWindow={tabsEnabled ? moveToNewWindow : undefined}
             onTogglePin={togglePinGated}

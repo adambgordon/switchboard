@@ -130,6 +130,12 @@ body.sb-window-drop-target .sb-tabstrip {
 .sb-tab.active {
   background: var(--paper-pane);
   color: var(--ink-soft);
+  /* Redraw the row rule that this tab's own fill covers. The rules are painted as a gradient across
+     the strip, so an opaque tab sitting on top of one punches a gap in it — which showed as the active
+     tab in an upper row appearing to have no bottom edge, with the line resuming either side of it.
+     An inset shadow rather than a border, so it costs no layout: a border-box border would take its
+     pixel out of the tab's content height and shift the label. */
+  box-shadow: inset 0 -1px 0 0 var(--tab-rule);
 }
 .sb-tab.active:hover {
   background: var(--paper-pane);

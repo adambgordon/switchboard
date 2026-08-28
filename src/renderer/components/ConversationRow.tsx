@@ -22,12 +22,11 @@ interface Props {
   /** Double-click — open it as a KEPT tab rather than the replaceable preview one. Absent when tabs
    *  are switched off, which is what makes the gesture inert there rather than half-working. */
   onStick?: (id: string) => void
-  /** ⌘+click — open a kept tab in the background, without going there (the browser gesture). */
-  onOpenInBackground?: (id: string) => void
-  /** ⇧⌘+click — open it in the OTHER pane, creating the split if there isn't one. */
-  onOpenToSide?: (id: string) => void
-  /** ⇧+click — open it in a NEW WINDOW, as ⇧+click does in a browser. */
-  onOpenInNewWindow?: (id: string) => void
+  // There are deliberately NO ⌘/⇧ click gestures for tab placement. They were borrowed from browsers
+  // (⌘ = new tab, ⇧ = new window), but this row belongs to an editor-shaped app, and editors do not
+  // overload a click that way — so the borrowing read as arbitrary rather than familiar. Placement is
+  // on the ⋮ and right-click menus, which name what they do. ⌥ stays: marking unread is Switchboard's
+  // own idea, not an import.
   /** Option+click on a live row — always mark it unread (never toggles). */
   onMarkUnread?: (id: string) => void
   /** Open the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume) by clicking the ⋮
@@ -48,9 +47,6 @@ function ConversationRowImpl({
   onSelect,
   onJump,
   onStick,
-  onOpenInBackground,
-  onOpenToSide,
-  onOpenInNewWindow,
   onMarkUnread,
   onOpenMenu,
   onContextMenu
@@ -78,31 +74,16 @@ function ConversationRowImpl({
           if (live && onMarkUnread) onMarkUnread(meta.sessionId)
           return
         }
-        // The compound chord is tested BEFORE either of its parts, or ⇧⌘ would be swallowed by
-        // whichever single-modifier branch came first. Browser convention sets the two singles:
-        // ⌘ opens a tab, ⇧ opens a window. Side-by-side has no browser analogue, so it takes the
-        // compound — and it is on the ⋮ and right-click menus besides.
-        if (e.shiftKey && e.metaKey && onOpenToSide) {
-          onOpenToSide(meta.sessionId)
-          return
-        }
-        if (e.shiftKey && onOpenInNewWindow) {
-          onOpenInNewWindow(meta.sessionId)
-          return
-        }
-        if (e.metaKey && onOpenInBackground) {
-          // ⌘+click = open a kept tab without going there. Checked before the live/not-live split
-          // because it means the same thing on either kind of row, and it must not also navigate.
-          onOpenInBackground(meta.sessionId)
-          return
-        }
         live && onJump ? onJump(meta.sessionId) : onSelect(meta.sessionId)
       }}
       // Double-click keeps the tab. The two ordinary clicks that precede it (DOM order is
       // click, click, dblclick) each re-open the same conversation, which is idempotent — the second
       // lands on the current history stop and changes nothing — so no click-count dedupe is needed.
       onDoubleClick={(e) => {
-        if (e.altKey || e.metaKey || e.shiftKey || !onStick) return
+        // Only ⌥ is excluded, because it means something else here (mark unread) and must not also
+        // keep the tab. ⌘ and ⇧ carry no meaning on a row any more, so a stray one is let through
+        // rather than silently swallowing the gesture.
+        if (e.altKey || !onStick) return
         onStick(meta.sessionId)
       }}
       onContextMenu={(e) => {
