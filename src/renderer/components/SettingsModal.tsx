@@ -1,5 +1,5 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
-import { Close, Folder, Info, Reset } from './icons'
+import { Close, Folder, Info, Reset, Warning } from './icons'
 import { basename } from '../lib/format'
 import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
 import { AGENTS, type AgentKind } from '@shared/types'
@@ -20,7 +20,7 @@ const THEME_MODES: { value: ThemeMode; label: string }[] = [
 const CAP_TIP =
   "Each live session is a real agent process with its own terminal. At the limit, starting another reclaims whichever session has been idle longest — sessions still working are never stopped, and you're never blocked from starting a new one. Raising the limit means a higher cap on resource consumption: more memory, CPU, and GPU per live terminal. This is intended to prevent agent processes from overwhelming your machine. Increase at your own risk."
 
-type Page = 'appearance' | 'application' | 'shortcuts' | 'faq'
+type Page = 'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq'
 
 interface Shortcut {
   keys: string[]
@@ -258,9 +258,11 @@ interface Props {
 }
 
 /**
- * The Preferences modal — a left nav (Appearance / Application / Shortcuts / FAQ) over the shared
+ * The Preferences modal — a left nav (Appearance / Application / Beta Features / Shortcuts / FAQ)
+ * over the shared
  * scrim+card. Appearance holds theme + dock icon; Application holds Updates (first), the live-session
- * cap, and the new-conversation defaults; Shortcuts / FAQ are reference. Open it to a specific page via
+ * cap, and the new-conversation defaults; Beta Features holds the tabs / split / windows flag;
+ * Shortcuts / FAQ are reference. Open it to a specific page via
  * `page` (⌘, / title-bar gear → appearance; ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is
  * handled by App's global key handler, which also makes the rest of the keyboard inert while open.
  */
@@ -350,6 +352,12 @@ export default function SettingsModal({
               )}
             </button>
             <button
+              className={`sb-settings-nav-item${page === 'beta' ? ' active' : ''}`}
+              onClick={() => onChangePage('beta')}
+            >
+              Beta Features
+            </button>
+            <button
               className={`sb-settings-nav-item${page === 'shortcuts' ? ' active' : ''}`}
               onClick={() => onChangePage('shortcuts')}
             >
@@ -415,36 +423,6 @@ export default function SettingsModal({
               <>
                 <div className="sb-modal-group">
                   <UpdatesSetting updates={updates} />
-                </div>
-                <div className="sb-modal-group">
-                  <div className="sb-setting">
-                    <div className="sb-setting-title">Tabs and split view</div>
-                    <div className="sb-seg" role="radiogroup" aria-label="Tabs and split view">
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={tabsEnabled}
-                        className={`sb-seg-btn${tabsEnabled ? ' active' : ''}`}
-                        onClick={() => onSetTabsEnabled(true)}
-                      >
-                        On
-                      </button>
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={!tabsEnabled}
-                        className={`sb-seg-btn${!tabsEnabled ? ' active' : ''}`}
-                        onClick={() => onSetTabsEnabled(false)}
-                      >
-                        Off
-                      </button>
-                    </div>
-                    <div className="sb-setting-desc">
-                      Keep several conversations open at once in a tab strip. Clicking a conversation
-                      previews it in a replaceable tab; double-clicking or resuming it keeps that tab.
-                      Turn this off to show one conversation at a time.
-                    </div>
-                  </div>
                 </div>
                 <div className="sb-modal-group">
                   <div className="sb-setting">
@@ -610,6 +588,42 @@ export default function SettingsModal({
                   </div>
                 </div>
               </>
+            ) : page === 'beta' ? (
+              <div className="sb-modal-group">
+                <div className="sb-setting">
+                  <div className="sb-beta-callout">
+                    <Warning size={16} />
+                    <span>Beta features are experimental and subject to change.</span>
+                  </div>
+                  <div className="sb-setting-title">Tabs and split view</div>
+                  <div className="sb-seg" role="radiogroup" aria-label="Tabs and split view">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={tabsEnabled}
+                      className={`sb-seg-btn${tabsEnabled ? ' active' : ''}`}
+                      onClick={() => onSetTabsEnabled(true)}
+                    >
+                      On
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={!tabsEnabled}
+                      className={`sb-seg-btn${!tabsEnabled ? ' active' : ''}`}
+                      onClick={() => onSetTabsEnabled(false)}
+                    >
+                      Off
+                    </button>
+                  </div>
+                  <div className="sb-setting-desc">
+                    Keep several conversations open at once in a tab strip, split the view into two
+                    panes, and open conversations in their own windows. Clicking a conversation
+                    previews it in a replaceable tab; double-clicking or resuming it keeps that tab.
+                    Turn this off to show one conversation at a time.
+                  </div>
+                </div>
+              </div>
             ) : page === 'shortcuts' ? (
               groupsFor(tabsEnabled).map((group) => (
                 <div className="sb-modal-group" key={group.title}>

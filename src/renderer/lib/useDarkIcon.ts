@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useStorageSync } from './useStorageSync'
 
 /**
  * The "dark dock icon" preference — a manual on/off toggle, INDEPENDENT of the light/dark theme,
@@ -23,6 +24,7 @@ export interface DarkIcon {
 
 export function useDarkIcon(): DarkIcon {
   const [value, setValue] = useState<boolean>(load)
+  useStorageSync(KEY, load, setValue)
 
   useEffect(() => {
     try {

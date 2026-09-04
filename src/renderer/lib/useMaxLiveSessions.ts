@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CONFIG } from '@shared/types'
+import { useStorageSync } from './useStorageSync'
 
 /**
  * The "maximum live sessions" preference — the LRU cap on concurrent live PTYs. Persisted in
@@ -44,6 +45,7 @@ export interface MaxLiveSessions {
 /** Persisted, clamped max-live-sessions preference (the LRU cap). */
 export function useMaxLiveSessions(): MaxLiveSessions {
   const [value, setValue] = useState<number>(load)
+  useStorageSync(KEY, load, setValue)
 
   useEffect(() => {
     try {

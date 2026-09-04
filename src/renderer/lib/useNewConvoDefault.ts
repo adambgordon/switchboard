@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useStorageSync } from './useStorageSync'
 
 /**
  * The "default folder for new conversations" preference, persisted in localStorage (renderer state;
@@ -29,6 +30,7 @@ export interface NewConvoDefault {
 /** Persisted default-folder preference for new conversations (absolute path, '' = none). */
 export function useNewConvoDefault(): NewConvoDefault {
   const [dir, setDirState] = useState<string>(load)
+  useStorageSync(KEY, load, setDirState)
 
   useEffect(() => {
     try {

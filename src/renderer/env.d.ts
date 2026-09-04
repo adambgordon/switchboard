@@ -10,7 +10,7 @@ declare global {
     /** Dev-only updater preview from SWITCHBOARD_FAKE_UPDATING. */
     fakeUpdating: boolean
     /** What this window was opened to show. Synchronous, so the first render is already right — see
-     *  the preload's readWindowInit. An ordinary browser window gets `{ null, false }`. */
+     *  the preload's readWindowInit. */
     sbWindow: WindowInit
   }
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AgentKind } from '@shared/types'
+import { useStorageSync } from './useStorageSync'
 
 /**
  * The "default agent for new conversations" preference, persisted in localStorage. Mirrors
@@ -41,6 +42,7 @@ export interface NewConvoDefaultAgent extends DefaultAgentState {
 /** Persisted default-agent preference for new conversations (agent + enabled toggle). */
 export function useNewConvoDefaultAgent(): NewConvoDefaultAgent {
   const [state, setState] = useState<DefaultAgentState>(load)
+  useStorageSync(KEY, load, setState)
 
   useEffect(() => {
     try {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MouseEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type MouseEvent } from 'react'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { useTabReorder } from '../lib/useTabReorder'
@@ -31,11 +31,11 @@ interface Props {
    *  a split never shows two equally-selected tabs. */
   focused: boolean
   /** There is no split yet, and this pane has enough tabs that creating one leaves both populated. */
-  canSplitRight: boolean
+  canSplitRight: (sessionId: string) => boolean
   /** A split already exists, so the tab can move to the pane that is not this one. With two panes,
    *  "the other pane" is unambiguous — only the LABEL differs by side. */
   canMoveToOtherPane: boolean
-  onActivate: (paneIndex: number, index: number) => void
+  onActivate: (paneIndex: number, index: number, focusSurface?: boolean) => void
   onClose: (paneIndex: number, index: number) => void
   onCloseOthers: (paneIndex: number, index: number) => void
   onPromote: (sessionId: string, paneIndex: number) => void
@@ -47,12 +47,16 @@ interface Props {
   onOpenInNewWindow: (sessionId: string) => void
   /** A drag landed on a strip in THIS window — reorder, or move between panes. */
   onMoveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
-  /** A drag left this window: another window took the tab, or it became a window of its own. */
-  onTabLeftWindow: (sessionId: string) => void
+  /** A drag left this window: another window took the tab group, or it became a window of its own. */
+  onTabLeftWindow: (sessionIds: string[]) => void
   /** Conversations in the current multi-selection — empty unless one is in effect. */
   selectedIds: Set<string>
   /** Drop a whole group at once (a drag carrying a multi-selection). */
-  onMoveTabGroup: (sessionIds: string[], to: { pane: number; index: number }) => void
+  onMoveTabGroup: (
+    sessionIds: string[],
+    activeSessionId: string,
+    to: { pane: number; index: number }
+  ) => void
   /** What a gesture on this tab should act on — the group when it belongs to one, else just it. */
   onResolveTargets: (paneIndex: number, sessionId: string) => string[]
   /** ⌘-click: add or remove one tab. */
@@ -67,7 +71,11 @@ interface ItemProps {
   focused: boolean
   /** Part of the current multi-selection. */
   selected: boolean
-  onActivate: (e: MouseEvent) => void
+  /** ⌘ / ⇧ handled on PRESS; returns true when it consumed the gesture, so the click is ignored. */
+  onModifierPress: (e: MouseEvent) => boolean
+  onActivate: () => void
+  onKeyboardActivate: () => void
+  onNavigate: (delta: number) => void
   onPromote: () => void
   onClose: () => void
   onContextMenu: (e: MouseEvent) => void
@@ -82,7 +90,10 @@ function Tab({
   active,
   focused,
   selected,
+  onModifierPress,
   onActivate,
+  onKeyboardActivate,
+  onNavigate,
   onPromote,
   onClose,
   onContextMenu
@@ -100,13 +111,35 @@ function Tab({
       // attribute rather than overloading one whose meaning is fixed.
       aria-selected={active}
       data-picked={selected || undefined}
-      tabIndex={-1}
+      tabIndex={active ? 0 : -1}
       // A tab truncates aggressively, so the full title lives in the shared tooltip layer — never a
       // native `title`, which lags and resets on the slightest pointer move. `data-tip-sub` adds the
       // preview line beneath it, giving the hover the same content as a rail row.
       data-tip={tab.title}
       {...(tab.subtitle ? { 'data-tip-sub': tab.subtitle } : {})}
-      onClick={onActivate}
+      // Selection is decided on PRESS, not on click. A press is the moment the user commits to a tab,
+      // it is what every list of this kind responds to, and it does not depend on a `click` arriving
+      // afterwards — which is the fragile part, since a press begins a drag, moves focus, and can
+      // re-render the strip before any click is dispatched. `preventDefault` stops the press from also
+      // starting a text selection across the strip.
+      onPointerDown={(e) => {
+        if (onModifierPress(e)) e.preventDefault()
+      }}
+      // The plain case only: a modified click was already handled above, and acting again here would
+      // undo the selection that press just made.
+      onClick={(e) => {
+        if (!e.metaKey && !e.shiftKey) onActivate()
+      }}
+      onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onKeyboardActivate()
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          e.preventDefault()
+          onNavigate(e.key === 'ArrowRight' ? 1 : -1)
+        }
+      }}
       // A ⌘- or ⇧-click must not also start a drag-reorder; the hook checks the same modifiers.
       // Double-click is the editor gesture for "keep this one". The two ordinary clicks that precede
       // it only activate an already-open tab, which is idempotent, so no dedupe is needed here —
@@ -122,26 +155,31 @@ function Tab({
       onContextMenu={onContextMenu}
     >
       <span className="sb-tab-title truncate">{tab.title}</span>
-      {/* Fixed-width trailing slot: a live tab shows its liveness dot at rest and the close button on
-          hover, mirroring how a rail row's gutter swaps its dot for the ⋮ button. The width is
-          reserved either way so a tab never changes size under the pointer. */}
-      <span className="sb-tab-gutter">
-        {tab.dot && <span ref={dotRef} className={`sb-dot ${tab.dot}`} aria-label="live" role="img" />}
-        <button
-          className="sb-tab-close"
-          // The tooltip is generic while the accessible name is specific: the tip appears under the
-          // pointer, where which tab is meant is already obvious, whereas a screen reader announces the
-          // button with no such context.
-          data-tip="Close tab"
-          aria-label={`Close ${tab.title}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            onClose()
-          }}
-        >
-          <Close size={12} />
-        </button>
-      </span>
+      {/* The dot's slot exists ONLY when there is a dot. It used to be reserved unconditionally, so
+          the close button always had somewhere to appear without resizing the tab — but that left
+          every not-live tab carrying ~30px of permanent dead space to hold a button that is not
+          there. The button is positioned against the tab's own right edge instead (see CSS): over the
+          gutter when one exists, over the title's tail when it does not. Nothing reflows either way,
+          and the tail it covers is the ellipsis on any title long enough to need one. */}
+      {tab.dot && (
+        <span className="sb-tab-gutter">
+          <span ref={dotRef} className={`sb-dot ${tab.dot}`} aria-label="live" role="img" />
+        </span>
+      )}
+      <button
+        className="sb-tab-close"
+        // The tooltip is generic while the accessible name is specific: the tip appears under the
+        // pointer, where which tab is meant is already obvious, whereas a screen reader announces the
+        // button with no such context.
+        data-tip="Close tab"
+        aria-label={`Close ${tab.title}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          onClose()
+        }}
+      >
+        <Close size={12} />
+      </button>
     </div>
   )
 }
@@ -211,15 +249,46 @@ export default function TabStrip({
   // behavior as every other scroller in the app.
   useAutoHideScrollbar(stripRef)
 
+  const overflowGeometryKey = JSON.stringify(
+    tabs.map((tab) => [tab.sessionId, tab.title, tab.preview, !!tab.dot])
+  )
+  const keepActiveVisible = (): void => {
+    const active = stripRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
+    active?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }
+  // Chromium's custom vertical scrollbar consumes an inline lane even when there is nothing to
+  // scroll. Mark real overflow before paint so CSS can collapse that idle lane without making tabs
+  // jump when a working scrollbar is actually needed. ResizeObserver covers pane resizing and wrap
+  // changes; the key covers only tab properties that can alter geometry. Activation is deliberately
+  // absent, so selecting a tab never forces a synchronous layout read or rebuilds the observer.
+  useLayoutEffect(() => {
+    const el = stripRef.current
+    if (!el) return
+    const update = (): void => {
+      el.classList.toggle('is-overflowing', el.scrollHeight - el.clientHeight > 1)
+      keepActiveVisible()
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [overflowGeometryKey])
+
   // Keep the active tab visible when the rows overflow the cap — otherwise ⌘1-9, ⌥⌘←/→, and opening
   // a conversation from the rail can all select a tab in a row that is scrolled out of sight, leaving
   // the strip looking as though nothing happened. Queried from the DOM rather than threaded through a
   // ref: the selected tab is already marked for assistive technology, so there is one source for it.
   // `nearest` on both axes so this scrolls the minimum, and never the pane behind it.
   useEffect(() => {
-    const el = stripRef.current?.querySelector('[aria-selected="true"]')
-    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    keepActiveVisible()
   }, [activeIndex, tabs.length])
+
+  const navigateFrom = (index: number, delta: number): void => {
+    if (tabs.length === 0) return
+    const next = (index + delta + tabs.length) % tabs.length
+    onActivate(paneIndex, next, false)
+    stripRef.current?.querySelectorAll<HTMLElement>('.sb-tab')[next]?.focus()
+  }
 
   const contextMenu = async (e: MouseEvent, index: number): Promise<void> => {
     e.preventDefault()
@@ -235,7 +304,7 @@ export default function TabStrip({
       // An unlinked terminal has no conversation, so there are no details to show and nothing to
       // reopen elsewhere by id — hide both rather than offer controls that silently do nothing.
       details: !tab.unlinked,
-      splitRight: canSplitRight,
+      splitRight: canSplitRight(tab.sessionId),
       // Same action either way; the side this pane is on decides which direction to name it.
       moveRight: canMoveToOtherPane && paneIndex === 0,
       moveLeft: canMoveToOtherPane && paneIndex === 1,
@@ -266,14 +335,23 @@ export default function TabStrip({
           active={i === activeIndex}
           focused={focused}
           selected={selectedIds.has(tab.sessionId)}
-          // ⇧ is tested before ⌘ so ⇧⌘-click extends rather than toggling — extending is the more
+          // ⇧ is tested before ⌘ so ⇧⌘ extends rather than toggling — extending is the more
           // destructive of the two (it replaces the run), so it should be the one that wins outright
           // rather than being reachable only by accident.
-          onActivate={(e) => {
-            if (e.shiftKey) onExtendSelect(paneIndex, tab.sessionId)
-            else if (e.metaKey) onToggleSelect(paneIndex, tab.sessionId)
-            else onActivate(paneIndex, i)
+          onModifierPress={(e) => {
+            if (e.shiftKey) {
+              onExtendSelect(paneIndex, tab.sessionId)
+              return true
+            }
+            if (e.metaKey) {
+              onToggleSelect(paneIndex, tab.sessionId)
+              return true
+            }
+            return false
           }}
+          onActivate={() => onActivate(paneIndex, i)}
+          onKeyboardActivate={() => onActivate(paneIndex, i, false)}
+          onNavigate={(delta) => navigateFrom(i, delta)}
           onPromote={() => onPromote(tab.sessionId, paneIndex)}
           onClose={() => onClose(paneIndex, i)}
           onContextMenu={(e) => void contextMenu(e, i)}

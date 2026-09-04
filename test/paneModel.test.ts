@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   SPLIT_LIMITS,
   activeTabId,
+  canSplitActiveTab,
+  canPlaceTabsToSide,
   initialLayout,
   locateTab,
   openSessionIds,
   paneReducer,
+  restorePaneLayout,
+  snapshotPaneLayout,
   stepTab,
   tabSequence,
   type Pane,
@@ -34,7 +38,7 @@ import {
 const t = (sessionId: string, preview = false): Tab => ({ sessionId, preview })
 const pane = (id: string, tabs: Tab[], activeIndex: number): Pane => ({ id, tabs, activeIndex })
 
-function layout(panes: Pane[], focusIndex = 0, splitFraction = SPLIT_LIMITS.default): PaneLayout {
+function layout(panes: Pane[], focusIndex = 0, splitFraction: number = SPLIT_LIMITS.default): PaneLayout {
   return { panes, focusIndex, splitFraction }
 }
 
@@ -121,6 +125,52 @@ describe('open — preview tabs', () => {
     const after = step(before, { type: 'open', sessionId: 'D', mode: 'preview' })
     expect(after.panes[0].tabs).toEqual([t('A'), t('D', true), t('B'), t('C')])
     expect(after.panes[0].activeIndex).toBe(1)
+  })
+})
+
+describe('openMany — adopting a transferred tab group', () => {
+  it('appends in source order, promotes arrivals, and activates the grabbed tab', () => {
+    const before = layout(
+      [
+        pane('p0', [t('X'), t('Q', true)], 0),
+        pane('p1', [t('Z'), t('B', true)], 1)
+      ],
+      1
+    )
+    const after = step(before, {
+      type: 'openMany',
+      sessionIds: ['A', 'B', 'C'],
+      activeSessionId: 'B',
+      pane: 0
+    })
+
+    expect(after.panes).toEqual([
+      {
+        id: 'p0',
+        tabs: [t('X'), t('Q', true), t('A'), t('B'), t('C')],
+        activeIndex: 3
+      },
+      { id: 'p1', tabs: [t('Z')], activeIndex: 0 }
+    ])
+    expect(after.focusIndex).toBe(0)
+    expect(activeTabId(after)).toBe('B')
+  })
+
+  it('deduplicates the payload without changing its first-seen order', () => {
+    const after = step(layout([pane('p0', [t('X')], 0)]), {
+      type: 'openMany',
+      sessionIds: ['B', 'A', 'B'],
+      activeSessionId: 'A'
+    })
+    expect(after.panes[0].tabs).toEqual([t('X'), t('B'), t('A')])
+    expect(activeTabId(after)).toBe('A')
+  })
+
+  it('is a no-op for an empty payload', () => {
+    const before = layout([pane('p0', [t('A')], 0)])
+    expect(
+      paneReducer(before, { type: 'openMany', sessionIds: [], activeSessionId: 'A' })
+    ).toBe(before)
   })
 })
 
@@ -478,7 +528,56 @@ describe('move — across panes', () => {
 })
 
 describe('split / unsplit', () => {
-  it('split adds an empty pane and hands it the keyboard', () => {
+  it('moves the active tab into a new right pane and promotes it', () => {
+    const before = layout([pane('p0', [t('A'), t('P', true), t('C')], 1)])
+    expect(canSplitActiveTab(before)).toBe(true)
+
+    const after = step(before, { type: 'splitActive', paneId: 'p1' })
+
+    expect(after.panes).toEqual([
+      { id: 'p0', tabs: [t('A'), t('C')], activeIndex: 1 },
+      { id: 'p1', tabs: [t('P')], activeIndex: 0 }
+    ])
+    expect(after.focusIndex).toBe(1)
+    expect(activeTabId(after)).toBe('P')
+  })
+
+  it('does not split when moving the active tab would empty the left pane', () => {
+    const before = layout([pane('p0', [t('A')], 0)])
+    expect(canSplitActiveTab(before)).toBe(false)
+    expect(paneReducer(before, { type: 'splitActive', paneId: 'p1' })).toBe(before)
+  })
+
+  it('rejects side placement when the full selected group would empty its source', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C')], 0)])
+    expect(canPlaceTabsToSide(before, ['A', 'B', 'C'], 1)).toBe(false)
+    expect(canPlaceTabsToSide(before, ['A', 'C'], 1)).toBe(true)
+  })
+
+  it('allows a new conversation beside an existing tab but not beside an empty pane', () => {
+    expect(canPlaceTabsToSide(layout([pane('p0', [t('A')], 0)]), ['NEW'], 1)).toBe(true)
+    expect(canPlaceTabsToSide(initialLayout('p0'), ['NEW'], 1)).toBe(false)
+  })
+
+  it('rejects moving the sole source tab across an existing split', () => {
+    const before = layout([pane('p0', [t('A')], 0), pane('p1', [t('B'), t('C')], 0)])
+    expect(canPlaceTabsToSide(before, ['A'], 1)).toBe(false)
+    expect(canPlaceTabsToSide(before, ['B'], 1)).toBe(true)
+  })
+
+  it('does not split while the welcome screen is selected', () => {
+    const before = layout([pane('p0', [t('A'), t('B')], -1)])
+    expect(canSplitActiveTab(before)).toBe(false)
+    expect(paneReducer(before, { type: 'splitActive', paneId: 'p1' })).toBe(before)
+  })
+
+  it('does not split an already-split layout', () => {
+    const before = layout([pane('p0', [t('A'), t('B')], 0), pane('p1', [t('C')], 0)], 1)
+    expect(canSplitActiveTab(before)).toBe(false)
+    expect(paneReducer(before, { type: 'splitActive', paneId: 'p2' })).toBe(before)
+  })
+
+  it('the low-level split adds an empty pane for a compound placement', () => {
     const after = step(layout([pane('p0', [t('A')], 0)]), { type: 'split', paneId: 'p1' })
     expect(after.panes).toEqual([
       { id: 'p0', tabs: [t('A')], activeIndex: 0 },
@@ -589,7 +688,7 @@ describe('closeMany / moveMany — acting on a multi-selection', () => {
     // Order comes from the strip, not from the caller's array — passed here deliberately jumbled, so
     // an implementation that trusted the argument order would land them E, A, C.
     const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 0), pane('p1', [t('Z')], 0)], 0)
-    const after = step(before, { type: 'moveMany', sessionIds: ['E', 'A', 'C'], to: { pane: 1, index: 1 } })
+    const after = step(before, { type: 'moveMany', sessionIds: ['E', 'A', 'C'], activeSessionId: 'C', to: { pane: 1, index: 1 } })
     expect(after.panes[0].tabs).toEqual([t('B'), t('D')])
     expect(after.panes[1].tabs.map((x) => x.sessionId)).toEqual(['Z', 'A', 'C', 'E'])
   })
@@ -598,7 +697,7 @@ describe('closeMany / moveMany — acting on a multi-selection', () => {
     // A deliberate placement is not a preview — and two preview tabs in one pane would break the
     // one-preview rule outright.
     const before = layout([pane('p0', [t('A', true), t('B')], 0), pane('p1', [t('Z')], 0)], 0)
-    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'B'], to: { pane: 1, index: 1 } })
+    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'B'], activeSessionId: 'A', to: { pane: 1, index: 1 } })
     // Moving EVERY tab out empties the source, which then collapses — so one pane remains, and it is
     // the destination's list. `t()` defaults to preview:false, so this also asserts the promotion.
     expect(after.panes).toHaveLength(1)
@@ -607,29 +706,42 @@ describe('closeMany / moveMany — acting on a multi-selection', () => {
 
   it('activates the arrival and focuses the destination', () => {
     const before = layout([pane('p0', [t('A'), t('B'), t('C')], 0), pane('p1', [t('Z')], 0)], 0)
-    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'B'], to: { pane: 1, index: 1 } })
+    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'B'], activeSessionId: 'B', to: { pane: 1, index: 1 } })
     expect(after.focusIndex).toBe(1)
-    expect(activeTabId(after)).toBe('A')
+    expect(activeTabId(after)).toBe('B')
   })
 
   it('reorders within one pane', () => {
     // Destination index is resolved AFTER the movers are taken out, matching single-tab `move`.
     const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D')], 0)])
-    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'C'], to: { pane: 0, index: 1 } })
+    const after = step(before, { type: 'moveMany', sessionIds: ['A', 'C'], activeSessionId: 'C', to: { pane: 0, index: 1 } })
     expect(after.panes[0].tabs.map((x) => x.sessionId)).toEqual(['B', 'A', 'C', 'D'])
+    expect(activeTabId(after)).toBe('A')
+  })
+
+  it('keeps preview state during a same-pane group reorder', () => {
+    const before = layout([pane('p0', [t('A'), t('P', true), t('C'), t('D')], 2)])
+    const after = step(before, {
+      type: 'moveMany',
+      sessionIds: ['A', 'P'],
+      activeSessionId: 'P',
+      to: { pane: 0, index: 2 }
+    })
+    expect(after.panes[0].tabs).toEqual([t('C'), t('D'), t('A'), t('P', true)])
+    expect(activeTabId(after)).toBe('C')
   })
 
   it('clamps a destination index past the end', () => {
     const before = layout([pane('p0', [t('A'), t('B')], 0), pane('p1', [t('Z')], 0)], 0)
-    const after = step(before, { type: 'moveMany', sessionIds: ['A'], to: { pane: 1, index: 99 } })
+    const after = step(before, { type: 'moveMany', sessionIds: ['A'], activeSessionId: 'A', to: { pane: 1, index: 99 } })
     expect(after.panes[1].tabs.map((x) => x.sessionId)).toEqual(['Z', 'A'])
   })
 
   it('is a no-op for an empty set, unknown ids, or a pane that does not exist', () => {
     const before = layout([pane('p0', [t('A')], 0)])
-    expect(paneReducer(before, { type: 'moveMany', sessionIds: [], to: { pane: 0, index: 0 } })).toBe(before)
-    expect(paneReducer(before, { type: 'moveMany', sessionIds: ['ZZ'], to: { pane: 0, index: 0 } })).toBe(before)
-    expect(paneReducer(before, { type: 'moveMany', sessionIds: ['A'], to: { pane: 5, index: 0 } })).toBe(before)
+    expect(paneReducer(before, { type: 'moveMany', sessionIds: [], activeSessionId: 'A', to: { pane: 0, index: 0 } })).toBe(before)
+    expect(paneReducer(before, { type: 'moveMany', sessionIds: ['ZZ'], activeSessionId: 'ZZ', to: { pane: 0, index: 0 } })).toBe(before)
+    expect(paneReducer(before, { type: 'moveMany', sessionIds: ['A'], activeSessionId: 'A', to: { pane: 5, index: 0 } })).toBe(before)
   })
 })
 
@@ -830,5 +942,43 @@ describe('readers', () => {
     expect(locateTab(split, 'B')).toEqual({ pane: 0, index: 1 })
     expect(locateTab(split, 'C')).toEqual({ pane: 1, index: 0 })
     expect(locateTab(split, 'nope')).toBeNull()
+  })
+})
+
+describe('restart persistence', () => {
+  it('restores pane order and active tabs with fresh ids and persistent tabs', () => {
+    expect(restorePaneLayout({ panes: [
+      { sessionIds: ['A', 'B'], activeSessionId: 'B' },
+      { sessionIds: ['C', 'D'], activeSessionId: 'C' }
+    ] }, ['fresh-0', 'fresh-1'])).toEqual({
+      panes: [
+        pane('fresh-0', [t('A'), t('B')], 1),
+        pane('fresh-1', [t('C'), t('D')], 0)
+      ],
+      focusIndex: 0,
+      splitFraction: SPLIT_LIMITS.default
+    })
+  })
+
+  it('restores a deselected pane without persisting focus or split sizing', () => {
+    expect(restorePaneLayout({ panes: [
+      { sessionIds: ['A'], activeSessionId: null }
+    ] }, ['fresh'])).toEqual({
+      panes: [pane('fresh', [t('A')], -1)],
+      focusIndex: 0,
+      splitFraction: SPLIT_LIMITS.default
+    })
+  })
+
+  it('snapshots only tab placement, order, and each pane active tab', () => {
+    const state = layout([
+      pane('runtime-a', [t('A', true), t('B')], 1),
+      pane('runtime-b', [t('C')], -1)
+    ], 1, 0.7)
+    expect(snapshotPaneLayout(state)).toEqual({ panes: [
+      { sessionIds: ['A', 'B'], activeSessionId: 'B' },
+      { sessionIds: ['C'], activeSessionId: null }
+    ] })
+    expect(snapshotPaneLayout(initialLayout('empty'))).toBeNull()
   })
 })

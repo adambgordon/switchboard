@@ -29,7 +29,8 @@ describe('bindActions', () => {
       view: 'move',
       retargetLiveOrder: true,
       focus: true,
-      tabs: 'rekey'
+      tabs: 'rekey',
+      tabSelection: 'rekey'
     })
   })
 
@@ -62,7 +63,8 @@ describe('bindActions', () => {
       view: 'copy',
       retargetLiveOrder: true,
       focus: true,
-      tabs: 'retarget'
+      tabs: 'retarget',
+      tabSelection: 'retarget'
     })
     expect(bindActions(correction, 'other')).toEqual({
       rekeySeen: false,
@@ -70,7 +72,8 @@ describe('bindActions', () => {
       view: 'none',
       retargetLiveOrder: true,
       focus: false,
-      tabs: 'retarget'
+      tabs: 'retarget',
+      tabSelection: 'none'
     })
   })
 
@@ -108,7 +111,8 @@ describe('bindActions', () => {
         view: 'none',
         retargetLiveOrder: false,
         focus: false,
-        tabs: 'none'
+        tabs: 'none',
+        tabSelection: 'none'
       })
     }
   })

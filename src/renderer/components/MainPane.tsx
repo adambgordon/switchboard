@@ -5,14 +5,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MutableRefObject,
   type RefObject
 } from 'react'
 import type { ConversationMeta, PtyState, Transcript } from '@shared/types'
-import type { ResolvedTheme } from '../lib/theme'
 import PaneHeader from './PaneHeader'
 import TabStrip, { type TabDescriptor } from './TabStrip'
 import TranscriptView, { type TranscriptScrollState } from './TranscriptView'
-import TerminalDeck from './TerminalDeck'
 import { Play } from './icons'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 
@@ -30,33 +29,37 @@ interface Props {
   onPaneFocus?: () => void
   /** Where this conversation's live terminal is. One xterm per terminal, so a pane that does not hold
    *  it shows the transcript and says where it is — and, across windows, offers to move it. */
-  terminalAt?: 'here' | 'other-pane' | 'other-window' | null
+  terminalAt?: 'here' | 'other-pane' | 'claimable' | null
   /** Bring the terminal into this window and show it here. */
   onClaimTerminal?: () => void
-  /** Preferences → Application → Tabs and split view. False renders no strip at all. */
+  /** Preferences → Beta Features → Tabs and split view. False renders no strip at all. */
   showTabs: boolean
   tabs: TabDescriptor[]
   activeTabIndex: number
-  onActivateTab: (pane: number, index: number) => void
+  onActivateTab: (pane: number, index: number, focusSurface?: boolean) => void
   onCloseTab: (pane: number, index: number) => void
   onCloseOtherTabs: (pane: number, index: number) => void
   onPromoteTab: (sessionId: string, pane?: number) => void
   /** See TabStrip: whether the tab can create the split, and whether it can cross an existing one. */
-  canSplitRight: boolean
+  canSplitRight: (sessionId: string) => boolean
   canMoveToOtherPane: boolean
   onSplitRightTab: (sessionId: string, pane: number) => void
   onMoveTabToOtherPane: (sessionId: string, pane: number) => void
   onOpenTabInNewWindow: (sessionId: string) => void
   /** A tab was dragged onto a strip in this window. */
   onMoveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
-  /** A tab was dragged out of this window entirely. */
-  onTabLeftWindow: (sessionId: string) => void
+  /** A tab group was dragged out of this window entirely. */
+  onTabLeftWindow: (sessionIds: string[]) => void
   /** Multi-selection: which tabs are in it, the two gestures that build it, and the group forms of
    *  drop and target-resolution. */
   selectedTabIds: Set<string>
   onToggleTabSelect: (pane: number, sessionId: string) => void
   onExtendTabSelect: (pane: number, sessionId: string) => void
-  onMoveTabGroup: (sessionIds: string[], to: { pane: number; index: number }) => void
+  onMoveTabGroup: (
+    sessionIds: string[],
+    activeSessionId: string,
+    to: { pane: number; index: number }
+  ) => void
   onResolveTabTargets: (pane: number, sessionId: string) => string[]
   /** Open the conversation-info modal for an arbitrary conversation (the tab menu's Session Details). */
   onShowInfoFor: (sessionId: string) => void
@@ -65,12 +68,10 @@ interface Props {
   meta: ConversationMeta | null
   pty: PtyState | null
   view: View
-  /** Resolved app theme, forwarded to the terminal deck for live re-skinning. */
-  theme: ResolvedTheme
   focusReq: { sessionId: string; n: number } | null
   transcript: Transcript | null
   transcriptLoading: boolean
-  activePtys: PtyState[]
+  transcriptScrollStateRef: MutableRefObject<Map<string, TranscriptScrollState>>
   pinned: boolean
   /** This row stands for no conversation — see PaneHeader, which hides its conversation-keyed controls. */
   unlinked: boolean
@@ -83,9 +84,9 @@ interface Props {
   onShowInfo: () => void
   /** Genuine engagement with the open conversation (a click or keystroke in the pane body) —
    *  used to clear a manual "unread" mark once you actually start working in it. */
-  onEngage?: () => void
-  /** Option+click in the terminal — always mark the conversation unread (never toggles). */
-  onMarkUnread: (id: string) => void
+  onEngage?: (id: string) => void
+  /** Stable portal target for every xterm homed to this pane. */
+  terminalHostRef: (node: HTMLDivElement | null) => void
   /** Ref to the pane root (`.sb-pane`); App reads it to route ⌘F when focus is in the main pane. */
   paneRef: RefObject<HTMLElement>
   /** Whether the find-in-conversation bar is open (App owns the toggle; ⌘F / Esc drive it). */
@@ -180,11 +181,10 @@ export default function MainPane(props: Props) {
     meta,
     pty,
     view,
-    theme,
     focusReq,
     transcript,
     transcriptLoading,
-    activePtys,
+    transcriptScrollStateRef,
     pinned,
     unlinked,
     onTogglePin,
@@ -194,7 +194,7 @@ export default function MainPane(props: Props) {
     onKill,
     onShowInfo,
     onEngage,
-    onMarkUnread,
+    terminalHostRef,
     paneRef,
     findOpen,
     findFocusReq,
@@ -206,7 +206,6 @@ export default function MainPane(props: Props) {
 
   const showTerminal = !!selectedId && view === 'terminal' && !!pty
   const showTranscript = !!selectedId && !showTerminal
-  const visiblePtyId = showTerminal && pty ? pty.ptyId : null
   // Formatted-view focus key: bumps when a focus is requested for the selected conversation (a
   // not-live row click or ⌥⌘↑/↓ switch), so TranscriptView takes the keyboard like the terminal does
   // on a live one. Derived from selectedId — known instantly — so focus lands during the async
@@ -221,11 +220,6 @@ export default function MainPane(props: Props) {
   // the dedup and a stale focusReq re-grabs focus on return — switching back to a previously-focused
   // not-live conversation would re-pull focus on each remount.
   const transcriptFocusKeyRef = useRef<number | null>(null)
-  // Compact per-conversation Formatted state. MainPane stays mounted while TranscriptView comes and
-  // goes, so positions survive both conversation switches and Formatted↔Terminal toggles without
-  // retaining every Markdown tree in the DOM.
-  const transcriptScrollStateRef = useRef(new Map<string, TranscriptScrollState>())
-
   // --- find in conversation (the main-pane search; distinct from the rail's cross-conversation
   // search). Query state is local so keystrokes re-render only the pane, not App / the rail. ---
   const [findQuery, setFindQuery] = useState('')
@@ -271,12 +265,12 @@ export default function MainPane(props: Props) {
   const bodyRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = bodyRef.current
-    if (!el || !onEngage) return
+    if (!el || !onEngage || !selectedId) return
     const onDown = (e: MouseEvent): void => {
-      if (e.button === 0) onEngage()
+      if (e.button === 0) onEngage(selectedId)
     }
     const onKey = (e: KeyboardEvent): void => {
-      if (!e.metaKey && !e.ctrlKey) onEngage()
+      if (!e.metaKey && !e.ctrlKey) onEngage(selectedId)
     }
     el.addEventListener('mousedown', onDown)
     el.addEventListener('keydown', onKey, true)
@@ -284,7 +278,7 @@ export default function MainPane(props: Props) {
       el.removeEventListener('mousedown', onDown)
       el.removeEventListener('keydown', onKey, true)
     }
-  }, [onEngage])
+  }, [onEngage, selectedId])
 
   return (
     <main
@@ -377,13 +371,10 @@ export default function MainPane(props: Props) {
           ) : (
             <NoHistory live={!!pty} onGoLive={onGoLive} />
           ))}
-        <TerminalDeck
-          activePtys={activePtys}
-          visiblePtyId={visiblePtyId}
-          deckVisible={showTerminal}
-          focusReq={focusReq}
-          theme={theme}
-          onMarkUnread={onMarkUnread}
+        <div
+          className="sb-term-deck"
+          ref={terminalHostRef}
+          style={{ display: showTerminal ? 'block' : 'none' }}
         />
       </div>
     </main>

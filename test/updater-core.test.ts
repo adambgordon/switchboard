@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { findRepoRootFrom, interpretRemoteSha, parseFakeUpdate } from '../src/main/updater-core'
+import {
+  cachedSingleFlight,
+  findRepoRootFrom,
+  interpretRemoteSha,
+  parseFakeUpdate,
+  singleFlight
+} from '../src/main/updater-core'
 
 const here = dirname(fileURLToPath(import.meta.url)) // <repo>/test
 const repoRoot = resolve(here, '..') // <repo> — has .git + package.json name "switchboard"
@@ -54,5 +60,70 @@ describe('parseFakeUpdate', () => {
     expect(parseFakeUpdate('behind:5')).toEqual({ status: 'behind' }) // trailing :N tolerated, ignored
     expect(parseFakeUpdate('unknown:offline')).toEqual({ status: 'unknown', reason: 'offline' })
     expect(parseFakeUpdate('unknown')).toEqual({ status: 'unknown', reason: 'forced' })
+  })
+})
+
+describe('singleFlight', () => {
+  it('shares one in-flight promise and starts again after it settles', async () => {
+    let starts = 0
+    let release = (): void => {}
+    const run = singleFlight(
+      () => new Promise<number>((resolve) => {
+        starts += 1
+        release = () => resolve(starts)
+      })
+    )
+
+    const first = run()
+    const second = run()
+    expect(starts).toBe(1)
+    expect(second).toBe(first)
+    release()
+    await expect(first).resolves.toBe(1)
+
+    const third = run()
+    expect(starts).toBe(2)
+    release()
+    await expect(third).resolves.toBe(2)
+  })
+
+  it('allows a retry after a rejected run', async () => {
+    let starts = 0
+    const run = singleFlight(async () => {
+      starts += 1
+      if (starts === 1) throw new Error('nope')
+      return 'ok'
+    })
+    await expect(run()).rejects.toThrow('nope')
+    await expect(run()).resolves.toBe('ok')
+  })
+})
+
+describe('cachedSingleFlight', () => {
+  it('reuses a settled result until a forced refresh', async () => {
+    let starts = 0
+    const get = cachedSingleFlight(async () => ++starts)
+    await expect(get()).resolves.toBe(1)
+    await expect(get()).resolves.toBe(1)
+    await expect(get(true)).resolves.toBe(2)
+    await expect(get()).resolves.toBe(2)
+    expect(starts).toBe(2)
+  })
+
+  it('shares concurrent forced refreshes', async () => {
+    let release = (_value: number): void => {}
+    let starts = 0
+    const get = cachedSingleFlight(
+      () => new Promise<number>((resolve) => {
+        starts += 1
+        release = resolve
+      })
+    )
+    const first = get(true)
+    const second = get(true)
+    expect(second).toBe(first)
+    expect(starts).toBe(1)
+    release(7)
+    await expect(first).resolves.toBe(7)
   })
 })

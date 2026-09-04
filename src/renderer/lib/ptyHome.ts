@@ -2,14 +2,12 @@
  * Which pane each live terminal is mounted in.
  *
  * A window can hold only ONE xterm per terminal: the renderer's output fan-out keeps a single writer
- * per pty id, and a second one silently kills the first. So showing a terminal in the other pane means
- * unmounting and remounting it — and a remounted xterm attaches to an empty backlog, because no PTY
- * output is retained anywhere to replay, so it comes back blank until something changes its size.
+ * per pty id, and a second one silently replaces the first. Moving the xterm therefore unmounts and
+ * rebuilds it from `ptyStream`'s self-contained serialized snapshot.
  *
- * The assignment is therefore **sticky**: a terminal is given a pane once, when first seen, and moves
- * only if that pane goes away. That rule is the whole point of this module, and it is pure and tested
- * rather than living in an effect, where a one-line regression to it would look exactly like working
- * code and cost a blank terminal.
+ * A terminal follows the pane holding its tab, so moving a live tab cannot strand its xterm behind a
+ * disabled "other pane" control. With no local tab it remains sticky: focus changes and transient
+ * indexing gaps are not reasons to rebuild a terminal.
  */
 
 /** The bit of a live PTY this needs: its identity, and the conversation it is running. */
@@ -39,18 +37,20 @@ export function nextPtyHomes(
 
   for (const p of ptys) {
     const current = prev[p.ptyId]
-    // Already homed to a pane that still exists — leave it exactly where it is. This branch is the
-    // stickiness, and it is what stops a terminal being remounted (and blanked) by anything other
-    // than its pane disappearing.
-    if (current !== undefined && current < ctx.paneCount) continue
-    // First sight, or its pane was removed: the pane holding its tab, else the focused one.
-    //
-    // There is deliberately no `current === home` short-circuit here. Reaching this line means
-    // `current` is either absent or >= paneCount, while both branches of `home` resolve to a pane that
-    // exists — so the two can never be equal, and a guard for it would be unreachable rather than
-    // merely untested. `??`, not `||`: pane 0 is a real answer.
     const tabPane = ctx.paneOfSession(p.sessionId)
-    edit()[p.ptyId] = tabPane ?? Math.min(ctx.focusIndex, ctx.paneCount - 1)
+    if (tabPane !== null) {
+      if (current === tabPane) continue
+      edit()[p.ptyId] = tabPane
+      continue
+    }
+    // With no local tab, preserve a valid home. This is what keeps another window's terminal and a
+    // locally-closed live tab from remounting whenever pane focus changes.
+    if (current !== undefined && current < ctx.paneCount) continue
+    // First sight, or its pane was removed: fall back to the focused pane.
+    //
+    // There is deliberately no equality short-circuit here. Reaching this line means `current` is
+    // absent or outside the layout, while the fallback is guaranteed to be a pane that exists.
+    edit()[p.ptyId] = Math.min(ctx.focusIndex, ctx.paneCount - 1)
   }
 
   // Forget terminals that have exited, so the map cannot grow for the life of the window.

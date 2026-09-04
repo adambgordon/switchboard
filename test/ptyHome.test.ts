@@ -4,9 +4,8 @@ import { nextPtyHomes, partitionPtys, type HomeContext } from '../src/renderer/l
 /**
  * Terminal-to-pane assignment. The stakes are why this is pure rather than living in the effect that
  * calls it: a window holds one xterm per terminal, so moving one between panes means unmounting and
- * remounting it — and a remounted xterm attaches to an empty backlog, since no PTY output is kept
- * anywhere to replay. A regression here does not throw or look wrong in a diff; it produces a blank
- * terminal that only a resize recovers.
+ * remounting it. The serialized PTY handoff restores that replacement; the home map must follow the tab
+ * or the terminal remains mounted in a pane with no tab capable of showing it.
  */
 const pty = (ptyId: string, sessionId: string) => ({ ptyId, sessionId })
 
@@ -41,18 +40,24 @@ describe('nextPtyHomes — first assignment', () => {
   })
 
   it('pane 0 is a real answer, not a falsy one', () => {
-    // The tab pane is looked up with `??`, not `||` — pane 0 is a valid home and must not be treated
-    // as "no tab" and replaced by the focused pane.
+    // Pane 0 is a valid home and must not be treated as "no tab" and replaced by the focused pane.
     expect(nextPtyHomes({}, [pty('t1', 'S1')], ctx(2, 1, { S1: 0 }))).toEqual({ t1: 0 })
   })
 })
 
-describe('nextPtyHomes — stickiness', () => {
-  it('does NOT follow a tab that moved to the other pane', () => {
-    // The load-bearing rule. Following the tab would remount the xterm and blank the terminal; the
-    // pane that owns it keeps showing it, and the other pane shows that conversation's transcript.
+describe('nextPtyHomes — tab placement and stickiness', () => {
+  it('follows a tab that moved to the other pane', () => {
+    // Leaving the home behind would make the terminal unreachable because the old pane no longer has
+    // a tab that can show it.
     const prev = { t1: 0 }
-    expect(nextPtyHomes(prev, [pty('t1', 'S1')], ctx(2, 1, { S1: 1 }))).toBe(prev)
+    expect(nextPtyHomes(prev, [pty('t1', 'S1')], ctx(2, 1, { S1: 1 }))).toEqual({ t1: 1 })
+  })
+
+  it('returns the previous map by identity when the tab stays in its pane', () => {
+    // This path runs on every render while a live tab is open; allocating here would re-render both
+    // pane trees even though no terminal moved.
+    const prev = { t1: 1 }
+    expect(nextPtyHomes(prev, [pty('t1', 'S1')], ctx(2, 0, { S1: 1 }))).toBe(prev)
   })
 
   it('does not move a terminal when the focus moves', () => {
@@ -121,7 +126,7 @@ describe('partitionPtys', () => {
 
   it('leaves an unhomed terminal in NO pane', () => {
     // For one frame only. Guessing a pane and correcting next frame would remount the xterm, which is
-    // exactly the cost the sticky rule exists to avoid.
+    // needless churn even though the serialized handoff can restore it.
     const out = partitionPtys([pty('a', 'A'), pty('b', 'B')], { a: 1 }, 2)
     expect(out.map((g) => g.map((p) => p.ptyId))).toEqual([[], ['a']])
   })

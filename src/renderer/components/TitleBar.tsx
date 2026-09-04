@@ -17,6 +17,8 @@ interface Props {
   /** Whether the main area is currently split into two panes. Undefined hides the control entirely
    *  (the tabs-and-split preference is off). */
   split?: boolean
+  /** An unsplit window needs another tab to move right before it can create a second pane. */
+  splitDisabled?: boolean
   onToggleSplit?: () => void
 }
 
@@ -29,6 +31,7 @@ export default function TitleBar({
   onToggleTheme,
   updatesNeedAttention,
   split,
+  splitDisabled,
   onToggleSplit
 }: Props) {
   return (
@@ -52,6 +55,7 @@ export default function TitleBar({
         <button
           className={`sb-panel-toggle${split ? ' active' : ''}`}
           onClick={onToggleSplit}
+          disabled={splitDisabled}
           data-tip={`${split ? 'Close' : 'Open'} split view (⌘\\)`}
           aria-label={`${split ? 'Close' : 'Open'} split view`}
           aria-pressed={!!split}

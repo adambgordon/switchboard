@@ -275,6 +275,16 @@ export interface PtyState extends PtySession {
   ownedHere: boolean
 }
 
+/** A self-contained xterm state transfer. The VT payload is produced by SerializeAddon and must be
+ * replayed at the captured geometry before the destination fits itself to a new pane. */
+export interface PtySnapshot {
+  data: string
+  cols: number
+  rows: number
+  /** How many rows the viewport was above the bottom, clamped by the retained serialized scrollback. */
+  viewportFromBottom: number
+}
+
 /** IPC channel identifiers. invoke/handle unless noted as a main->renderer push. */
 export const IPC = {
   sessionsList: 'sessions:list',
@@ -286,6 +296,8 @@ export const IPC = {
   ptyInput: 'pty:input',
   ptyResize: 'pty:resize',
   ptyKill: 'pty:kill',
+  ptyFlowPause: 'pty:flowPause',
+  ptyFlowResume: 'pty:flowResume',
   ptySetMaxLive: 'pty:setMaxLive', // renderer -> main: update the live-PTY cap
   ptyData: 'pty:data', // push (ptyId, data)
   ptyExit: 'pty:exit', // push (ptyId, exitCode)
@@ -300,28 +312,36 @@ export const IPC = {
   tabContextMenu: 'shell:tabContextMenu', // renderer -> main: pop the native right-click menu for a tab; resolves with the chosen action
   menuCloseTab: 'menu:closeTab', // push: ⌘W — the renderer closes the active tab, or asks main to close the window when there is none
   windowClose: 'window:close', // renderer -> main: close the sender's window (⌘W with no tab to close)
-  windowOpenConversation: 'window:openConversation', // renderer -> main: open a NEW window showing one conversation
+  windowOpenConversation: 'window:openConversation', // renderer -> main: open a NEW window with an ordered tab group
   // Dragging a tab between windows. While a mouse button is held the OS routes every move to the
   // window the drag STARTED in, so the window under the cursor never learns the pointer is there —
   // main is the only party that can see all the windows, so it referees. It reads the cursor on
   // demand (never on a timer) and only while a drag is actually in flight.
-  tabDragBegin: 'tab:dragBegin', // renderer -> main: a tab drag started here
+  tabDragBegin: 'tab:dragBegin', // renderer -> main: a tab-group drag started here
   tabDragHover: 'tab:dragHover', // renderer -> main: resolve which window the cursor is over now
   tabDragDrop: 'tab:dragDrop', // renderer -> main: released; resolves with what became of the tab
   tabDragCancel: 'tab:dragCancel', // renderer -> main: the source window handled it itself
   tabDragOver: 'tab:dragOver', // push: this window is under a tab drag from elsewhere
   tabDragLeave: 'tab:dragLeave', // push: it no longer is
-  tabDropHere: 'tab:dropHere', // push (sessionId): adopt this conversation as a tab
+  tabDropHere: 'tab:dropHere', // push (TabDragPayload): adopt this ordered tab group
   // One conversation holds ONE tab across the whole app. Only main can see every window, so it keeps
   // the register of which window holds what and answers the two questions a renderer cannot: "is this
   // open somewhere else" and "then show it / hand it over".
   tabsChanged: 'tab:changed', // renderer -> main: the full set of conversations this window has tabs for
+  tabWorkspaceChanged: 'tab:workspaceChanged', // renderer -> main: restart-safe pane membership/order/active tabs
   tabsElsewhere: 'tab:elsewhere', // push (sessionIds): conversations OTHER windows hold tabs for
   conversationReveal: 'tab:reveal', // renderer -> main: focus the window holding this and show its tab
+  conversationResume: 'tab:resume', // renderer -> main: resume in the window already holding the tab
   conversationClaim: 'tab:claim', // renderer -> main: tell that window to give the tab up
   tabActivate: 'tab:activate', // push (sessionId): bring your tab for this conversation forward
+  tabResume: 'tab:resumeHere', // push (sessionId): resume the tab in this window
   tabRelease: 'tab:release', // push (sessionId): close your tab for this conversation
+  tabShouldRelease: 'tab:shouldRelease', // renderer -> main: confirm a queued release is still current
   ptyClaim: 'pty:claim', // renderer -> main: take ownership of a terminal from another window
+  ptySnapshotRequest: 'pty:snapshotRequest', // push (requestId, ptyId): owner serializes after draining writes
+  ptySnapshotReply: 'pty:snapshotReply', // renderer -> main (requestId, ptyId, snapshot|null)
+  ptySnapshotStage: 'pty:snapshotStage', // push (ptyId, snapshot): destination stages before ownership flips
+  ptySnapshotRestored: 'pty:snapshotRestored', // renderer -> main: destination replay completed; repaint foreground TUI
   windowSetBackgroundColor: 'window:setBackgroundColor',
   windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
@@ -333,6 +353,8 @@ export const IPC = {
   updatesCheck: 'updates:check', // compare the build commit to main (GitHub API)
   updatesRun: 'updates:run', // git pull + npm run setup in the source repo
   updatesProgress: 'updates:progress', // push (line) — streamed update output
+  updatesRunStateGet: 'updates:runStateGet',
+  updatesRunStateChanged: 'updates:runStateChanged', // push (UpdateRunState)
   updatesRelaunch: 'updates:relaunch' // renderer -> main: quit + relaunch into the rebuilt app
 } as const
 
@@ -368,18 +390,41 @@ export type TabMenuAction =
   | 'moveLeft'
   | 'newWindow'
 
-/** What became of a tab released outside its own window's strips. See `tabDragDrop`. */
+/** What became of a tab group released outside its own window's strips. See `tabDragDrop`. */
 export type TabDropOutcome = 'moved' | 'detached' | 'cancelled'
 
-/** What a freshly-created window should show. Requested once on mount via `IPC.windowGetInit`. */
+/** The tabs carried by one drag, in source-strip order, and the tab under the pointer. */
+export interface TabDragPayload {
+  sessionIds: string[]
+  activeSessionId: string
+}
+
+/** Restart-safe tab state. Runtime pane ids and preview status are deliberately excluded. */
+export interface PersistedTabPane {
+  sessionIds: string[]
+  activeSessionId: string | null
+}
+
+export interface PersistedTabLayout {
+  panes: PersistedTabPane[]
+}
+
+/** What a freshly-created window should show. Passed synchronously through `additionalArguments`,
+ *  parsed by the preload, and exposed as `window.sbWindow` before the first renderer frame. */
 export interface WindowInit {
   /**
    * The conversations to open as this window's tabs — empty for an ordinary browser window.
    *
    * A list rather than a single id because a multi-selection moved to a new window belongs in ONE
-   * window holding all of them, not one window each. The first becomes the active tab.
+   * window holding all of them, not one window each.
    */
   sessionIds: string[]
+  /** The tab the user dragged or invoked the command on. Null in an ordinary browser window. */
+  activeSessionId: string | null
+  /** A layout restored from the previous app run; null for an ordinary or newly-detached window. */
+  restoredTabs: PersistedTabLayout | null
+  /** The first browser window persists shared rail layout; detached windows never do. */
+  primary: boolean
   /**
    * Start with the left rail hidden. A detached window is a working surface for one conversation, so
    * it opens without the browser — ⌘B brings it back. It is a starting state, not a mode: the choice
@@ -396,11 +441,18 @@ export interface UpdateRunResult {
   code: number | null
 }
 
+export type UpdateRunPhase = 'idle' | 'updating' | 'done' | 'failed'
+
+export interface UpdateRunState {
+  phase: UpdateRunPhase
+  log: string
+}
+
 /** The typed surface exposed on `window.api` by the preload bridge. */
 export interface SwitchboardApi {
   // --- conversations (read-only) ---
   listConversations(): Promise<ConversationGroup[]>
-  getTranscript(sessionId: string): Promise<Transcript | null>
+  getTranscript(sessionId: string, revision: string): Promise<Transcript | null>
   /** Subscribe to live re-indexes (file watcher). Returns an unsubscribe fn. */
   onSessionsChanged(cb: (groups: ConversationGroup[]) => void): () => void
   /**
@@ -426,6 +478,8 @@ export interface SwitchboardApi {
   sendInput(ptyId: string, data: string): void
   resize(ptyId: string, cols: number, rows: number): void
   kill(ptyId: string): void
+  /** Backpressure for renderer write queues. Main combines this window's pause with transfer pauses. */
+  setPtyOutputPaused(ptyId: string, paused: boolean): void
   onPtyData(cb: (ptyId: string, data: string) => void): () => void
   onPtyExit(cb: (ptyId: string, exitCode: number | null) => void): () => void
   /** A Codex PTY's sessionId changed from `oldSessionId` to `newSessionId` (same `ptyId`).
@@ -478,19 +532,18 @@ export interface SwitchboardApi {
   /** Close the window this renderer belongs to. The ⌘W fallback, and what makes a detached window
    *  closable from inside. */
   closeWindow(): void
-  /** Open a NEW window showing these conversations, with the rail hidden. Fire-and-forget. A group
-   *  goes to one window holding all of them, so this takes a list. */
-  openConversationWindow(sessionIds: string[]): void
+  /** Open a NEW window showing this ordered tab group, with the rail hidden. Fire-and-forget. */
+  openConversationWindow(payload: TabDragPayload): void
 
   // ---- dragging a tab between windows ----
-  /** Tell main a tab drag started here, so it can referee where the cursor goes. */
-  tabDragBegin(sessionId: string): void
+  /** Tell main a tab-group drag started here, so it can referee where the cursor goes. */
+  tabDragBegin(payload: TabDragPayload): void
   /** Ask main to re-resolve which window the cursor is over, and to move the drop highlight there.
    *  Called at most once per animation frame, and only while dragging. */
   tabDragHover(): void
   /**
    * The pointer was released outside this window's own strips. Main decides from the cursor:
-   *  - `moved` — another window took the tab; the caller must now close its own.
+   *  - `moved` — another window took the group; the caller must now close its copies.
    *  - `detached` — no window was under the cursor, so a new one opened with it; also close ours.
    *  - `cancelled` — the cursor was still over this window, so nothing happened.
    */
@@ -500,29 +553,43 @@ export interface SwitchboardApi {
   /** This window is under a tab drag from another one — show that it can receive it. */
   onTabDragOver(cb: () => void): () => void
   onTabDragLeave(cb: () => void): () => void
-  /** Adopt a conversation dragged in from another window, as a kept tab in the focused pane. */
-  onTabDropHere(cb: (sessionId: string) => void): () => void
+  /** Adopt an ordered tab group dragged in from another window. */
+  onTabDropHere(cb: (payload: TabDragPayload) => void): () => void
 
   // ---- one tab per conversation, across every window ----
   /** Report the full set of conversations this window holds tabs for. Sent whenever that set changes,
    *  so main can keep its register without tracking individual opens and closes. */
   tabsChanged(sessionIds: string[]): void
+  /** Persist this window's restart-safe tab layout, or clear it when tabs are disabled/empty. */
+  persistTabLayout(layout: PersistedTabLayout | null): void
   /** The conversations OTHER windows hold tabs for. Lets this window decide locally — and
    *  synchronously — whether an open should reveal rather than duplicate. */
   onTabsElsewhere(cb: (sessionIds: string[]) => void): () => void
   /** Focus the window holding this conversation and bring its tab forward. For an implicit open ("show
    *  me this"), where the tab already exists and should not be relocated. */
   revealConversation(sessionId: string): void
+  /** Route Resume to the window already holding the conversation's tab. */
+  resumeConversationElsewhere(sessionId: string): void
   /** Ask whichever window holds this conversation to give its tab up, because this window is about to
    *  place it. For an explicit placement, where relocating IS what was asked for. */
   claimConversation(sessionId: string): void
   /** Another window asked for our tab to be shown. */
   onTabActivate(cb: (sessionId: string) => void): () => void
+  onTabResume(cb: (sessionId: string) => void): () => void
   /** Another window is taking this conversation — close our tab for it. */
   onTabRelease(cb: (sessionId: string) => void): () => void
-  /** Take ownership of a terminal currently owned by another window, so this one can show it. The
-   *  previous owner's xterm unmounts; ours mounts and repaints on its first fit. */
-  claimTerminal(ptyId: string): void
+  /** Recheck a queued release against main's current owner before closing the local tab. */
+  shouldReleaseTab(sessionId: string): Promise<boolean>
+  /** Take ownership of a terminal currently owned by another window, so this one can show it. Main
+   *  transfers a drained xterm snapshot before changing ownership. */
+  claimTerminal(ptyId: string): Promise<boolean>
+  /** Main asks the current owner for a drained, self-contained terminal snapshot. */
+  onPtySnapshotRequest(cb: (requestId: string, ptyId: string) => void): () => void
+  replyPtySnapshot(requestId: string, ptyId: string, snapshot: PtySnapshot | null): void
+  /** Stage a snapshot synchronously before the ownership update that mounts its destination xterm. */
+  onPtySnapshotStage(cb: (ptyId: string, snapshot: PtySnapshot) => void): () => void
+  /** Confirm staged state reached xterm; main then asks the foreground process for a complete repaint. */
+  confirmPtySnapshotRestored(ptyId: string): void
   /** Match the window's native backgroundColor to the active theme's --paper, so a live resize
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void
@@ -555,12 +622,14 @@ export interface SwitchboardApi {
   /** Build version/sha + whether this copy can rebuild itself (source repo findable, packaged). */
   getUpdateInfo(): Promise<UpdateInfo>
   /** Compare the build's commit to the latest on `main` (GitHub compare API). */
-  checkForUpdates(): Promise<UpdateCheck>
+  checkForUpdates(force?: boolean): Promise<UpdateCheck>
   /** Run `git pull --ff-only <https> main && npm run setup` in the source repo, streaming output via
    *  onUpdateProgress. Resolves when it finishes (ok=false on any failure, or in a dev run). */
   runUpdate(): Promise<UpdateRunResult>
   /** Streamed stdout/stderr lines from an in-flight runUpdate. Returns an unsubscribe fn. */
   onUpdateProgress(cb: (line: string) => void): () => void
+  getUpdateRunState(): Promise<UpdateRunState>
+  onUpdateRunState(cb: (state: UpdateRunState) => void): () => void
   /** Quit and relaunch into the freshly-built .app (after a successful runUpdate). */
   relaunchForUpdate(): void
 }

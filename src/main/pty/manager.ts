@@ -102,6 +102,8 @@ interface Live {
   sized: boolean
   bootWhenReady: () => void
   exitCode: number | null
+  /** Independent reasons holding node-pty's readable side paused (renderer backpressure or transfer). */
+  flowPauses: Set<string>
 }
 
 /**
@@ -183,19 +185,26 @@ export class PtyManager extends EventEmitter {
     this.maxLive = Math.max(CONFIG.liveSessionsMin, Math.min(CONFIG.liveSessionsMax, Math.floor(n)))
   }
 
-  resume(sessionId: string, cwd: string, agent: AgentKind, title = 'Conversation'): PtySession {
-    return this.spawn({ sessionId, cwd, title, origin: 'resume', agent })
+  resume(
+    sessionId: string,
+    cwd: string,
+    agent: AgentKind,
+    title = 'Conversation',
+    beforeAnnounce?: (session: PtySession) => void
+  ): PtySession {
+    return this.spawn({ sessionId, cwd, title, origin: 'resume', agent, beforeAnnounce })
   }
 
-  startNew(cwd: string, agent: AgentKind): PtySession {
-    if (agent === 'codex') return this.startNewCodex(cwd)
+  startNew(cwd: string, agent: AgentKind, beforeAnnounce?: (session: PtySession) => void): PtySession {
+    if (agent === 'codex') return this.startNewCodex(cwd, beforeAnnounce)
     // Claude gets a pre-assigned id and is live (and renamable) immediately.
     return this.spawn({
       sessionId: randomUUID(),
       cwd,
       title: 'New conversation',
       origin: 'new',
-      agent: 'claude'
+      agent: 'claude',
+      beforeAnnounce
     })
   }
 
@@ -205,7 +214,7 @@ export class PtyManager extends EventEmitter {
    * is swapped in later by probeCodexIdentity, once the OS can prove which rollout the Codex process
    * in this terminal has open — and stays a placeholder if it never can.
    */
-  private startNewCodex(cwd: string): PtySession {
+  private startNewCodex(cwd: string, beforeAnnounce?: (session: PtySession) => void): PtySession {
     return this.spawn({
       sessionId: randomUUID(), // placeholder; swapped for the real rollout id on bind
       cwd,
@@ -214,7 +223,8 @@ export class PtyManager extends EventEmitter {
       title: 'New conversation',
       origin: 'new',
       agent: 'codex',
-      provisional: true
+      provisional: true,
+      beforeAnnounce
     })
   }
 
@@ -242,6 +252,58 @@ export class PtyManager extends EventEmitter {
     if (!e.sized) {
       e.sized = true
       e.bootWhenReady()
+    }
+  }
+
+  /** Pause/resume output without letting one caller release another caller's hold. */
+  setOutputPaused(ptyId: string, reason: string, paused: boolean): void {
+    const e = this.live.get(ptyId)
+    if (!e) return
+    if (paused) {
+      if (e.flowPauses.has(reason)) return
+      const wasFlowing = e.flowPauses.size === 0
+      e.flowPauses.add(reason)
+      if (wasFlowing) {
+        try {
+          e.proc.pause()
+        } catch {
+          /* pty may have just exited */
+        }
+      }
+      return
+    }
+    if (!e.flowPauses.delete(reason) || e.flowPauses.size > 0) return
+    try {
+      e.proc.resume()
+    } catch {
+      /* pty may have just exited */
+    }
+  }
+
+  /** A renderer disappeared while holding backpressure; never leave its PTYs paused forever. */
+  releaseOutputPause(reason: string): void {
+    for (const e of this.live.values()) {
+      if (!e.flowPauses.delete(reason) || e.flowPauses.size > 0) continue
+      try {
+        e.proc.resume()
+      } catch {
+        /* pty may have just exited */
+      }
+    }
+  }
+
+  /** Force a sized PTY to repaint its current screen for a renderer that has just claimed it. */
+  repaint(ptyId: string): void {
+    const e = this.live.get(ptyId)
+    if (!e || !e.sized) return
+    const { cols, rows } = e.proc
+    try {
+      // A same-size resize is a no-op for an idle shell. Step one column out and immediately back so
+      // the foreground process receives SIGWINCH while its final geometry remains unchanged.
+      e.proc.resize(cols + 1, rows)
+      e.proc.resize(cols, rows)
+    } catch {
+      /* pty may have just exited */
     }
   }
 
@@ -476,6 +538,7 @@ export class PtyManager extends EventEmitter {
     origin: 'resume' | 'new'
     agent: AgentKind
     provisional?: boolean
+    beforeAnnounce?: (session: PtySession) => void
   }): PtySession {
     // Don't double-spawn a session that's already live — just hand back the existing one.
     const existing = this.findBySession(o.sessionId)
@@ -522,7 +585,8 @@ export class PtyManager extends EventEmitter {
       shellReady: false,
       sized: false,
       bootWhenReady: () => {},
-      exitCode: null
+      exitCode: null,
+      flowPauses: new Set()
     }
     this.live.set(ptyId, entry)
     if (o.agent === 'claude') this.parkedJobs?.register(ptyId, o.sessionId)
@@ -575,8 +639,10 @@ export class PtyManager extends EventEmitter {
       this.emitActive()
     })
 
+    const state = this.toState(entry)
+    o.beforeAnnounce?.(state)
     this.emitActive()
-    return this.toState(entry)
+    return state
   }
 
   private markBusy(e: Live): boolean {

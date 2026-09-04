@@ -21,7 +21,7 @@ interface Props {
   unlinked: boolean
   /** Where this conversation's live terminal is: rendered here, in this window's other pane, or in
    *  another window (from which it can be moved). Null when there is no live terminal. */
-  terminalAt?: 'here' | 'other-pane' | 'other-window' | null
+  terminalAt?: 'here' | 'other-pane' | 'claimable' | null
   /** Bring the terminal into this window and show it. */
   onClaimTerminal?: () => void
   onTogglePin: () => void
@@ -178,19 +178,18 @@ export default function PaneHeader({
               {/* A terminal exists in exactly one place, and WHERE decides what this button does.
                   Here: switch to it. In another WINDOW: bring it over — clicking "Terminal" in a
                   window that does not hold it plainly means "show it here", so that is what it does.
-                  In the other PANE of this window: disabled with a tip, because moving a terminal
-                  between panes is not supported yet, and a control that silently refuses is worse
-                  than one that says why. */}
+                  In the other PANE of this window: disabled with a tip. Homes normally follow their
+                  tabs during render; this is the fail-closed state if they ever disagree. */}
               <button
                 className={`sb-seg-btn${view === 'terminal' ? ' active' : ''}`}
-                onClick={terminalAt === 'other-window' ? onClaimTerminal : onGoLive}
+                onClick={terminalAt === 'claimable' ? onClaimTerminal : onGoLive}
                 disabled={terminalAt === 'other-pane'}
                 aria-label="Show the live terminal"
                 data-tip={
                   terminalAt === 'other-pane'
                     ? 'Terminal is open in the other pane'
-                    : terminalAt === 'other-window'
-                      ? 'Terminal is open in another window — click to move it here'
+                    : terminalAt === 'claimable'
+                      ? 'Live terminal isn’t shown here — click to show it here'
                       : 'Live terminal'
                 }
               >
@@ -202,7 +201,7 @@ export default function PaneHeader({
             </div>
             <button className="sb-btn-ghost danger" onClick={onKill} data-tip="Stop session">
               <Stop size={12} />
-              Stop
+              <span className="sb-pane-action-label">Stop</span>
             </button>
           </>
         ) : (

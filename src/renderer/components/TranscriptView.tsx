@@ -183,6 +183,73 @@ export default function TranscriptView({
     onCount: onSearchCount
   })
 
+  // Native DOM selections can span sibling panes because they share one document. Claim the gesture
+  // at mousedown so CSS makes the sibling non-selectable BEFORE Chromium begins extending the range;
+  // then normalize the endpoint once on release while that guard is still active. Rewriting the range
+  // on every `selectionchange` fights the browser's next mousemove and visibly flickers.
+  useEffect(() => {
+    const root = contentRef.current
+    const pane = root?.closest<HTMLElement>('.sb-pane') ?? null
+    if (!root || !pane) return
+    let selecting = false
+
+    const release = (): void => {
+      selecting = false
+      pane.classList.remove('sb-selection-owner')
+      document.body.classList.remove('sb-selecting-transcript')
+      document.removeEventListener('mouseup', finish, true)
+      window.removeEventListener('blur', finish)
+    }
+
+    const finish = (): void => {
+      if (!selecting) return
+      const selection = window.getSelection()
+      const anchor = selection?.anchorNode
+      const focus = selection?.focusNode
+      if (selection && !selection.isCollapsed && anchor && focus) {
+        const anchorInside = root.contains(anchor)
+        const focusInside = root.contains(focus)
+        if (anchorInside && !focusInside) {
+          const focusPrecedesRoot = !!(
+            root.compareDocumentPosition(focus) & Node.DOCUMENT_POSITION_PRECEDING
+          )
+          selection.setBaseAndExtent(
+            anchor,
+            selection.anchorOffset,
+            root,
+            focusPrecedesRoot ? 0 : root.childNodes.length
+          )
+        } else if (!anchorInside && focusInside) {
+          const anchorPrecedesRoot = !!(
+            root.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_PRECEDING
+          )
+          selection.setBaseAndExtent(
+            root,
+            anchorPrecedesRoot ? 0 : root.childNodes.length,
+            focus,
+            selection.focusOffset
+          )
+        }
+      }
+      release()
+    }
+
+    const begin = (e: MouseEvent): void => {
+      if (e.button !== 0) return
+      selecting = true
+      pane.classList.add('sb-selection-owner')
+      document.body.classList.add('sb-selecting-transcript')
+      document.addEventListener('mouseup', finish, true)
+      window.addEventListener('blur', finish)
+    }
+
+    root.addEventListener('mousedown', begin)
+    return () => {
+      root.removeEventListener('mousedown', begin)
+      release()
+    }
+  }, [transcript?.sessionId])
+
   const handleScroll = useCallback((): void => {
     const el = scrollElRef.current
     if (!el) return

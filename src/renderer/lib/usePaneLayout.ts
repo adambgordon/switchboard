@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useReducer, useRef } from 'react'
+import type { PersistedTabLayout } from '@shared/types'
 import {
   activeTabId,
   initialLayout,
   paneReducer,
+  restorePaneLayout,
   type OpenMode,
   type PaneLayout
 } from './paneModel'
@@ -16,14 +18,15 @@ import {
  * the previous occupant's terminals. Minting happens here rather than in the reducer so the reducer
  * stays replayable in a test.
  *
- * Layout state is ephemeral, like the Live order and the navigation history: it does not survive a
- * reload. Live terminals do not either.
+ * Main restores only pane membership/order and the active tab in each pane. Runtime pane ids remain
+ * fresh, and Live terminals, preview status, focus and split sizing do not survive a restart.
  */
 export interface PaneLayoutApi {
   layout: PaneLayout
   /** The selection — the active tab of the focused pane. */
   selectedId: string | null
   openTab: (sessionId: string, mode: OpenMode, opts?: { pane?: number; focus?: boolean }) => void
+  openTabs: (sessionIds: string[], activeSessionId: string, pane?: number) => void
   promoteTab: (sessionId: string, pane?: number) => void
   activateTab: (pane: number, index: number) => void
   /** Show the welcome screen in the focused pane, leaving its tabs alone. */
@@ -34,7 +37,12 @@ export interface PaneLayoutApi {
   /** Bulk forms for a multi-selection, by session id — see the `closeMany` / `moveMany` actions for
    *  why a loop of the single-tab calls above cannot stand in for them. */
   closeTabs: (sessionIds: string[]) => void
-  moveTabs: (sessionIds: string[], to: { pane: number; index: number }) => void
+  moveTabs: (
+    sessionIds: string[],
+    activeSessionId: string,
+    to: { pane: number; index: number }
+  ) => void
+  splitActiveTab: () => void
   splitPane: () => void
   unsplit: () => void
   focusPane: (index: number) => void
@@ -44,14 +52,23 @@ export interface PaneLayoutApi {
   collapseToSingle: () => void
 }
 
-export function usePaneLayout(): PaneLayoutApi {
-  const [layout, dispatch] = useReducer(paneReducer, 'p0', initialLayout)
+export function usePaneLayout(restored?: PersistedTabLayout | null): PaneLayoutApi {
+  const [layout, dispatch] = useReducer(
+    paneReducer,
+    restored,
+    (saved) => restorePaneLayout(saved, ['p0', 'p1'])
+  )
   // Next unused pane id. Starts at 1 because `initialLayout` took p0.
-  const nextPaneId = useRef(1)
+  const nextPaneId = useRef(layout.panes.length)
 
   const openTab = useCallback(
     (sessionId: string, mode: OpenMode, opts?: { pane?: number; focus?: boolean }) =>
       dispatch({ type: 'open', sessionId, mode, pane: opts?.pane, focus: opts?.focus }),
+    []
+  )
+  const openTabs = useCallback(
+    (sessionIds: string[], activeSessionId: string, pane?: number) =>
+      dispatch({ type: 'openMany', sessionIds, activeSessionId, pane }),
     []
   )
   const promoteTab = useCallback(
@@ -83,10 +100,14 @@ export function usePaneLayout(): PaneLayoutApi {
     []
   )
   const moveTabs = useCallback(
-    (sessionIds: string[], to: { pane: number; index: number }) =>
-      dispatch({ type: 'moveMany', sessionIds, to }),
+    (sessionIds: string[], activeSessionId: string, to: { pane: number; index: number }) =>
+      dispatch({ type: 'moveMany', sessionIds, activeSessionId, to }),
     []
   )
+  const splitActiveTab = useCallback(() => {
+    dispatch({ type: 'splitActive', paneId: `p${nextPaneId.current}` })
+    nextPaneId.current += 1
+  }, [])
   const splitPane = useCallback(() => {
     dispatch({ type: 'split', paneId: `p${nextPaneId.current}` })
     nextPaneId.current += 1
@@ -113,6 +134,7 @@ export function usePaneLayout(): PaneLayoutApi {
     layout,
     selectedId,
     openTab,
+    openTabs,
     promoteTab,
     activateTab,
     deselect,
@@ -121,6 +143,7 @@ export function usePaneLayout(): PaneLayoutApi {
     closeTabs,
     moveTab,
     moveTabs,
+    splitActiveTab,
     splitPane,
     unsplit,
     focusPane,

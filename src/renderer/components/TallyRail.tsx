@@ -84,6 +84,7 @@ interface Props {
   onStick?: (sessionId: string) => void
   /** The ⋮ menu's Open to the Side — show it in the other pane. */
   onOpenToSide?: (sessionId: string) => void
+  canOpenToSide?: (sessionId: string) => boolean
   /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
   onOpenInNewWindow?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
@@ -164,6 +165,7 @@ export default function TallyRail({
   onSelect,
   onStick,
   onOpenToSide,
+  canOpenToSide,
   onOpenInNewWindow,
   onTogglePin,
   query,
@@ -288,16 +290,18 @@ export default function TallyRail({
     unread: boolean
     pinned: boolean
     unlinked: boolean
+    side: boolean
   } | null>(null)
   const menuStateFor = (
     id: string
-  ): { live: boolean; unread: boolean; pinned: boolean; unlinked: boolean } | null => {
+  ): { live: boolean; unread: boolean; pinned: boolean; unlinked: boolean; side: boolean } | null => {
     const entry = entryById(id)
     if (!entry) return null
     return {
       live: !!entry.pty,
       unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
       pinned: entry.pinned,
+      side: canOpenToSide?.(id) ?? false,
       // Pin, read state, and session details are all keyed to a conversation this row does not have,
       // so they would silently do nothing. Hide them rather than offer a no-op.
       unlinked: isUnlinkedRow(entry.pty, entry.meta)
@@ -581,7 +585,7 @@ export default function TallyRail({
           {/* Sits with the benign items rather than behind the destructive divider: it opens a view,
               it does not start or stop anything. Hidden on an unlinked row for the same reason the
               three above are — a terminal with no conversation has no transcript to show beside one. */}
-          {onOpenToSide && !ctxMenu.unlinked && (
+          {onOpenToSide && ctxMenu.side && !ctxMenu.unlinked && (
             <button
               className="sb-ctxmenu-item"
               onClick={() => {

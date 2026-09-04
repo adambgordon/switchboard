@@ -60,3 +60,30 @@ export function parseFakeUpdate(value: string | undefined): UpdateCheck | null {
   if (v.startsWith('unknown')) return { status: 'unknown', reason: v.split(':')[1] || 'forced' }
   return null
 }
+
+/** Coalesce concurrent starts, then allow a fresh run after the shared promise settles. */
+export function singleFlight<T>(start: () => Promise<T>): () => Promise<T> {
+  let inFlight: Promise<T> | null = null
+  return () => {
+    if (!inFlight) {
+      const current = start().finally(() => {
+        if (inFlight === current) inFlight = null
+      })
+      inFlight = current
+    }
+    return inFlight
+  }
+}
+
+/** Reuse the settled value until an explicit refresh; concurrent refreshes still share one start. */
+export function cachedSingleFlight<T>(start: () => Promise<T>): (force?: boolean) => Promise<T> {
+  let hasCached = false
+  let cached: T
+  const run = singleFlight(async () => {
+    const value = await start()
+    cached = value
+    hasCached = true
+    return value
+  })
+  return (force = false) => (!force && hasCached ? Promise.resolve(cached) : run())
+}

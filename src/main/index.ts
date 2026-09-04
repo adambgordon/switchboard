@@ -1,7 +1,17 @@
 import { app, BrowserWindow, nativeImage, nativeTheme, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { registerIpc, disposeIpc, openExternalUrl, releaseWindow, setWindowOpener } from './ipc'
+import {
+  registerIpc,
+  disposeIpc,
+  openExternalUrl,
+  prepareWindowClose,
+  releaseWindow,
+  setWindowOpener,
+  initializeTabWorkspace,
+  registerTabWindow,
+  flushTabWorkspace
+} from './ipc'
 import { installAppMenu } from './menu'
 import { loadWindowState, saveWindowState, resolvePlacement } from './windowState'
 import { trafficLightPositionFor } from './trafficLights'
@@ -18,13 +28,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
  * window or its webContents instead.
  */
 let firstWindow: BrowserWindow | null = null
+let appQuitting = false
 
 /** How far each additional window is offset from the last, so a new one never lands exactly on top. */
 const CASCADE_STEP = 28
 
-function createWindow(init?: WindowInit): void {
+function createWindow(init?: WindowInit): BrowserWindow {
   const userDataDir = app.getPath('userData')
   const isFirst = BrowserWindow.getAllWindows().length === 0
+  const windowInit: WindowInit = init ?? {
+    sessionIds: [],
+    activeSessionId: null,
+    restoredTabs: null,
+    primary: isFirst,
+    collapseRail: !isFirst
+  }
   const saved = loadWindowState(userDataDir)
   const placement = resolvePlacement(
     saved,
@@ -73,7 +91,7 @@ function createWindow(init?: WindowInit): void {
       // What this window should show, handed to the preload as a process argument rather than over
       // IPC. It has to be SYNCHRONOUS: a detached window opens with the rail hidden, and an async
       // answer would render the browser for a frame and then snap it shut.
-      additionalArguments: init ? [`--sb-window=${JSON.stringify(init)}`] : []
+      additionalArguments: [`--sb-window=${JSON.stringify(windowInit)}`]
     }
   })
 
@@ -111,7 +129,10 @@ function createWindow(init?: WindowInit): void {
   // ONLY the first window persists. A detached window is a temporary working surface, and letting it
   // write here would mean the next launch restored whatever size the last-closed satellite happened
   // to have rather than the browser the user actually arranged.
-  win.on('close', () => {
+  const wcId = win.webContents.id
+  registerTabWindow(wcId, windowInit.restoredTabs)
+  let closePrepared = false
+  win.on('close', (event) => {
     if (win === firstWindow && !win.isDestroyed()) {
       saveWindowState(userDataDir, {
         ...win.getNormalBounds(),
@@ -119,15 +140,18 @@ function createWindow(init?: WindowInit): void {
         fullScreen: win.isFullScreen()
       })
     }
+    if (appQuitting || closePrepared || BrowserWindow.getAllWindows().length < 2) return
+    event.preventDefault()
+    void prepareWindowClose(wcId).finally(() => {
+      closePrepared = true
+      if (!win.isDestroyed()) win.close()
+    })
   })
-  const wcId = win.webContents.id
   win.on('closed', () => {
-    releaseWindow(wcId)
-    if (firstWindow === win) {
-      // Promote a survivor, so whichever window is left keeps persisting its bounds rather than
-      // leaving the app with nothing to restore.
-      firstWindow = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ?? null
-    }
+    releaseWindow(wcId, appQuitting)
+    // The original window saved its geometry on close. Do not promote a cascaded satellite and let
+    // its later close overwrite that browser geometry.
+    if (firstWindow === win) firstWindow = null
   })
 
   // External links open in the system browser, never in-app.
@@ -148,6 +172,7 @@ function createWindow(init?: WindowInit): void {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  return win
 }
 
 app.setName('Switchboard')
@@ -174,7 +199,20 @@ app.whenReady().then(() => {
   // Hand the IPC layer the ability to open a window, so "Open in New Window" doesn't need to reach
   // back into this module (which owns geometry, cascade, and first-window bookkeeping).
   setWindowOpener(createWindow)
-  createWindow()
+  const devWorkspace = process.env.SWITCHBOARD_DEV_LABEL?.trim().replace(/[^a-z0-9._-]+/gi, '-') || 'default'
+  const workspaceFile = app.isPackaged ? undefined : `tab-workspace-dev-${devWorkspace}.json`
+  const savedWorkspace = initializeTabWorkspace(app.getPath('userData'), workspaceFile)
+  const restored = process.env.SWITCHBOARD_SMOKE ? [] : savedWorkspace
+  if (restored.length === 0) createWindow()
+  else {
+    restored.forEach((layout, index) => createWindow({
+      sessionIds: [],
+      activeSessionId: null,
+      restoredTabs: layout,
+      primary: index === 0,
+      collapseRail: index > 0
+    }))
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -218,5 +256,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  appQuitting = true
+  flushTabWorkspace()
   disposeIpc()
 })

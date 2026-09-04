@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import type { AgentKind } from '@shared/types'
-import { attachPty } from '../lib/ptyStream'
+import { SerializeAddon } from '@xterm/addon-serialize'
+import type { AgentKind, PtySnapshot } from '@shared/types'
+import { attachPty, pendingPtySnapshot } from '../lib/ptyStream'
 import type { ResolvedTheme } from '../lib/theme'
 import { installScrollbackSafeScrollUp } from '../lib/xtermScrollUp'
 
 interface Props {
+  /** Pane-owned portal target. Changing it moves the existing xterm DOM without recreating xterm. */
+  mountNode: HTMLElement
   ptyId: string
   /** The conversation this terminal hosts — needed so Option+click can mark it unread. */
   sessionId: string
@@ -123,9 +127,19 @@ const CODEX_REFRESH_FOLLOW_MS = 1000
 const CODEX_REPLAY_FOLLOW_MS = 1000
 const CODEX_REPLAY_FOLLOW_IDLE_MS = 250
 const CODEX_BOTTOM_PIN_TOLERANCE_ROWS = 1
+const HANDOFF_SCROLLBACK_ROWS = 2000
 
-export default function TerminalView({ ptyId, sessionId, agent, visible, focusKey, theme, onMarkUnread }: Props) {
-  const hostRef = useRef<HTMLDivElement>(null)
+export default function TerminalView({
+  mountNode,
+  ptyId,
+  sessionId,
+  agent,
+  visible,
+  focusKey,
+  theme,
+  onMarkUnread
+}: Props) {
+  const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const lastSentRef = useRef<{ cols: number; rows: number } | null>(null)
@@ -135,6 +149,12 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
   const replayFollowRef = useRef(false)
   const replayFollowUntilRef = useRef(0)
   const replayFollowTimerRef = useRef<number | null>(null)
+  const restoringHandoffRef = useRef(false)
+  const attachHostRef = useCallback((node: HTMLDivElement | null): void => {
+    hostRef.current = node
+    const element = termRef.current?.element
+    if (node && element && element.parentElement !== node) node.appendChild(element)
+  }, [])
 
   // Fit the terminal to its host and push the new size to the PTY — but ONLY when the host is
   // genuinely measurable, and only when the size actually changed. A hidden deck item
@@ -167,8 +187,12 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
+    const stagedSnapshot = pendingPtySnapshot(ptyId)
+    restoringHandoffRef.current = !!stagedSnapshot
 
     const term = new Terminal({
+      cols: stagedSnapshot?.cols,
+      rows: stagedSnapshot?.rows,
       fontFamily: "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace",
       fontSize: 11.5,
       // 1.3, not a rounder value: 11.5×1.3≈15px keeps the cell height ~integer. WebGL (the
@@ -194,7 +218,9 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       theme: THEMES[theme]
     })
     const fit = new FitAddon()
+    const serialize = new SerializeAddon()
     term.loadAddon(fit)
+    term.loadAddon(serialize)
     term.loadAddon(new WebLinksAddon(openExternalLink))
     term.open(host)
     // claude renders tables / box-art using Unicode-11 (emoji-aware) cell widths,
@@ -296,15 +322,40 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
     // default 80×24 and then paying a ~170ms WebGL resize mid-flood (the trace's single worst
     // main-thread task on resume, ~950ms in). The rAF + ResizeObserver below stay as the fallback
     // for when the host isn't measurable yet (created while hidden) and for later/window resizes.
-    fitAndResize()
+    if (!stagedSnapshot) fitAndResize()
+
+    const snapshot = (): PtySnapshot => {
+      const buffer = term.buffer.active
+      return {
+        data: serialize.serialize({ scrollback: HANDOFF_SCROLLBACK_ROWS }),
+        cols: term.cols,
+        rows: term.rows,
+        viewportFromBottom: Math.min(
+          HANDOFF_SCROLLBACK_ROWS,
+          Math.max(0, buffer.baseY - buffer.viewportY)
+        )
+      }
+    }
+
+    const restored = (saved: PtySnapshot): void => {
+      const buffer = term.buffer.active
+      if (saved.viewportFromBottom > 0) {
+        term.scrollToLine(Math.max(0, buffer.baseY - saved.viewportFromBottom))
+      }
+      restoringHandoffRef.current = false
+      fitAndResize()
+      if (agent === 'codex') syncScrollArea(term)
+      window.api.confirmPtySnapshotRestored(ptyId)
+    }
 
     // After Codex output, recompute the scrollbar range so the newest rows stay reachable (see
     // syncScrollArea) — coalesced to one call per frame regardless of how many chunks arrived. Claude
     // is alternate-screen (no scrollback), so it keeps the plain write with zero added per-output work.
     const detach =
       agent === 'codex'
-        ? attachPty(ptyId, (d) => {
+        ? attachPty(ptyId, (d, done) => {
             term.write(d, () => {
+              done()
               const now = performance.now()
               const followingReplay =
                 replayFollowRef.current && now < replayFollowUntilRef.current
@@ -322,8 +373,8 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
                 if (t) syncScrollArea(t)
               })
             })
-          })
-        : attachPty(ptyId, (d) => term.write(d))
+          }, snapshot, restored)
+        : attachPty(ptyId, (d, done) => term.write(d, done), snapshot, restored)
     const followRefreshScroll =
       agent === 'codex'
         ? term.onScroll((viewportY) => {
@@ -345,6 +396,37 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       return true
     })
 
+    const offExit = window.api.onPtyExit((id, code) => {
+      if (id === ptyId) {
+        term.write(`\r\n\x1b[2m—— session ended (exit ${code ?? 0}) ——\x1b[0m\r\n`)
+      }
+    })
+
+    return () => {
+      if (syncRafRef.current != null) cancelAnimationFrame(syncRafRef.current)
+      syncRafRef.current = null
+      stopReplayFollow()
+      offExit()
+      onInput.dispose()
+      followRefreshScroll?.dispose()
+      detach()
+      scrollbackReset?.dispose()
+      safeScrollUp.dispose()
+      term.dispose()
+      termRef.current = null
+      fitRef.current = null
+      lastSentRef.current = null
+    }
+  }, [ptyId, agent, fitAndResize])
+
+  // The React component is window-owned and stable; only this DOM host moves between pane portals.
+  // Rebind host-local listeners and sizing without touching the xterm, its parser, or its scrollback.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host || !termRef.current) return
+    const fitWhenReady = (): void => {
+      if (!restoringHandoffRef.current) fitAndResize()
+    }
     const onDragOver = (e: DragEvent): void => {
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
@@ -354,17 +436,8 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
       const files = Array.from(e.dataTransfer?.files ?? [])
       if (files.length === 0) return
       const paths = files.map((f) => escapePath(window.api.getPathForFile(f))).join(' ')
-      // Both agents recognize an image path delivered as a paste and attach it to the prompt.
       window.api.sendInput(ptyId, `\x1b[200~${paths}\x1b[201~`)
     }
-    host.addEventListener('dragover', onDragOver)
-    host.addEventListener('drop', onDrop)
-
-    // Cmd+V is text-only. macOS fires a DOM 'paste' event for Cmd+V (but not for
-    // Ctrl+V), separate from the keydown above. If the clipboard carries no text
-    // (e.g. a screenshot), block the event in capture — before xterm's own paste
-    // handler runs — so image attachment stays exclusively on Ctrl+V.
-    // Text pastes fall through to xterm untouched, so multi-line paste still works.
     const onPaste = (e: ClipboardEvent): void => {
       const text = e.clipboardData?.getData('text/plain') ?? ''
       if (!text) {
@@ -372,41 +445,20 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
         e.stopImmediatePropagation()
       }
     }
-    host.addEventListener('paste', onPaste, true)
-
-    const offExit = window.api.onPtyExit((id, code) => {
-      if (id === ptyId) {
-        term.write(`\r\n\x1b[2m—— session ended (exit ${code ?? 0}) ——\x1b[0m\r\n`)
-      }
-    })
-
-    // Initial fit already ran synchronously above (before the flood). These stay as the fallback
-    // path (host not yet measurable at mount) and for genuine later resizes (window / pane).
-    const raf = requestAnimationFrame(fitAndResize)
-    const ro = new ResizeObserver(fitAndResize)
+    const raf = requestAnimationFrame(fitWhenReady)
+    const ro = new ResizeObserver(fitWhenReady)
     ro.observe(host)
-
+    host.addEventListener('dragover', onDragOver)
+    host.addEventListener('drop', onDrop)
+    host.addEventListener('paste', onPaste, true)
     return () => {
       cancelAnimationFrame(raf)
-      if (syncRafRef.current != null) cancelAnimationFrame(syncRafRef.current)
-      syncRafRef.current = null
-      stopReplayFollow()
       ro.disconnect()
       host.removeEventListener('dragover', onDragOver)
       host.removeEventListener('drop', onDrop)
       host.removeEventListener('paste', onPaste, true)
-      offExit()
-      onInput.dispose()
-      followRefreshScroll?.dispose()
-      scrollbackReset?.dispose()
-      safeScrollUp.dispose()
-      detach()
-      term.dispose()
-      termRef.current = null
-      fitRef.current = null
-      lastSentRef.current = null
     }
-  }, [ptyId, agent, fitAndResize])
+  }, [mountNode, ptyId, fitAndResize])
 
   // Re-skin the terminal when the app theme flips. xterm applies term.options.theme live (re-reads
   // the palette and repaints), so a running claude session recolors in place — no remount. The
@@ -519,5 +571,11 @@ export default function TerminalView({ ptyId, sessionId, agent, visible, focusKe
     return () => cancelAnimationFrame(id)
   }, [focusKey, visible, ptyId])
 
-  return <div className="sb-term" ref={hostRef} />
+  return createPortal(
+    <div className="sb-term-host" style={{ display: visible ? 'block' : 'none' }}>
+      <div className="sb-term" ref={attachHostRef} />
+    </div>,
+    mountNode,
+    ptyId
+  )
 }

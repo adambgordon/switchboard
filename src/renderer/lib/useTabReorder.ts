@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
+import { makeTabDragPayload } from '@shared/tabDrag'
 import { pointInRect, tabDropIndex } from './dropTarget'
 
 /**
@@ -46,9 +47,13 @@ export interface TabReorderOpts {
   targetsFor: (sessionId: string) => string[]
   /** Move a whole group at once. Separate from `onMove` because a group cannot be expressed as a
    *  from-index: the tabs are scattered, and their indices shift as each one lands. */
-  onMoveGroup: (sessionIds: string[], to: { pane: number; index: number }) => void
-  /** The tab went to another window, or off into a new one — drop it from this window. */
-  onLeaveWindow: (sessionId: string) => void
+  onMoveGroup: (
+    sessionIds: string[],
+    activeSessionId: string,
+    to: { pane: number; index: number }
+  ) => void
+  /** The tab group went to another window, or off into a new one — drop it from this window. */
+  onLeaveWindow: (sessionIds: string[]) => void
 }
 
 export function useTabReorder(
@@ -67,19 +72,40 @@ export function useTabReorder(
     let fromIndex = -1
     /** What this drag carries. Fixed when the drag begins — see TabReorderOpts.targetsFor. */
     let carrying: string[] = []
+    /** Every tab hidden for the duration, so a whole group vacates rather than just the one grabbed. */
+    let vacated: HTMLElement[] = []
     let startX = 0
     let startY = 0
     let dragging = false
     let clone: HTMLElement | null = null
-    // Where inside the tab it was grabbed, so the clone stays under that same point rather than
-    // snapping its corner to the cursor.
-    let grabDx = 0
-    let grabDy = 0
     let caret: HTMLElement | null = null
     let overStrip: HTMLElement | null = null
     let target: { pane: number; index: number } | null = null
-    let hoverPending = false
+    let moveFrame: number | null = null
+    let latestX = 0
+    let latestY = 0
     let suppressClick = false
+    /**
+     * Escape releases the drag with nothing moved.
+     *
+     * Bound to the DOCUMENT for the duration rather than to the strip: the pointer is captured, so the
+     * strip may not be under it, and a keystroke goes to whatever holds focus regardless. Capture phase
+     * with `stopPropagation`, so the app's global Escape — which closes modals and the find bar — does
+     * not also fire when getting out of a drag is what the user asked for.
+     *
+     * `finish()` nulls `pressed`, and every pointer handler returns early on that, so the release that
+     * follows performs nothing on its own — no separate "aborted" flag is needed, and one would be a
+     * guard with no observable effect.
+     */
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || !dragging) return
+      e.preventDefault()
+      e.stopPropagation()
+      // The click that follows the release must not activate the tab either.
+      suppressClick = true
+      window.api.tabDragCancel()
+      finish()
+    }
 
     /** Every strip in this window, with the pane each belongs to. */
     const allStrips = (): Array<{ el: HTMLElement; pane: number }> =>
@@ -127,13 +153,7 @@ export function useTabReorder(
         // for as long as the drag is outside.
         target = null
         dropCaret()
-        if (!hoverPending) {
-          hoverPending = true
-          requestAnimationFrame(() => {
-            hoverPending = false
-            if (dragging) window.api.tabDragHover()
-          })
-        }
+        window.api.tabDragHover()
         return
       }
       const tabs = Array.from(hit.el.querySelectorAll<HTMLElement>('.sb-tab'))
@@ -160,11 +180,18 @@ export function useTabReorder(
     }
 
     const finish = (): void => {
+      if (moveFrame != null) cancelAnimationFrame(moveFrame)
+      moveFrame = null
       clone?.remove()
       clone = null
       dropCaret()
+      // Restore every tab that vacated, not only the grabbed one — a group left hidden would look
+      // like the drag deleted it.
+      for (const n of vacated) n.style.visibility = ''
+      vacated = []
       if (pressed) pressed.style.visibility = ''
       document.body.classList.remove('sb-dragging-tab')
+      document.removeEventListener('keydown', onKey, true)
       pressed = null
       dragging = false
       target = null
@@ -198,26 +225,56 @@ export function useTabReorder(
           return
         }
         dragging = true
-        carrying = optsRef.current.targetsFor(sessionId)
+        const payload = makeTabDragPayload(
+          optsRef.current.order,
+          optsRef.current.targetsFor(sessionId),
+          sessionId
+        )
+        carrying = payload.sessionIds
         pressed.setPointerCapture?.(e.pointerId)
         const r = pressed.getBoundingClientRect()
         const c = pressed.cloneNode(true) as HTMLElement
         c.classList.add('sb-tab-dragging')
         c.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;margin:0;pointer-events:none;z-index:1200`
-        grabDx = r.left - e.clientX
-        grabDy = r.top - e.clientY
+        // A group reads as a small stack with a count, the way a multi-file drag does everywhere else.
+        // Two tabs get one backing card; three or more get two. The badge carries the exact count, so
+        // another visual layer would add cost without adding information.
+        if (carrying.length > 1) {
+          c.classList.add('stacked')
+          if (carrying.length > 2) c.classList.add('stacked-many')
+          const badge = document.createElement('span')
+          badge.className = 'sb-tab-dragcount'
+          badge.textContent = String(carrying.length)
+          c.appendChild(badge)
+        }
         document.body.appendChild(c)
         clone = c
-        pressed.style.visibility = 'hidden'
+        // Every carried tab gives up its space, not just the grabbed one — otherwise the rest sit
+        // there looking untouched while the count says they are moving. Resolved by index against
+        // `order`, which is the same list the strip renders from.
+        const els = Array.from(el.querySelectorAll<HTMLElement>('.sb-tab'))
+        vacated = carrying
+          .map((id) => els[optsRef.current.order.indexOf(id)])
+          .filter((n): n is HTMLElement => !!n)
+        if (!vacated.includes(pressed)) vacated.push(pressed)
+        for (const n of vacated) n.style.visibility = 'hidden'
         document.body.classList.add('sb-dragging-tab')
-        window.api.tabDragBegin(sessionId)
+        document.addEventListener('keydown', onKey, true)
+        window.api.tabDragBegin(payload)
       }
       e.preventDefault()
-      if (clone) {
-        clone.style.left = `${e.clientX + grabDx}px`
-        clone.style.top = `${e.clientY + grabDy}px`
+      latestX = e.clientX
+      latestY = e.clientY
+      if (moveFrame == null) {
+        moveFrame = requestAnimationFrame(() => {
+          moveFrame = null
+          if (!dragging) return
+          if (clone) {
+            clone.style.transform = `translate3d(${latestX - startX}px, ${latestY - startY}px, 0)`
+          }
+          updateTarget(latestX, latestY)
+        })
       }
-      updateTarget(e.clientX, e.clientY)
     }
 
     const onPointerUp = (e: PointerEvent): void => {
@@ -232,9 +289,13 @@ export function useTabReorder(
         suppressClick = false
       }, 0)
       // The RELEASE position decides, not wherever the last move happened to be.
+      if (moveFrame != null) cancelAnimationFrame(moveFrame)
+      moveFrame = null
+      if (clone) {
+        clone.style.transform = `translate3d(${e.clientX - startX}px, ${e.clientY - startY}px, 0)`
+      }
       updateTarget(e.clientX, e.clientY)
       const landed = target
-      const id = sessionId
       const group = carrying
       const from = { pane: optsRef.current.paneIndex, index: fromIndex }
       finish()
@@ -246,7 +307,7 @@ export function useTabReorder(
           // only the dragged tab, so the target can be off by the others — accepted, because the
           // alternative is excluding every carried tab from the geometry and leaving the caret
           // pointing somewhere the group cannot actually land.
-          optsRef.current.onMoveGroup(group, landed)
+          optsRef.current.onMoveGroup(group, sessionId, landed)
           return
         }
         // `to.index` needs NO adjustment for the removal that precedes the insertion. `tabDropIndex`
@@ -263,12 +324,7 @@ export function useTabReorder(
       // Released outside this window's strips — main resolves it against the cursor.
       void window.api.tabDragDrop().then((outcome) => {
         if (outcome === 'cancelled') return
-        // Only the dragged tab crosses. Main was told about one conversation at dragBegin, so the
-        // rest of a group would be closed here without ever arriving anywhere — losing tabs to a
-        // gesture is far worse than moving fewer than expected. Dragging a group between windows is
-        // deliberately left out rather than half-done; the menu moves a whole group to a new window.
-        void group
-        optsRef.current.onLeaveWindow(id)
+        optsRef.current.onLeaveWindow(group)
       })
     }
 

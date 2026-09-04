@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { THEME_KEY, resolveTheme, type ResolvedTheme, type ThemeMode } from './theme'
 import { applyTheme, readThemeMode, systemPrefersDark } from './themeDom'
+import { useStorageSync } from './useStorageSync'
 
 export interface Theme {
   /** The user's choice: 'system' (follow the OS), 'light', or 'dark'. */
@@ -26,6 +27,7 @@ export interface Theme {
 export function useTheme(): Theme {
   const [mode, setMode] = useState<ThemeMode>(readThemeMode)
   const [sysDark, setSysDark] = useState<boolean>(systemPrefersDark)
+  useStorageSync(THEME_KEY, readThemeMode, setMode)
 
   // Track the OS preference so 'system' resolves live. Harmless for explicit modes (resolveTheme
   // ignores sysDark for them), so no need to gate the listener on mode.

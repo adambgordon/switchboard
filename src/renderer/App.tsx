@@ -7,20 +7,24 @@ import {
   useState,
   type CSSProperties
 } from 'react'
-import type { AgentKind, ConversationMeta, LiveState, PtyState } from '@shared/types'
+import type { AgentKind, ConversationMeta, LiveState, PtyState, Transcript } from '@shared/types'
+import { makeTabDragPayload } from '@shared/tabDrag'
 import { useSessions } from './lib/useSessions'
 import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
 import { bindActions } from './lib/bindPolicy'
-import { useLayout } from './lib/useLayout'
+import { PANE_LIMITS, useLayout } from './lib/useLayout'
 import { usePaneLayout } from './lib/usePaneLayout'
 import { useTabsEnabled } from './lib/useTabsEnabled'
 import {
   SPLIT_LIMITS,
+  canPlaceTabsToSide,
+  canSplitActiveTab,
   locateTab,
   openSessionIds,
   paneActiveId,
+  snapshotPaneLayout,
   stepTab,
   type OpenMode
 } from './lib/paneModel'
@@ -29,11 +33,12 @@ import {
   actionTargets,
   extendSelection,
   pruneSelection,
+  retargetSelection,
   selectOnly,
   toggleSelected,
   type TabSelection
 } from './lib/tabSelection'
-import { nextPtyHomes, partitionPtys } from './lib/ptyHome'
+import { nextPtyHomes } from './lib/ptyHome'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
 import { useNewConvoDefault } from './lib/useNewConvoDefault'
 import { useNewConvoDefaultAgent } from './lib/useNewConvoDefaultAgent'
@@ -67,6 +72,8 @@ import CapWarningModal from './components/CapWarningModal'
 import ConversationInfoModal from './components/ConversationInfoModal'
 import TooltipLayer from './components/TooltipLayer'
 import AppVeil from './components/AppVeil'
+import type { TranscriptScrollState } from './components/TranscriptView'
+import TerminalDeck from './components/TerminalDeck'
 
 type View = 'transcript' | 'terminal'
 
@@ -132,7 +139,7 @@ export default function App() {
     },
     [reorderLive]
   )
-  const { seen, unread, markUnread, markRead, rekey: rekeySeen } = useSeen()
+  const { seen, unread, markSeen, markUnread, markRead, rekey: rekeySeen } = useSeen()
   const { dir: defaultDir, setDir: setDefaultDir } = useNewConvoDefault()
   const { enabled: markdownCopy, setEnabled: setMarkdownCopy } = useMarkdownCopy()
   const {
@@ -165,8 +172,14 @@ export default function App() {
   // Optional-chained on purpose: editing the preload does not hot-reload, so a dev instance that was
   // already running when this was added would otherwise throw here and white-screen the whole app
   // rather than simply behaving like an ordinary window.
-  const windowInit = window.sbWindow ?? { sessionIds: [], collapseRail: false }
-  const detached = windowInit.sessionIds.length > 0
+  const windowInit = window.sbWindow ?? {
+    sessionIds: [],
+    activeSessionId: null,
+    restoredTabs: null,
+    primary: true,
+    collapseRail: false
+  }
+  const detached = !windowInit.primary
   const {
     paneWidth,
     paneCollapsed,
@@ -177,6 +190,7 @@ export default function App() {
     toggleSection
   } = useLayout({ collapseRail: windowInit.collapseRail, persist: !detached })
   const dragStartRef = useRef(0)
+  const bodyElRef = useRef<HTMLDivElement>(null)
   // The split divider reports a pointer delta, so a drag needs the fraction it began at AND the
   // container width that delta is a fraction of.
   const panesElRef = useRef<HTMLDivElement>(null)
@@ -190,7 +204,7 @@ export default function App() {
   // before tabs existed. So the flag gates only the strip's presence, the promotion gestures, and the
   // split / window commands; nothing below asks about it. See useTabsEnabled.
   const { enabled: tabsEnabled, setEnabled: setTabsEnabled } = useTabsEnabled()
-  const panes = usePaneLayout()
+  const panes = usePaneLayout(tabsEnabled ? windowInit.restoredTabs : null)
   const { layout: paneLayout } = panes
   // THE selection: the active tab of the focused pane. Derived, never stored twice.
   const selectedId = panes.selectedId
@@ -212,6 +226,7 @@ export default function App() {
   // focusReq lets MainPane route focus to the right surface (a live terminal, else the Formatted
   // transcript) only for the selected conversation.
   const [focusReq, setFocusReq] = useState<{ sessionId: string; n: number } | null>(null)
+  const keepTabFocusRef = useRef(false)
   const requestFocus = useCallback(
     (sessionId: string) => setFocusReq((r) => ({ sessionId, n: (r?.n ?? 0) + 1 })),
     []
@@ -223,11 +238,12 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [settingsPage, setSettingsPage] = useState<
-    'appearance' | 'application' | 'shortcuts' | 'faq' | null
+    'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq' | null
   >(null)
   // Conversation-info modal target: which session, and whether to open straight into title-edit vs
   // view (both the pane title and the right-click "Session details…" open in view). Null when closed.
   const [infoModal, setInfoModal] = useState<{ sessionId: string; edit: boolean } | null>(null)
+  const overlayOpenRef = useRef(false)
   // Section keys revealed past their cap via "Show more" (ephemeral — resets on reload).
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
   const searchRef = useRef<HTMLInputElement>(null)
@@ -239,26 +255,37 @@ export default function App() {
   // one acts on it.
   const pane0Ref = useRef<HTMLElement>(null)
   const pane1Ref = useRef<HTMLElement>(null)
+  const [terminalHosts, setTerminalHosts] = useState<Array<HTMLElement | null>>([null, null])
+  const setTerminalHost = useCallback((index: number, node: HTMLElement | null): void => {
+    setTerminalHosts((prev) => {
+      if (prev[index] === node) return prev
+      const next = [...prev]
+      next[index] = node
+      return next
+    })
+  }, [])
+  const setTerminalHost0 = useCallback((node: HTMLDivElement | null) => setTerminalHost(0, node), [setTerminalHost])
+  const setTerminalHost1 = useCallback((node: HTMLDivElement | null) => setTerminalHost(1, node), [setTerminalHost])
+  const transcriptCacheRef = useRef(new Map<string, Transcript | null>())
+  const transcriptScrollStateRef = useRef(new Map<string, TranscriptScrollState>())
   const [findOpen, setFindOpen] = useState(false)
   // Bumped on every ⌘F while focus is in the main pane, so pressing ⌘F again (after clicking into
   // the transcript) re-focuses the find input even when the bar is already open. Threaded down to
   // TranscriptSearch, which focuses + selects whenever it changes.
   const [findFocusReq, setFindFocusReq] = useState(0)
-  // If find opens over a live Terminal and we auto-switch to Formatted to search, remember the
-  // prior view so closing find restores it.
-  const findPriorViewRef = useRef<View | null>(null)
+  // Find can stay open while tabs change. Remember every live terminal it temporarily moved to
+  // Formatted so closing restores all of them, not only whichever tab was visited last.
+  const findPriorTerminalIdsRef = useRef(new Set<string>())
 
   // Begin buffering PTY output immediately, before any session is spawned.
   useEffect(() => {
     initPtyStream()
   }, [])
 
-  // Recent PTY output is retained per terminal so one can be rebuilt in another pane or window without
-  // coming up blank — which means it is retained until told otherwise. This is the "otherwise": the
-  // live set is the authority, so a terminal that ended has its record dropped on the next change,
-  // and no teardown path can be missed because none is consulted.
+  // Keep handoff state only for terminals this window owns. A former owner receives a fresh snapshot if
+  // it claims the terminal again, so retaining its stale copy would only multiply memory across windows.
   useEffect(() => {
-    retainOnly(new Set(ptys.active.map((p) => p.ptyId)))
+    retainOnly(new Set(ptys.active.filter((p) => p.ownedHere).map((p) => p.ptyId)))
   }, [ptys.active])
 
   // Read by subscriptions that must not re-subscribe on every layout change.
@@ -271,6 +298,7 @@ export default function App() {
   const [openElsewhere, setOpenElsewhere] = useState<Set<string>>(() => new Set())
   const openElsewhereRef = useRef(openElsewhere)
   openElsewhereRef.current = openElsewhere
+  const [pendingResumeId, setPendingResumeId] = useState<string | null>(null)
 
   // Several tabs acted on as one. Kept beside the layout rather than inside it: a selection is about
   // what the user has picked out, not about what exists, and folding it into the reducer would make
@@ -303,8 +331,10 @@ export default function App() {
     setTabSelection((s) => toggleSelected(s, pane, p ? paneActiveId(p) : null, sessionId))
   }, [])
   const extendTabSelection = useCallback((pane: number, sessionId: string) => {
-    const order = paneLayoutRef.current.panes[pane]?.tabs.map((t) => t.sessionId) ?? []
-    setTabSelection((s) => extendSelection(s, pane, order, sessionId))
+    const p = paneLayoutRef.current.panes[pane]
+    const order = p?.tabs.map((t) => t.sessionId) ?? []
+    // The active tab is the fallback anchor, so a first ⇧-click takes the run from where the user is.
+    setTabSelection((s) => extendSelection(s, pane, order, sessionId, p ? paneActiveId(p) : null))
   }, [])
 
   // What a command invoked on ONE tab should actually act on: the group when that tab belongs to one,
@@ -314,6 +344,21 @@ export default function App() {
     (pane: number, sessionId: string): string[] =>
       actionTargets(tabSelectionRef.current, pane, sessionId),
     []
+  )
+
+  // Closing a tab that belongs to a group closes the GROUP — from the ✕, middle-click, the menu, and
+  // ⌘W alike, because those are the same act on the same tab and differing would be arbitrary. Declared
+  // up here with the rest of the selection wiring: the ⌘W subscription is established further up still,
+  // and a `const` defined below it could not be named in its dependency list.
+  const closeTabsFrom = useCallback(
+    (pane: number, index: number) => {
+      const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
+      if (!id) return
+      const ids = targetsFor(pane, id)
+      if (ids.length > 1) panes.closeTabs(ids)
+      else panes.closeTab(pane, index)
+    },
+    [panes.closeTab, panes.closeTabs, targetsFor]
   )
   const tabsEnabledRef = useRef(tabsEnabled)
   tabsEnabledRef.current = tabsEnabled
@@ -327,19 +372,20 @@ export default function App() {
     tabsWereEnabled.current = tabsEnabled
   }, [tabsEnabled, panes.collapseToSingle])
 
-  // A detached window opens straight onto the conversation it was created for, as a kept tab — it was
-  // asked for by name, so it is not a preview. Runs once; the conversation index has not necessarily
-  // loaded yet, which is fine, because a tab holds an id and the title fills in when it arrives.
+  // A detached window opens straight onto the tab group it was created for. Runs once; the
+  // conversation index has not necessarily loaded yet, which is fine, because tabs hold ids and their
+  // titles fill in when it arrives.
   const openedInitialRef = useRef(false)
   useEffect(() => {
     const targets = windowInit.sessionIds
     if (targets.length === 0 || openedInitialRef.current) return
     openedInitialRef.current = true
-    // In reverse, because `open` inserts AFTER the active tab: opening them front-to-back would land
-    // each one before the last and reverse the group. The final iteration is the first id, which
-    // therefore also ends up active — the tab the user was on when the group left.
-    for (const id of [...targets].reverse()) panes.openTab(id, 'persistent')
-  }, [panes.openTab])
+    const activeSessionId = windowInit.activeSessionId ?? targets[0]
+    panes.openTabs(targets, activeSessionId)
+    if (targets.length > 1) {
+      setTabSelection({ pane: 0, ids: new Set(targets), anchor: activeSessionId })
+    }
+  }, [panes.openTabs])
 
   // ⌘W arrives as a push from the File menu, not a keydown: a menu accelerator is consumed by the app
   // and the key event never reaches the page. Close the focused pane's active tab; with none — no tabs
@@ -347,13 +393,16 @@ export default function App() {
   // other macOS app does with it.
   useEffect(() => {
     const off = window.api.onMenuCloseTab(() => {
+      if (overlayOpenRef.current) return
       const l = paneLayoutRef.current
       const index = l.panes[l.focusIndex]?.activeIndex ?? -1
-      if (tabsEnabledRef.current && index >= 0) panes.closeTab(l.focusIndex, index)
+      // Through the group-aware path, so ⌘W closes a whole multi-selection — the same rule the ✕,
+      // middle-click and the menu follow.
+      if (tabsEnabledRef.current && index >= 0) closeTabsFrom(l.focusIndex, index)
       else window.api.closeWindow()
     })
     return off
-  }, [panes.closeTab])
+  }, [closeTabsFrom])
 
   // A Codex PTY's sessionId changed — an initial bind off a placeholder, or a correction between two
   // real conversations. The two need OPPOSITE handling of session-keyed state, and getting it wrong
@@ -362,6 +411,9 @@ export default function App() {
   useEffect(() => {
     const off = window.api.onPtyBound((_ptyId, oldId, newId, kind) => {
       const act = bindActions({ oldId, newId, kind }, selectedIdRef.current)
+      if (findPriorTerminalIdsRef.current.delete(oldId)) {
+        findPriorTerminalIdsRef.current.add(newId)
+      }
       if (act.nav === 'rekey') rekeyNav(oldId, newId)
       else if (act.nav === 'retarget') retargetNav(oldId, newId)
       if (act.rekeySeen) rekeySeen(oldId, newId)
@@ -371,6 +423,9 @@ export default function App() {
       // old id alone — that conversation is still real, only the terminal moved.
       if (act.tabs === 'rekey') panes.rekeyTabs(oldId, newId)
       else if (act.tabs === 'retarget') panes.retargetTabs(oldId, newId)
+      if (act.tabSelection !== 'none') {
+        setTabSelection((selection) => retargetSelection(selection, oldId, newId))
+      }
       if (act.view === 'move') {
         setViewBySession((prev) => {
           if (!(oldId in prev)) return prev
@@ -408,13 +463,15 @@ export default function App() {
     return () => window.removeEventListener('resize', sync)
   }, [])
 
-  // The main pane always owns the keyboard. Whenever the selected conversation changes to a real
-  // one — including via ⌘[ / ⌘] back/forward, which don't request focus themselves — focus its
-  // surface so you can type (live) or hit Enter to resume (not-live). The explicit requestFocus in
-  // the action handlers (click / switch / resume / go-live) still covers re-selecting the SAME
-  // conversation, where this effect (keyed on selectedId) wouldn't fire.
+  // A selection change normally hands the conversation surface the keyboard. Roving through the tab
+  // strip is the one exception: keep focus on its newly-active tab so another arrow can continue.
   useEffect(() => {
-    if (selectedId) requestFocus(selectedId)
+    if (!selectedId) return
+    if (keepTabFocusRef.current) {
+      keepTabFocusRef.current = false
+      return
+    }
+    requestFocus(selectedId)
   }, [selectedId, requestFocus])
 
   // --- the two halves of "what is selected" ---
@@ -499,14 +556,9 @@ export default function App() {
   // When a search is active, each section is filtered to the matching sessions.
   // --- terminal ownership + per-pane resolution ---
   //
-  // Which pane each live terminal is mounted in. STICKY, and that is the load-bearing part: a window
-  // can hold only ONE xterm per terminal (the renderer's output fan-out keeps a single writer per pty
-  // id, and a second one silently kills the first), so putting a terminal in the other pane means
-  // unmounting and remounting it. A remounted xterm attaches to an empty backlog — no PTY output is
-  // retained anywhere to replay — so it would come back blank until something changed its size.
-  //
-  // A terminal is therefore assigned a pane ONCE, when first seen, and moves only if that pane goes
-  // away (an unsplit, which changes the surviving pane's width and so repaints it anyway).
+  // Which pane each live terminal is mounted in. A window can hold only ONE xterm per terminal, so a
+  // live tab moving panes rebuilds its terminal there from ptyStream's serialized handoff.
+  // With no local tab the home stays sticky, so focus changes do not remount hidden terminals.
   // The rule itself is pure and mutation-checked in lib/ptyHome.ts — this is only the wiring.
   //
   // Resolved DURING render, against a ref, rather than in an effect writing state. An effect would
@@ -538,16 +590,16 @@ export default function App() {
     const meta = id ? metaById.get(id) ?? null : null
     const pty = id ? ptys.bySession.get(id) ?? null : null
     // A terminal renders here only if this WINDOW owns it (main decides, one owner app-wide) and this
-    // PANE is its home within the window. The two are independent gates, and the reason they differ
-    // matters to the user: across windows the terminal can be moved here, across panes it cannot yet.
+    // PANE is its home within the window. The two are independent gates: cross-window ownership moves
+    // only on an explicit claim, while the pane home follows the tab automatically.
     const ownsTerminal = !!pty && pty.ownedHere && ptyHome[pty.ptyId] === index
-    const terminalAt: 'here' | 'other-pane' | 'other-window' | null = !pty
+    const terminalAt: 'here' | 'other-pane' | 'claimable' | null = !pty
       ? null
       : ownsTerminal
         ? 'here'
         : pty.ownedHere
           ? 'other-pane'
-          : 'other-window'
+          : 'claimable'
     const requested: View = id
       ? viewBySession[id] ?? (pty ? 'terminal' : 'transcript')
       : 'transcript'
@@ -568,11 +620,15 @@ export default function App() {
   const view1 = paneView(1)
   const { transcript: transcript0, loading: loading0 } = useTranscript(
     view0.id,
-    view0.view === 'transcript'
+    view0.meta ? `${view0.meta.mtime}:${view0.meta.sizeBytes}` : 'unindexed',
+    view0.view === 'transcript',
+    transcriptCacheRef.current
   )
   const { transcript: transcript1, loading: loading1 } = useTranscript(
     view1.id,
-    view1.view === 'transcript'
+    view1.meta ? `${view1.meta.mtime}:${view1.meta.sizeBytes}` : 'unindexed',
+    view1.view === 'transcript',
+    transcriptCacheRef.current
   )
   const focusedView = paneLayout.focusIndex === 1 ? view1 : view0
 
@@ -599,21 +655,11 @@ export default function App() {
     [seen, unread, focused, visibleIds]
   )
 
-  // Live terminals partitioned by the pane that owns them. A terminal with no home yet appears in
-  // NEITHER pane for one frame: mounting it in the wrong pane and moving it next frame would blank it,
-  // and while it is unmounted the pty stream buffers its output rather than losing it.
-  // Only terminals THIS window owns are candidates: one xterm per terminal app-wide, and main is the
-  // authority on which window that is. A terminal owned elsewhere is mounted nowhere here, and the
-  // pane showing its conversation offers to bring it over instead.
-  const ptysByPane = useMemo<PtyState[][]>(
-    () =>
-      partitionPtys(
-        ptys.active.filter((p) => p.ownedHere),
-        ptyHome,
-        paneLayout.panes.length
-      ),
-    [ptys.active, ptyHome, paneLayout.panes.length]
-  )
+  const ownedPtys = useMemo(() => ptys.active.filter((p) => p.ownedHere), [ptys.active])
+  const visiblePtyIds = [
+    view0.view === 'terminal' && view0.terminalAt === 'here' ? view0.pty?.ptyId ?? null : null,
+    view1.view === 'terminal' && view1.terminalAt === 'here' ? view1.pty?.ptyId ?? null : null
+  ]
 
   const railSections = useMemo<RailSection[]>(() => {
     const pinnedEntries: RailEntry[] = pinnedOrder
@@ -701,6 +747,7 @@ export default function App() {
         : null,
     [liveTally.count, capWarnDismissed, maxLive]
   )
+  overlayOpenRef.current = settingsPage !== null || capWarning !== null || infoModal !== null
 
   // "This row stands for no conversation" (see rowIdentity), by id — the ONE place that resolution
   // lives. Every consumer of the gate routes through here rather than re-deriving it: an unlinked
@@ -749,59 +796,50 @@ export default function App() {
   // Activating a tab is a landing like any other: it marks the conversation read and hands the pane
   // the keyboard. The history stop is recorded by the selection effect, not here.
   const goToTab = useCallback(
-    (pane: number, index: number) => {
+    (pane: number, index: number, focusSurface = true) => {
       const id = paneLayout.panes[pane]?.tabs[index]?.sessionId
       if (!id) return
       // A plain click means "just this one", so it is also the way out of a multi-selection.
       setTabSelection(selectOnly())
+      if (!focusSurface && id !== selectedIdRef.current) keepTabFocusRef.current = true
       panes.activateTab(pane, index)
       if (!isUnlinkedId(id)) markRead(id)
-      requestFocus(id)
+      if (focusSurface) requestFocus(id)
     },
     [paneLayout.panes, panes.activateTab, isUnlinkedId, markRead, requestFocus]
   )
 
-  // Closing a tab that belongs to a group closes the group — including from the ✕ and middle-click,
-  // not just the menu, since those are the same act on the same tab.
-  const closeTabsFrom = useCallback(
-    (pane: number, index: number) => {
-      const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
-      if (!id) return
-      const ids = targetsFor(pane, id)
-      if (ids.length > 1) panes.closeTabs(ids)
-      else panes.closeTab(pane, index)
-    },
-    [panes.closeTab, panes.closeTabs, targetsFor]
-  )
 
   const selectedMeta = focusedView.meta
   const selectedPty = focusedView.pty
   const effectiveView = focusedView.view
-  const selectedInputRequestedAt = selectedPty
-    ? currentInputRequestedAt(selectedMeta ?? synthMeta(selectedPty), selectedPty.inputRequestedAt)
-    : null
+  const view0Unlinked = view0.id ? isUnlinkedId(view0.id) : false
+  const view1Unlinked = view1.id ? isUnlinkedId(view1.id) : false
   // An unlinked row shows no read state, so it must not persist one either — see rowIdentity.
-  const selectedUnlinked = selectedId ? isUnlinkedId(selectedId) : false
+  const selectedUnlinked = paneLayout.focusIndex === 1 ? view1Unlinked : view0Unlinked
 
-  // Looking at a conversation (visible in a pane + the window focused) marks it read: it advances the
-  // seen marker AND clears any manual-unread override, so a turn finishing under your eyes drops the
-  // dot to quiet. Applies to EVERY visible pane, not just the focused one — you can see both.
-  const otherVisibleId = view0.id === selectedId ? view1.id : view0.id
-  const otherVisibleMeta = otherVisibleId ? metaById.get(otherVisibleId) ?? null : null
+  const view0InputRequestedAt = view0.pty
+    ? currentInputRequestedAt(view0.meta ?? synthMeta(view0.pty), view0.pty.inputRequestedAt)
+    : null
+  const view1InputRequestedAt = view1.pty
+    ? currentInputRequestedAt(view1.meta ?? synthMeta(view1.pty), view1.pty.inputRequestedAt)
+    : null
+
+  // Visible conversations advance their seen timestamp independently. A manual unread override is
+  // cleared only by an explicit landing or genuine engagement in that specific pane.
   useEffect(() => {
-    if (selectedId && focused && !selectedUnlinked) markRead(selectedId)
-    if (otherVisibleId && focused && !isUnlinkedId(otherVisibleId)) markRead(otherVisibleId)
+    if (view0.id && focused && !view0Unlinked) markSeen(view0.id, Date.now())
   }, [
-    selectedId,
-    otherVisibleId,
+    view0.id,
     focused,
-    selectedUnlinked,
-    isUnlinkedId,
-    selectedMeta?.turnEndedAt,
-    otherVisibleMeta?.turnEndedAt,
-    selectedInputRequestedAt,
-    markRead
+    view0Unlinked,
+    view0.meta?.turnEndedAt,
+    view0InputRequestedAt,
+    markSeen
   ])
+  useEffect(() => {
+    if (view1.id && focused && !view1Unlinked) markSeen(view1.id, Date.now())
+  }, [view1.id, focused, view1Unlinked, view1.meta?.turnEndedAt, view1InputRequestedAt, markSeen])
 
   // Arrow-key order follows what's actually visible — the same visibility rule the pane
   // renders with (collapse + Recent cap + search override) — so nav never lands on a hidden row.
@@ -826,6 +864,27 @@ export default function App() {
       g.conversations.reduce((max, c) => Math.max(max, c.firstActivityAt ?? 0), 0)
     return [...groups].sort((a, b) => startedAt(b) - startedAt(a)).map((g) => g.cwd)
   }, [groups])
+  const metaByIdRef = useRef(metaById)
+  metaByIdRef.current = metaById
+  const restoredTabsValidatedRef = useRef(false)
+  useEffect(() => {
+    const restored = windowInit.restoredTabs
+    if (restoredTabsValidatedRef.current || !restored) return
+    if (!tabsEnabled) {
+      restoredTabsValidatedRef.current = true
+      if (detached) window.api.closeWindow()
+      return
+    }
+    if (loading) return
+    restoredTabsValidatedRef.current = true
+    const restoredIds = restored.panes.flatMap((pane) => pane.sessionIds)
+    const invalid = restoredIds.filter((id) => !metaById.has(id))
+    if (invalid.length === restoredIds.length && detached) {
+      window.api.closeWindow()
+      return
+    }
+    if (invalid.length > 0) panes.closeTabs(invalid)
+  }, [loading, metaById, tabsEnabled, detached, panes.closeTabs, windowInit.restoredTabs])
 
   // Agent axis for "new conversation". `availableAgents` are the launchable CLIs. The agent is
   // RESOLVED (no choice to present) when a usable default is set, or when only one agent exists;
@@ -902,11 +961,21 @@ export default function App() {
   // `pane` is passed explicitly by the per-pane header buttons rather than relying on the pointer
   // having already moved keyboard focus to that pane — the spawn must land where the button lives.
   const resume = useCallback(async (meta: ConversationMeta, pane?: number) => {
+    if (
+      pane === undefined &&
+      openElsewhereRef.current.has(meta.sessionId) &&
+      !locateTab(paneLayoutRef.current, meta.sessionId)
+    ) {
+      window.api.resumeConversationElsewhere(meta.sessionId)
+      return
+    }
     land(meta.sessionId, 'persistent', { pane })
     setSessionView(meta.sessionId, 'terminal')
     requestFocus(meta.sessionId)
     await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
   }, [land, requestFocus, setSessionView])
+  const resumeRef = useRef(resume)
+  resumeRef.current = resume
 
   const startNew = useCallback(async (cwd: string, agent: AgentKind) => {
     setMenuOpen(false)
@@ -1030,6 +1099,7 @@ export default function App() {
     (id: string) => {
       const l = paneLayoutRef.current
       const target = l.panes.length > 1 ? (l.focusIndex === 0 ? 1 : 0) : 1
+      if (!canPlaceTabsToSide(l, [id], target)) return
       if (l.panes.length < 2) panes.splitPane()
       land(id, 'persistent', { pane: target })
       if (!isUnlinkedId(id)) markRead(id)
@@ -1037,6 +1107,11 @@ export default function App() {
     },
     [panes.splitPane, land, isUnlinkedId, markRead, requestFocus]
   )
+  const canOpenToSide = useCallback((id: string): boolean => {
+    const l = paneLayoutRef.current
+    const target = l.panes.length > 1 ? (l.focusIndex === 0 ? 1 : 0) : 1
+    return canPlaceTabsToSide(l, [id], target)
+  }, [])
   // Send an EXISTING tab to the other pane, creating the split when there is none. Distinct from
   // openToSide, which opens a conversation over there and leaves whatever was here alone: this is a
   // move, so the source pane gives the tab up.
@@ -1044,11 +1119,11 @@ export default function App() {
     (sessionId: string, fromPane: number) => {
       const l = paneLayoutRef.current
       const ids = targetsFor(fromPane, sessionId)
-      if (ids.length === 0) return
+      if (ids.length === 0 || !canPlaceTabsToSide(l, ids, 1)) return
       // "Right" is pane 1: the menu item is offered only from the left pane (see canSplitRight), so
       // there is no other direction to resolve.
       if (l.panes.length < 2) panes.splitPane()
-      panes.moveTabs(ids, { pane: 1, index: l.panes[1]?.tabs.length ?? 0 })
+      panes.moveTabs(ids, sessionId, { pane: 1, index: l.panes[1]?.tabs.length ?? 0 })
       panes.focusPane(1)
       if (!isUnlinkedId(sessionId)) markRead(sessionId)
       requestFocus(sessionId)
@@ -1064,7 +1139,7 @@ export default function App() {
       const ids = targetsFor(fromPane, sessionId)
       if (ids.length === 0) return
       const to = fromPane === 0 ? 1 : 0
-      panes.moveTabs(ids, { pane: to, index: l.panes[to]?.tabs.length ?? 0 })
+      panes.moveTabs(ids, sessionId, { pane: to, index: l.panes[to]?.tabs.length ?? 0 })
       panes.focusPane(to)
       if (!isUnlinkedId(sessionId)) markRead(sessionId)
       requestFocus(sessionId)
@@ -1075,9 +1150,11 @@ export default function App() {
   // action is a move and says so. Also requires two tabs here: moving the only one empties this pane,
   // the layout collapses it, and the net effect would be no split at all.
   const canSplitRightFrom = useCallback(
-    (index: number): boolean =>
-      paneLayout.panes.length === 1 && index === 0 && (paneLayout.panes[0]?.tabs.length ?? 0) >= 2,
-    [paneLayout.panes]
+    (index: number, sessionId: string): boolean => {
+      if (paneLayout.panes.length !== 1 || index !== 0) return false
+      return canPlaceTabsToSide(paneLayout, targetsFor(index, sessionId), 1)
+    },
+    [paneLayout, targetsFor]
   )
   // A tab was dragged onto a strip in THIS window: a reorder, or a move between panes.
   const moveTabHere = useCallback(
@@ -1089,20 +1166,17 @@ export default function App() {
   )
   // A dragged multi-selection landed on a strip in this window.
   const moveTabGroupHere = useCallback(
-    (sessionIds: string[], to: { pane: number; index: number }) => {
-      panes.moveTabs(sessionIds, to)
+    (sessionIds: string[], activeSessionId: string, to: { pane: number; index: number }) => {
+      panes.moveTabs(sessionIds, activeSessionId, to)
       panes.focusPane(to.pane)
     },
     [panes.moveTabs, panes.focusPane]
   )
-  // A tab was dragged OUT of this window — another window took it, or it became a window of its own.
-  // Either way this window gives it up, which is what makes the gesture a move rather than a copy.
+  // A tab group was dragged OUT of this window — another window took it, or it became a window of its
+  // own. Either way this window gives up the whole payload, making the gesture a move rather than a copy.
   const tabLeftWindow = useCallback(
-    (sessionId: string) => {
-      const at = locateTab(paneLayoutRef.current, sessionId)
-      if (at) panes.closeTab(at.pane, at.index)
-    },
-    [panes.closeTab]
+    (sessionIds: string[]) => panes.closeTabs(sessionIds),
+    [panes.closeTabs]
   )
   // MOVE a conversation into its own window: the new window opens with it, and this window gives up
   // its tab. A move rather than a copy, matching every other way a tab travels here (drag, Move Right,
@@ -1110,41 +1184,55 @@ export default function App() {
   //
   // The tab is what moves; the live TERMINAL does not follow. One xterm per terminal app-wide, and
   // yanking it would blank the session someone may be typing in — so the new window shows the
-  // transcript and offers to bring the terminal over, which is now a repaint rather than a loss.
+  // transcript and offers to bring the terminal over through the serialized ownership handoff.
   const moveToNewWindow = useCallback(
     (id: string) => {
       const at = locateTab(paneLayoutRef.current, id)
       // A group goes to ONE new window holding all of it, not one window each.
       const ids = at ? targetsFor(at.pane, id) : [id]
-      window.api.openConversationWindow(ids)
-      panes.closeTabs(ids)
+      const order = at
+        ? paneLayoutRef.current.panes[at.pane].tabs.map((tab) => tab.sessionId)
+        : [id]
+      const payload = makeTabDragPayload(order, ids, id)
+      window.api.openConversationWindow(payload)
+      panes.closeTabs(payload.sessionIds)
     },
     [panes.closeTabs, targetsFor]
   )
-  // A tab dragged in from ANOTHER window. It lands as a KEPT tab in the focused pane: a drop is a
-  // deliberate act, so it should not be replaceable by the next ordinary click the way a preview is.
-  // Its position within the strip is deliberately not honoured — the OS gave the source window the
-  // pointer, so where the cursor sits inside THIS window is not knowable here, and appending is
-  // honest where guessing a slot would not be.
+  // A tab group dragged in from ANOTHER window. This is explicit placement, not an implicit "show me"
+  // navigation: routing it through `land` without a pane would see the source's still-open tabs and
+  // reveal that window instead of adopting them. The atomic reducer appends the ordered group to the
+  // focused pane and keeps the grabbed tab active.
   useEffect(
     () =>
-      window.api.onTabDropHere((sessionId: string) => {
-        land(sessionId, 'persistent')
-        if (!isUnlinkedId(sessionId)) markRead(sessionId)
-        requestFocus(sessionId)
+      window.api.onTabDropHere(({ sessionIds, activeSessionId }) => {
+        const pane = paneLayoutRef.current.focusIndex
+        panes.openTabs(sessionIds, activeSessionId, pane)
+        setTabSelection(
+          sessionIds.length > 1
+            ? { pane, ids: new Set(sessionIds), anchor: activeSessionId }
+            : NO_SELECTION
+        )
+        if (!isUnlinkedId(activeSessionId)) markRead(activeSessionId)
+        requestFocus(activeSessionId)
       }),
-    [land, isUnlinkedId, markRead, requestFocus]
+    [panes.openTabs, isUnlinkedId, markRead, requestFocus]
   )
   // Keep main's register of which window holds which conversation current. Keyed on the SET, not on the
   // layout: activating a tab, reordering the strip and resizing the split all leave the set alone, and
   // this should not chatter for any of them.
   const openIdsKey = useMemo(
-    () => [...openSessionIds(paneLayout)].sort().join(' '),
+    () => [...openSessionIds(paneLayout)].sort().join('\\0'),
     [paneLayout]
   )
   useEffect(() => {
-    window.api.tabsChanged(openIdsKey ? openIdsKey.split(' ') : [])
+    window.api.tabsChanged(openIdsKey ? openIdsKey.split('\\0') : [])
   }, [openIdsKey])
+  const persistedTabLayout = useMemo(() => snapshotPaneLayout(paneLayout), [paneLayout])
+  const persistedTabLayoutKey = JSON.stringify(persistedTabLayout)
+  useEffect(() => {
+    window.api.persistTabLayout(tabsEnabled ? persistedTabLayout : null)
+  }, [tabsEnabled, persistedTabLayoutKey])
 
   useEffect(() => {
     const offElsewhere = window.api.onTabsElsewhere((ids: string[]) => {
@@ -1155,18 +1243,36 @@ export default function App() {
     const offActivate = window.api.onTabActivate((sessionId: string) => {
       if (locateTab(paneLayoutRef.current, sessionId)) panes.openTab(sessionId, 'persistent')
     })
+    const offResume = window.api.onTabResume((sessionId: string) => {
+      if (!locateTab(paneLayoutRef.current, sessionId)) return
+      const meta = metaByIdRef.current.get(sessionId)
+      if (meta) void resumeRef.current(meta)
+      else setPendingResumeId(sessionId)
+    })
     // Another window is taking it. Give the tab up — that is what makes an explicit placement a move
     // rather than a copy.
     const offRelease = window.api.onTabRelease((sessionId: string) => {
-      const at = locateTab(paneLayoutRef.current, sessionId)
-      if (at) panes.closeTab(at.pane, at.index)
+      void window.api.shouldReleaseTab(sessionId).then((shouldRelease) => {
+        if (!shouldRelease) return
+        const at = locateTab(paneLayoutRef.current, sessionId)
+        if (at) panes.closeTab(at.pane, at.index)
+      })
     })
     return () => {
       offElsewhere()
       offActivate()
+      offResume()
       offRelease()
     }
   }, [panes.openTab, panes.closeTab])
+
+  useEffect(() => {
+    if (!pendingResumeId) return
+    const meta = metaById.get(pendingResumeId)
+    if (!meta || !locateTab(paneLayout, pendingResumeId)) return
+    setPendingResumeId(null)
+    void resume(meta)
+  }, [pendingResumeId, metaById, paneLayout, resume])
 
   // Show that this window will accept a tab currently being dragged over it. Driven by main, because
   // this window receives no pointer events at all while another one holds the drag.
@@ -1186,15 +1292,16 @@ export default function App() {
   // terminal app-wide, so this is a move, not a copy — the other window falls back to the transcript.
   const claimTerminal = useCallback(
     (ptyId: string, pane: number) => {
-      window.api.claimTerminal(ptyId)
-      goLive(pane)
+      void window.api.claimTerminal(ptyId).then((claimed) => {
+        if (claimed) goLive(pane)
+      })
     },
     [goLive]
   )
   const toggleSplit = useCallback(() => {
     if (paneLayoutRef.current.panes.length > 1) panes.unsplit()
-    else panes.splitPane()
-  }, [panes.splitPane, panes.unsplit])
+    else panes.splitActiveTab()
+  }, [panes.splitActiveTab, panes.unsplit])
   const killSession = useCallback((ptyId: string) => window.api.kill(ptyId), [])
   // Stop a session by its conversation id — the rail's right-click menu works in session ids, while
   // the PtyManager kills by ptyId, so resolve the live process first (mirrors the pane header's
@@ -1297,26 +1404,25 @@ export default function App() {
   // Clear a manual "unread" mark once the user genuinely engages the open conversation — a click
   // or keystroke in the pane body (see MainPane's listener). Gated on an existing flag so plain
   // typing in the terminal doesn't churn state past the first keystroke.
-  const onEngage = useCallback(() => {
-    if (selectedId && unread[selectedId] != null) markRead(selectedId)
-  }, [selectedId, unread, markRead])
+  const onEngage = useCallback((id: string) => {
+    if (unread[id] != null) markRead(id)
+  }, [unread, markRead])
 
   // Find-in-conversation searches the rendered transcript, so the first keystroke while a live
   // Terminal is showing switches to Formatted (remembering the prior view to restore on close).
   const onFindActivate = useCallback(() => {
     if (selectedId && effectiveView === 'terminal') {
-      findPriorViewRef.current = 'terminal'
+      findPriorTerminalIdsRef.current.add(selectedId)
       setSessionView(selectedId, 'transcript')
     }
   }, [selectedId, effectiveView, setSessionView])
 
   const closeFind = useCallback(() => {
     setFindOpen(false)
-    const prior = findPriorViewRef.current
-    findPriorViewRef.current = null
-    // Restore the live Terminal if find pulled us off it (and the session is still live).
-    if (prior === 'terminal' && selectedId && selectedPty) setSessionView(selectedId, 'terminal')
-  }, [selectedId, selectedPty, setSessionView])
+    const prior = [...findPriorTerminalIdsRef.current]
+    findPriorTerminalIdsRef.current.clear()
+    for (const sessionId of prior) setSessionView(sessionId, 'terminal')
+  }, [setSessionView])
 
   // The pane-header magnifier toggles find (closeFind restores the prior view on the way out).
   const toggleFind = useCallback(() => {
@@ -1440,9 +1546,9 @@ export default function App() {
         const pane = paneLayout.panes[paneLayout.focusIndex]
         if (pane && index < pane.tabs.length) goToTab(paneLayout.focusIndex, index)
       } else if (tabsEnabled && e.metaKey && !e.altKey && !e.shiftKey && e.code === 'Backslash') {
-        // ⌘\ — toggle the vertical split. Opening creates an EMPTY pane and takes the keyboard there,
-        // so nothing is duplicated and you pick what goes beside; closing merges its tabs back into
-        // the survivor, keeping whatever you were looking at selected. ⇧⌘\ is deliberately left free.
+        // ⌘\ — toggle the vertical split. Opening moves the active tab into a new right pane; closing
+        // merges its tabs back into the survivor, keeping whatever you were looking at selected. With
+        // fewer than two tabs, opening is a no-op so neither pane can be left empty. ⇧⌘\ is free.
         // `e.code`, since ⌘ leaves `e.key` as '\' but Shift would make it '|'.
         e.preventDefault()
         toggleSplit()
@@ -1513,8 +1619,8 @@ export default function App() {
   // Find belongs to whichever pane has the keyboard. Moving to the other pane closes it rather than
   // teleporting the bar: the query lives in that pane's own component, so it could not follow anyway.
   useEffect(() => {
-    setFindOpen(false)
-  }, [paneLayout.focusIndex])
+    closeFind()
+  }, [paneLayout.focusIndex, closeFind])
 
   // Resolve the info-modal target's meta + live process. A live-but-unindexed session still resolves
   // via the synthesized meta, mirroring the rail.
@@ -1538,9 +1644,14 @@ export default function App() {
         onToggleTheme={toggleTheme}
         updatesNeedAttention={updates.needsAttention}
         split={paneLayout.panes.length > 1}
+        splitDisabled={paneLayout.panes.length < 2 && !canSplitActiveTab(paneLayout)}
         onToggleSplit={tabsEnabled ? toggleSplit : undefined}
       />
-      <div className="sb-body" style={{ '--pane-w': `${paneWidth}px` } as CSSProperties}>
+      <div
+        className="sb-body"
+        ref={bodyElRef}
+        style={{ '--pane-w': `${paneWidth}px` } as CSSProperties}
+      >
         {!paneCollapsed && (
           <TallyRail
             sections={railSections}
@@ -1552,6 +1663,7 @@ export default function App() {
             onStick={tabsEnabled ? stickConversation : undefined}
             openElsewhere={openElsewhere}
             onOpenToSide={tabsEnabled ? openToSide : undefined}
+            canOpenToSide={tabsEnabled ? canOpenToSide : undefined}
             onOpenInNewWindow={tabsEnabled ? moveToNewWindow : undefined}
             onTogglePin={togglePinGated}
             query={query}
@@ -1595,7 +1707,11 @@ export default function App() {
             onResizeStart={() => {
               dragStartRef.current = paneWidth
             }}
-            onResize={(dx) => setPaneWidth(dragStartRef.current + dx)}
+            onResize={(dx) => {
+              const width = Math.max(PANE_LIMITS.min, Math.min(PANE_LIMITS.max, dragStartRef.current + dx))
+              bodyElRef.current?.style.setProperty('--pane-w', `${Math.round(width)}px`)
+            }}
+            onResizeEnd={(dx) => setPaneWidth(dragStartRef.current + dx)}
             onReset={resetPane}
           />
         )}
@@ -1605,12 +1721,16 @@ export default function App() {
         <div
           className={`sb-panes${paneLayout.panes.length > 1 ? ' split' : ''}`}
           ref={panesElRef}
+          style={{
+            '--split-left-grow': paneLayout.splitFraction,
+            '--split-right-grow': 1 - paneLayout.splitFraction
+          } as CSSProperties}
         >
           {paneLayout.panes.map((pane, i) => {
             const v = i === 1 ? view1 : view0
             const isFocused = i === paneLayout.focusIndex
             const split = paneLayout.panes.length > 1
-            const grow = i === 0 ? paneLayout.splitFraction : 1 - paneLayout.splitFraction
+            const grow = i === 0 ? 'var(--split-left-grow)' : 'var(--split-right-grow)'
             return (
               <Fragment key={pane.id}>
                 {i > 0 && (
@@ -1625,6 +1745,16 @@ export default function App() {
                       }
                     }}
                     onResize={(dx) => {
+                      const { fraction, width } = splitDragRef.current
+                      if (width <= 0) return
+                      const next = Math.max(
+                        SPLIT_LIMITS.min,
+                        Math.min(SPLIT_LIMITS.max, fraction + dx / width)
+                      )
+                      panesElRef.current?.style.setProperty('--split-left-grow', String(next))
+                      panesElRef.current?.style.setProperty('--split-right-grow', String(1 - next))
+                    }}
+                    onResizeEnd={(dx) => {
                       const { fraction, width } = splitDragRef.current
                       if (width > 0) panes.setSplitFraction(fraction + dx / width)
                     }}
@@ -1648,7 +1778,7 @@ export default function App() {
                   onCloseTab={closeTabsFrom}
                   onCloseOtherTabs={panes.closeOtherTabs}
                   onPromoteTab={panes.promoteTab}
-                  canSplitRight={canSplitRightFrom(i)}
+                  canSplitRight={(id) => canSplitRightFrom(i, id)}
                   canMoveToOtherPane={paneLayout.panes.length === 2}
                   onSplitRightTab={splitRightTab}
                   onMoveTabToOtherPane={moveTabToOtherPane}
@@ -1666,11 +1796,10 @@ export default function App() {
                   meta={v.meta}
                   pty={v.pty}
                   view={v.view}
-                  theme={themeResolved}
                   focusReq={focusReq}
                   transcript={i === 1 ? transcript1 : transcript0}
                   transcriptLoading={i === 1 ? loading1 : loading0}
-                  activePtys={ptysByPane[i] ?? []}
+                  transcriptScrollStateRef={transcriptScrollStateRef}
                   pinned={v.id ? pinned.has(v.id) : false}
                   unlinked={v.id ? isUnlinkedId(v.id) : false}
                   onTogglePin={() => {
@@ -1690,7 +1819,7 @@ export default function App() {
                     if (v.id) showInfo(v.id, false)
                   }}
                   onEngage={onEngage}
-                  onMarkUnread={markUnreadGated}
+                  terminalHostRef={i === 1 ? setTerminalHost1 : setTerminalHost0}
                   paneRef={i === 1 ? pane1Ref : pane0Ref}
                   // Find belongs to the pane holding the keyboard; the other pane never shows the bar.
                   findOpen={findOpen && isFocused}
@@ -1704,6 +1833,15 @@ export default function App() {
             )
           })}
         </div>
+        <TerminalDeck
+          activePtys={ownedPtys}
+          homes={ptyHome}
+          paneHosts={terminalHosts}
+          visiblePtyIds={visiblePtyIds}
+          focusReq={focusReq}
+          theme={themeResolved}
+          onMarkUnread={markUnreadGated}
+        />
       </div>
       <SettingsModal
         page={settingsPage}

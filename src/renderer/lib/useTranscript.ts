@@ -12,9 +12,12 @@ import type { Transcript } from '@shared/types'
  */
 export function useTranscript(
   sessionId: string | null,
-  enabled: boolean
+  revision: string,
+  enabled: boolean,
+  sharedCache?: Map<string, Transcript | null>
 ): { transcript: Transcript | null; loading: boolean } {
-  const cache = useRef(new Map<string, Transcript | null>())
+  const localCache = useRef(new Map<string, Transcript | null>())
+  const cache = sharedCache ?? localCache.current
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -27,39 +30,29 @@ export function useTranscript(
     const id = sessionId
     let alive = true
 
-    const load = (background: boolean): void => {
-      if (!background) {
-        const cached = cache.current.get(id)
-        if (cached !== undefined) {
-          setTranscript(cached)
-          setLoading(false)
-        } else {
-          setTranscript(null)
-          setLoading(true)
-        }
+    const load = (): void => {
+      const cached = cache.get(id)
+      if (cached !== undefined) {
+        setTranscript(cached)
+        setLoading(false)
+      } else {
+        setTranscript(null)
+        setLoading(true)
       }
-      window.api.getTranscript(id).then((t) => {
+      window.api.getTranscript(id, revision).then((t) => {
         if (!alive) return
-        cache.current.set(id, t)
+        cache.set(id, t)
         setTranscript(t)
         setLoading(false)
       })
     }
 
-    load(false)
-
-    // Live update: the watcher re-indexes (debounced) whenever any session file
-    // changes; refresh the open transcript in the background so a running
-    // conversation appears as it's written.
-    const off = window.api.onSessionsChanged(() => {
-      if (alive) load(true)
-    })
+    load()
 
     return () => {
       alive = false
-      off()
     }
-  }, [sessionId, enabled])
+  }, [sessionId, revision, enabled, cache])
 
   return { transcript, loading }
 }

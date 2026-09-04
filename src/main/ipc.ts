@@ -8,6 +8,7 @@ import {
   shell,
   nativeImage,
   screen,
+  webContents,
   type MenuItemConstructorOptions
 } from 'electron'
 import os from 'node:os'
@@ -15,18 +16,27 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
   IPC,
   type AgentAvailability,
   type AgentKind,
+  type ConversationGroup,
+  type PersistedTabLayout,
   type PtyBindKind,
+  type PtySnapshot,
   type PtySession,
   type PtyState,
+  type TabDragPayload,
   type TabDropOutcome,
   type TabMenuAction,
-  type Transcript,
+  type UpdateRunState,
   type WindowInit
 } from '../shared/types'
+import { parseTabDragPayload } from '../shared/tabDrag'
+import { appendUpdateLog } from '../shared/updateLog'
+import { claimWindowTabs, reconcileWindowTabs, shouldReleaseTab } from './tabOwnership'
+import { transferPty } from './pty/transfer'
 import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
@@ -36,12 +46,30 @@ import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
 import { syncTrafficLights } from './trafficLights'
 import { buildInfo, checkForUpdates, runUpdate, relaunchForUpdate } from './updater'
+import { cachedSingleFlight, singleFlight } from './updater-core'
+import { LatestTask } from './latestTask'
+import { TranscriptLoader, type TranscriptSource } from './transcriptLoader'
+import { loadTabWorkspace, TabWorkspaceStore } from './tabWorkspaceStore'
 
 const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 
 let watcher: SessionWatcher | null = null
 let mgr: PtyManager | null = null
 let liveTick: ReturnType<typeof setInterval> | null = null
+let tabWorkspace: TabWorkspaceStore | null = null
+
+export function initializeTabWorkspace(userDataDir: string, file?: string): PersistedTabLayout[] {
+  tabWorkspace = new TabWorkspaceStore(userDataDir, file)
+  return loadTabWorkspace(userDataDir, file)
+}
+
+export function registerTabWindow(webContentsId: number, layout: PersistedTabLayout | null): void {
+  if (layout) tabWorkspace?.register(webContentsId, layout)
+}
+
+export function flushTabWorkspace(): void {
+  tabWorkspace?.flush()
+}
 
 // --- the window layer ---------------------------------------------------------------------------
 //
@@ -60,9 +88,9 @@ let liveTick: ReturnType<typeof setInterval> | null = null
 const ptyOwner = new Map<string, number>()
 
 /** Supplied by `index.ts`, which owns geometry and first-window bookkeeping. */
-let openWindow: ((init?: WindowInit) => void) | null = null
+let openWindow: ((init?: WindowInit) => BrowserWindow) | null = null
 
-export function setWindowOpener(fn: (init?: WindowInit) => void): void {
+export function setWindowOpener(fn: (init?: WindowInit) => BrowserWindow): void {
   openWindow = fn
 }
 
@@ -73,7 +101,7 @@ export function setWindowOpener(fn: (init?: WindowInit) => void): void {
  * to stop when the cursor moves on. Held here rather than in either renderer because neither can see
  * the other: the OS gives the source window mouse capture for the duration.
  */
-let tabDrag: { sourceId: number; sessionId: string; hoveringId: number | null } | null = null
+let tabDrag: { sourceId: number; payload: TabDragPayload; hoveringId: number | null } | null = null
 
 /**
  * Which window holds the tab for each conversation.
@@ -85,6 +113,25 @@ let tabDrag: { sourceId: number; sessionId: string; hoveringId: number | null } 
  * longer exist. Same shape as `ptyOwner` above, and released by the same hook.
  */
 const tabOwner = new Map<string, number>()
+
+const SNAPSHOT_TIMEOUT_MS = 1000
+const pendingSnapshots = new Map<
+  string,
+  {
+    ownerId: number
+    ptyId: string
+    timer: ReturnType<typeof setTimeout>
+    resolve: (snapshot: PtySnapshot | null) => void
+  }
+>()
+
+let updateRunState: UpdateRunState = { phase: 'idle', log: '' }
+
+function claimTabsForWindow(windowId: number, sessionIds: string[]): void {
+  const releases = claimWindowTabs(tabOwner, windowId, sessionIds)
+  for (const { ownerId, sessionId } of releases) sendToWindow(ownerId, IPC.tabRelease, sessionId)
+  emitTabsElsewhere()
+}
 
 /** Tell every window which conversations the OTHERS hold, so each can decide locally. */
 function emitTabsElsewhere(): void {
@@ -102,19 +149,70 @@ function emitTabsElsewhere(): void {
 }
 
 function setWindowTabs(wcId: number, sessionIds: string[]): void {
-  for (const [sessionId, owner] of tabOwner) {
-    if (owner === wcId) tabOwner.delete(sessionId)
-  }
-  for (const sessionId of sessionIds) tabOwner.set(sessionId, wcId)
+  const releases = reconcileWindowTabs(tabOwner, wcId, sessionIds)
+  for (const { ownerId, sessionId } of releases) sendToWindow(ownerId, IPC.tabRelease, sessionId)
   emitTabsElsewhere()
 }
 
-function sendToWindow(wcId: number | null, channel: string, ...args: unknown[]): void {
-  if (wcId == null) return
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (w.webContents.id === wcId && !w.isDestroyed()) w.webContents.send(channel, ...args)
-  }
+function sendToWindow(wcId: number | null, channel: string, ...args: unknown[]): boolean {
+  if (wcId == null) return false
+  const target = webContents.fromId(wcId)
+  if (!target || target.isDestroyed()) return false
+  target.send(channel, ...args)
+  return true
 }
+
+function requestPtySnapshot(ownerId: number, ptyId: string): Promise<PtySnapshot | null> {
+  return new Promise((resolve) => {
+    const requestId = randomUUID()
+    const timer = setTimeout(() => {
+      pendingSnapshots.delete(requestId)
+      resolve(null)
+    }, SNAPSHOT_TIMEOUT_MS)
+    pendingSnapshots.set(requestId, { ownerId, ptyId, timer, resolve })
+    if (!sendToWindow(ownerId, IPC.ptySnapshotRequest, requestId, ptyId)) {
+      clearTimeout(timer)
+      pendingSnapshots.delete(requestId)
+      resolve(null)
+    }
+  })
+}
+
+async function transferTerminal(ptyId: string, targetId: number): Promise<boolean> {
+  if (!mgr?.list().some((s) => s.ptyId === ptyId)) return false
+  const ownerId = ptyOwner.get(ptyId)
+  const reason = `transfer:${randomUUID()}`
+  return transferPty(ownerId, targetId, {
+    pause: () => mgr!.setOutputPaused(ptyId, reason, true),
+    resume: () => mgr!.setOutputPaused(ptyId, reason, false),
+    capture: () => requestPtySnapshot(ownerId!, ptyId),
+    stage: (snapshot) => sendToWindow(targetId, IPC.ptySnapshotStage, ptyId, snapshot),
+    commit: () => {
+      ptyOwner.set(ptyId, targetId)
+      if (ownerId != null) mgr!.setOutputPaused(ptyId, `renderer:${ownerId}`, false)
+      emitActive()
+    },
+    repaintUnowned: () => mgr!.repaint(ptyId)
+  })
+}
+
+function emitUpdateRunState(): void {
+  broadcast(IPC.updatesRunStateChanged, updateRunState)
+}
+
+const runUpdateOnce = singleFlight(async () => {
+  updateRunState = { phase: 'updating', log: '' }
+  emitUpdateRunState()
+  const result = await runUpdate((line) => {
+    updateRunState = { ...updateRunState, log: appendUpdateLog(updateRunState.log, line) }
+    broadcast(IPC.updatesProgress, line)
+  })
+  updateRunState = { ...updateRunState, phase: result.ok ? 'done' : 'failed' }
+  emitUpdateRunState()
+  return result
+})
+
+const getUpdateCheck = cachedSingleFlight(checkForUpdates)
 
 function endTabDrag(): void {
   if (!tabDrag) return
@@ -123,23 +221,37 @@ function endTabDrag(): void {
 }
 
 /**
- * The topmost visible window containing the cursor, or null when the cursor is over none.
+ * A visible window containing the cursor, or null when none does.
  *
- * Deliberately asked of the OS rather than taken from the pointer event: `MouseEvent.screenX/screenY`
- * is in the renderer's CSS pixels, and this app zooms (⌘+/-), so those coordinates and a window's DIP
- * bounds part company at any zoom but 100%. `getCursorScreenPoint` is in the same space as the bounds.
+ * The cursor position is asked of the OS rather than taken from the pointer event: `screenX/screenY`
+ * is in the renderer's CSS pixels, and this app zooms (⌘+/−), so those coordinates and a window's DIP
+ * bounds part company at any zoom but 100%. `getCursorScreenPoint` shares the bounds' space.
  *
- * `getAllWindows` returns front-to-back, so the first hit is the topmost — which is the one the user
- * sees under the cursor, and therefore the one they mean.
+ * `excludeId` is load-bearing, and the reason is that **`getAllWindows` does not promise z-order** —
+ * Electron exposes no z-order for all windows. Detached windows are cascaded off the first
+ * one, so they overlap it: hit-testing in creation order finds the SOURCE window under the cursor and
+ * concludes the drag never left it, which made every cross-window drop cancel. The source renderer
+ * knows the one thing main cannot — whether the pointer is still inside its own viewport — so when it
+ * says the pointer is out, that window is excluded from the test entirely rather than guessed about.
  */
-function windowUnderCursor(): BrowserWindow | null {
+function windowUnderCursor(excludeId?: number): BrowserWindow | null {
   const { x, y } = screen.getCursorScreenPoint()
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed() || !w.isVisible() || w.isMinimized()) continue
+    if (excludeId != null && w.webContents.id === excludeId) continue
     const b = w.getBounds()
     if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return w
   }
   return null
+}
+
+/** Whether the cursor is within one specific window's bounds. */
+function cursorInWindow(wcId: number): boolean {
+  const w = BrowserWindow.getAllWindows().find((x) => x.webContents.id === wcId)
+  if (!w || w.isDestroyed()) return false
+  const { x, y } = screen.getCursorScreenPoint()
+  const b = w.getBounds()
+  return x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height
 }
 
 /**
@@ -147,7 +259,14 @@ function windowUnderCursor(): BrowserWindow | null {
  * without this a live session whose window was closed would stay unreachable for the rest of the run,
  * still running, with no window permitted to show it.
  */
-export function releaseWindow(webContentsId: number): void {
+export function releaseWindow(webContentsId: number, preserveTabs = false): void {
+  mgr?.releaseOutputPause(`renderer:${webContentsId}`)
+  for (const [requestId, pending] of pendingSnapshots) {
+    if (pending.ownerId !== webContentsId) continue
+    clearTimeout(pending.timer)
+    pendingSnapshots.delete(requestId)
+    pending.resolve(null)
+  }
   let released = false
   for (const [ptyId, owner] of ptyOwner) {
     if (owner === webContentsId) {
@@ -171,7 +290,33 @@ export function releaseWindow(webContentsId: number): void {
     }
   }
   if (forgot) emitTabsElsewhere()
+  tabWorkspace?.close(webContentsId, preserveTabs)
   if (released) emitActive()
+}
+
+/** Move live terminals out of a normally-closing window while its renderer can still serialize them. */
+export async function prepareWindowClose(webContentsId: number): Promise<void> {
+  if (!mgr) return
+  const survivors = BrowserWindow.getAllWindows().filter(
+    (w) => !w.isDestroyed() && w.webContents.id !== webContentsId
+  )
+  if (survivors.length === 0) return
+  const survivorIds = new Set(survivors.map((w) => w.webContents.id))
+  const fallback = BrowserWindow.getFocusedWindow()
+  const fallbackId =
+    fallback && survivorIds.has(fallback.webContents.id)
+      ? fallback.webContents.id
+      : survivors[0].webContents.id
+  const sessions = new Map(mgr.list().map((s) => [s.ptyId, s]))
+  const transfers: Promise<boolean>[] = []
+  for (const [ptyId, ownerId] of ptyOwner) {
+    if (ownerId !== webContentsId) continue
+    const session = sessions.get(ptyId)
+    const tabWindow = session ? tabOwner.get(session.sessionId) : undefined
+    const targetId = tabWindow != null && survivorIds.has(tabWindow) ? tabWindow : fallbackId
+    transfers.push(transferTerminal(ptyId, targetId))
+  }
+  await Promise.all(transfers)
 }
 
 /** Resolve ownership FROM ONE WINDOW'S POINT OF VIEW, so the renderer gets a boolean it can act on
@@ -225,10 +370,9 @@ function broadcast(channel: string, ...args: unknown[]): void {
   }
 }
 
-/** Re-index both agents' sessions and push the result to the renderer. Swallows transient fs errors. */
-async function reindexAndBroadcast(): Promise<void> {
-  try {
-    const groups = await indexConversations(PROJECTS_ROOT, undefined, metaCache)
+const conversationIndex = new LatestTask(
+  () => indexConversations(PROJECTS_ROOT, undefined, metaCache),
+  (groups) => {
     // Keep every live Codex terminal's identity honest: a new rollout only lands on disk at its first
     // turn, which is exactly when this re-index fires (the live session goes active). Hand the manager
     // the eligible rollout ids so it can ask the OS which one the Codex process in each terminal
@@ -255,13 +399,33 @@ async function reindexAndBroadcast(): Promise<void> {
       void mgr.probeCodexIdentity(eligibleCodexIds)
     }
     const sig = JSON.stringify(groups)
-    if (sig === lastBroadcastSig) return
-    lastBroadcastSig = sig
-    broadcast(IPC.sessionsChanged, groups)
-  } catch {
-    /* transient fs error */
+    if (sig !== lastBroadcastSig) {
+      lastBroadcastSig = sig
+      broadcast(IPC.sessionsChanged, groups)
+    }
   }
+)
+
+/** Re-index both agents' sessions and push the result to the renderer. Swallows transient fs errors. */
+function reindexAndBroadcast(queueIfRunning = true): Promise<ConversationGroup[]> {
+  return conversationIndex
+    .refresh(queueIfRunning)
+    .catch(() => conversationIndex.peek() ?? [])
 }
+
+async function transcriptSource(sessionId: string): Promise<TranscriptSource | null> {
+  const claudePath = await resolveSessionFile(sessionId)
+  if (claudePath) return { agent: 'claude', path: claudePath }
+  const codexPath = await resolveCodexFile(sessionId)
+  return codexPath ? { agent: 'codex', path: codexPath } : null
+}
+
+const transcriptLoader = new TranscriptLoader(
+  transcriptSource,
+  (source) => source.agent === 'claude'
+    ? parseTranscript(source.path)
+    : parseCodexTranscript(source.path)
+)
 
 /**
  * Which agent CLIs are launchable, probed via the LOGIN+INTERACTIVE shell (`$SHELL -lic`) — the same
@@ -433,43 +597,34 @@ export function registerIpc(): void {
   mgr = new PtyManager({
     claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') }
   })
-  mgr.on('data', (ptyId: string, data: string) => broadcast(IPC.ptyData, ptyId, data))
-  mgr.on('exit', (ptyId: string, code: number | null) => broadcast(IPC.ptyExit, ptyId, code))
+  mgr.on('data', (ptyId: string, data: string) =>
+    sendToWindow(ptyOwner.get(ptyId) ?? null, IPC.ptyData, ptyId, data)
+  )
+  mgr.on('exit', (ptyId: string, code: number | null) => {
+    ptyOwner.delete(ptyId)
+    broadcast(IPC.ptyExit, ptyId, code)
+  })
   mgr.on('active-changed', () => emitActive())
   // A Codex PTY's sessionId changed. `kind` must be forwarded: it tells the renderer whether this
   // replaced a placeholder (everything keyed to it migrates) or corrected a terminal onto a different
   // real conversation (CONVERSATION-owned state — persisted seen/unread, earlier history stops —
   // stays put, while terminal-owned state — selection, current stop, surface, Live slot — follows the
   // terminal). See PtyBindKind.
-  mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) =>
+  mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) => {
+    const ownerId = tabOwner.get(oldId) ?? ptyOwner.get(ptyId)
+    if (tabOwner.get(oldId) === ownerId) tabOwner.delete(oldId)
+    if (ownerId != null) claimTabsForWindow(ownerId, [newId])
     broadcast(IPC.ptyBound, ptyId, oldId, newId, kind)
-  )
+  })
 
   // Warm the agent-availability probe now so the first New-menu open is instant (it's cached).
   void listAgents()
 
   // --- conversations (read-only) ---
-  ipcMain.handle(IPC.sessionsList, () => indexConversations(PROJECTS_ROOT, undefined, metaCache))
-  ipcMain.handle(IPC.sessionsGet, async (_e, sessionId: string): Promise<Transcript | null> => {
-    // Claude first (its filename stem IS the id); fall back to a Codex rollout (trailing UUID).
-    const claudeFp = await resolveSessionFile(sessionId)
-    if (claudeFp) {
-      try {
-        return await parseTranscript(claudeFp)
-      } catch {
-        return null
-      }
-    }
-    const codexFp = await resolveCodexFile(sessionId)
-    if (codexFp) {
-      try {
-        return await parseCodexTranscript(codexFp)
-      } catch {
-        return null
-      }
-    }
-    return null
-  })
+  ipcMain.handle(IPC.sessionsList, () => conversationIndex.get().catch(() => []))
+  ipcMain.handle(IPC.sessionsGet, (_e, sessionId: string, revision: string) =>
+    transcriptLoader.load(sessionId, revision)
+  )
   // Set/clear a conversation's title, then re-index + broadcast IMMEDIATELY so the new title lands in
   // the UI now rather than when the watcher/poll next fires. Dispatch by agent: a Claude session has a
   // JSONL file (we append its own `custom-title` line); otherwise it's Codex — the sessionId IS the
@@ -490,35 +645,57 @@ export function registerIpc(): void {
   // --- live sessions (explicit spawn only) ---
   // The spawning window owns the terminal it started. That is the only implicit assignment; every
   // later move is an explicit claim.
-  ipcMain.handle(IPC.ptyResume, (e, sessionId: string, cwd: string, agent: AgentKind, title?: string) => {
-    const st = mgr!.resume(sessionId, cwd, agent, title)
-    ptyOwner.set(st.ptyId, e.sender.id)
-    emitActive()
+  ipcMain.handle(IPC.ptyResume, async (e, sessionId: string, cwd: string, agent: AgentKind, title?: string) => {
+    const existing = mgr!.findBySession(sessionId)
+    if (existing) {
+      await transferTerminal(existing.ptyId, e.sender.id)
+      return forWindow([existing], e.sender.id)[0]
+    }
+    const st = mgr!.resume(sessionId, cwd, agent, title, (spawned) => {
+      ptyOwner.set(spawned.ptyId, e.sender.id)
+    })
     return forWindow([st], e.sender.id)[0]
   })
   ipcMain.handle(IPC.ptyStartNew, (e, cwd: string, agent: AgentKind) => {
     // Guard a stale default folder: if it's been deleted/renamed since it was chosen in Preferences,
     // reject so the renderer can fall back to the chooser instead of node-pty throwing on a bad cwd.
     if (!existsSync(cwd)) throw new Error(`Directory no longer exists: ${cwd}`)
-    const st = mgr!.startNew(cwd, agent)
-    ptyOwner.set(st.ptyId, e.sender.id)
-    emitActive()
+    const st = mgr!.startNew(cwd, agent, (spawned) => {
+      ptyOwner.set(spawned.ptyId, e.sender.id)
+    })
     return forWindow([st], e.sender.id)[0]
   })
-  // Take a terminal over from another window. The previous owner's xterm unmounts and ours mounts;
-  // the fresh xterm starts empty, and its first fit pushes this window's geometry, which is what makes
-  // the agent repaint into it.
-  ipcMain.on(IPC.ptyClaim, (e, ptyId: string) => {
-    if (!mgr?.list().some((s) => s.ptyId === ptyId)) return
-    if (ptyOwner.get(ptyId) === e.sender.id) return
-    ptyOwner.set(ptyId, e.sender.id)
-    emitActive()
-  })
-  ipcMain.on(IPC.ptyInput, (_e, ptyId: string, data: string) => mgr!.write(ptyId, data))
-  ipcMain.on(IPC.ptyResize, (_e, ptyId: string, cols: number, rows: number) =>
-    mgr!.resize(ptyId, cols, rows)
+  ipcMain.handle(IPC.ptyClaim, (e, ptyId: string) => transferTerminal(ptyId, e.sender.id))
+  ipcMain.on(
+    IPC.ptySnapshotReply,
+    (e, requestId: string, ptyId: string, snapshot: PtySnapshot | null) => {
+      const pending = pendingSnapshots.get(requestId)
+      if (!pending || pending.ownerId !== e.sender.id || pending.ptyId !== ptyId) return
+      clearTimeout(pending.timer)
+      pendingSnapshots.delete(requestId)
+      pending.resolve(snapshot)
+    }
   )
+  ipcMain.on(IPC.ptySnapshotRestored, (e, ptyId: string) => {
+    if (ptyOwner.get(ptyId) === e.sender.id) mgr!.repaint(ptyId)
+  })
+  ipcMain.on(IPC.ptyInput, (e, ptyId: string, data: string) => {
+    if (ptyOwner.get(ptyId) === e.sender.id) mgr!.write(ptyId, data)
+  })
+  ipcMain.on(IPC.ptyResize, (e, ptyId: string, cols: number, rows: number) => {
+    if (ptyOwner.get(ptyId) === e.sender.id) mgr!.resize(ptyId, cols, rows)
+  })
   ipcMain.on(IPC.ptyKill, (_e, ptyId: string) => mgr!.kill(ptyId))
+  ipcMain.on(IPC.ptyFlowPause, (e, ptyId: string) => {
+    if (ptyOwner.get(ptyId) === e.sender.id) {
+      mgr!.setOutputPaused(ptyId, `renderer:${e.sender.id}`, true)
+    }
+  })
+  ipcMain.on(IPC.ptyFlowResume, (e, ptyId: string) => {
+    if (ptyOwner.get(ptyId) === e.sender.id) {
+      mgr!.setOutputPaused(ptyId, `renderer:${e.sender.id}`, false)
+    }
+  })
   ipcMain.on(IPC.ptySetMaxLive, (_e, n: number) => mgr!.setMaxLive(n))
   ipcMain.handle(IPC.ptyActiveList, (e) => forWindow(mgr!.list(), e.sender.id))
   ipcMain.handle(IPC.agentsAvailable, () => listAgents())
@@ -558,16 +735,25 @@ export function registerIpc(): void {
   // The referee. While a mouse button is held the OS delivers every move to the window the drag began
   // in, so no other window can see the pointer over itself; main is the only party that can. It reads
   // the cursor ON DEMAND — never on a timer — and only between dragBegin and drop/cancel.
-  ipcMain.on(IPC.tabDragBegin, (e, sessionId: string) => {
-    if (typeof sessionId !== 'string' || !sessionId) return
-    tabDrag = { sourceId: e.sender.id, sessionId, hoveringId: null }
+  ipcMain.on(IPC.tabDragBegin, (e, value: unknown) => {
+    const payload = parseTabDragPayload(value)
+    if (!payload) return
+    tabDrag = { sourceId: e.sender.id, payload, hoveringId: null }
   })
-  ipcMain.on(IPC.tabDragHover, () => {
-    if (!tabDrag) return
-    const target = windowUnderCursor()
-    // Only the window under the cursor is highlighted, and only when it is not the source — the
-    // source shows its own caret locally, from real pointer events it is already receiving.
-    const id = target && target.webContents.id !== tabDrag.sourceId ? target.webContents.id : null
+  // Resolved from the cursor and window bounds alone. An earlier version asked the source renderer
+  // whether the pointer had left its own viewport and only looked for a target when it said yes — which
+  // breaks precisely where it matters: a detached window is CASCADED off the one that spawned it, so
+  // the two overlap, and a pointer over the second is still inside the first's rectangle. The answer
+  // came back "no", and every cross-window drop cancelled.
+  //
+  // So: the source is excluded from the search, and any OTHER window containing the cursor wins. The
+  // one case this reads wrongly is a source window sitting ON TOP of another and the release landing
+  // over its own body — that resolves to the window underneath. The drop highlight appears on whichever
+  // window would receive it, before the button comes up, so the guess is at least visible.
+  ipcMain.on(IPC.tabDragHover, (e) => {
+    if (!tabDrag || tabDrag.sourceId !== e.sender.id) return
+    const target = windowUnderCursor(tabDrag.sourceId)
+    const id = target ? target.webContents.id : null
     if (id === tabDrag.hoveringId) return
     sendToWindow(tabDrag.hoveringId, IPC.tabDragLeave)
     tabDrag.hoveringId = id
@@ -577,17 +763,23 @@ export function registerIpc(): void {
     const drag = tabDrag
     endTabDrag()
     if (!drag || drag.sourceId !== e.sender.id) return 'cancelled'
-    const target = windowUnderCursor()
-    if (target && target.webContents.id !== drag.sourceId) {
-      target.webContents.send(IPC.tabDropHere, drag.sessionId)
+    const target = windowUnderCursor(drag.sourceId)
+    if (target) {
+      claimTabsForWindow(target.webContents.id, drag.payload.sessionIds)
+      target.webContents.send(IPC.tabDropHere, drag.payload)
       target.focus()
       return 'moved'
     }
-    // Still over the source window, just not over a strip — dropping a tab back onto its own window
-    // means nothing, so it means nothing.
-    if (target) return 'cancelled'
-    // Over no window at all: released on the desktop, which is the detach gesture.
-    openWindow?.({ sessionIds: [drag.sessionId], collapseRail: true })
+    // No other window under the cursor. Over the source's own body means the user released somewhere
+    // that is not a strip, which does nothing; over the desktop is the detach gesture.
+    if (cursorInWindow(drag.sourceId)) return 'cancelled'
+    const opened = openWindow?.({
+      ...drag.payload,
+      restoredTabs: null,
+      primary: false,
+      collapseRail: true
+    })
+    if (opened) claimTabsForWindow(opened.webContents.id, drag.payload.sessionIds)
     return 'detached'
   })
   ipcMain.on(IPC.tabDragCancel, () => endTabDrag())
@@ -599,6 +791,9 @@ export function registerIpc(): void {
       e.sender.id,
       sessionIds.filter((id): id is string => typeof id === 'string' && !!id)
     )
+  })
+  ipcMain.on(IPC.tabWorkspaceChanged, (e, layout: unknown) => {
+    tabWorkspace?.update(e.sender.id, layout)
   })
   // "Show me this" for a conversation another window already holds: focus that window and bring its
   // tab forward. The tab does NOT come here — the user asked to see the conversation, not to
@@ -612,13 +807,23 @@ export function registerIpc(): void {
       w.webContents.send(IPC.tabActivate, sessionId)
     }
   })
+  ipcMain.on(IPC.conversationResume, (e, sessionId: string) => {
+    const owner = tabOwner.get(sessionId)
+    if (owner == null || owner === e.sender.id) return
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w.isDestroyed() || w.webContents.id !== owner) continue
+      w.focus()
+      w.webContents.send(IPC.tabResume, sessionId)
+    }
+  })
   // An explicit placement (Open to the Side) for a conversation another window holds. Relocating is
   // what was asked for, so that window gives the tab up; the caller opens it locally itself, and the
   // register corrects itself when both windows report their sets.
   ipcMain.on(IPC.conversationClaim, (e, sessionId: string) => {
-    const owner = tabOwner.get(sessionId)
-    if (owner == null || owner === e.sender.id) return
-    sendToWindow(owner, IPC.tabRelease, sessionId)
+    claimTabsForWindow(e.sender.id, [sessionId])
+  })
+  ipcMain.handle(IPC.tabShouldRelease, (e, sessionId: string) => {
+    return shouldReleaseTab(tabOwner, e.sender.id, sessionId)
   })
 
   // The ⌘W fallback: the renderer asks for its own window to close when it has no tab to close.
@@ -626,12 +831,16 @@ export function registerIpc(): void {
   // Open one or more conversations in a new window — the same app with the rail hidden, the browser
   // one ⌘B away, rather than a second cut-down shell that would have to reimplement it. A group moved
   // here lands in ONE window holding all of them, not one window each.
-  ipcMain.on(IPC.windowOpenConversation, (_e, sessionIds: string[]) => {
-    const ids = Array.isArray(sessionIds)
-      ? sessionIds.filter((id): id is string => typeof id === 'string' && !!id)
-      : []
-    if (ids.length === 0) return
-    openWindow?.({ sessionIds: ids, collapseRail: true })
+  ipcMain.on(IPC.windowOpenConversation, (e, value: unknown) => {
+    const payload = parseTabDragPayload(value)
+    if (!payload) return
+    const opened = openWindow?.({
+      ...payload,
+      restoredTabs: null,
+      primary: false,
+      collapseRail: true
+    })
+    if (opened) claimTabsForWindow(opened.webContents.id, payload.sessionIds)
   })
   // Keep the OS window background in lockstep with the renderer's theme, so a live window resize
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.
@@ -667,8 +876,9 @@ export function registerIpc(): void {
   // --- self-update: check compares the build commit to main (GitHub API, HTTPS); run shells out to
   // `git pull --ff-only <https> main && npm run setup` in the source repo, streaming output. ---
   ipcMain.handle(IPC.updatesGetInfo, () => buildInfo())
-  ipcMain.handle(IPC.updatesCheck, () => checkForUpdates())
-  ipcMain.handle(IPC.updatesRun, (e) => runUpdate((line) => e.sender.send(IPC.updatesProgress, line)))
+  ipcMain.handle(IPC.updatesCheck, (_e, force: boolean) => getUpdateCheck(force === true))
+  ipcMain.handle(IPC.updatesRun, () => runUpdateOnce())
+  ipcMain.handle(IPC.updatesRunStateGet, () => updateRunState)
   ipcMain.on(IPC.updatesRelaunch, () => relaunchForUpdate())
 
   // --- live re-index on file changes (structural: new conversations, renames, other windows) ---
@@ -703,6 +913,11 @@ export function disposeIpc(): void {
   }
   watcher?.stop()
   watcher = null
+  for (const pending of pendingSnapshots.values()) {
+    clearTimeout(pending.timer)
+    pending.resolve(null)
+  }
+  pendingSnapshots.clear()
   mgr?.killAll()
   mgr = null
 }

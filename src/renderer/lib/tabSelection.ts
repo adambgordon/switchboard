@@ -81,18 +81,24 @@ export function toggleSelected(
  * what makes a shift-click correctable by another shift-click, instead of only ever growing. The
  * anchor stays put for exactly that reason.
  *
- * `order` is the pane's tabs in display order. With no anchor, or an anchor no longer present, the
- * clicked tab becomes the new anchor and the selection is just it.
+ * `order` is the pane's tabs in display order.
+ *
+ * With no anchor yet, the ACTIVE tab is the anchor. That is what makes a first ⇧-click do something
+ * worth doing instead of selecting the one tab you clicked, and it is what separates ⇧ from ⌘: ⇧ takes
+ * the run from where you already are, ⌘ picks tabs off one at a time. Active on B, ⇧-click D ⇒ B, C, D.
+ * Falls back to the clicked tab only when there is no active tab either — an empty pane, or one showing
+ * the welcome screen.
  */
 export function extendSelection(
   sel: TabSelection,
   pane: number,
   order: string[],
-  sessionId: string
+  sessionId: string,
+  activeId?: string | null
 ): TabSelection {
   const to = order.indexOf(sessionId)
   if (to < 0) return sel
-  const anchor = sel.pane === pane ? sel.anchor : null
+  const anchor = (sel.pane === pane ? sel.anchor : null) ?? activeId ?? null
   const from = anchor ? order.indexOf(anchor) : -1
   if (from < 0) return { pane, ids: new Set([sessionId]), anchor: sessionId }
   const [lo, hi] = from <= to ? [from, to] : [to, from]
@@ -122,4 +128,13 @@ export function pruneSelection(sel: TabSelection, paneOrder: string[][]): TabSel
   // last was. A rule whose sole effect is to lose something is not a rule worth having.
   const ids = new Set(live)
   return { pane: sel.pane, ids, anchor: sel.anchor && ids.has(sel.anchor) ? sel.anchor : null }
+}
+
+/** Move a selected id across a bind, deduplicating when the real id was already in the group. */
+export function retargetSelection(sel: TabSelection, from: string, to: string): TabSelection {
+  if (from === to || !sel.ids.has(from)) return sel
+  const ids = new Set(sel.ids)
+  ids.delete(from)
+  ids.add(to)
+  return { ...sel, ids, anchor: sel.anchor === from ? to : sel.anchor }
 }

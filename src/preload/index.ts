@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { IPC, type SwitchboardApi, type WindowInit } from '../shared/types'
+import { sanitizeTabLayout } from '../shared/tabWorkspace'
 
 function subscribe(channel: string, cb: (...args: never[]) => void): () => void {
   const handler = (_e: IpcRendererEvent, ...args: unknown[]): void =>
@@ -10,7 +11,7 @@ function subscribe(channel: string, cb: (...args: never[]) => void): () => void 
 
 const api: SwitchboardApi = {
   listConversations: () => ipcRenderer.invoke(IPC.sessionsList),
-  getTranscript: (id) => ipcRenderer.invoke(IPC.sessionsGet, id),
+  getTranscript: (id, revision) => ipcRenderer.invoke(IPC.sessionsGet, id, revision),
   onSessionsChanged: (cb) => subscribe(IPC.sessionsChanged, cb as never),
   renameConversation: (id, title) => ipcRenderer.invoke(IPC.sessionsRename, id, title),
 
@@ -19,6 +20,8 @@ const api: SwitchboardApi = {
   sendInput: (ptyId, data) => ipcRenderer.send(IPC.ptyInput, ptyId, data),
   resize: (ptyId, cols, rows) => ipcRenderer.send(IPC.ptyResize, ptyId, cols, rows),
   kill: (ptyId) => ipcRenderer.send(IPC.ptyKill, ptyId),
+  setPtyOutputPaused: (ptyId, paused) =>
+    ipcRenderer.send(paused ? IPC.ptyFlowPause : IPC.ptyFlowResume, ptyId),
   onPtyData: (cb) => subscribe(IPC.ptyData, cb as never),
   onPtyExit: (cb) => subscribe(IPC.ptyExit, cb as never),
   onPtyBound: (cb) => subscribe(IPC.ptyBound, cb as never),
@@ -34,9 +37,8 @@ const api: SwitchboardApi = {
   tabContextMenu: (opts) => ipcRenderer.invoke(IPC.tabContextMenu, opts),
   onMenuCloseTab: (cb) => subscribe(IPC.menuCloseTab, cb as never),
   closeWindow: () => ipcRenderer.send(IPC.windowClose),
-  openConversationWindow: (sessionIds) =>
-    ipcRenderer.send(IPC.windowOpenConversation, sessionIds),
-  tabDragBegin: (sessionId) => ipcRenderer.send(IPC.tabDragBegin, sessionId),
+  openConversationWindow: (payload) => ipcRenderer.send(IPC.windowOpenConversation, payload),
+  tabDragBegin: (payload) => ipcRenderer.send(IPC.tabDragBegin, payload),
   tabDragHover: () => ipcRenderer.send(IPC.tabDragHover),
   tabDragDrop: () => ipcRenderer.invoke(IPC.tabDragDrop),
   tabDragCancel: () => ipcRenderer.send(IPC.tabDragCancel),
@@ -44,12 +46,21 @@ const api: SwitchboardApi = {
   onTabDragLeave: (cb) => subscribe(IPC.tabDragLeave, cb as never),
   onTabDropHere: (cb) => subscribe(IPC.tabDropHere, cb as never),
   tabsChanged: (sessionIds) => ipcRenderer.send(IPC.tabsChanged, sessionIds),
+  persistTabLayout: (layout) => ipcRenderer.send(IPC.tabWorkspaceChanged, layout),
   onTabsElsewhere: (cb) => subscribe(IPC.tabsElsewhere, cb as never),
   revealConversation: (sessionId) => ipcRenderer.send(IPC.conversationReveal, sessionId),
+  resumeConversationElsewhere: (sessionId) => ipcRenderer.send(IPC.conversationResume, sessionId),
   claimConversation: (sessionId) => ipcRenderer.send(IPC.conversationClaim, sessionId),
   onTabActivate: (cb) => subscribe(IPC.tabActivate, cb as never),
+  onTabResume: (cb) => subscribe(IPC.tabResume, cb as never),
   onTabRelease: (cb) => subscribe(IPC.tabRelease, cb as never),
-  claimTerminal: (ptyId) => ipcRenderer.send(IPC.ptyClaim, ptyId),
+  shouldReleaseTab: (sessionId) => ipcRenderer.invoke(IPC.tabShouldRelease, sessionId),
+  claimTerminal: (ptyId) => ipcRenderer.invoke(IPC.ptyClaim, ptyId),
+  onPtySnapshotRequest: (cb) => subscribe(IPC.ptySnapshotRequest, cb as never),
+  replyPtySnapshot: (requestId, ptyId, snapshot) =>
+    ipcRenderer.send(IPC.ptySnapshotReply, requestId, ptyId, snapshot),
+  onPtySnapshotStage: (cb) => subscribe(IPC.ptySnapshotStage, cb as never),
+  confirmPtySnapshotRestored: (ptyId) => ipcRenderer.send(IPC.ptySnapshotRestored, ptyId),
   setBackgroundColor: (color) => ipcRenderer.send(IPC.windowSetBackgroundColor, color),
   syncTrafficLights: () => ipcRenderer.send(IPC.windowSyncTrafficLights),
   onRefreshStart: (cb) => subscribe(IPC.appRefreshStart, cb as never),
@@ -61,9 +72,11 @@ const api: SwitchboardApi = {
   getPathForFile: (file) => webUtils.getPathForFile(file),
 
   getUpdateInfo: () => ipcRenderer.invoke(IPC.updatesGetInfo),
-  checkForUpdates: () => ipcRenderer.invoke(IPC.updatesCheck),
+  checkForUpdates: (force = false) => ipcRenderer.invoke(IPC.updatesCheck, force),
   runUpdate: () => ipcRenderer.invoke(IPC.updatesRun),
   onUpdateProgress: (cb) => subscribe(IPC.updatesProgress, cb as never),
+  getUpdateRunState: () => ipcRenderer.invoke(IPC.updatesRunStateGet),
+  onUpdateRunState: (cb) => subscribe(IPC.updatesRunStateChanged, cb as never),
   relaunchForUpdate: () => ipcRenderer.send(IPC.updatesRelaunch)
 }
 
@@ -85,17 +98,38 @@ contextBridge.exposeInMainWorld('devLabel', process.env.SWITCHBOARD_DEV_LABEL?.t
 const WINDOW_FLAG = '--sb-window='
 function readWindowInit(): WindowInit {
   const arg = process.argv.find((a) => a.startsWith(WINDOW_FLAG))
-  if (!arg) return { sessionIds: [], collapseRail: false }
+  if (!arg) {
+    return {
+      sessionIds: [],
+      activeSessionId: null,
+      restoredTabs: null,
+      primary: true,
+      collapseRail: false
+    }
+  }
   try {
     const parsed = JSON.parse(arg.slice(WINDOW_FLAG.length)) as Partial<WindowInit>
+    const sessionIds = Array.isArray(parsed.sessionIds)
+      ? [...new Set(parsed.sessionIds.filter((id): id is string => typeof id === 'string' && !!id))]
+      : []
     return {
-      sessionIds: Array.isArray(parsed.sessionIds)
-        ? parsed.sessionIds.filter((id): id is string => typeof id === 'string' && !!id)
-        : [],
+      sessionIds,
+      activeSessionId:
+        typeof parsed.activeSessionId === 'string' && sessionIds.includes(parsed.activeSessionId)
+          ? parsed.activeSessionId
+          : sessionIds[0] ?? null,
+      restoredTabs: sanitizeTabLayout(parsed.restoredTabs),
+      primary: parsed.primary === true,
       collapseRail: parsed.collapseRail === true
     }
   } catch {
-    return { sessionIds: [], collapseRail: false }
+    return {
+      sessionIds: [],
+      activeSessionId: null,
+      restoredTabs: null,
+      primary: true,
+      collapseRail: false
+    }
   }
 }
 contextBridge.exposeInMainWorld('sbWindow', readWindowInit())

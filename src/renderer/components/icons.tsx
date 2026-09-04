@@ -104,6 +104,15 @@ export const Info = (p: IconProps) =>
     </>,
     p
   )
+export const Warning = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M10.3 3.7 2.2 18a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </>,
+    p
+  )
 // Person (head + shoulders) — the "You" section tag's mark, the human counterpart to the agent logos.
 export const Person = (p: IconProps) =>
   svg(
@@ -152,8 +161,13 @@ export const PanelRight = (p: IconProps) =>
 export const SplitVertical = (p: IconProps) =>
   svg(
     <>
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <line x1="12" y1="4" x2="12" y2="20" />
+      {/* TWO separate frames with a gap between them. What this must not be is one rectangle with a
+          single interior stroke — that was a near-copy of PanelLeft, differing only in where the stroke
+          sat, so the rail toggle and the split toggle read as the same control two positions apart. Two
+          detached panes is a distinct silhouette at 16px, which is the only size that matters. Drawn to
+          PanelLeft's 3→21 box so it does not also look a size smaller than its neighbours. */}
+      <rect x="3" y="3" width="8" height="18" rx="2" />
+      <rect x="13" y="3" width="8" height="18" rx="2" />
     </>,
     p
   )

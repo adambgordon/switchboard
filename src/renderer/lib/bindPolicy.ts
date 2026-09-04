@@ -52,6 +52,8 @@ export interface BindActions {
    *  holds that guard, because it is the half that owns the pane state. Asking the same question in
    *  both places is how the two answers drift apart. */
   tabs: 'rekey' | 'retarget' | 'none'
+  /** Multi-selected tabs are terminal-owned for the member whose id changes. */
+  tabSelection: 'rekey' | 'retarget' | 'none'
 }
 
 const INERT: BindActions = {
@@ -60,7 +62,8 @@ const INERT: BindActions = {
   view: 'none',
   retargetLiveOrder: false,
   focus: false,
-  tabs: 'none'
+  tabs: 'none',
+  tabSelection: 'none'
 }
 
 /**
@@ -79,7 +82,8 @@ export function bindActions(ev: BindEvent, selectedId: string | null): BindActio
       view: 'move',
       retargetLiveOrder: true,
       focus: true,
-      tabs: 'rekey'
+      tabs: 'rekey',
+      tabSelection: 'rekey'
     }
   }
   // A correction. Both ids name durable conversations: the old one drops back to Recent with its
@@ -91,6 +95,7 @@ export function bindActions(ev: BindEvent, selectedId: string | null): BindActio
     view: selected ? 'copy' : 'none',
     retargetLiveOrder: true,
     focus: selected,
-    tabs: 'retarget'
+    tabs: 'retarget',
+    tabSelection: selected ? 'retarget' : 'none'
   }
 }

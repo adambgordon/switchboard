@@ -4,8 +4,9 @@ import TerminalView from './TerminalView'
 
 interface Props {
   activePtys: PtyState[]
-  visiblePtyId: string | null
-  deckVisible: boolean
+  homes: Record<string, number>
+  paneHosts: Array<HTMLElement | null>
+  visiblePtyIds: Array<string | null>
   /** A focus request: `{ sessionId, n }` where `n` is a bump counter. Only the matching
    *  session's TerminalView receives a non-null `focusKey`. */
   focusReq: { sessionId: string; n: number } | null
@@ -21,32 +22,40 @@ interface Props {
  * xterm instances stay alive). This is what makes bouncing between live sessions
  * instant.
  */
-export default function TerminalDeck({ activePtys, visiblePtyId, deckVisible, focusReq, theme, onMarkUnread }: Props) {
+export default function TerminalDeck({
+  activePtys,
+  homes,
+  paneHosts,
+  visiblePtyIds,
+  focusReq,
+  theme,
+  onMarkUnread
+}: Props) {
   return (
-    <div className="sb-term-deck" style={{ display: deckVisible ? 'block' : 'none' }}>
+    <>
       {activePtys.map((p) => {
-        const isVisible = deckVisible && p.ptyId === visiblePtyId
+        const pane = homes[p.ptyId]
+        if (pane == null) return null
+        const mountNode = paneHosts[pane] ?? paneHosts[0]
+        if (!mountNode) return null
+        const isVisible = visiblePtyIds[pane] === p.ptyId
         // A focus request aimed at this session passes its bump counter down; every other
         // terminal gets null and so never auto-focuses just from becoming visible.
         const focusKey = focusReq && focusReq.sessionId === p.sessionId ? focusReq.n : null
         return (
-          <div
+          <TerminalView
             key={p.ptyId}
-            className="sb-term-host"
-            style={{ display: isVisible ? 'block' : 'none' }}
-          >
-            <TerminalView
-              ptyId={p.ptyId}
-              sessionId={p.sessionId}
-              agent={p.agent}
-              visible={isVisible}
-              focusKey={focusKey}
-              theme={theme}
-              onMarkUnread={onMarkUnread}
-            />
-          </div>
+            mountNode={mountNode}
+            ptyId={p.ptyId}
+            sessionId={p.sessionId}
+            agent={p.agent}
+            visible={isVisible}
+            focusKey={focusKey}
+            theme={theme}
+            onMarkUnread={onMarkUnread}
+          />
         )
       })}
-    </div>
+    </>
   )
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 /**
- * The "tabs and split view" preference, persisted in localStorage. On by default.
+ * The "tabs and split view" preference, persisted in localStorage. Off by default.
  *
  * One switch governs the whole family — the tab strip, the vertical split, and opening a
  * conversation in its own window — because they are one model, not three features.
@@ -14,19 +14,27 @@ import { useCallback, useEffect, useState } from 'react'
  * liveness and read-state paths asks about it. A flag that forked the state model would double the
  * number of places every invariant has to hold.
  *
- * Owned once in App, like the other preference hooks — a second `useState(load)` copy would desync
- * from this one's writes.
+ * Owned once per window in App, like the other preference hooks. Open windows synchronize through
+ * the storage event, so one app preference cannot leave them running different interaction models.
  */
 const KEY = 'switchboard.tabs'
+const DEFAULT_ENABLED = false
+
+function parse(raw: string | null): boolean {
+  if (!raw) return DEFAULT_ENABLED
+  try {
+    const o = JSON.parse(raw) as { enabled?: unknown }
+    return typeof o.enabled === 'boolean' ? o.enabled : DEFAULT_ENABLED
+  } catch {
+    return DEFAULT_ENABLED
+  }
+}
 
 function load(): boolean {
   try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return true
-    const o = JSON.parse(raw) as { enabled?: unknown }
-    return typeof o.enabled === 'boolean' ? o.enabled : true
+    return parse(localStorage.getItem(KEY))
   } catch {
-    return true
+    return DEFAULT_ENABLED
   }
 }
 
@@ -35,7 +43,7 @@ export interface TabsEnabled {
   setEnabled: (value: boolean) => void
 }
 
-/** Persisted tabs-and-split preference (default on). */
+/** Persisted tabs-and-split preference (default off). */
 export function useTabsEnabled(): TabsEnabled {
   const [enabled, setEnabledState] = useState<boolean>(load)
 
@@ -46,6 +54,14 @@ export function useTabsEnabled(): TabsEnabled {
       /* storage unavailable */
     }
   }, [enabled])
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === null || event.key === KEY) setEnabledState(load())
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
 
   const setEnabled = useCallback((v: boolean) => setEnabledState(v), [])
 

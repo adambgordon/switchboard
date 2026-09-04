@@ -19,6 +19,9 @@
  *     new pane the previous occupant's terminals.
  */
 
+import type { PersistedTabLayout } from '@shared/types'
+import { sanitizeTabLayout } from '../../shared/tabWorkspace'
+
 /** A conversation occupying a slot in a pane. */
 export interface Tab {
   sessionId: string
@@ -52,11 +55,13 @@ export interface PaneLayout {
 /** How an open should treat the tab it lands on. */
 export type OpenMode = 'preview' | 'persistent'
 
-export const SPLIT_LIMITS = { min: 0.2, default: 0.5, max: 0.8 } as const
+export const SPLIT_LIMITS = { min: 0.25, default: 0.5, max: 0.75 } as const
 
 export type PaneAction =
   /** Land on a conversation. The single entry point for every navigation. */
   | { type: 'open'; sessionId: string; mode: OpenMode; pane?: number; focus?: boolean }
+  /** Append an ordered tab group and activate the tab the transfer was performed on. */
+  | { type: 'openMany'; sessionIds: string[]; activeSessionId: string; pane?: number }
   /** Make a preview tab stick (acting on the conversation, or an explicit gesture). */
   | { type: 'promote'; sessionId: string; pane?: number }
   | { type: 'close'; pane: number; index: number }
@@ -70,12 +75,19 @@ export type PaneAction =
    * sees the states in between, so the batch has to happen here.
    */
   | { type: 'closeMany'; sessionIds: string[] }
-  | { type: 'moveMany'; sessionIds: string[]; to: { pane: number; index: number } }
+  | {
+      type: 'moveMany'
+      sessionIds: string[]
+      activeSessionId: string
+      to: { pane: number; index: number }
+    }
   | { type: 'activate'; pane: number; index: number }
   /** Show the welcome screen in the focused pane without disturbing its tabs. */
   | { type: 'deselect' }
   | { type: 'move'; from: { pane: number; index: number }; to: { pane: number; index: number } }
-  /** Add the second pane. Its id is supplied because the reducer mints nothing. */
+  /** Add the second pane and move the active tab into it. */
+  | { type: 'splitActive'; paneId: string }
+  /** Add an empty second pane for a compound placement such as Open to the Side. */
   | { type: 'split'; paneId: string }
   | { type: 'unsplit' }
   | { type: 'focusPane'; index: number }
@@ -95,6 +107,35 @@ export function initialLayout(paneId: string): PaneLayout {
   }
 }
 
+export function restorePaneLayout(
+  saved: PersistedTabLayout | null | undefined,
+  paneIds: readonly string[]
+): PaneLayout {
+  const valid = sanitizeTabLayout(saved)
+  if (!valid) return initialLayout(paneIds[0] ?? 'p0')
+  const panes = valid.panes.map((pane, index): Pane => {
+    const tabs = pane.sessionIds.map((sessionId) => ({ sessionId, preview: false }))
+    return {
+      id: paneIds[index] ?? `p${index}`,
+      tabs,
+      activeIndex: pane.activeSessionId === null
+        ? -1
+        : Math.max(0, tabs.findIndex((tab) => tab.sessionId === pane.activeSessionId))
+    }
+  })
+  return { panes, focusIndex: 0, splitFraction: SPLIT_LIMITS.default }
+}
+
+export function snapshotPaneLayout(layout: PaneLayout): PersistedTabLayout | null {
+  const panes = layout.panes
+    .map((pane) => ({
+      sessionIds: pane.tabs.map((tab) => tab.sessionId),
+      activeSessionId: paneActiveId(pane)
+    }))
+    .filter((pane) => pane.sessionIds.length > 0)
+  return panes.length > 0 ? { panes } : null
+}
+
 // --- readers -------------------------------------------------------------------------------------
 
 /** The active tab's session id in a pane, or null when the pane is empty. */
@@ -106,6 +147,32 @@ export function paneActiveId(pane: Pane): string | null {
 export function activeTabId(layout: PaneLayout): string | null {
   const pane = layout.panes[layout.focusIndex]
   return pane ? paneActiveId(pane) : null
+}
+
+/** Whether the title-bar split can move the active tab right without emptying the left pane. */
+export function canSplitActiveTab(layout: PaneLayout): boolean {
+  if (layout.panes.length !== 1) return false
+  const pane = layout.panes[0]
+  return pane.tabs.length > 1 && pane.activeIndex >= 0
+}
+
+/** Whether moving/opening these tabs in a side pane leaves every existing source populated. */
+export function canPlaceTabsToSide(
+  layout: PaneLayout,
+  sessionIds: readonly string[],
+  targetPane: number
+): boolean {
+  const moving = new Set(sessionIds)
+  if (layout.panes.length === 1) {
+    return layout.panes[0].tabs.some((tab) => !moving.has(tab.sessionId))
+  }
+  for (let paneIndex = 0; paneIndex < layout.panes.length; paneIndex++) {
+    if (paneIndex === targetPane) continue
+    const pane = layout.panes[paneIndex]
+    const moved = pane.tabs.filter((tab) => moving.has(tab.sessionId)).length
+    if (moved > 0 && moved === pane.tabs.length) return false
+  }
+  return true
 }
 
 /** Every conversation with a tab anywhere in the window. */
@@ -244,6 +311,30 @@ function pruneEmptyPanes(layout: PaneLayout): PaneLayout {
 
 export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
   switch (action.type) {
+    case 'openMany': {
+      const target = resolvePane(state, action.pane)
+      const sessionIds = [...new Set(action.sessionIds)]
+      if (sessionIds.length === 0) return state
+      const activeSessionId = sessionIds.includes(action.activeSessionId)
+        ? action.activeSessionId
+        : sessionIds[0]
+      const incoming = sessionIds.map((sessionId): Tab => {
+        const found = locateTab(state, sessionId)
+        const tab = found ? state.panes[found.pane].tabs[found.index] : { sessionId, preview: false }
+        // A transfer is deliberate placement, so even an existing preview tab becomes persistent.
+        return { ...tab, preview: false }
+      })
+      const moved = new Set(sessionIds)
+      const stripped = state.panes.map((pane) => pane.tabs.filter((tab) => !moved.has(tab.sessionId)))
+      const tabs = [...stripped[target], ...incoming]
+      const panes = state.panes.map((pane, index) =>
+        index === target
+          ? { ...pane, tabs, activeIndex: tabs.findIndex((tab) => tab.sessionId === activeSessionId) }
+          : { ...pane, tabs: stripped[index], activeIndex: activeAfterKeep(pane, stripped[index]) }
+      )
+      return pruneEmptyPanes({ ...state, panes, focusIndex: target })
+    }
+
     case 'open': {
       const target = resolvePane(state, action.pane)
       const pane = state.panes[target]
@@ -440,27 +531,54 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       const kill = new Set(action.sessionIds)
       const dstIndex = action.to.pane
       if (kill.size === 0 || !state.panes[dstIndex]) return state
-      // Gathered by walking the panes in order, so the group arrives laid out the way it looked —
-      // taking them in the caller's argument order would let the strip silently rearrange itself.
-      const moving: Tab[] = []
-      for (const pane of state.panes) {
-        for (const tab of pane.tabs) {
-          // Promoted on arrival, like a single cross-pane move: a deliberate placement is not a
-          // preview, and several preview tabs landing together would break the one-preview rule.
-          if (kill.has(tab.sessionId)) moving.push({ ...tab, preview: false })
+      const moving: Array<{ tab: Tab; pane: number }> = []
+      for (let paneIndex = 0; paneIndex < state.panes.length; paneIndex++) {
+        for (const tab of state.panes[paneIndex].tabs) {
+          if (kill.has(tab.sessionId)) moving.push({ tab, pane: paneIndex })
         }
       }
       if (moving.length === 0) return state
+      const samePane = moving.every((item) => item.pane === dstIndex)
       const stripped = state.panes.map((pane) => pane.tabs.filter((t) => !kill.has(t.sessionId)))
       const dstTabs = stripped[dstIndex]
       const at = clamp(action.to.index, 0, dstTabs.length)
-      const merged = [...dstTabs.slice(0, at), ...moving, ...dstTabs.slice(at)]
+      const arrivals = moving.map(({ tab }) => (samePane ? tab : { ...tab, preview: false }))
+      const merged = [...dstTabs.slice(0, at), ...arrivals, ...dstTabs.slice(at)]
+      const previousActive = paneActiveId(state.panes[dstIndex])
+      const arrivalActive = arrivals.some((tab) => tab.sessionId === action.activeSessionId)
+        ? action.activeSessionId
+        : arrivals[0].sessionId
       const panes = state.panes.map((pane, i) =>
         i === dstIndex
-          ? { ...pane, tabs: merged, activeIndex: at }
+          ? {
+              ...pane,
+              tabs: merged,
+              activeIndex: samePane
+                ? previousActive
+                  ? merged.findIndex((tab) => tab.sessionId === previousActive)
+                  : -1
+                : merged.findIndex((tab) => tab.sessionId === arrivalActive)
+            }
           : { ...pane, tabs: stripped[i], activeIndex: activeAfterKeep(pane, stripped[i]) }
       )
-      return pruneEmptyPanes({ ...state, panes, focusIndex: dstIndex })
+      return pruneEmptyPanes({ ...state, panes, focusIndex: samePane ? state.focusIndex : dstIndex })
+    }
+
+    case 'splitActive': {
+      if (!canSplitActiveTab(state)) return state
+      const source = state.panes[0]
+      const split = {
+        ...state,
+        panes: [...state.panes, { id: action.paneId, tabs: [], activeIndex: -1 }],
+        focusIndex: 0
+      }
+      // Reuse the ordinary cross-pane move: deliberate placement promotes a preview tab, adjusts
+      // the left pane's selection, and gives the destination pane the keyboard.
+      return paneReducer(split, {
+        type: 'move',
+        from: { pane: 0, index: source.activeIndex },
+        to: { pane: 1, index: 0 }
+      })
     }
 
     case 'split': {

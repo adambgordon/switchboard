@@ -5,6 +5,7 @@ import {
   extendSelection,
   hasGroup,
   pruneSelection,
+  retargetSelection,
   selectOnly,
   toggleSelected,
   type TabSelection
@@ -127,10 +128,31 @@ describe('extendSelection — ⇧-click', () => {
     expect(after.anchor).toBe('B')
   })
 
+  it('anchors on the ACTIVE tab when there is no selection yet', () => {
+    // The first ⇧-click, and the whole point of ⇧ over ⌘: active on B, ⇧-click D takes the run B..D
+    // rather than selecting D alone. Asserted with a fixture where the two answers differ by three
+    // tabs, so a version ignoring `activeId` cannot pass.
+    expect([...extendSelection(NO_SELECTION, 0, ORDER, 'D', 'B').ids]).toEqual(['B', 'C', 'D'])
+    // And backwards from the active tab.
+    expect([...extendSelection(NO_SELECTION, 0, ORDER, 'A', 'C').ids]).toEqual(['A', 'B', 'C'])
+  })
+
+  it('prefers an existing anchor over the active tab', () => {
+    // Once a run has been started, further ⇧-clicks extend from where it started — not from whatever
+    // became active as a side effect. Otherwise a shift-click could never be corrected.
+    expect([...extendSelection(sel(0, ['B'], 'B'), 0, ORDER, 'E', 'D').ids]).toEqual([
+      'B',
+      'C',
+      'D',
+      'E'
+    ])
+  })
+
   it('starts a new anchor when there is none, or the old one is gone', () => {
+    // No anchor AND no active tab — an empty pane, or the welcome screen.
     expect(extendSelection(NO_SELECTION, 0, ORDER, 'C')).toEqual(sel(0, ['C'], 'C'))
-    // Anchor names a tab that has since closed.
-    expect(extendSelection(sel(0, ['Z'], 'Z'), 0, ORDER, 'C')).toEqual(sel(0, ['C'], 'C'))
+    // Anchor names a tab that has since closed, and nothing is active.
+    expect(extendSelection(sel(0, ['Z'], 'Z'), 0, ORDER, 'C', null)).toEqual(sel(0, ['C'], 'C'))
   })
 
   it('ignores a click on a tab that is not in this pane', () => {
@@ -201,5 +223,24 @@ describe('pruneSelection', () => {
     // Two panes, and the selection is in the second. Checking pane 0's tabs would discard everything.
     const after = pruneSelection(sel(1, ['Y', 'Z'], 'Y'), [ORDER, ['X', 'Y', 'Z']])
     expect([...after.ids].sort()).toEqual(['Y', 'Z'])
+  })
+})
+
+describe('retargetSelection', () => {
+  it('moves a selected member and its anchor to the bound id', () => {
+    expect(retargetSelection(sel(0, ['A', 'OLD', 'C'], 'OLD'), 'OLD', 'NEW')).toEqual(
+      sel(0, ['A', 'NEW', 'C'], 'NEW')
+    )
+  })
+
+  it('deduplicates when the bound id is already selected', () => {
+    expect([...retargetSelection(sel(0, ['OLD', 'NEW'], 'OLD'), 'OLD', 'NEW').ids]).toEqual([
+      'NEW'
+    ])
+  })
+
+  it('returns the same selection when the old id is absent', () => {
+    const before = sel(1, ['A', 'B'], 'A')
+    expect(retargetSelection(before, 'OLD', 'NEW')).toBe(before)
   })
 })

@@ -65,6 +65,12 @@ export default function TooltipLayer() {
       })
     }
     const onOver = (e: MouseEvent): void => {
+      // Never while a button is held. A drag sweeps the pointer across the whole window, so every
+      // `data-tip` host it passes would arm a tooltip — and one duly appeared over a tab being
+      // dragged, describing a conversation the user was in the middle of moving. Stated as "no
+      // tooltips during any drag" rather than as a check for this particular one: a label explaining
+      // what is under the pointer is meaningless while the pointer is carrying something.
+      if (e.buttons !== 0) return
       const el = (e.target as Element | null)?.closest('[data-tip]') ?? null
       if (!el || el === activeRef.current) return
       activeRef.current = el
