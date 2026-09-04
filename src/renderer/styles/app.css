@@ -435,9 +435,13 @@ body.sb-resizing .sb-pane {
   color: var(--ink-ghost);
   transition: all var(--dur-fast) var(--ease);
 }
-.sb-panel-toggle:hover {
+.sb-panel-toggle:hover:not(:disabled) {
   color: var(--ink);
   background: var(--paper-hover);
+}
+.sb-panel-toggle:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 .sb-panel-toggle.active {
   color: var(--ink-soft);
@@ -597,7 +601,10 @@ body.sb-resizing .sb-pane {
   display: flex;
   gap: 5px;
   flex-shrink: 0;
-  width: 76px;
+  width: 96px;
+}
+.sb-shortcut-keys .sb-kbd {
+  white-space: nowrap;
 }
 .sb-shortcut-desc {
   font-size: var(--text-sm);
@@ -775,17 +782,20 @@ body.sb-resizing .sb-pane {
 }
 /* The settings pages read as one flat divided list: their groups add no gap of their own (the
    per-setting padding is the rhythm), the first setting hugs the top, and the last drops its divider
-   + pad. Applies to both settings content pages (Appearance / Application). */
+   + pad. */
 .sb-page-appearance .sb-modal-group,
-.sb-page-application .sb-modal-group {
+.sb-page-application .sb-modal-group,
+.sb-page-beta .sb-modal-group {
   margin-top: 0;
 }
 .sb-page-appearance .sb-modal-group:first-child .sb-setting:first-child,
-.sb-page-application .sb-modal-group:first-child .sb-setting:first-child {
+.sb-page-application .sb-modal-group:first-child .sb-setting:first-child,
+.sb-page-beta .sb-modal-group:first-child .sb-setting:first-child {
   padding-top: 0;
 }
 .sb-page-appearance .sb-modal-group:last-child .sb-setting:last-child,
-.sb-page-application .sb-modal-group:last-child .sb-setting:last-child {
+.sb-page-application .sb-modal-group:last-child .sb-setting:last-child,
+.sb-page-beta .sb-modal-group:last-child .sb-setting:last-child {
   padding-bottom: 0;
   border-bottom: none;
 }
@@ -806,6 +816,22 @@ body.sb-resizing .sb-pane {
 .sb-setting-desc strong {
   font-weight: 600;
   color: var(--ink);
+}
+.sb-beta-callout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--paper-sunken);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.sb-beta-callout svg {
+  flex-shrink: 0;
+  color: var(--ink-faint);
 }
 /* shrink the inline ⌘N glyph from its full key-cap size so it sits in the sentence */
 .sb-setting-desc .sb-kbd {

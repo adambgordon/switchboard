@@ -26,15 +26,12 @@
 }
 /* Which pane has the keyboard is shown IN the pane, never in the rail — the rail rings only the
    focused pane's active tab, so selection stays the single tier the design requires. The primary cue
-   is the tab strip's own active-tab marker (see .sb-tab.active.focused); this softens the unfocused
-   pane's rules as a quieter second signal, which also covers a pane holding no tabs at all. Scoped to
-   `.split` because a lone pane is always the focused one and must look untouched. */
+   is the tab strip's own active-tab ink (see .sb-tab.active.focused); the header rule softens as a
+   quieter second signal, which also covers a pane holding no tabs at all. Scoped to `.split` because
+   a lone pane is always the focused one and must look untouched. Tab-row rules deliberately stay
+   constant: changing their strength when split focus is recreated reads as their weight changing. */
 .sb-panes.split .sb-pane:not(.pane-focused) .sb-pane-header {
   border-bottom-color: var(--rule-soft);
-}
-/* The strip's rules are a gradient, not a border, so they soften through their own custom property. */
-.sb-panes.split .sb-pane:not(.pane-focused) .sb-tabstrip {
-  --tab-rule: var(--rule-soft);
 }
 /* The pane is programmatically focusable (tabIndex -1) so a conversation click can hand it the
    keyboard immediately — quiet selection + ⌘F routing — before the transcript mounts/loads. No
@@ -156,15 +153,6 @@
   }
 }
 
-/* Stage 3 — Find and Pin leave the header. Deliberately NOT folded into an overflow menu: both keep a
-   full equivalent already (⌘F opens find; pinning is on the rail row's own menu), so a new popover
-   would be a third way to reach two things that have two. */
-@container pane (max-width: 400px) {
-  .sb-pane-find,
-  .sb-pane-pin {
-    display: none;
-  }
-}
 .sb-pane-pin {
   display: inline-flex;
   align-items: center;
@@ -364,4 +352,55 @@ kbd {
 }
 .sb-pane-find.active {
   color: var(--ink-soft);
+}
+
+/* Stage 3 — Find and Pin leave the header. This must follow both controls' base display rules or the
+   equal-specificity declarations above win by source order. Both actions remain available elsewhere:
+   ⌘F opens find, and the rail row menu owns pinning. */
+@container pane (max-width: 400px) {
+  .sb-pane-find,
+  .sb-pane-pin {
+    display: none;
+  }
+  .sb-pane-header:has(.sb-find) .sb-pane-id,
+  .sb-pane-header:has(.sb-find) .sb-pane-actions {
+    display: none;
+  }
+  .sb-find {
+    flex: 1;
+    min-width: 0;
+  }
+  .sb-find-input {
+    flex: 1;
+    width: auto;
+    min-width: 60px;
+  }
+}
+
+@container pane (max-width: 240px) {
+  .sb-pane-header {
+    gap: 4px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .sb-pane-id {
+    display: none;
+  }
+  .sb-pane-actions {
+    flex: 1;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .sb-btn-ghost {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .sb-pane-action-label,
+  .sb-find-count {
+    display: none;
+  }
+  .sb-find {
+    gap: 4px;
+    padding-left: 8px;
+  }
 }
