@@ -51,9 +51,23 @@ describe('reconcileWindowTabs', () => {
     expect(shouldReleaseTab(owners, 1, 'TARGET')).toBe(false)
   })
 
+  // A release queued for a window that has since become the tab's ONLY holder must be dropped.
+  // The owner entry disappears when the claiming window closes (`releaseWindow` forgets its tabs),
+  // so the queued release arrives with the session unowned. Answering "release" there closes the
+  // last tab for a conversation that is still open — it vanishes from every window.
+  it('drops a queued release once no other window owns the tab', () => {
+    const owners = new Map([['TARGET', 2]])
+    expect(shouldReleaseTab(owners, 1, 'TARGET')).toBe(true)
+    owners.delete('TARGET')
+    expect(shouldReleaseTab(owners, 1, 'TARGET')).toBe(false)
+  })
+
+  // Starting from an EMPTY map cannot catch a missing dedup: setting the same id twice lands on the
+  // identical final state, so a raw-array loop and a de-duplicated one agree. Pre-owning the id
+  // elsewhere is what separates them — an undeduplicated loop emits the release twice.
   it('deduplicates repeated ids in a malformed renderer report', () => {
-    const owners = new Map<string, number>()
-    expect(reconcileWindowTabs(owners, 1, ['A', 'A'])).toEqual([])
-    expect([...owners]).toEqual([['A', 1]])
+    const owners = new Map([['A', 2]])
+    expect(reconcileWindowTabs(owners, 1, ['A', 'A'])).toEqual([{ sessionId: 'A', ownerId: 1 }])
+    expect([...owners]).toEqual([['A', 2]])
   })
 })

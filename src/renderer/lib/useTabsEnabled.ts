@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useStorageSync } from './useStorageSync'
 
 /**
  * The "tabs and split view" preference, persisted in localStorage. Off by default.
@@ -55,13 +56,7 @@ export function useTabsEnabled(): TabsEnabled {
     }
   }, [enabled])
 
-  useEffect(() => {
-    const onStorage = (event: StorageEvent): void => {
-      if (event.key === null || event.key === KEY) setEnabledState(load())
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  useStorageSync(KEY, load, setEnabledState)
 
   const setEnabled = useCallback((v: boolean) => setEnabledState(v), [])
 
