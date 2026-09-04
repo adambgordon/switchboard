@@ -14,6 +14,7 @@ import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
 import { bindActions } from './lib/bindPolicy'
+import { tabPersistAction } from './lib/tabPersistPolicy'
 import { PANE_LIMITS, useLayout } from './lib/useLayout'
 import { usePaneLayout } from './lib/usePaneLayout'
 import { useTabsEnabled } from './lib/useTabsEnabled'
@@ -1230,8 +1231,15 @@ export default function App() {
   }, [openIdsKey])
   const persistedTabLayout = useMemo(() => snapshotPaneLayout(paneLayout), [paneLayout])
   const persistedTabLayoutKey = JSON.stringify(persistedTabLayout)
+  // Seeded with the mount-time value so a window that STARTS with the preference off reads as
+  // "still off" rather than as a fresh switch-off — see tabPersistPolicy for why that distinction
+  // is the difference between honouring the setting and deleting the user's saved layout.
+  const tabsEnabledWasRef = useRef(tabsEnabled)
   useEffect(() => {
-    window.api.persistTabLayout(tabsEnabled ? persistedTabLayout : null)
+    const action = tabPersistAction(tabsEnabledWasRef.current, tabsEnabled)
+    tabsEnabledWasRef.current = tabsEnabled
+    if (action === 'persist') window.api.persistTabLayout(persistedTabLayout)
+    else if (action === 'clear') window.api.persistTabLayout(null)
   }, [tabsEnabled, persistedTabLayoutKey])
 
   useEffect(() => {
