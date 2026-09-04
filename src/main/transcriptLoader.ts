@@ -29,6 +29,11 @@ export class TranscriptLoader {
       try {
         return await this.parseSource(source)
       } catch {
+        // Forget the path so the next request resolves it again. A session's file can MOVE while
+        // the app runs — Claude derives its project directory from the cwd, so renaming that
+        // directory re-encodes the path — and a cached path that no longer exists would otherwise
+        // fail here on every future load, leaving the transcript permanently blank until restart.
+        this.sources.delete(sessionId)
         return null
       }
     })().finally(() => {

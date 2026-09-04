@@ -8,6 +8,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import type { AgentKind, PtySnapshot } from '@shared/types'
+import { HANDOFF_SCROLLBACK_ROWS } from '@shared/terminalHistory'
 import { attachPty, pendingPtySnapshot } from '../lib/ptyStream'
 import type { ResolvedTheme } from '../lib/theme'
 import { installScrollbackSafeScrollUp } from '../lib/xtermScrollUp'
@@ -127,7 +128,6 @@ const CODEX_REFRESH_FOLLOW_MS = 1000
 const CODEX_REPLAY_FOLLOW_MS = 1000
 const CODEX_REPLAY_FOLLOW_IDLE_MS = 250
 const CODEX_BOTTOM_PIN_TOLERANCE_ROWS = 1
-const HANDOFF_SCROLLBACK_ROWS = 2000
 
 export default function TerminalView({
   mountNode,
@@ -556,7 +556,12 @@ export default function TerminalView({
       cancelAnimationFrame(raf1)
       cancelAnimationFrame(raf2)
     }
-  }, [visible, ptyId, agent, fitAndResize])
+    // `mountNode` belongs here for the same reason `visible` does. Moving a tab between panes
+    // re-parents this terminal's host, and detaching an element from the document is another way
+    // xterm's observer sees it stop intersecting — but `visible` stays true across the move, so
+    // without this dep the effect never re-runs and the terminal can sit frozen on its last frame
+    // in its new pane. The re-parent effect above already treats `mountNode` as a stable dep.
+  }, [visible, mountNode, ptyId, agent, fitAndResize])
 
   // Focus only on an explicit, session-targeted request (click / Enter / resume / new /
   // go-live), tracked by a bump counter so re-focusing the same terminal still fires. A change

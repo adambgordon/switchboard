@@ -1,6 +1,5 @@
 import { type AgentKind } from '../../shared/types'
-
-const CODEX_REPLAY_ROWS = 2000
+import { CODEX_REPLAY_ROWS } from '../../shared/terminalHistory'
 
 const CODEX_OVERRIDES = [
   `tui.terminal_resize_reflow_max_rows=${CODEX_REPLAY_ROWS}`,
@@ -15,8 +14,8 @@ const CODEX_OVERRIDES = [
  * The shell command to type to boot an agent. Claude resumes by id (`--resume`) or starts a fresh
  * session with a PRE-ASSIGNED id (`--session-id`). Codex resumes by id (`codex resume <id>`) but
  * mints its OWN id for a new session. Codex rebuilds terminal scrollback from its source-backed
- * transcript after a resize; cap that replay explicitly because its automatic fallback for an
- * unidentified xterm host keeps only 1,000 rows.
+ * transcript after a resize; cap that replay explicitly rather than inheriting whatever its
+ * terminal detection resolves to for a host it does not recognise — see `shared/terminalHistory`.
  */
 export function bootCommandFor(
   agent: AgentKind,

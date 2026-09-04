@@ -1,4 +1,12 @@
-/** One cached async value with concurrent sharing and one trailing refresh when work changes mid-run. */
+/**
+ * One cached async value with concurrent sharing and AT MOST ONE trailing refresh when work
+ * changes mid-run.
+ *
+ * Deliberately not `cachedSingleFlight` (updater-core): that has no trailing pass, so a `force`
+ * arriving during a run joins it and returns the result the run had already computed. Here the
+ * mid-run request comes from a file watcher, so joining would mean silently dropping the change
+ * that triggered it.
+ */
 export class LatestTask<T> {
   private value: T | undefined
   private hasValue = false
@@ -25,13 +33,19 @@ export class LatestTask<T> {
     }
     const run = async (): Promise<T> => {
       let value!: T
-      do {
+      // At most ONE trailing pass. A change landing mid-run must not be lost — the watcher event
+      // for it IS the `refresh` call, so without a trailing pass it would never be picked up. But
+      // looping while changes keep arriving is unbounded, and every caller waiting on `get()` waits
+      // for the whole chain: a steady stream of writes can starve the conversation-list IPC for as
+      // long as it lasts. Two passes bound that; anything still pending rides the next event.
+      for (let pass = 0; pass < 2; pass += 1) {
         this.refreshAgain = false
         value = await this.load()
         this.value = value
         this.hasValue = true
         this.accept?.(value)
-      } while (this.refreshAgain)
+        if (!this.refreshAgain) break
+      }
       return value
     }
     const current = run().finally(() => {

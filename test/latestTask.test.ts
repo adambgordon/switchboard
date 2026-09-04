@@ -48,6 +48,30 @@ describe('LatestTask', () => {
     expect(accepted).toEqual([1, 2])
   })
 
+  // The trailing pass must be bounded, not merely "one per quiet run". A change arriving during
+  // the TRAILING pass used to queue another, so a steady stream of writes kept the loop going and
+  // every caller waiting on `get()` waited for the whole chain. This refreshes on every pass, so
+  // an unbounded implementation never stops; a bounded one stops at two.
+  it('stops after one trailing pass even while changes keep arriving', async () => {
+    const gates = [deferred<number>(), deferred<number>(), deferred<number>()]
+    let loads = 0
+    const task = new LatestTask(() => {
+      const gate = gates[loads]
+      loads += 1
+      // Request another refresh while THIS pass is in flight, every time.
+      queueMicrotask(() => void task.refresh())
+      return gate?.promise ?? Promise.resolve(-1)
+    })
+
+    const running = task.refresh()
+    gates[0].resolve(1)
+    await Promise.resolve()
+    await Promise.resolve()
+    gates[1].resolve(2)
+    await expect(running).resolves.toBe(2)
+    expect(loads).toBe(2)
+  })
+
   it('does not queue a second load for concurrent readers', async () => {
     const gate = deferred<number>()
     let loads = 0

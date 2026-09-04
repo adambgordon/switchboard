@@ -74,6 +74,50 @@ describe('TranscriptLoader', () => {
     await expect(loader.load('session', '2:10')).resolves.toBeNull()
     fail = false
     await expect(loader.load('session', '3:20')).resolves.toEqual(transcript('recovered'))
-    expect(resolves).toBe(2)
+  })
+
+  // A session's file can move while the app runs — Claude derives its project directory from the
+  // cwd, so renaming that directory re-encodes the path. Caching the resolved path forever meant
+  // every later parse threw against the stale path and the transcript stayed blank until restart.
+  // Asserting the recovered PATH rather than a resolve count is what pins this: a loader that
+  // merely re-resolved by luck would still hand the old path to `parseSource`.
+  it('re-resolves the path after a parse failure so a moved file recovers', async () => {
+    const paths = ['/old/session.jsonl', '/new/session.jsonl']
+    const attempted: string[] = []
+    const loader = new TranscriptLoader(
+      async () => ({ agent: 'claude', path: paths[Math.min(attempted.length, 1)] }),
+      async (source: TranscriptSource) => {
+        attempted.push(source.path)
+        if (source.path === '/old/session.jsonl') throw new Error('ENOENT')
+        return transcript('moved')
+      }
+    )
+
+    await expect(loader.load('session', '1:10')).resolves.toBeNull()
+    await expect(loader.load('session', '2:20')).resolves.toEqual(transcript('moved'))
+    expect(attempted).toEqual(['/old/session.jsonl', '/new/session.jsonl'])
+  })
+
+  // Sequential loads at different revisions cannot catch a key that ignores the revision, because
+  // each settles and is deleted before the next starts — both a keyed and an unkeyed loader parse
+  // twice. Only CONCURRENT loads at different revisions distinguish them: an unkeyed loader would
+  // hand the second caller the first revision's older parse.
+  it('does not share a concurrent parse across two different revisions', async () => {
+    const finishers: Array<(value: Transcript | null) => void> = []
+    const loader = new TranscriptLoader(
+      async () => ({ agent: 'claude', path: '/session.jsonl' }),
+      () => new Promise((resolve) => finishers.push(resolve))
+    )
+
+    const older = loader.load('session', '1:10')
+    const newer = loader.load('session', '2:20')
+    expect(newer).not.toBe(older)
+    await Promise.resolve()
+    expect(finishers).toHaveLength(2)
+
+    finishers[0](transcript('older'))
+    finishers[1](transcript('newer'))
+    await expect(older).resolves.toEqual(transcript('older'))
+    await expect(newer).resolves.toEqual(transcript('newer'))
   })
 })
