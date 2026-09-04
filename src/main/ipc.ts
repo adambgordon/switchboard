@@ -612,7 +612,7 @@ export function registerIpc(): void {
   // terminal). See PtyBindKind.
   mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) => {
     const ownerId = tabOwner.get(oldId) ?? ptyOwner.get(ptyId)
-    if (tabOwner.get(oldId) === ownerId) tabOwner.delete(oldId)
+    tabOwner.delete(oldId)
     if (ownerId != null) claimTabsForWindow(ownerId, [newId])
     broadcast(IPC.ptyBound, ptyId, oldId, newId, kind)
   })

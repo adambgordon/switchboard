@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { sanitizeTabLayout, sanitizeTabWorkspace } from '../src/shared/tabWorkspace'
+import {
+  MAX_RESTORED_WINDOWS,
+  sanitizeTabLayout,
+  sanitizeTabWorkspace
+} from '../src/shared/tabWorkspace'
 import { loadTabWorkspace, TabWorkspaceStore } from '../src/main/tabWorkspaceStore'
 
 const onePane = (ids: string[], active: string | null = ids[0] ?? null) => ({
@@ -56,6 +60,20 @@ describe('tab workspace sanitizing', () => {
       version: 1,
       windows: []
     })
+  })
+
+  // Panes were already bounded; windows were not. Every surviving entry becomes a real
+  // BrowserWindow at startup, so a truncated write or hand edit could bury the app under windows
+  // with no way back. Uses distinct ids per window so the global dedup cannot be what trims the
+  // list — otherwise this would pass even with no cap at all.
+  it('caps how many windows a corrupt workspace can reopen', () => {
+    const many = Array.from({ length: 40 }, (_, i) => onePane([`S${i}`]))
+    const kept = sanitizeTabWorkspace({ version: 1, windows: many }).windows
+
+    expect(kept).toHaveLength(MAX_RESTORED_WINDOWS)
+    // Keeps the FIRST entries, so restoration is a prefix of what was saved rather than a sample.
+    expect(kept[0]).toEqual(onePane(['S0']))
+    expect(kept[MAX_RESTORED_WINDOWS - 1]).toEqual(onePane([`S${MAX_RESTORED_WINDOWS - 1}`]))
   })
 })
 

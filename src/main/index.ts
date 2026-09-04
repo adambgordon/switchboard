@@ -142,10 +142,15 @@ function createWindow(init?: WindowInit): BrowserWindow {
     }
     if (appQuitting || closePrepared || BrowserWindow.getAllWindows().length < 2) return
     event.preventDefault()
-    void prepareWindowClose(wcId).finally(() => {
-      closePrepared = true
-      if (!win.isDestroyed()) win.close()
-    })
+    // Catch rather than `void` a floating promise: Node throws on an unhandled rejection, so a
+    // failure in here would take the app down mid-quit. The window must close either way — the
+    // preparation is a courtesy (handing owned terminals to a surviving window), not a gate.
+    prepareWindowClose(wcId)
+      .catch(() => {})
+      .finally(() => {
+        closePrepared = true
+        if (!win.isDestroyed()) win.close()
+      })
   })
   win.on('closed', () => {
     releaseWindow(wcId, appQuitting)

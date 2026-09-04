@@ -29,8 +29,10 @@ export function claimWindowTabs(
   windowId: number,
   sessionIds: readonly string[]
 ): TabRelease[] {
+  // No de-duplication needed, unlike `reconcileWindowTabs`: this loop assigns the owner as it goes,
+  // so a repeated id finds itself already owned here and cannot emit a second release.
   const releases: TabRelease[] = []
-  for (const sessionId of new Set(sessionIds)) {
+  for (const sessionId of sessionIds) {
     const ownerId = owners.get(sessionId)
     if (ownerId != null && ownerId !== windowId) releases.push({ sessionId, ownerId })
     owners.set(sessionId, windowId)
