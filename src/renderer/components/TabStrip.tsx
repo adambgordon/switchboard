@@ -111,6 +111,7 @@ function Tab({
       // attribute rather than overloading one whose meaning is fixed.
       aria-selected={active}
       data-picked={selected || undefined}
+      data-session-id={tab.sessionId}
       tabIndex={active ? 0 : -1}
       // A tab truncates aggressively, so the full title lives in the shared tooltip layer — never a
       // native `title`, which lags and resets on the slightest pointer move. `data-tip-sub` adds the

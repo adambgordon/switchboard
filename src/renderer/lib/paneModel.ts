@@ -19,7 +19,7 @@
  *     new pane the previous occupant's terminals.
  */
 
-import type { PersistedTabLayout } from '@shared/types'
+import type { PersistedTabLayout, TabOpenMode } from '@shared/types'
 import { sanitizeTabLayout } from '../../shared/tabWorkspace'
 
 /** A conversation occupying a slot in a pane. */
@@ -52,14 +52,19 @@ export interface PaneLayout {
   splitFraction: number
 }
 
-/** How an open should treat the tab it lands on. */
-export type OpenMode = 'preview' | 'persistent'
-
 export const SPLIT_LIMITS = { min: 0.25, default: 0.5, max: 0.75 } as const
+
+/** Feature-off navigation is always replaceable, even when a remote sender requested promotion. */
+export function effectiveTabOpenMode(
+  tabsEnabled: boolean,
+  requested: TabOpenMode
+): TabOpenMode {
+  return tabsEnabled ? requested : 'preview'
+}
 
 export type PaneAction =
   /** Land on a conversation. The single entry point for every navigation. */
-  | { type: 'open'; sessionId: string; mode: OpenMode; pane?: number; focus?: boolean }
+  | { type: 'open'; sessionId: string; mode: TabOpenMode; pane?: number; focus?: boolean }
   /** Append an ordered tab group and activate the tab the transfer was performed on. */
   | { type: 'openMany'; sessionIds: string[]; activeSessionId: string; pane?: number }
   /** Make a preview tab stick (acting on the conversation, or an explicit gesture). */
@@ -96,6 +101,8 @@ export type PaneAction =
   | { type: 'rekey'; from: string; to: string }
   /** A live terminal turned out to be running a different, also-real conversation. */
   | { type: 'retarget'; from: string; to: string }
+  /** Replace the feature-off projection with a saved workspace when the feature becomes active. */
+  | { type: 'restore'; saved: PersistedTabLayout; paneIds: string[] }
   /** Tabs were switched off: keep what is on screen, drop the rest. */
   | { type: 'collapseToSingle' }
 
@@ -632,10 +639,28 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       // rename itself while the OTHER pane already held the real id — producing two tabs for one
       // conversation, the very state one-tab-per-conversation exists to prevent.
       const already = locateTab(state, action.to)
+      const selectedFrom = activeTabId(state) === action.from
+      const placeholderPersistent = state.panes.some((pane) =>
+        pane.tabs.some((tab) => tab.sessionId === action.from && !tab.preview)
+      )
       let touched = false
       const panes = state.panes.map((pane, p) => {
         const i = findTab(pane, action.from)
-        if (i < 0) return pane
+        if (i < 0) {
+          if (
+            placeholderPersistent &&
+            already?.pane === p &&
+            pane.tabs[already.index]?.preview
+          ) {
+            return {
+              ...pane,
+              tabs: pane.tabs.map((tab, index) =>
+                index === already.index ? { ...tab, preview: false } : tab
+              )
+            }
+          }
+          return pane
+        }
         touched = true
         const existing = findTab(pane, action.to)
         const collidesHere = existing >= 0 && existing !== i
@@ -644,10 +669,15 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
           // The real id is already open; keep that tab and drop the placeholder's, rather than
           // leaving the window with two tabs for one conversation. If the placeholder's tab was the
           // active one AND the survivor is in this pane, the selection moves to it — the same
-          // conversation, now under the name it turned out to have. When the survivor is in the other
-          // pane there is nothing here to select, so the pane falls back to a neighbour.
-          const tabs = pane.tabs.filter((_, k) => k !== i)
+          // conversation, now under the name it turned out to have. Cross-pane selection is resolved
+          // after every pane has removed its placeholder.
+          let tabs = pane.tabs.filter((_, k) => k !== i)
           const survivor = collidesHere ? (existing > i ? existing - 1 : existing) : -1
+          if (placeholderPersistent && survivor >= 0 && tabs[survivor].preview) {
+            tabs = tabs.map((tab, index) =>
+              index === survivor ? { ...tab, preview: false } : tab
+            )
+          }
           return {
             ...pane,
             tabs,
@@ -662,7 +692,19 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
           tabs: pane.tabs.map((t, k) => (k === i ? { ...t, sessionId: action.to } : t))
         }
       })
-      return touched ? { ...state, panes } : state
+      if (!touched) return state
+      let next = { ...state, panes }
+      if (selectedFrom) {
+        const survivor = locateTab(next, action.to)
+        if (survivor) {
+          const home = next.panes[survivor.pane]
+          next = {
+            ...withPane(next, survivor.pane, { ...home, activeIndex: survivor.index }),
+            focusIndex: survivor.pane
+          }
+        }
+      }
+      return pruneEmptyPanes(next)
     }
 
     case 'retarget': {
@@ -691,6 +733,9 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
         )
       })
     }
+
+    case 'restore':
+      return restorePaneLayout(action.saved, action.paneIds)
 
     case 'collapseToSingle': {
       // Tabs were switched off. Keep exactly what is on screen and discard the rest, landing in the

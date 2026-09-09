@@ -40,12 +40,37 @@ export function actionTargets(sel: TabSelection, pane: number, sessionId: string
   return [...sel.ids]
 }
 
+/** Keyboard close targets the focused group, even when its active tab was removed from that group. */
+export function keyboardCloseTargets(sel: TabSelection, pane: number, activeId: string | null): string[] {
+  if (hasGroup(sel, pane)) return [...sel.ids]
+  return activeId ? [activeId] : []
+}
+
 /**
  * A plain click. Drops any group — this is the gesture that means "just this one", and it has to be
  * able to undo a selection that is in the way.
  */
 export function selectOnly(): TabSelection {
   return NO_SELECTION
+}
+
+/** Whether a pointer press is outside the current group rather than another selection gesture. */
+export function shouldClearSelectionOnPointerDown(
+  sel: TabSelection,
+  tabId: string | null,
+  modifiedTabPress: boolean
+): boolean {
+  if (sel.ids.size === 0) return false
+  if (tabId === null) return true
+  if (modifiedTabPress) return false
+  return !sel.ids.has(tabId)
+}
+
+export function shouldClearSelectionOnWindowBlur(
+  sel: TabSelection,
+  windowFocused: boolean
+): boolean {
+  return sel.ids.size > 0 && !windowFocused
 }
 
 /**

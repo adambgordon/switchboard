@@ -1,9 +1,8 @@
 /**
  * How much terminal history the app carries, in already-wrapped rows.
  *
- * The two constants below are deliberately equal and MUST be changed together — they are the same
- * product decision seen from two processes, and they used to be independent literals that agreed
- * only by luck. Raising one alone silently wastes the other's work.
+ * The two constants below express the same product limit in two processes and MUST be changed
+ * together. Keep them equal so replay and handoff retain the same number of history rows.
  *
  * They are NOT interchangeable, though, because the agents differ:
  *
@@ -21,9 +20,8 @@
  *   this matters only once the agent exits to a plain shell — where there is no reflow to rebuild
  *   anything.
  *
- * Kept modest on purpose: reflow runs on EVERY resize, and this app resizes far more than a plain
- * terminal does (splits, divider drags, the handoff repaint, ⌘R's zoom-wiggle). Snapshot cost was
- * measured at ~11 ms per terminal at 2,000 rows, paid per terminal on a cross-window move.
+ * These limits bound reflow work on every resize (splits, divider drags, the handoff repaint,
+ * ⌘R's zoom-wiggle) and snapshot serialization work per terminal on each cross-window move.
  *
  * Note this is smaller than the live xterm `scrollback`, which is sized for ordinary shell output
  * and is not rebuilt from anything.

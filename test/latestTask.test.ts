@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { LatestTask } from '../src/main/latestTask'
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -48,20 +48,21 @@ describe('LatestTask', () => {
     expect(accepted).toEqual([1, 2])
   })
 
-  // The trailing pass must be bounded, not merely "one per quiet run". A change arriving during
-  // the TRAILING pass used to queue another, so a steady stream of writes kept the loop going and
-  // every caller waiting on `get()` waited for the whole chain. This refreshes on every pass, so
-  // an unbounded implementation never stops; a bounded one stops at two.
-  it('stops after one trailing pass even while changes keep arriving', async () => {
+  // The original caller must stop after one trailing pass, but the watcher event that arrived during
+  // that pass is still a real request. It starts a detached chain after the caller is released.
+  it('releases the caller after two passes and accepts a dirty trailing pass afterward', async () => {
     const gates = [deferred<number>(), deferred<number>(), deferred<number>()]
     let loads = 0
-    const task = new LatestTask(() => {
-      const gate = gates[loads]
-      loads += 1
-      // Request another refresh while THIS pass is in flight, every time.
-      queueMicrotask(() => void task.refresh())
-      return gate?.promise ?? Promise.resolve(-1)
-    })
+    const accepted: number[] = []
+    const task = new LatestTask(
+      () => {
+        const gate = gates[loads]
+        loads += 1
+        if (loads <= 2) queueMicrotask(() => void task.refresh())
+        return gate?.promise ?? Promise.resolve(-1)
+      },
+      (value) => accepted.push(value)
+    )
 
     const running = task.refresh()
     gates[0].resolve(1)
@@ -69,7 +70,11 @@ describe('LatestTask', () => {
     await Promise.resolve()
     gates[1].resolve(2)
     await expect(running).resolves.toBe(2)
-    expect(loads).toBe(2)
+    await vi.waitFor(() => expect(loads).toBe(3))
+    expect(accepted).toEqual([1, 2])
+    gates[2].resolve(3)
+    await vi.waitFor(() => expect(task.peek()).toBe(3))
+    expect(accepted).toEqual([1, 2, 3])
   })
 
   it('does not queue a second load for concurrent readers', async () => {

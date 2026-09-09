@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Transcript } from '../src/shared/types'
 import { TranscriptLoader, type TranscriptSource } from '../src/main/transcriptLoader'
+import { parseTranscript } from '../src/main/sessions/parser'
+import { parseCodexTranscript } from '../src/main/sessions/codexParser'
 
 const transcript = (text: string): Transcript => ({
   sessionId: 'session',
@@ -76,26 +81,83 @@ describe('TranscriptLoader', () => {
     await expect(loader.load('session', '3:20')).resolves.toEqual(transcript('recovered'))
   })
 
-  // A session's file can move while the app runs — Claude derives its project directory from the
-  // cwd, so renaming that directory re-encodes the path. Caching the resolved path forever meant
-  // every later parse threw against the stale path and the transcript stayed blank until restart.
-  // Asserting the recovered PATH rather than a resolve count is what pins this: a loader that
-  // merely re-resolved by luck would still hand the old path to `parseSource`.
-  it('re-resolves the path after a parse failure so a moved file recovers', async () => {
-    const paths = ['/old/session.jsonl', '/new/session.jsonl']
-    const attempted: string[] = []
-    const loader = new TranscriptLoader(
-      async () => ({ agent: 'claude', path: paths[Math.min(attempted.length, 1)] }),
-      async (source: TranscriptSource) => {
-        attempted.push(source.path)
-        if (source.path === '/old/session.jsonl') throw new Error('ENOENT')
-        return transcript('moved')
-      }
-    )
+  it.each(['claude', 'codex'] as const)('recovers a moved %s file in the same request using the real parser', async (agent) => {
+    const dir = await mkdtemp(join(tmpdir(), 'transcript-loader-'))
+    try {
+      await mkdir(join(dir, 'old'))
+      await mkdir(join(dir, 'new'))
+      const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+      const file = agent === 'claude' ? `${id}.jsonl` : `rollout-2026-09-09T00-00-00-${id}.jsonl`
+      const before = join(dir, 'old', file)
+      const after = join(dir, 'new', file)
+      const record = agent === 'claude'
+        ? { type: 'user', uuid: 'one', cwd: '/repo', message: { role: 'user', content: 'Hello' } }
+        : { type: 'event_msg', payload: { type: 'user_message', message: 'Hello' } }
+      await writeFile(before, JSON.stringify(record) + '\n')
+      const parse = agent === 'claude' ? parseTranscript : parseCodexTranscript
+      let currentPath = before
+      let resolves = 0
+      const loader = new TranscriptLoader(async () => {
+        resolves += 1
+        return { agent, path: currentPath }
+      }, (source) => parse(source.path))
+      expect((await loader.load(id, '1'))?.messages).toHaveLength(1)
+      await rename(before, after)
+      currentPath = after
+      const recovered = await loader.load(id, '2')
+      expect(recovered?.messages[0]?.blocks).toEqual([{ kind: 'text', text: 'Hello' }])
+      expect((await loader.load(id, '3'))?.messages).toHaveLength(1)
+      expect(resolves).toBe(2)
 
-    await expect(loader.load('session', '1:10')).resolves.toBeNull()
-    await expect(loader.load('session', '2:20')).resolves.toEqual(transcript('moved'))
-    expect(attempted).toEqual(['/old/session.jsonl', '/new/session.jsonl'])
+      await rm(after)
+      await expect(loader.load(id, '4')).resolves.toBeNull()
+      await writeFile(after, JSON.stringify(record) + '\n')
+      expect((await loader.load(id, '5'))?.messages).toHaveLength(1)
+      expect(resolves).toBe(4)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('bounds recovery to one retry and leaves failed paths uncached', async () => {
+    let fail = false
+    const attempted: string[] = []
+    let resolves = 0
+    const loader = new TranscriptLoader(async () => ({
+      agent: 'claude', path: `/path-${++resolves}.jsonl`
+    }), async (source) => {
+      attempted.push(source.path)
+      if (fail) throw new Error('unreadable')
+      return transcript('available')
+    })
+    await loader.load('session', '1')
+    fail = true
+    await expect(loader.load('session', '2')).resolves.toBeNull()
+    expect(attempted).toEqual(['/path-1.jsonl', '/path-1.jsonl', '/path-2.jsonl'])
+    fail = false
+    await expect(loader.load('session', '3')).resolves.toEqual(transcript('available'))
+    expect(resolves).toBe(3)
+  })
+
+  it('does not evict a newer resolved path when an older cold parse fails late', async () => {
+    let rejectOld: (error: Error) => void = () => {}
+    let resolves = 0
+    let parses = 0
+    const loader = new TranscriptLoader(async () => ({
+      agent: 'claude', path: ++resolves === 1 ? '/old.jsonl' : '/new.jsonl'
+    }), async (source) => {
+      parses += 1
+      if (parses === 1) return new Promise((_resolve, reject) => { rejectOld = reject })
+      if (source.path === '/old.jsonl') throw new Error('moved')
+      return transcript('new')
+    })
+    const older = loader.load('session', '1')
+    await Promise.resolve()
+    await expect(loader.load('session', '2')).resolves.toEqual(transcript('new'))
+    rejectOld(new Error('moved'))
+    await expect(older).resolves.toBeNull()
+    await expect(loader.load('session', '3')).resolves.toEqual(transcript('new'))
+    expect(resolves).toBe(2)
   })
 
   // Sequential loads at different revisions cannot catch a key that ignores the revision, because

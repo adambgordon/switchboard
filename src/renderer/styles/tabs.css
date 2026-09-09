@@ -59,12 +59,44 @@
 
 /* ---- dragging a tab ---- */
 
-/* The moving tab: a fixed clone on <body>, so the strip's scroll container cannot clip it and it can
-   travel anywhere in the window. Lifted off the surface, and slightly transparent so the caret and
-   the tabs it is passing over stay readable underneath it. */
-/* Two class selectors on `.sb-tab` deliberately: the clone keeps whatever state classes it was cloned
-   from, and `.sb-tab.active` / `.sb-tab.picked` appear LATER in this file and set `box-shadow` of their
-   own. At equal specificity they would win and erase the lift and the stack. */
+/* One transparent shell moves the whole visual. Its pseudo-elements are real same-size rounded card
+   shapes, so every corner has identical geometry; only the shell transform changes per frame. */
+.sb-tab-drag-shell {
+  --tab-drag-surface: var(--paper-raised);
+}
+.sb-tab-drag-shell::before,
+.sb-tab-drag-shell::after {
+  content: none;
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--tab-drag-surface);
+  pointer-events: none;
+}
+.sb-tab-drag-shell.stacked::before {
+  content: '';
+  z-index: 1;
+  transform: translate(3px, 3px);
+  box-shadow: var(--shadow-pop);
+}
+.sb-tab-drag-shell.stacked-many::before {
+  box-shadow: none;
+}
+.sb-tab-drag-shell.stacked-many::after {
+  content: '';
+  z-index: 0;
+  transform: translate(6px, 6px);
+  box-shadow: var(--shadow-pop);
+}
+:root[data-theme='dark'] .sb-tab-drag-shell {
+  --tab-drag-surface: var(--paper-pane);
+}
+
+/* The moving tab clone lives inside the fixed shell on <body>, so the strip's scroll container cannot
+   clip it and the whole stack travels anywhere in the window as one visual. Two class selectors keep
+   its drag surface stronger than the state classes copied from the source tab. */
 .sb-tab.sb-tab-dragging {
   border-radius: var(--r-sm);
   /* A real BORDER, not just a shadow. The clone travels over every surface in the window — the
@@ -72,7 +104,7 @@
      edgeless: over the terminal's own paper it read as nothing at all. A 1px rule is the only thing
      that holds an edge against an arbitrary background. */
   border: 1px solid var(--rule-strong);
-  background: var(--paper-raised);
+  background: var(--tab-drag-surface, var(--paper-raised));
   color: var(--ink);
   box-shadow: var(--shadow-pop);
   /* Fully opaque: at 0.92 the surface beneath showed through and undid the border's whole job. */
@@ -83,27 +115,10 @@
    the badge carries the exact count.
    Faked rather than N real clones — only the top one is ever legible, so the rest would cost N times
    the work to communicate one number.
-   Drawn with BOX SHADOWS, not pseudo-elements. The clone carries an inline `z-index` to float over the
-   window, which makes it a stacking context — and inside a stacking context a negative-`z-index` child
-   paints ABOVE the element's own background, not behind it. The stack layers therefore rendered in
-   FRONT of the clone's fill and read as stray outlines around it. A box shadow paints behind the
-   background unconditionally, inherits the border radius, and needs no extra elements.
-   Each layer is two shadows: the paper fill, then the same offset expanded 1px in the rule colour,
-   which leaves a 1px rim. The first offset is 3px and the second 7px because the 1px spread puts their
-   outer edges 4px and 8px behind the front card — two uniform 4px steps. */
-.sb-tab.sb-tab-dragging.stacked {
-  box-shadow:
-    3px 3px 0 0 var(--paper-raised),
-    3px 3px 0 1px var(--rule-strong),
-    var(--shadow-pop);
-}
-.sb-tab.sb-tab-dragging.stacked.stacked-many {
-  box-shadow:
-    3px 3px 0 0 var(--paper-raised),
-    3px 3px 0 1px var(--rule-strong),
-    7px 7px 0 0 var(--paper-raised),
-    7px 7px 0 1px var(--rule-strong),
-    var(--shadow-pop);
+   The backing cards live on the transparent shell above rather than being composite shadows on the
+   front card; that is what keeps their rounded corners identical. */
+.sb-tab-drag-shell.stacked > .sb-tab.sb-tab-dragging {
+  box-shadow: none;
 }
 /* The count. Ink on paper, never an accent — this is a quantity, not a live session. */
 .sb-tab-dragcount {
@@ -237,6 +252,17 @@ body.sb-window-drop-target .sb-tabstrip {
   right: 0;
   bottom: 0;
   height: 1px;
+  background: var(--tab-rule);
+  pointer-events: none;
+  z-index: 1;
+}
+/* Hidden dragged tabs take their right-hand dividers with them. Repaint the first visible follower's
+   leading edge without adding border width, so every non-dragged tab stays exactly where it was. */
+.sb-tab.sb-tab-after-drag-gap::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
   background: var(--tab-rule);
   pointer-events: none;
   z-index: 1;

@@ -3,9 +3,9 @@ import { nextPtyHomes, partitionPtys, type HomeContext } from '../src/renderer/l
 
 /**
  * Terminal-to-pane assignment. The stakes are why this is pure rather than living in the effect that
- * calls it: a window holds one xterm per terminal, so moving one between panes means unmounting and
- * remounting it. The serialized PTY handoff restores that replacement; the home map must follow the tab
- * or the terminal remains mounted in a pane with no tab capable of showing it.
+ * calls it: a window holds one stable xterm per terminal, and the home map decides which pane hosts
+ * its portal. It must follow the tab or the terminal remains mounted in a pane with no tab capable of
+ * showing it.
  */
 const pty = (ptyId: string, sessionId: string) => ({ ptyId, sessionId })
 

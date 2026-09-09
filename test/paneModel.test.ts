@@ -5,6 +5,7 @@ import {
   canSplitActiveTab,
   canPlaceTabsToSide,
   initialLayout,
+  effectiveTabOpenMode,
   locateTab,
   openSessionIds,
   paneReducer,
@@ -17,13 +18,14 @@ import {
   type PaneLayout,
   type Tab
 } from '../src/renderer/lib/paneModel'
+import { historyReducer } from '../src/main/navigationHistory'
 
 /**
  * The tab / pane model. Selection is DERIVED from this (the active tab of the focused pane), so a
  * wrong answer here is a wrong conversation on screen — which is why the whole reducer is pure and
  * tested rather than living in a hook.
  *
- * Two fixture rules this file follows deliberately, both learned the hard way elsewhere in the repo:
+ * Two fixture rules apply throughout this file:
  *
  *   1. **Assert the full result, and separate the ids under test.** Two different wrong behaviours
  *      must not be able to produce the same array. Adjacent ids are where that goes wrong — "drop the
@@ -89,6 +91,18 @@ describe('initialLayout', () => {
       splitFraction: SPLIT_LIMITS.default
     })
     expect(activeTabId(l)).toBeNull()
+  })
+})
+
+describe('effectiveTabOpenMode', () => {
+  it('preserves preview and persistent requests while tabs are enabled', () => {
+    expect(effectiveTabOpenMode(true, 'preview')).toBe('preview')
+    expect(effectiveTabOpenMode(true, 'persistent')).toBe('persistent')
+  })
+
+  it('forces every landing into the one replaceable slot while tabs are disabled', () => {
+    expect(effectiveTabOpenMode(false, 'preview')).toBe('preview')
+    expect(effectiveTabOpenMode(false, 'persistent')).toBe('preview')
   })
 })
 
@@ -795,12 +809,62 @@ describe('rekey — a placeholder id became real', () => {
     // The hole a per-pane collision check left. Renaming here would have produced two tabs for one
     // conversation, one in each pane — which is precisely the state one-tab-per-conversation exists to
     // prevent, arrived at by a route that never went through `open`.
-    const before = layout([pane('p0', [t('A'), t('PH')], 1), pane('p1', [t('S1')], 0)], 0)
+    const before = layout(
+      [pane('p0', [t('A'), t('PH')], 1), pane('p1', [t('S1', true)], 0)],
+      0
+    )
     const after = step(before, { type: 'rekey', from: 'PH', to: 'S1' })
     expect(after.panes[0].tabs).toEqual([t('A')])
     expect(after.panes[1].tabs).toEqual([t('S1')])
+    expect(after.focusIndex).toBe(1)
+    expect(activeTabId(after)).toBe('S1')
     const all = after.panes.flatMap((p) => p.tabs.map((x) => x.sessionId))
     expect(new Set(all).size).toBe(all.length)
+  })
+
+  it('prunes an emptied source pane while focusing the cross-pane survivor', () => {
+    const before = layout(
+      [pane('p0', [t('PH')], 0), pane('p1', [t('S1', true), t('B')], 1)],
+      0
+    )
+    const after = step(before, { type: 'rekey', from: 'PH', to: 'S1' })
+    expect(after).toEqual({
+      panes: [pane('p1', [t('S1'), t('B')], 0)],
+      focusIndex: 0,
+      splitFraction: SPLIT_LIMITS.default
+    })
+    expect(activeTabId(after)).toBe('S1')
+  })
+
+  it('keeps pane selection and navigation on the same survivor after a collision', () => {
+    const before = layout(
+      [pane('p0', [t('A'), t('PH')], 1), pane('p1', [t('S1')], 0)],
+      0
+    )
+    const paneAfter = step(before, { type: 'rekey', from: 'PH', to: 'S1' })
+    const navAfter = historyReducer(
+      { entries: [{ sessionId: 'A', view: 'transcript' }, { sessionId: 'PH', view: 'terminal' }], cursor: 1, away: false },
+      { type: 'rekey', from: 'PH', to: 'S1' }
+    )
+    expect(activeTabId(paneAfter)).toBe('S1')
+    expect(navAfter.entries[navAfter.cursor].sessionId).toBe('S1')
+    expect(historyReducer(navAfter, {
+      type: 'visit', visit: { sessionId: activeTabId(paneAfter)!, view: 'terminal' }
+    })).toBe(navAfter)
+  })
+
+  it('does not pull focus when an unselected placeholder collides across panes', () => {
+    const before = layout(
+      [pane('p0', [t('A'), t('PH')], 0), pane('p1', [t('S1', true)], 0)],
+      0
+    )
+    const after = step(before, { type: 'rekey', from: 'PH', to: 'S1' })
+    expect(after.panes).toEqual([
+      pane('p0', [t('A')], 0),
+      pane('p1', [t('S1')], 0)
+    ])
+    expect(after.focusIndex).toBe(0)
+    expect(activeTabId(after)).toBe('A')
   })
 })
 
@@ -980,5 +1044,24 @@ describe('restart persistence', () => {
       { sessionIds: ['C'], activeSessionId: null }
     ] })
     expect(snapshotPaneLayout(initialLayout('empty'))).toBeNull()
+  })
+
+  it('replaces the feature-off projection with a restored layout and fresh pane ids', () => {
+    const before = layout([pane('old', [t('CURRENT', true)], 0)])
+    const after = step(before, {
+      type: 'restore',
+      saved: {
+        panes: [
+          { sessionIds: ['A', 'B'], activeSessionId: 'B' },
+          { sessionIds: ['C'], activeSessionId: 'C' }
+        ]
+      },
+      paneIds: ['old', 'fresh']
+    })
+    expect(after).toEqual({
+      panes: [pane('old', [t('A'), t('B')], 1), pane('fresh', [t('C')], 0)],
+      focusIndex: 0,
+      splitFraction: SPLIT_LIMITS.default
+    })
   })
 })

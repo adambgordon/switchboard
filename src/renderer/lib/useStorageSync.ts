@@ -1,5 +1,5 @@
 import { useEffect, type Dispatch, type SetStateAction } from 'react'
-import { shouldResync } from './storageSync'
+import { startStorageSync } from './storageSync'
 
 /** Keep one localStorage-backed hook in sync with writes made by another window. */
 export function useStorageSync<T>(
@@ -8,10 +8,10 @@ export function useStorageSync<T>(
   setValue: Dispatch<SetStateAction<T>>
 ): void {
   useEffect(() => {
-    const onStorage = (event: StorageEvent): void => {
-      if (shouldResync(event.key, key)) setValue(read())
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
+    return startStorageSync(key, read, setValue, (listener) => {
+      const onStorage = (event: StorageEvent): void => listener(event)
+      window.addEventListener('storage', onStorage)
+      return () => window.removeEventListener('storage', onStorage)
+    })
   }, [key, read, setValue])
 }

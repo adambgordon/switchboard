@@ -1,184 +1,87 @@
 import { describe, expect, it } from 'vitest'
-import { navReducer, type NavAction, type NavState } from '../src/renderer/lib/useNavHistory'
+import { EMPTY_HISTORY, historyReducer, type HistoryAction } from '../src/main/navigationHistory'
 
-const INITIAL: NavState = { selectedId: null, stack: [], cursor: -1 }
+const run = (actions: HistoryAction[]) => actions.reduce(historyReducer, EMPTY_HISTORY)
+const visit = (sessionId: string, view: 'transcript' | 'terminal' = 'transcript'): HistoryAction =>
+  ({ type: 'visit', visit: { sessionId, view } })
 
-/** Apply a sequence of actions from INITIAL (or a given start) and return the final state. */
-function run(actions: NavAction[], start: NavState = INITIAL): NavState {
-  return actions.reduce(navReducer, start)
-}
-
-describe('navReducer', () => {
-  it('open records a stop and selects it', () => {
-    const s = run([{ type: 'open', id: 'a' }])
-    expect(s).toEqual({ selectedId: 'a', stack: ['a'], cursor: 0 })
+describe('app navigation history', () => {
+  it('records visits and mode changes, collapsing only identical consecutive stops', () => {
+    const state = run([visit('A'), visit('A'), visit('A', 'terminal'), visit('B'), visit('A')])
+    expect(state).toEqual({
+      entries: [
+        { sessionId: 'A', view: 'transcript' }, { sessionId: 'A', view: 'terminal' },
+        { sessionId: 'B', view: 'transcript' }, { sessionId: 'A', view: 'transcript' }
+      ],
+      cursor: 3, away: false
+    })
   })
 
-  it('successive opens push stops and advance the cursor', () => {
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' },
-      { type: 'open', id: 'c' }
+  it('walks backward and forward without changing the log', () => {
+    const initial = run([visit('A'), visit('B', 'terminal'), visit('C')])
+    const back = historyReducer(initial, { type: 'step', direction: -1 })
+    expect(back.cursor).toBe(1)
+    expect(back.entries).toBe(initial.entries)
+    const forward = historyReducer(back, { type: 'step', direction: 1 })
+    expect(forward).toEqual(initial)
+  })
+
+  it('clamps at the ends and remains inert before the first visit', () => {
+    expect(historyReducer(EMPTY_HISTORY, { type: 'step', direction: -1 })).toBe(EMPTY_HISTORY)
+    expect(historyReducer(EMPTY_HISTORY, { type: 'step', direction: 1 })).toBe(EMPTY_HISTORY)
+    const one = run([visit('A')])
+    expect(historyReducer(one, { type: 'step', direction: -1 })).toBe(one)
+    expect(historyReducer(one, { type: 'step', direction: 1 })).toBe(one)
+  })
+
+  it('truncates Forward only when a new visit branches after Back', () => {
+    const state = run([visit('A'), visit('B'), visit('C'), { type: 'step', direction: -1 }, visit('D')])
+    expect(state.entries.map((v) => v.sessionId)).toEqual(['A', 'B', 'D'])
+    expect(state.cursor).toBe(2)
+  })
+
+  it('leaves Forward intact when the current stop is re-reported', () => {
+    const state = run([visit('A'), visit('B'), { type: 'step', direction: -1 }])
+    expect(historyReducer(state, visit('A'))).toBe(state)
+    expect(state.entries.map((v) => v.sessionId)).toEqual(['A', 'B'])
+  })
+
+  it('Welcome is a drift: Back re-centers, Forward waits, and no stop is added', () => {
+    const state = run([visit('A'), visit('B'), { type: 'home' }])
+    expect(state.entries.map((v) => v.sessionId)).toEqual(['A', 'B'])
+    expect(state.away).toBe(true)
+    expect(historyReducer(state, { type: 'home' })).toBe(state)
+    expect(historyReducer(state, { type: 'step', direction: 1 })).toBe(state)
+    const centered = historyReducer(state, { type: 'step', direction: -1 })
+    expect(centered.cursor).toBe(1)
+    expect(centered.away).toBe(false)
+    expect(historyReducer(centered, { type: 'step', direction: -1 }).cursor).toBe(0)
+  })
+
+  it('rekeys every placeholder visit without losing mode or cursor', () => {
+    const state = run([visit('PH'), visit('B'), visit('PH', 'terminal'), { type: 'rekey', from: 'PH', to: 'S' }])
+    expect(state.entries).toEqual([
+      { sessionId: 'S', view: 'transcript' }, { sessionId: 'B', view: 'transcript' },
+      { sessionId: 'S', view: 'terminal' }
     ])
-    expect(s).toEqual({ selectedId: 'c', stack: ['a', 'b', 'c'], cursor: 2 })
+    expect(state.cursor).toBe(2)
   })
 
-  it('re-opening the current stop does not duplicate it', () => {
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'a' }
+  it('corrections retarget only the current visit, keeping earlier conversation visits', () => {
+    const state = run([visit('A'), visit('B'), visit('A', 'terminal'), { type: 'retarget', from: 'A', to: 'S' }])
+    expect(state.entries).toEqual([
+      { sessionId: 'A', view: 'transcript' }, { sessionId: 'B', view: 'transcript' },
+      { sessionId: 'S', view: 'terminal' }
     ])
-    expect(s).toEqual({ selectedId: 'a', stack: ['a'], cursor: 0 })
+    expect(historyReducer(state, { type: 'retarget', from: 'A', to: 'X' })).toBe(state)
+    const away = historyReducer(state, { type: 'home' })
+    expect(historyReducer(away, { type: 'retarget', from: 'S', to: 'X' })).toBe(away)
   })
 
-  it('back/forward walk the recorded stops', () => {
-    const opened = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' },
-      { type: 'open', id: 'c' }
-    ])
-    const back1 = navReducer(opened, { type: 'back' })
-    expect(back1).toMatchObject({ selectedId: 'b', cursor: 1 })
-    const back2 = navReducer(back1, { type: 'back' })
-    expect(back2).toMatchObject({ selectedId: 'a', cursor: 0 })
-    const fwd1 = navReducer(back2, { type: 'forward' })
-    expect(fwd1).toMatchObject({ selectedId: 'b', cursor: 1 })
-  })
-
-  it('back is a no-op at the start, forward is a no-op at the newest stop', () => {
-    const atStart = run([{ type: 'open', id: 'a' }])
-    expect(navReducer(atStart, { type: 'back' })).toBe(atStart)
-    expect(navReducer(atStart, { type: 'forward' })).toBe(atStart)
-  })
-
-  it('opening after going back truncates the forward history', () => {
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' },
-      { type: 'open', id: 'c' },
-      { type: 'back' }, // -> b (cursor 1), c still ahead
-      { type: 'open', id: 'd' } // truncates c, pushes d
-    ])
-    expect(s).toEqual({ selectedId: 'd', stack: ['a', 'b', 'd'], cursor: 2 })
-  })
-
-  it('forward is inert while drifted (after home)', () => {
-    const drifted = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' },
-      { type: 'back' }, // -> a (cursor 0), b ahead
-      { type: 'home' } // drift off stop a (selectedId null)
-    ])
-    expect(navReducer(drifted, { type: 'forward' })).toBe(drifted)
-  })
-
-  it('back/forward before anything is opened are no-ops', () => {
-    expect(navReducer(INITIAL, { type: 'back' })).toBe(INITIAL)
-    expect(navReducer(INITIAL, { type: 'forward' })).toBe(INITIAL)
-  })
-
-  it('home deselects (welcome screen) but leaves history intact', () => {
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' },
-      { type: 'home' }
-    ])
-    expect(s).toEqual({ selectedId: null, stack: ['a', 'b'], cursor: 1 })
-  })
-
-  it('back after home re-centers on the last opened conversation', () => {
-    const home = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'b' },
-      { type: 'home' } // -> welcome (selectedId null); stack/cursor untouched
-    ])
-    const back1 = navReducer(home, { type: 'back' })
-    expect(back1).toEqual({ selectedId: 'b', stack: ['a', 'b'], cursor: 1 })
-    const back2 = navReducer(back1, { type: 'back' })
-    expect(back2).toMatchObject({ selectedId: 'a', cursor: 0 })
-  })
-
-  it('home is a no-op when nothing is selected', () => {
-    expect(navReducer(INITIAL, { type: 'home' })).toBe(INITIAL)
-  })
-
-  // rekey: a provisional new-Codex session's placeholder id is swapped for its real rollout id on
-  // bind. It must update the selection AND every history stop so back/forward stay coherent.
-  it('rekey swaps the placeholder id in both selection and stack', () => {
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'P' },
-      { type: 'rekey', from: 'P', to: 'real' }
-    ])
-    expect(s).toEqual({ selectedId: 'real', stack: ['a', 'real'], cursor: 1 })
-  })
-
-  it('rekey swaps a stack entry that is not the current selection', () => {
-    const s = run([
-      { type: 'open', id: 'P' },
-      { type: 'open', id: 'b' },
-      { type: 'rekey', from: 'P', to: 'real' }
-    ])
-    expect(s).toEqual({ selectedId: 'b', stack: ['real', 'b'], cursor: 1 })
-  })
-
-  it('rekey is a no-op when the id is absent', () => {
-    const start = run([{ type: 'open', id: 'a' }])
-    expect(navReducer(start, { type: 'rekey', from: 'missing', to: 'x' })).toBe(start)
-  })
-
-  it('rekey is a no-op when from === to', () => {
-    const start = run([{ type: 'open', id: 'a' }])
-    expect(navReducer(start, { type: 'rekey', from: 'a', to: 'a' })).toBe(start)
-  })
-
-  // retarget: a LIVE terminal was proven to be running a different conversation than it claimed.
-  // Unlike rekey, `from` is a real conversation that still exists, so only the stop the user is
-  // standing on may follow the terminal — earlier stops on it were genuine visits.
-  it('retarget moves the selection and the current stop only', () => {
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'S1' },
-      { type: 'retarget', from: 'S1', to: 'S2' }
-    ])
-    expect(s).toEqual({ selectedId: 'S2', stack: ['a', 'S2'], cursor: 1 })
-  })
-
-  it('retarget leaves earlier visits to the same conversation pointing at it', () => {
-    // The distinction from rekey. `S1` at index 0 is a real past visit to a conversation that still
-    // exists once the terminal leaves it, so back() must still return there.
-    const s = run([
-      { type: 'open', id: 'S1' },
-      { type: 'open', id: 'b' },
-      { type: 'open', id: 'S1' },
-      { type: 'retarget', from: 'S1', to: 'S2' }
-    ])
-    expect(s).toEqual({ selectedId: 'S2', stack: ['S1', 'b', 'S2'], cursor: 2 })
-  })
-
-  it('retarget does nothing when the user is not looking at that terminal', () => {
-    const start = run([
-      { type: 'open', id: 'S1' },
-      { type: 'open', id: 'b' }
-    ])
-    expect(navReducer(start, { type: 'retarget', from: 'S1', to: 'S2' })).toBe(start)
-  })
-
-  it('retarget does not leave history drifted', () => {
-    // Moving the selection without the stop would make selectedId !== stack[cursor], which back()
-    // reads as "drifted" and answers by snapping in place — so the first back() after a re-label
-    // would appear to do nothing.
-    const s = run([
-      { type: 'open', id: 'a' },
-      { type: 'open', id: 'S1' },
-      { type: 'retarget', from: 'S1', to: 'S2' },
-      { type: 'back' }
-    ])
-    expect(s).toEqual({ selectedId: 'a', stack: ['a', 'S2'], cursor: 0 })
-  })
-
-  it('retarget is a no-op when from === to', () => {
-    const start = run([{ type: 'open', id: 'a' }])
-    expect(navReducer(start, { type: 'retarget', from: 'a', to: 'a' })).toBe(start)
+  it('ignores missing and same-id identity changes', () => {
+    const state = run([visit('A')])
+    expect(historyReducer(state, { type: 'rekey', from: 'absent', to: 'B' })).toBe(state)
+    expect(historyReducer(state, { type: 'rekey', from: 'A', to: 'A' })).toBe(state)
+    expect(historyReducer(state, { type: 'retarget', from: 'A', to: 'A' })).toBe(state)
   })
 })

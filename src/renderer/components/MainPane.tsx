@@ -203,6 +203,8 @@ export default function MainPane(props: Props) {
     onFindToggle,
     markdownCopy
   } = props
+  const onPaneFocusRef = useRef(onPaneFocus)
+  onPaneFocusRef.current = onPaneFocus
 
   const showTerminal = !!selectedId && view === 'terminal' && !!pty
   const showTranscript = !!selectedId && !showTerminal
@@ -280,16 +282,23 @@ export default function MainPane(props: Props) {
     }
   }, [onEngage, selectedId])
 
+  // TerminalView is portalled into this pane from a sibling React subtree, so React's synthetic
+  // events follow TerminalDeck rather than this component. A native capture listener follows the
+  // physical DOM instead, keeping pane ownership aligned with the terminal that actually took focus.
+  useEffect(() => {
+    const el = paneRef.current
+    if (!el) return
+    const onDown = (): void => onPaneFocusRef.current?.()
+    el.addEventListener('pointerdown', onDown, true)
+    return () => el.removeEventListener('pointerdown', onDown, true)
+  }, [paneRef])
+
   return (
     <main
       className={`sb-pane${paneFocused ? ' pane-focused' : ''}`}
       ref={paneRef}
       tabIndex={-1}
       style={style}
-      // Capture phase: a pointer landing anywhere in this pane — strip, header, transcript, or the
-      // terminal — hands it the keyboard, before xterm or the transcript consume the event. It only
-      // records which pane is active, so nothing is prevented or stopped here.
-      onMouseDownCapture={onPaneFocus}
     >
       {/* Tabs sit ABOVE the header: the strip says which conversations are open, the header describes
           the one you are in. The strip renders whenever the feature is on and this pane holds a tab —

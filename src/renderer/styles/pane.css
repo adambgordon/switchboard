@@ -153,6 +153,22 @@
   }
 }
 
+/* Stage 3 — the terminal action keeps its icon and hit target but drops its text. Both actions carry
+   a tooltip and explicit aria-label, so this gives up no function or accessible name. */
+@container pane (max-width: 500px) {
+  .sb-pane-action-label {
+    display: none;
+  }
+  .sb-pane-actions > .sb-btn-resume,
+  .sb-pane-actions > .sb-btn-ghost {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+  }
+}
+
 .sb-pane-pin {
   display: inline-flex;
   align-items: center;
@@ -354,7 +370,35 @@ kbd {
   color: var(--ink-soft);
 }
 
-/* Stage 3 — Find and Pin leave the header. This must follow both controls' base display rules or the
+/* Find adds a second wide control to the header, so its compact stages start sooner than the
+   resting header's. First collapse the view toggle to its already-labelled icons; once the title
+   would be reduced to a fragment, Find replaces that whole identity block and takes its space. */
+@container pane (max-width: 900px) {
+  .sb-pane-header:has(.sb-find) .sb-seg-label {
+    display: none;
+  }
+  .sb-pane-header:has(.sb-find) .sb-seg-btn {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+}
+
+@container pane (max-width: 760px) {
+  .sb-pane-header:has(.sb-find) .sb-pane-id {
+    display: none;
+  }
+  .sb-pane-header:has(.sb-find) .sb-find {
+    flex: 1;
+    min-width: 0;
+  }
+  .sb-pane-header:has(.sb-find) .sb-find-input {
+    flex: 1;
+    width: auto;
+    min-width: 60px;
+  }
+}
+
+/* Stage 4 — Find and Pin leave the header. This must follow both controls' base display rules or the
    equal-specificity declarations above win by source order. Both actions remain available elsewhere:
    ⌘F opens find, and the rail row menu owns pinning. */
 @container pane (max-width: 400px) {
@@ -395,7 +439,6 @@ kbd {
     padding-left: 6px;
     padding-right: 6px;
   }
-  .sb-pane-action-label,
   .sb-find-count {
     display: none;
   }

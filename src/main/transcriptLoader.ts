@@ -21,21 +21,23 @@ export class TranscriptLoader {
     if (found) return found
     const current = (async () => {
       let source = this.sources.get(sessionId)
-      if (!source) {
-        source = await this.resolveSource(sessionId) ?? undefined
-        if (!source) return null
-        this.sources.set(sessionId, source)
+      // Retry only a cached path: a fresh resolution already searched the current filesystem.
+      const attempts = source ? 2 : 1
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        if (!source) {
+          source = await this.resolveSource(sessionId) ?? undefined
+          if (!source) return null
+          this.sources.set(sessionId, source)
+        }
+        try {
+          return await this.parseSource(source)
+        } catch {
+          // A concurrent revision may already have resolved the new path; never evict its result.
+          if (this.sources.get(sessionId) === source) this.sources.delete(sessionId)
+          source = undefined
+        }
       }
-      try {
-        return await this.parseSource(source)
-      } catch {
-        // Forget the path so the next request resolves it again. A session's file can MOVE while
-        // the app runs — Claude derives its project directory from the cwd, so renaming that
-        // directory re-encodes the path — and a cached path that no longer exists would otherwise
-        // fail here on every future load, leaving the transcript permanently blank until restart.
-        this.sources.delete(sessionId)
-        return null
-      }
+      return null
     })().finally(() => {
       if (this.loads.get(key) === current) this.loads.delete(key)
     })

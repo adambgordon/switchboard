@@ -91,7 +91,7 @@ Then quit (⌘Q) (if already running) and reopen the app.
 - **Row menu (⋮)** — each row's **⋮** button (or a right-click) opens a quick menu to pin/unpin, open **Session details**, resume or stop a session, and mark it read or unread. **⌥-click** a live row (or its terminal) to mark it unread directly.
 - **Rename & inspect** — click a conversation's title at the top of the pane (or right-click a row → **Session details**) to open an info card: agent, folder, git branch, model, message count (visible human/agent prose or image messages, not tool plumbing), size, duration, token usage (per-agent categories) plus current context size, last activity, and session ID — values are selectable to copy (and session ID has a one-click copy). Rename **in place** right in the heading — press **Enter** to save. Renames are real and go through each agent's *own* store — Claude Code's title record (carries into `claude --resume`), Codex's app-server `thread/name/set` — never a Switchboard-private one.
 - **Search, two kinds** — fuzzy search *across* conversations (titles, previews, directories), and find-in-conversation (`⌘F`) that highlights every match in the Formatted transcript, including inside collapsed tool runs and clamped results.
-- **Navigate by keyboard** — switch conversations with `⌥⌘↑` / `⌥⌘↓` (the main pane stays focused, so you can type or hit `⏎` to resume), browser-style back/forward, and more (see below).
+- **Navigate by keyboard** — switch conversations with `⌥⌘↑` / `⌥⌘↓` (the main pane stays focused, so you can type or hit `⏎` to resume), app-wide back/forward through conversation and Formatted/Terminal visits, and more (see below). History follows a tab wherever it lives and reopens a closed tab as a preview; restoring a Terminal visit only uses an existing live terminal and never starts an agent. Navigation history resets when you quit.
 - **Defaults for New** — set a default directory and/or a default agent in Preferences so **New** (`⌘N`) skips the picker(s) and starts there with that agent.
 - **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences → Appearance, where you can also pick a light or dark **dock icon** independent of the theme.
 
@@ -108,9 +108,9 @@ _For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUD
 | `⏎` | Resume the selected conversation from its transcript — or, if it's already live, focus into its terminal |
 | `⇧⌘U` | Mark the selected conversation read / unread |
 | `⌥-click` | Mark a conversation unread — a live row in the list, or its terminal |
-| `⌘[` / `⌘]` | Back / forward through the conversations you've opened |
+| `⌘[` / `⌘]` | Back / forward through conversation and view visits across all windows |
 | `⌘B` | Toggle the pane |
-| `⌘W` / `⇧⌘W` | Close the current tab / close the window |
+| `⌘W` / `⇧⌘W` | Close the focused tab group (or current tab) / close the window |
 | `⌘1`–`⌘9` | Jump to a tab by position |
 | `⌥⌘←` / `⌥⌘→` | Previous / next tab (wraps, and continues across the split) |
 | `⌘\` | Split the view, or close the split |
@@ -159,6 +159,7 @@ src/
   main/                    Electron main process (Node)
     index.ts               window, security (CSP lives in index.html), lifecycle, dev dock icon, boot self-test (SWITCHBOARD_SMOKE)
     ipc.ts                 IPC handlers; owns the file watcher + PtyManager
+    navigation.ts          app-wide visit routing + guarded playback (navigationHistory.ts = pure history transitions)
     menu.ts                custom app menu — ⌘R→Refresh (no reload roles), File/View/Window
     windowState.ts         persists window bounds/position across launches
     trafficLights.ts       re-aligns the native traffic lights to the page zoom (renderer pings on resize)
@@ -170,11 +171,11 @@ src/
     pty/bootCommand.ts     per-agent boot command + Ctrl-E/Ctrl-U line-clear so stray prompt content can't fuse onto it (pure, unit-tested)
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
   renderer/                React 18 + Vite
-    App.tsx                two-column layout + state orchestration (per-conversation view memory, back/forward history)
+    App.tsx                two-column layout + state orchestration (per-conversation view memory, app-wide navigation adapter)
     components/            TitleBar · MainPane · PaneHeader · TranscriptView · TranscriptSearch ·
                            TerminalDeck/TerminalView · TallyRail · ResizeHandle · SettingsModal · UpdatesSetting · AppVeil · TooltipLayer · …
     lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus/focusSync · useLayout · useTheme · useDarkIcon · useTranscript ·
-                           useNavHistory · useMaxLiveSessions · useMarkdownCopy · useSyncedAnimation/animationSync · useRailFlip ·
+                           useAppNavigation · useMaxLiveSessions · useMarkdownCopy · useSyncedAnimation/animationSync · useRailFlip ·
                            useTranscriptSearch · useAutoHideScrollbar · messageGroups · clipboard · mdCopy/mdCopyDom ·
                            maxLiveScale · fuzzy · findMatches · ptyStream · format
     styles/                tokens.css (design system) + per-zone CSS

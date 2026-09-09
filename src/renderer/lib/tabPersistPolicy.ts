@@ -1,5 +1,5 @@
 /** What to do with the saved tab workspace when the preference or the layout changes. */
-export type TabPersistAction = 'persist' | 'clear' | 'ignore'
+export type TabPersistAction = 'activate' | 'persist' | 'clear' | 'ignore'
 
 /**
  * Decide from the preference's PREVIOUS and current value, never from its current value alone.
@@ -15,6 +15,19 @@ export type TabPersistAction = 'persist' | 'clear' | 'ignore'
  * layout just as surely as clearing it. Off means leave the file alone.
  */
 export function tabPersistAction(wasEnabled: boolean, isEnabled: boolean): TabPersistAction {
+  if (!wasEnabled && isEnabled) return 'activate'
   if (isEnabled) return 'persist'
   return wasEnabled ? 'clear' : 'ignore'
+}
+
+/** Layout writes stay blocked until any dormant primary layout has committed in the reducer. */
+export function canPersistTabWorkspace(enabled: boolean, ready: boolean): boolean {
+  return enabled && ready
+}
+
+export function restoredWorkspaceApplied(
+  pendingLayoutKey: string | null,
+  currentLayoutKey: string
+): boolean {
+  return pendingLayoutKey !== null && pendingLayoutKey === currentLayoutKey
 }

@@ -10,7 +10,8 @@ import {
   setWindowOpener,
   initializeTabWorkspace,
   registerTabWindow,
-  flushTabWorkspace
+  flushTabWorkspace,
+  navigationWindowFocused
 } from './ipc'
 import { installAppMenu } from './menu'
 import { loadWindowState, saveWindowState, resolvePlacement } from './windowState'
@@ -120,6 +121,7 @@ function createWindow(init?: WindowInit): BrowserWindow {
   // cannot observe its own focus. Wired per window, and before it is shown, so the show()-triggered
   // focus is forwarded rather than missed.
   wireWindowFocus(win, (focused) => {
+    if (focused) navigationWindowFocused(win.webContents.id)
     if (!win.isDestroyed()) win.webContents.send(IPC.windowFocusChanged, focused)
   })
   // Remember size + position + maximized/fullscreen so the next launch matches.
@@ -206,18 +208,15 @@ app.whenReady().then(() => {
   setWindowOpener(createWindow)
   const devWorkspace = process.env.SWITCHBOARD_DEV_LABEL?.trim().replace(/[^a-z0-9._-]+/gi, '-') || 'default'
   const workspaceFile = app.isPackaged ? undefined : `tab-workspace-dev-${devWorkspace}.json`
-  const savedWorkspace = initializeTabWorkspace(app.getPath('userData'), workspaceFile)
-  const restored = process.env.SWITCHBOARD_SMOKE ? [] : savedWorkspace
-  if (restored.length === 0) createWindow()
-  else {
-    restored.forEach((layout, index) => createWindow({
-      sessionIds: [],
-      activeSessionId: null,
-      restoredTabs: layout,
-      primary: index === 0,
-      collapseRail: index > 0
-    }))
-  }
+  const savedLayout = initializeTabWorkspace(app.getPath('userData'), workspaceFile)
+  const restoredTabs = process.env.SWITCHBOARD_SMOKE ? null : savedLayout
+  createWindow({
+    sessionIds: [],
+    activeSessionId: null,
+    restoredTabs,
+    primary: true,
+    collapseRail: false
+  })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

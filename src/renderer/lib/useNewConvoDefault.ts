@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useStorageSync } from './useStorageSync'
 
 /**
@@ -22,6 +22,14 @@ function load(): string {
   }
 }
 
+function save(dir: string): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ dir }))
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export interface NewConvoDefault {
   dir: string
   setDir: (dir: string) => void
@@ -32,15 +40,10 @@ export function useNewConvoDefault(): NewConvoDefault {
   const [dir, setDirState] = useState<string>(load)
   useStorageSync(KEY, load, setDirState)
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify({ dir }))
-    } catch {
-      /* storage unavailable */
-    }
-  }, [dir])
-
-  const setDir = useCallback((d: string) => setDirState(d), [])
+  const setDir = useCallback((d: string) => {
+    save(d)
+    setDirState(d)
+  }, [])
 
   return { dir, setDir }
 }

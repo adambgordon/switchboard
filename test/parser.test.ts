@@ -343,11 +343,10 @@ describe('parseTranscript', () => {
     expect(t.messages.map((m) => m.uuid)).toEqual(['p', 'a'])
   })
 
-  it('returns an empty transcript for a non-existent file (no throw)', async () => {
-    const t = await parseTranscript(path.join(tmpDir, 'does-not-exist.jsonl'))
-    expect(t.messages).toEqual([])
-    expect(t.cwd).toBe('')
-    expect(t.title).toBe('Untitled')
+  it('propagates file-read errors so the loader can invalidate a stale path', async () => {
+    await expect(parseTranscript(path.join(tmpDir, 'does-not-exist.jsonl'))).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
   })
 })
 

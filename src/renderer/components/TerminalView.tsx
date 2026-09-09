@@ -503,7 +503,7 @@ export default function TerminalView({
     }
     host.addEventListener('mousedown', onDown, true)
     return () => host.removeEventListener('mousedown', onDown, true)
-  }, [sessionId, onMarkUnread])
+  }, [mountNode, sessionId, onMarkUnread])
 
   // Refit when this terminal becomes the visible one (it may have been sized to 0 while hidden
   // behind display:none), then WAKE its renderer and force a repaint. xterm pauses a terminal's

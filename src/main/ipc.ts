@@ -30,12 +30,20 @@ import {
   type TabDragPayload,
   type TabDropOutcome,
   type TabMenuAction,
+  type TabOpenMode,
   type UpdateRunState,
   type WindowInit
 } from '../shared/types'
 import { parseTabDragPayload } from '../shared/tabDrag'
 import { appendUpdateLog } from '../shared/updateLog'
-import { claimWindowTabs, reconcileWindowTabs, shouldReleaseTab } from './tabOwnership'
+import {
+  BoundTabReservations,
+  retireInitialTabClaim,
+  canReserveTabForBoundPty,
+  claimWindowTabs,
+  reconcileWindowTabs,
+  shouldReleaseTab
+} from './tabOwnership'
 import { transferPty } from './pty/transfer'
 import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
@@ -50,6 +58,8 @@ import { cachedSingleFlight, singleFlight } from './updater-core'
 import { LatestTask } from './latestTask'
 import { TranscriptLoader, type TranscriptSource } from './transcriptLoader'
 import { loadTabWorkspace, TabWorkspaceStore } from './tabWorkspaceStore'
+import { NavigationCoordinator } from './navigation'
+import type { NavigationVisit } from '../shared/navigation'
 
 const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 
@@ -58,9 +68,18 @@ let mgr: PtyManager | null = null
 let liveTick: ReturnType<typeof setInterval> | null = null
 let tabWorkspace: TabWorkspaceStore | null = null
 
-export function initializeTabWorkspace(userDataDir: string, file?: string): PersistedTabLayout[] {
-  tabWorkspace = new TabWorkspaceStore(userDataDir, file)
-  return loadTabWorkspace(userDataDir, file)
+export function initializeTabWorkspace(
+  userDataDir: string,
+  file?: string
+): PersistedTabLayout | null {
+  const restored = loadTabWorkspace(userDataDir, file)
+  tabWorkspace = new TabWorkspaceStore(
+    userDataDir,
+    file,
+    restored,
+    (sessionId) => tabOwner.get(sessionId)
+  )
+  return tabWorkspace.takePrimary()
 }
 
 export function registerTabWindow(webContentsId: number, layout: PersistedTabLayout | null): void {
@@ -73,9 +92,9 @@ export function flushTabWorkspace(): void {
 
 // --- the window layer ---------------------------------------------------------------------------
 //
-// `PtyManager` owns terminal lifecycle and knows nothing about windows; it streams bytes to every
-// renderer. Everything below is the part that only this module can know, because the spawning window
-// is the IPC sender.
+// `PtyManager` owns terminal lifecycle and knows nothing about windows. Everything below routes its
+// bytes to one renderer and owns cross-window placement, which only this module can know because the
+// spawning window is the IPC sender.
 
 /**
  * ptyId → the webContents id of the window allowed to mount an xterm for it.
@@ -113,6 +132,34 @@ let tabDrag: { sourceId: number; payload: TabDragPayload; hoveringId: number | n
  * longer exist. Same shape as `ptyOwner` above, and released by the same hook.
  */
 const tabOwner = new Map<string, number>()
+/** Eager claims protected from stale target reports until that target first reports the tab. */
+const pendingTabClaims = new Map<string, number>()
+const boundTabReservations = new BoundTabReservations()
+
+const navigation = new NavigationCoordinator({
+  ownerOf: (sessionId) => tabOwner.get(sessionId),
+  exists: (windowId) => {
+    const contents = webContents.fromId(windowId)
+    return !!contents && !contents.isDestroyed()
+  },
+  activate: (windowId, command) => { sendToWindow(windowId, IPC.tabActivate, command) },
+  cancel: (windowId, requestId) => { sendToWindow(windowId, IPC.navigationCancelled, requestId) },
+  focus: (windowId) => {
+    const contents = webContents.fromId(windowId)
+    if (contents && !contents.isDestroyed()) BrowserWindow.fromWebContents(contents)?.focus()
+  },
+  restoreTerminal: (windowId, sessionId, current) => {
+    const pty = mgr?.findBySession(sessionId)
+    if (!pty) return Promise.resolve(false)
+    return transferTerminal(pty.ptyId, windowId, () =>
+      current() && mgr?.findBySession(sessionId)?.ptyId === pty.ptyId
+    )
+  }
+})
+
+export function navigationWindowFocused(windowId: number): void {
+  navigation.focused(windowId)
+}
 
 const SNAPSHOT_TIMEOUT_MS = 1000
 const pendingSnapshots = new Map<
@@ -128,7 +175,7 @@ const pendingSnapshots = new Map<
 let updateRunState: UpdateRunState = { phase: 'idle', log: '' }
 
 function claimTabsForWindow(windowId: number, sessionIds: string[]): void {
-  const releases = claimWindowTabs(tabOwner, windowId, sessionIds)
+  const releases = claimWindowTabs(tabOwner, windowId, sessionIds, pendingTabClaims)
   for (const { ownerId, sessionId } of releases) sendToWindow(ownerId, IPC.tabRelease, sessionId)
   emitTabsElsewhere()
 }
@@ -149,7 +196,7 @@ function emitTabsElsewhere(): void {
 }
 
 function setWindowTabs(wcId: number, sessionIds: string[]): void {
-  const releases = reconcileWindowTabs(tabOwner, wcId, sessionIds)
+  const releases = reconcileWindowTabs(tabOwner, wcId, sessionIds, pendingTabClaims)
   for (const { ownerId, sessionId } of releases) sendToWindow(ownerId, IPC.tabRelease, sessionId)
   emitTabsElsewhere()
 }
@@ -178,15 +225,19 @@ function requestPtySnapshot(ownerId: number, ptyId: string): Promise<PtySnapshot
   })
 }
 
-async function transferTerminal(ptyId: string, targetId: number): Promise<boolean> {
-  if (!mgr?.list().some((s) => s.ptyId === ptyId)) return false
+async function transferTerminal(
+  ptyId: string,
+  targetId: number,
+  current: () => boolean = () => true
+): Promise<boolean> {
+  if (!current() || !mgr?.list().some((s) => s.ptyId === ptyId)) return false
   const ownerId = ptyOwner.get(ptyId)
   const reason = `transfer:${randomUUID()}`
   return transferPty(ownerId, targetId, {
     pause: () => mgr!.setOutputPaused(ptyId, reason, true),
     resume: () => mgr!.setOutputPaused(ptyId, reason, false),
     capture: () => requestPtySnapshot(ownerId!, ptyId),
-    stage: (snapshot) => sendToWindow(targetId, IPC.ptySnapshotStage, ptyId, snapshot),
+    stage: (snapshot) => current() && sendToWindow(targetId, IPC.ptySnapshotStage, ptyId, snapshot),
     commit: () => {
       ptyOwner.set(ptyId, targetId)
       if (ownerId != null) mgr!.setOutputPaused(ptyId, `renderer:${ownerId}`, false)
@@ -289,7 +340,12 @@ export function releaseWindow(webContentsId: number, preserveTabs = false): void
       forgot = true
     }
   }
+  for (const [sessionId, targetId] of pendingTabClaims) {
+    if (targetId === webContentsId) pendingTabClaims.delete(sessionId)
+  }
+  boundTabReservations.discardWindow(webContentsId)
   if (forgot) emitTabsElsewhere()
+  navigation.closed(webContentsId)
   tabWorkspace?.close(webContentsId, preserveTabs)
   if (released) emitActive()
 }
@@ -601,6 +657,7 @@ export function registerIpc(): void {
     sendToWindow(ptyOwner.get(ptyId) ?? null, IPC.ptyData, ptyId, data)
   )
   mgr.on('exit', (ptyId: string, code: number | null) => {
+    boundTabReservations.discardPty(ptyId)
     ptyOwner.delete(ptyId)
     broadcast(IPC.ptyExit, ptyId, code)
   })
@@ -611,10 +668,35 @@ export function registerIpc(): void {
   // stays put, while terminal-owned state — selection, current stop, surface, Live slot — follows the
   // terminal). See PtyBindKind.
   mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) => {
-    const ownerId = tabOwner.get(oldId) ?? ptyOwner.get(ptyId)
-    tabOwner.delete(oldId)
-    if (ownerId != null) claimTabsForWindow(ownerId, [newId])
-    broadcast(IPC.ptyBound, ptyId, oldId, newId, kind)
+    boundTabReservations.discardPty(ptyId)
+    const tabWindow = retireInitialTabClaim(
+      tabOwner,
+      kind,
+      oldId,
+      newId,
+      pendingTabClaims
+    )
+    const adoptionToken = tabWindow == null ? null : randomUUID()
+    if (adoptionToken && tabWindow != null) {
+      boundTabReservations.reserve(adoptionToken, {
+        windowId: tabWindow, ptyId, sessionId: newId, fromSessionId: null
+      })
+    }
+    if (kind === 'initial') navigation.rekey(oldId, newId)
+    if (kind === 'initial') emitTabsElsewhere()
+    const terminalOwner = ptyOwner.get(ptyId)
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w.isDestroyed()) continue
+      w.webContents.send(
+        IPC.ptyBound,
+        ptyId,
+        oldId,
+        newId,
+        kind,
+        terminalOwner === w.webContents.id,
+        tabWindow === w.webContents.id ? adoptionToken : null
+      )
+    }
   })
 
   // Warm the agent-availability probe now so the first New-menu open is instant (it's cached).
@@ -767,7 +849,7 @@ export function registerIpc(): void {
     if (target) {
       claimTabsForWindow(target.webContents.id, drag.payload.sessionIds)
       target.webContents.send(IPC.tabDropHere, drag.payload)
-      target.focus()
+      navigation.reveal(e.sender.id, drag.payload.activeSessionId, 'persistent')
       return 'moved'
     }
     // No other window under the cursor. Over the source's own body means the user released somewhere
@@ -795,17 +877,35 @@ export function registerIpc(): void {
   ipcMain.on(IPC.tabWorkspaceChanged, (e, layout: unknown) => {
     tabWorkspace?.update(e.sender.id, layout)
   })
+  ipcMain.handle(IPC.tabWorkspaceActivate, (e) => tabWorkspace?.layoutFor(e.sender.id) ?? null)
+  ipcMain.on(IPC.tabWorkspaceActivated, () => {
+    for (const layout of tabWorkspace?.takeDormant() ?? []) {
+      openWindow?.({
+        sessionIds: [],
+        activeSessionId: null,
+        restoredTabs: layout,
+        primary: false,
+        collapseRail: true
+      })
+    }
+  })
+  ipcMain.on(IPC.tabWorkspaceClear, () => tabWorkspace?.clear())
   // "Show me this" for a conversation another window already holds: focus that window and bring its
   // tab forward. The tab does NOT come here — the user asked to see the conversation, not to
   // rearrange their windows.
-  ipcMain.on(IPC.conversationReveal, (e, sessionId: string) => {
-    const owner = tabOwner.get(sessionId)
-    if (owner == null || owner === e.sender.id) return
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (w.isDestroyed() || w.webContents.id !== owner) continue
-      w.focus()
-      w.webContents.send(IPC.tabActivate, sessionId)
-    }
+  ipcMain.on(IPC.conversationReveal, (e, sessionId: string, mode: TabOpenMode) => {
+    if (mode !== 'preview' && mode !== 'persistent') return
+    navigation.reveal(e.sender.id, sessionId, mode)
+  })
+  ipcMain.on(IPC.navigationReport, (e, visit: NavigationVisit | null, record: boolean, revision: number) => {
+    navigation.report(e.sender.id, visit, record, revision)
+  })
+  ipcMain.on(IPC.navigationStep, (e, direction: number) => {
+    if (direction === -1 || direction === 1) navigation.go(e.sender.id, direction)
+  })
+  ipcMain.on(IPC.navigationInterrupt, (e, revision: number) => navigation.intent(e.sender.id, revision))
+  ipcMain.on(IPC.navigationComplete, (e, requestId: number, visit: NavigationVisit | null) => {
+    navigation.complete(e.sender.id, requestId, visit)
   })
   ipcMain.on(IPC.conversationResume, (e, sessionId: string) => {
     const owner = tabOwner.get(sessionId)
@@ -824,6 +924,29 @@ export function registerIpc(): void {
   })
   ipcMain.handle(IPC.tabShouldRelease, (e, sessionId: string) => {
     return shouldReleaseTab(tabOwner, e.sender.id, sessionId)
+  })
+  ipcMain.handle(IPC.tabReserveBound, (e, ptyId: string, oldSessionId: string, sessionId: string): string | null => {
+    if (!canReserveTabForBoundPty(
+      ptyOwner,
+      mgr?.list() ?? [],
+      e.sender.id,
+      ptyId,
+      sessionId
+    )) return null
+    const token = randomUUID()
+    boundTabReservations.reserve(token, { windowId: e.sender.id, ptyId, sessionId, fromSessionId: oldSessionId })
+    return token
+  })
+  ipcMain.on(IPC.tabCommitBound, (e, token: string) => {
+    const reservation = boundTabReservations.take(token, e.sender.id)
+    if (!reservation) return
+    if (reservation.fromSessionId) {
+      navigation.retarget(reservation.windowId, reservation.fromSessionId, reservation.sessionId)
+    }
+    claimTabsForWindow(reservation.windowId, [reservation.sessionId])
+  })
+  ipcMain.on(IPC.tabCancelBound, (e, token: string) => {
+    boundTabReservations.take(token, e.sender.id)
   })
 
   // The ⌘W fallback: the renderer asks for its own window to close when it has no tab to close.
@@ -870,7 +993,11 @@ export function registerIpc(): void {
   // IPC.windowFocusChanged push (see windowFocus.ts — main is the sole authority).
   ipcMain.handle(
     IPC.windowIsFocused,
-    (e) => BrowserWindow.fromWebContents(e.sender)?.isFocused() ?? false
+    (e) => {
+      const focused = BrowserWindow.fromWebContents(e.sender)?.isFocused() ?? false
+      if (focused) navigation.focused(e.sender.id)
+      return focused
+    }
   )
 
   // --- self-update: check compares the build commit to main (GitHub API, HTTPS); run shells out to

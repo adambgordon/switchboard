@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { pointInRect, tabDropIndex, type TabRect } from '../src/renderer/lib/dropTarget'
+import {
+  pointInRect,
+  groupDragFollowerIndices,
+  groupDragIndices,
+  isGroupOriginDrop,
+  tabCaretIndex,
+  tabDropIndex,
+  type TabRect
+} from '../src/renderer/lib/dropTarget'
 
 /**
  * Where a dragged tab lands.
@@ -67,6 +75,12 @@ describe('tabDropIndex — the dragged tab does not count itself', () => {
     expect(tabDropIndex(tabs, 160, 16, 0)).toBe(1)
     expect(tabDropIndex(tabs, 260, 16, 0)).toBe(2)
   })
+
+  it('skips a whole scattered group without removing its geometry', () => {
+    const many = row(0, 6)
+    expect(tabDropIndex(many, 550, 16, [1, 3, 4])).toBe(2)
+    expect(tabDropIndex(many, 600, 16, [1, 3, 4])).toBe(3)
+  })
 })
 
 describe('tabDropIndex — wrapped rows', () => {
@@ -133,6 +147,79 @@ describe('tabDropIndex — degenerate inputs', () => {
     const tabs = row(0, 3)
     const shuffled = [tabs[2], tabs[0], tabs[1]]
     expect(tabDropIndex(shuffled, 160, 16)).toBe(2)
+  })
+
+  it('resolves an exact row tie upward even when the bottom row is listed first', () => {
+    const bottomFirst = [...row(64, 2), ...row(0, 2)]
+    expect(tabDropIndex(bottomFirst, 10, 48)).toBe(0)
+  })
+})
+
+describe('tabCaretIndex', () => {
+  it('keeps leftward boundaries unchanged', () => {
+    expect(tabCaretIndex(1, 4, 2)).toBe(1)
+  })
+
+  it('skips the dragged rectangle for a rightward middle insertion', () => {
+    expect(tabCaretIndex(2, 4, 1)).toBe(3)
+  })
+
+  it('paints the original slot at the dragged tab’s left edge', () => {
+    expect(tabCaretIndex(1, 4, 1)).toBe(1)
+  })
+
+  it('maps a post-removal end insertion to the trailing strip boundary', () => {
+    expect(tabCaretIndex(3, 4, 1)).toBe(4)
+  })
+
+  it('does not translate a different strip with no skipped rectangle', () => {
+    expect(tabCaretIndex(2, 4)).toBe(2)
+  })
+
+  it('maps a scattered group against the unchanged source rectangles', () => {
+    expect(tabCaretIndex(1, 6, [1, 3, 4], 1)).toBe(1)
+    expect(tabCaretIndex(2, 6, [1, 3, 4], 1)).toBe(5)
+    expect(tabCaretIndex(3, 6, [1, 3, 4], 1)).toBe(6)
+  })
+})
+
+describe('groupDragIndices', () => {
+  it('returns a contiguous selection in source order', () => {
+    expect(groupDragIndices(['A', 'B', 'C', 'D'], ['B', 'C'])).toEqual([1, 2])
+  })
+
+  it('returns a scattered selection in source order', () => {
+    expect(groupDragIndices(['A', 'B', 'C', 'D', 'E'], ['D', 'B', 'E'])).toEqual([1, 3, 4])
+  })
+
+  it('returns no indices when none of the carried ids belong to this strip', () => {
+    expect(groupDragIndices(['A', 'B'], ['X'])).toEqual([])
+  })
+})
+
+describe('groupDragFollowerIndices', () => {
+  it('marks one follower after a contiguous selected run', () => {
+    expect(groupDragFollowerIndices([1, 2, 3], [0, 0, 0, 0, 0, 0])).toEqual([4])
+  })
+
+  it('marks the follower after every scattered selected run', () => {
+    expect(groupDragFollowerIndices([1, 3, 4], [0, 0, 0, 0, 0, 0])).toEqual([2, 5])
+  })
+
+  it('does not invent a follower past the final tab', () => {
+    expect(groupDragFollowerIndices([2, 3], [0, 0, 0, 0])).toEqual([])
+  })
+
+  it('does not paint a follower that wrapped onto another row', () => {
+    expect(groupDragFollowerIndices([1], [0, 0, 32, 32])).toEqual([])
+  })
+})
+
+describe('isGroupOriginDrop', () => {
+  it('treats only the group’s leftmost source position as the no-op origin', () => {
+    expect(isGroupOriginDrop(0, 1, { pane: 0, index: 1 })).toBe(true)
+    expect(isGroupOriginDrop(0, 1, { pane: 0, index: 2 })).toBe(false)
+    expect(isGroupOriginDrop(0, 1, { pane: 1, index: 1 })).toBe(false)
   })
 })
 

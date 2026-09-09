@@ -2,19 +2,32 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties
 } from 'react'
-import type { AgentKind, ConversationMeta, LiveState, PtyState, Transcript } from '@shared/types'
+import type {
+  AgentKind,
+  ConversationMeta,
+  LiveState,
+  PtyState,
+  TabOpenMode,
+  Transcript
+} from '@shared/types'
 import { makeTabDragPayload } from '@shared/tabDrag'
 import { useSessions } from './lib/useSessions'
 import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
-import { bindActions } from './lib/bindPolicy'
-import { tabPersistAction } from './lib/tabPersistPolicy'
+import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
+import { deferredResumeAction } from './lib/deferredResume'
+import {
+  canPersistTabWorkspace,
+  restoredWorkspaceApplied,
+  tabPersistAction
+} from './lib/tabPersistPolicy'
 import { PANE_LIMITS, useLayout } from './lib/useLayout'
 import { usePaneLayout } from './lib/usePaneLayout'
 import { useTabsEnabled } from './lib/useTabsEnabled'
@@ -22,20 +35,23 @@ import {
   SPLIT_LIMITS,
   canPlaceTabsToSide,
   canSplitActiveTab,
+  effectiveTabOpenMode,
   locateTab,
   openSessionIds,
   paneActiveId,
   snapshotPaneLayout,
-  stepTab,
-  type OpenMode
+  stepTab
 } from './lib/paneModel'
 import {
   NO_SELECTION,
   actionTargets,
+  keyboardCloseTargets,
   extendSelection,
   pruneSelection,
   retargetSelection,
   selectOnly,
+  shouldClearSelectionOnPointerDown,
+  shouldClearSelectionOnWindowBlur,
   toggleSelected,
   type TabSelection
 } from './lib/tabSelection'
@@ -48,7 +64,8 @@ import { useMaxLiveSessions } from './lib/useMaxLiveSessions'
 import { useSeen } from './lib/useSeen'
 import { useWindowFocus } from './lib/useWindowFocus'
 import { useTranscript } from './lib/useTranscript'
-import { useNavHistory } from './lib/useNavHistory'
+import { useAppNavigation } from './lib/useAppNavigation'
+import type { ConversationView, NavigationCommand } from '@shared/navigation'
 import { useTheme } from './lib/useTheme'
 import { useDarkIcon } from './lib/useDarkIcon'
 import { useUpdates } from './lib/useUpdates'
@@ -75,8 +92,6 @@ import TooltipLayer from './components/TooltipLayer'
 import AppVeil from './components/AppVeil'
 import type { TranscriptScrollState } from './components/TranscriptView'
 import TerminalDeck from './components/TerminalDeck'
-
-type View = 'transcript' | 'terminal'
 
 /** Recent section: rows shown in 'recent' mode before toggling to 'all'. */
 const RECENT_CAP = 30
@@ -207,18 +222,25 @@ export default function App() {
   const { enabled: tabsEnabled, setEnabled: setTabsEnabled } = useTabsEnabled()
   const panes = usePaneLayout(tabsEnabled ? windowInit.restoredTabs : null)
   const { layout: paneLayout } = panes
+  const [tabWorkspaceReady, setTabWorkspaceReady] = useState(
+    () => tabsEnabled && !windowInit.restoredTabs
+  )
+  const pendingWorkspaceKeyRef = useRef<string | null>(null)
+  const pendingBoundClaimsRef = useRef(new Map<string, PendingBoundTab>())
   // THE selection: the active tab of the focused pane. Derived, never stored twice.
   const selectedId = panes.selectedId
 
+  const navigationApplyRef = useRef<((command: NavigationCommand) => void) | null>(null)
   const {
-    selectedId: navSelectedId,
-    open,
-    home,
-    back,
-    forward,
-    rekey: rekeyNav,
-    retarget: retargetNav
-  } = useNavHistory()
+    beginVisit,
+    go: goHistory,
+    rekey: rekeyPendingNavigation,
+    report: reportNavigation
+  } = useAppNavigation(navigationApplyRef)
+  const focusPane = useCallback((index: number) => {
+    beginVisit()
+    panes.focusPane(index)
+  }, [beginVisit, panes.focusPane])
   // Read by the onPtyBound listener, which must not re-subscribe on every selection change.
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
@@ -234,7 +256,7 @@ export default function App() {
   )
   // Per-conversation view memory (Formatted vs Terminal). The choice sticks per
   // session, so leaving and returning to a live conversation restores its view.
-  const [viewBySession, setViewBySession] = useState<Record<string, View>>({})
+  const [viewBySession, setViewBySession] = useState<Record<string, ConversationView>>({})
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -307,6 +329,30 @@ export default function App() {
   const [tabSelection, setTabSelection] = useState<TabSelection>(NO_SELECTION)
   const tabSelectionRef = useRef(tabSelection)
   tabSelectionRef.current = tabSelection
+  const hasTabSelection = tabSelection.ids.size > 0
+  useEffect(() => {
+    if (!hasTabSelection) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target instanceof Element ? event.target : null
+      const tabId = target?.closest<HTMLElement>('.sb-tab')?.dataset.sessionId ?? null
+      if (
+        shouldClearSelectionOnPointerDown(
+          tabSelectionRef.current,
+          tabId,
+          tabId !== null && (event.metaKey || event.shiftKey)
+        )
+      ) {
+        setTabSelection(NO_SELECTION)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [hasTabSelection])
+  useEffect(() => {
+    if (shouldClearSelectionOnWindowBlur(tabSelectionRef.current, focused)) {
+      setTabSelection(NO_SELECTION)
+    }
+  }, [focused])
   // Tabs close, move panes and get rekeyed underneath a selection, so it is re-checked against the
   // layout after every change rather than at each call site — no path can forget. `pruneSelection`
   // returns its input by identity when nothing went, so the common case costs no render.
@@ -347,31 +393,21 @@ export default function App() {
     []
   )
 
-  // Closing a tab that belongs to a group closes the GROUP — from the ✕, middle-click, the menu, and
-  // ⌘W alike, because those are the same act on the same tab and differing would be arbitrary. Declared
-  // up here with the rest of the selection wiring: the ⌘W subscription is established further up still,
-  // and a `const` defined below it could not be named in its dependency list.
+  // Controls invoked on a tab close its group only when that tab belongs to it. Keyboard close
+  // resolves the focused group independently, since the active tab can be outside the selection.
   const closeTabsFrom = useCallback(
     (pane: number, index: number) => {
+      beginVisit()
       const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
       if (!id) return
       const ids = targetsFor(pane, id)
       if (ids.length > 1) panes.closeTabs(ids)
       else panes.closeTab(pane, index)
     },
-    [panes.closeTab, panes.closeTabs, targetsFor]
+    [panes.closeTab, panes.closeTabs, targetsFor, beginVisit]
   )
   const tabsEnabledRef = useRef(tabsEnabled)
   tabsEnabledRef.current = tabsEnabled
-
-  // Switching the preference off collapses to the shape the off path expects: one pane holding one
-  // preview tab, whatever was on screen. Fires on the transition only, so turning it back on starts
-  // from that single tab rather than resurrecting a stale set.
-  const tabsWereEnabled = useRef(tabsEnabled)
-  useEffect(() => {
-    if (tabsWereEnabled.current && !tabsEnabled) panes.collapseToSingle()
-    tabsWereEnabled.current = tabsEnabled
-  }, [tabsEnabled, panes.collapseToSingle])
 
   // A detached window opens straight onto the tab group it was created for. Runs once; the
   // conversation index has not necessarily loaded yet, which is fine, because tabs hold ids and their
@@ -395,63 +431,121 @@ export default function App() {
   useEffect(() => {
     const off = window.api.onMenuCloseTab(() => {
       if (overlayOpenRef.current) return
+      beginVisit()
       const l = paneLayoutRef.current
-      const index = l.panes[l.focusIndex]?.activeIndex ?? -1
-      // Through the group-aware path, so ⌘W closes a whole multi-selection — the same rule the ✕,
-      // middle-click and the menu follow.
-      if (tabsEnabledRef.current && index >= 0) closeTabsFrom(l.focusIndex, index)
+      const ids = keyboardCloseTargets(
+        tabSelectionRef.current,
+        l.focusIndex,
+        paneActiveId(l.panes[l.focusIndex])
+      )
+      if (tabsEnabledRef.current && ids.length > 0) panes.closeTabs(ids)
       else window.api.closeWindow()
     })
     return off
-  }, [closeTabsFrom])
+  }, [panes.closeTabs, beginVisit])
 
   // A Codex PTY's sessionId changed — an initial bind off a placeholder, or a correction between two
   // real conversations. The two need OPPOSITE handling of session-keyed state, and getting it wrong
   // destroys durable data, so the decision lives in pure, mutation-checked `bindActions` and this
   // effect is only the wiring. See bindPolicy.ts and PtyBindKind.
   useEffect(() => {
-    const off = window.api.onPtyBound((_ptyId, oldId, newId, kind) => {
-      const act = bindActions({ oldId, newId, kind }, selectedIdRef.current)
-      if (findPriorTerminalIdsRef.current.delete(oldId)) {
-        findPriorTerminalIdsRef.current.add(newId)
-      }
-      if (act.nav === 'rekey') rekeyNav(oldId, newId)
-      else if (act.nav === 'retarget') retargetNav(oldId, newId)
-      if (act.rekeySeen) rekeySeen(oldId, newId)
-      if (act.retargetLiveOrder) retargetLiveOrder(oldId, newId)
-      // Tabs are session-keyed too. `rekey` rewrites every tab holding a placeholder that is ceasing
-      // to exist; `retarget` moves only the tab the user is standing on, leaving inactive tabs on the
-      // old id alone — that conversation is still real, only the terminal moved.
-      if (act.tabs === 'rekey') panes.rekeyTabs(oldId, newId)
-      else if (act.tabs === 'retarget') panes.retargetTabs(oldId, newId)
-      if (act.tabSelection !== 'none') {
-        setTabSelection((selection) => retargetSelection(selection, oldId, newId))
-      }
-      if (act.view === 'move') {
-        setViewBySession((prev) => {
-          if (!(oldId in prev)) return prev
-          const next = { ...prev, [newId]: prev[oldId] }
-          delete next[oldId]
-          return next
-        })
-      } else if (act.view === 'copy') {
-        // Carry the surface the user is standing on across, rather than letting the new
-        // conversation's own remembered view flip a terminal they are typing in over to Formatted.
-        // The old id keeps its entry — that conversation still exists.
-        setViewBySession((prev) => ({ ...prev, [newId]: prev[oldId] ?? 'terminal' }))
-      }
-      if (act.focus) requestFocus(newId)
+    let alive = true
+    const latestBinds = new Map<string, object>()
+    const cancelPending = (ptyId: string): void => {
+      const pending = pendingBoundClaimsRef.current.get(ptyId)
+      if (pending) window.api.cancelBoundTab(pending.token)
+      pendingBoundClaimsRef.current.delete(ptyId)
+    }
+    const offExit = window.api.onPtyExit((ptyId) => {
+      latestBinds.delete(ptyId)
+      cancelPending(ptyId)
     })
-    return off
+    const off = window.api.onPtyBound((ptyId, oldId, newId, kind, ownedHere, adoptionToken) => {
+      cancelPending(ptyId)
+      if (kind === 'initial') rekeyPendingNavigation(oldId, newId)
+      const ev = { oldId, newId, kind }
+      latestBinds.set(ptyId, ev)
+      const act = bindActions(ev, selectedIdRef.current, ownedHere)
+      if (act.retargetLiveOrder) retargetLiveOrder(oldId, newId)
+      const apply = (): void => {
+        if (act.view !== 'none' && findPriorTerminalIdsRef.current.delete(oldId)) {
+          findPriorTerminalIdsRef.current.add(newId)
+        }
+        if (act.rekeySeen) rekeySeen(oldId, newId)
+        // Tabs are session-keyed too. `rekey` rewrites every tab holding a placeholder that is ceasing
+        // to exist; `retarget` moves only the tab the user is standing on, leaving inactive tabs on the
+        // old id alone — that conversation is still real, only the terminal moved.
+        if (act.tabs === 'rekey') panes.rekeyTabs(oldId, newId)
+        else if (act.tabs === 'retarget') panes.retargetTabs(oldId, newId)
+        if (act.tabSelection !== 'none') {
+          setTabSelection((selection) => retargetSelection(selection, oldId, newId))
+        }
+        if (act.view === 'move') {
+          setViewBySession((prev) => {
+            if (!(oldId in prev)) return prev
+            const next = { ...prev, [newId]: prev[oldId] }
+            delete next[oldId]
+            return next
+          })
+        } else if (act.view === 'copy') {
+          // Carry the surface the user is standing on across, rather than letting the new
+          // conversation's own remembered view flip a terminal they are typing in over to Formatted.
+          // The old id keeps its entry — that conversation still exists.
+          setViewBySession((prev) => ({ ...prev, [newId]: prev[oldId] ?? 'terminal' }))
+        }
+        if (act.focus) requestFocus(newId)
+      }
+
+      if (kind === 'correction' && act.tabs === 'retarget') {
+        void window.api
+          .reserveBoundTab(ptyId, oldId, newId)
+          .then((token) => {
+            if (!token) return
+            if (!alive || latestBinds.get(ptyId) !== ev || selectedIdRef.current !== oldId) {
+              window.api.cancelBoundTab(token)
+              return
+            }
+            pendingBoundClaimsRef.current.set(ptyId, { token, ...ev })
+            apply()
+          })
+          .catch(() => {})
+      } else {
+        if (adoptionToken) {
+          if (locateTab(paneLayoutRef.current, oldId)) {
+            pendingBoundClaimsRef.current.set(ptyId, { token: adoptionToken, ...ev })
+          } else {
+            window.api.cancelBoundTab(adoptionToken)
+          }
+        }
+        apply()
+      }
+    })
+    return () => {
+      alive = false
+      off()
+      offExit()
+      for (const ptyId of pendingBoundClaimsRef.current.keys()) cancelPending(ptyId)
+    }
   }, [
-    rekeyNav,
+    rekeyPendingNavigation,
     rekeySeen,
     requestFocus,
-    retargetNav,
     retargetLiveOrder,
     panes.rekeyTabs,
     panes.retargetTabs
   ])
+
+  // Initial binds may adopt several inactive tabs in one commit. Corrections still require the app
+  // selection to follow. Read the committed layout before normal membership reports reach main.
+  useLayoutEffect(() => {
+    for (const [ptyId, pending] of pendingBoundClaimsRef.current) {
+      const action = boundTabAdoption(pending, paneLayout)
+      if (action === 'wait') continue
+      pendingBoundClaimsRef.current.delete(ptyId)
+      if (action === 'commit') window.api.commitBoundTab(pending.token)
+      else window.api.cancelBoundTab(pending.token)
+    }
+  })
 
   // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
   // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of
@@ -474,32 +568,6 @@ export default function App() {
     }
     requestFocus(selectedId)
   }, [selectedId, requestFocus])
-
-  // --- the two halves of "what is selected" ---
-  //
-  // The pane layout is what is on screen; the back/forward history is a LOG of it. Every selection
-  // change goes through the layout — a row click, a tab click, closing a tab, moving pane focus — and
-  // this records the stop, so no action handler has to remember to. Re-recording the stop the user is
-  // already on is an identity no-op in navReducer, which is what keeps this from fighting the effect
-  // below.
-  useEffect(() => {
-    if (selectedId) open(selectedId)
-    else home()
-  }, [selectedId, open, home])
-
-  // The one direction that starts in the history: ⌘[ / ⌘] move its cursor, and the conversation it
-  // lands on has to be put into the focused pane. Preview mode, so retracing your steps does not
-  // accumulate tabs.
-  //
-  // Keyed on `navSelectedId` ALONE, reading the current selection through a ref. Depending on
-  // `selectedId` too would fire this in the same commit as a pane-driven change, where the effect
-  // above has dispatched but its state has not landed yet — so it would see the history "disagreeing",
-  // reconcile the wrong way, and bounce the user back to the conversation they just left.
-  useEffect(() => {
-    if (navSelectedId && navSelectedId !== selectedIdRef.current) {
-      panes.openTab(navSelectedId, 'preview')
-    }
-  }, [navSelectedId, panes.openTab])
 
   // Keep the main-process LRU cap in lockstep with the persisted preference — on mount and on each
   // change. Fire-and-forget, and runs after commit, so it never touches the render/paint path.
@@ -557,8 +625,8 @@ export default function App() {
   // When a search is active, each section is filtered to the matching sessions.
   // --- terminal ownership + per-pane resolution ---
   //
-  // Which pane each live terminal is mounted in. A window can hold only ONE xterm per terminal, so a
-  // live tab moving panes rebuilds its terminal there from ptyStream's serialized handoff.
+  // Which pane each live terminal is mounted in. A window holds one stable xterm per terminal in the
+  // window-level deck, so a live tab moving panes only changes its portal host.
   // With no local tab the home stays sticky, so focus changes do not remount hidden terminals.
   // The rule itself is pure and mutation-checked in lib/ptyHome.ts — this is only the wiring.
   //
@@ -601,7 +669,7 @@ export default function App() {
         : pty.ownedHere
           ? 'other-pane'
           : 'claimable'
-    const requested: View = id
+    const requested: ConversationView = id
       ? viewBySession[id] ?? (pty ? 'terminal' : 'transcript')
       : 'transcript'
     return {
@@ -610,7 +678,7 @@ export default function App() {
       meta,
       pty,
       terminalAt,
-      view: (requested === 'terminal' && ownsTerminal ? 'terminal' : 'transcript') as View,
+      view: (requested === 'terminal' && ownsTerminal ? 'terminal' : 'transcript') as ConversationView,
       title: pty ? displayTitleForRow(pty, meta ?? synthMeta(pty)) : meta?.title ?? 'Conversation',
       cwd: meta?.cwd ?? pty?.cwd ?? ''
     }
@@ -632,6 +700,11 @@ export default function App() {
     transcriptCacheRef.current
   )
   const focusedView = paneLayout.focusIndex === 1 ? view1 : view0
+  useLayoutEffect(() => {
+    const id = focusedView.id
+    const view = id && findPriorTerminalIdsRef.current.has(id) ? 'terminal' : focusedView.view
+    reportNavigation(id ? { sessionId: id, view } : null, focusedView.terminalAt === 'here')
+  })
 
   // Both panes' active conversations are genuinely on screen, so both count as being looked at — for
   // the liveness dot's "seen" rule and for marking read. A set keyed by id, since one conversation can
@@ -798,6 +871,7 @@ export default function App() {
   // the keyboard. The history stop is recorded by the selection effect, not here.
   const goToTab = useCallback(
     (pane: number, index: number, focusSurface = true) => {
+      beginVisit()
       const id = paneLayout.panes[pane]?.tabs[index]?.sessionId
       if (!id) return
       // A plain click means "just this one", so it is also the way out of a multi-selection.
@@ -807,7 +881,7 @@ export default function App() {
       if (!isUnlinkedId(id)) markRead(id)
       if (focusSurface) requestFocus(id)
     },
-    [paneLayout.panes, panes.activateTab, isUnlinkedId, markRead, requestFocus]
+    [paneLayout.panes, panes.activateTab, isUnlinkedId, markRead, requestFocus, beginVisit]
   )
 
 
@@ -867,25 +941,6 @@ export default function App() {
   }, [groups])
   const metaByIdRef = useRef(metaById)
   metaByIdRef.current = metaById
-  const restoredTabsValidatedRef = useRef(false)
-  useEffect(() => {
-    const restored = windowInit.restoredTabs
-    if (restoredTabsValidatedRef.current || !restored) return
-    if (!tabsEnabled) {
-      restoredTabsValidatedRef.current = true
-      if (detached) window.api.closeWindow()
-      return
-    }
-    if (loading) return
-    restoredTabsValidatedRef.current = true
-    const restoredIds = restored.panes.flatMap((pane) => pane.sessionIds)
-    const invalid = restoredIds.filter((id) => !metaById.has(id))
-    if (invalid.length === restoredIds.length && detached) {
-      window.api.closeWindow()
-      return
-    }
-    if (invalid.length > 0) panes.closeTabs(invalid)
-  }, [loading, metaById, tabsEnabled, detached, panes.closeTabs, windowInit.restoredTabs])
 
   // Agent axis for "new conversation". `availableAgents` are the launchable CLIs. The agent is
   // RESOLVED (no choice to present) when a usable default is set, or when only one agent exists;
@@ -924,24 +979,44 @@ export default function App() {
 
   // --- actions: a live process is created ONLY by resume() or startNew() ---
   // Remember a conversation's chosen view so it sticks across navigation.
-  const setSessionView = useCallback((id: string, v: View) => {
+  const setSessionView = useCallback((id: string, v: ConversationView) => {
     setViewBySession((prev) => (prev[id] === v ? prev : { ...prev, [id]: v }))
   }, [])
 
+  const closeFind = useCallback(() => {
+    setFindOpen(false)
+    const prior = [...findPriorTerminalIdsRef.current]
+    findPriorTerminalIdsRef.current.clear()
+    for (const sessionId of prior) setSessionView(sessionId, 'terminal')
+  }, [setSessionView])
+
+  const chooseSessionView = useCallback((id: string, view: ConversationView) => {
+    beginVisit({ sessionId: id, view })
+    if (view === 'terminal') closeFind()
+    findPriorTerminalIdsRef.current.delete(id)
+    setSessionView(id, view)
+  }, [beginVisit, closeFind, setSessionView])
+
+  navigationApplyRef.current = (command) => {
+    if (command.kind === 'replay') closeFind()
+    panes.openTab(command.sessionId, effectiveTabOpenMode(tabsEnabledRef.current, command.mode))
+    if (command.view !== null) setSessionView(command.sessionId, command.view)
+    requestFocus(command.sessionId)
+  }
+
   /**
-   * Every landing on a conversation goes through here: it puts the conversation in a pane, and the
-   * effect above records the history stop.
+   * Open a conversation from a local user action. Main-directed reveals and history playback use
+   * the tagged activation path above.
    *
-   * This is the ONE place the tabs preference changes behaviour. With tabs off every landing is a
-   * PREVIEW open, so the pane's single tab is replaced in place and the app behaves exactly as it did
-   * before tabs existed — which is why nothing downstream needs to know about the flag.
+   * Both paths apply effectiveTabOpenMode: with tabs off, opens replace the single preview in place.
    *
    * `persistent` is for landings that ACT on a conversation rather than peek at it — Resume, New, and
    * ⏎ into a live terminal. Acting on it is what makes a tab stick, the same way editing a file does
    * in an editor.
    */
   const land = useCallback(
-    (id: string, mode: OpenMode, opts?: { pane?: number; focus?: boolean }) => {
+    (id: string, mode: TabOpenMode, opts?: { pane?: number; focus?: boolean }) => {
+      beginVisit()
       // One conversation, one tab — across windows as well as across panes. Within this window the
       // reducer handles it; another window's tab is only knowable through main, so it is decided here.
       // The rule matches the reducer's exactly: an implicit open reveals the tab where it is, an
@@ -949,14 +1024,14 @@ export default function App() {
       // opening a tab would put main's latency on the most-travelled path in the app.
       if (openElsewhereRef.current.has(id) && !locateTab(paneLayoutRef.current, id)) {
         if (opts?.pane === undefined) {
-          window.api.revealConversation(id)
+          window.api.revealConversation(id, effectiveTabOpenMode(tabsEnabledRef.current, mode))
           return
         }
         window.api.claimConversation(id)
       }
-      panes.openTab(id, tabsEnabled ? mode : 'preview', opts)
+      panes.openTab(id, effectiveTabOpenMode(tabsEnabledRef.current, mode), opts)
     },
-    [panes.openTab, tabsEnabled]
+    [panes.openTab, beginVisit]
   )
 
   // `pane` is passed explicitly by the per-pane header buttons rather than relying on the pointer
@@ -971,21 +1046,23 @@ export default function App() {
       return
     }
     land(meta.sessionId, 'persistent', { pane })
-    setSessionView(meta.sessionId, 'terminal')
+    chooseSessionView(meta.sessionId, 'terminal')
     requestFocus(meta.sessionId)
     await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
-  }, [land, requestFocus, setSessionView])
+  }, [land, requestFocus, chooseSessionView, beginVisit])
   const resumeRef = useRef(resume)
   resumeRef.current = resume
 
   const startNew = useCallback(async (cwd: string, agent: AgentKind) => {
+    const current = beginVisit()
     setMenuOpen(false)
     setLastAgent(agent) // starting an agent makes it the sticky menu default too
     const st = await window.api.startNew(cwd, agent)
+    if (!current()) return
     land(st.sessionId, 'persistent')
-    setSessionView(st.sessionId, 'terminal')
+    chooseSessionView(st.sessionId, 'terminal')
     requestFocus(st.sessionId)
-  }, [land, requestFocus, setSessionView])
+  }, [land, requestFocus, chooseSessionView, beginVisit])
 
   const pickOther = useCallback(
     async (agent: AgentKind) => {
@@ -1043,10 +1120,10 @@ export default function App() {
       const id = target ? paneActiveId(target) : null
       if (!id) return
       if (pane !== undefined && pane !== l.focusIndex) panes.focusPane(pane)
-      setSessionView(id, 'terminal')
+      chooseSessionView(id, 'terminal')
       requestFocus(id)
     },
-    [panes.focusPane, requestFocus, setSessionView]
+    [panes.focusPane, requestFocus, chooseSessionView]
   )
   // Enter/focus a live conversation's terminal: record a history stop, switch to the Terminal
   // view, and hand it the keyboard so you can type immediately. The optional `id` lets a switch /
@@ -1058,13 +1135,13 @@ export default function App() {
     if (!target) return
     // Going into a live terminal is acting on the conversation, so its tab stops being a preview.
     land(target, 'persistent')
-    setSessionView(target, 'terminal')
+    chooseSessionView(target, 'terminal')
     requestFocus(target)
-  }, [selectedId, land, setSessionView, requestFocus])
+  }, [selectedId, land, chooseSessionView, requestFocus])
   // Navigation restores each conversation's remembered surface. A live conversation with no choice
   // yet defaults to Terminal; explicit actions (Resume / New / Enter / Go live) still force Terminal.
   const openRemembered = useCallback(
-    (id: string, mode: OpenMode = 'preview') => {
+    (id: string, mode: TabOpenMode = 'preview') => {
       land(id, mode)
       // Deliberately opening a conversation IS attention, whatever the OS says about window focus —
       // so read state doesn't rest on that one signal, and losing it can't strand a row unread.
@@ -1118,6 +1195,7 @@ export default function App() {
   // move, so the source pane gives the tab up.
   const splitRightTab = useCallback(
     (sessionId: string, fromPane: number) => {
+      beginVisit()
       const l = paneLayoutRef.current
       const ids = targetsFor(fromPane, sessionId)
       if (ids.length === 0 || !canPlaceTabsToSide(l, ids, 1)) return
@@ -1129,12 +1207,13 @@ export default function App() {
       if (!isUnlinkedId(sessionId)) markRead(sessionId)
       requestFocus(sessionId)
     },
-    [panes.splitPane, panes.moveTabs, panes.focusPane, targetsFor, isUnlinkedId, markRead, requestFocus]
+    [panes.splitPane, panes.moveTabs, panes.focusPane, targetsFor, isUnlinkedId, markRead, requestFocus, beginVisit]
   )
   // Move a tab to the pane it is not in. Only reachable when a split already exists, so "the other
   // pane" is unambiguous — which is why one handler serves both Move Right and Move Left.
   const moveTabToOtherPane = useCallback(
     (sessionId: string, fromPane: number) => {
+      beginVisit()
       const l = paneLayoutRef.current
       if (l.panes.length < 2) return
       const ids = targetsFor(fromPane, sessionId)
@@ -1145,7 +1224,7 @@ export default function App() {
       if (!isUnlinkedId(sessionId)) markRead(sessionId)
       requestFocus(sessionId)
     },
-    [panes.moveTabs, panes.focusPane, targetsFor, isUnlinkedId, markRead, requestFocus]
+    [panes.moveTabs, panes.focusPane, targetsFor, isUnlinkedId, markRead, requestFocus, beginVisit]
   )
   // "Split Right" CREATES the second pane, so it is offered only when there is not one — otherwise the
   // action is a move and says so. Also requires two tabs here: moving the only one empties this pane,
@@ -1160,18 +1239,20 @@ export default function App() {
   // A tab was dragged onto a strip in THIS window: a reorder, or a move between panes.
   const moveTabHere = useCallback(
     (from: { pane: number; index: number }, to: { pane: number; index: number }) => {
+      beginVisit()
       panes.moveTab(from, to)
       panes.focusPane(to.pane)
     },
-    [panes.moveTab, panes.focusPane]
+    [panes.moveTab, panes.focusPane, beginVisit]
   )
   // A dragged multi-selection landed on a strip in this window.
   const moveTabGroupHere = useCallback(
     (sessionIds: string[], activeSessionId: string, to: { pane: number; index: number }) => {
+      beginVisit()
       panes.moveTabs(sessionIds, activeSessionId, to)
       panes.focusPane(to.pane)
     },
-    [panes.moveTabs, panes.focusPane]
+    [panes.moveTabs, panes.focusPane, beginVisit]
   )
   // A tab group was dragged OUT of this window — another window took it, or it became a window of its
   // own. Either way this window gives up the whole payload, making the gesture a move rather than a copy.
@@ -1188,6 +1269,7 @@ export default function App() {
   // transcript and offers to bring the terminal over through the serialized ownership handoff.
   const moveToNewWindow = useCallback(
     (id: string) => {
+      beginVisit()
       const at = locateTab(paneLayoutRef.current, id)
       // A group goes to ONE new window holding all of it, not one window each.
       const ids = at ? targetsFor(at.pane, id) : [id]
@@ -1198,7 +1280,7 @@ export default function App() {
       window.api.openConversationWindow(payload)
       panes.closeTabs(payload.sessionIds)
     },
-    [panes.closeTabs, targetsFor]
+    [panes.closeTabs, targetsFor, beginVisit]
   )
   // A tab group dragged in from ANOTHER window. This is explicit placement, not an implicit "show me"
   // navigation: routing it through `land` without a pane would see the source's still-open tabs and
@@ -1235,21 +1317,58 @@ export default function App() {
   // "still off" rather than as a fresh switch-off — see tabPersistPolicy for why that distinction
   // is the difference between honouring the setting and deleting the user's saved layout.
   const tabsEnabledWasRef = useRef(tabsEnabled)
+  const initialWorkspaceHandledRef = useRef(false)
+  useEffect(() => {
+    if (initialWorkspaceHandledRef.current) return
+    initialWorkspaceHandledRef.current = true
+    if (!tabsEnabled) return
+    if (windowInit.restoredTabs) window.api.finishTabWorkspaceActivation()
+    setTabWorkspaceReady(true)
+  }, [tabsEnabled, windowInit.restoredTabs])
+
   useEffect(() => {
     const action = tabPersistAction(tabsEnabledWasRef.current, tabsEnabled)
     tabsEnabledWasRef.current = tabsEnabled
-    if (action === 'persist') window.api.persistTabLayout(persistedTabLayout)
-    else if (action === 'clear') window.api.persistTabLayout(null)
+    if (action === 'clear') {
+      pendingWorkspaceKeyRef.current = null
+      setTabWorkspaceReady(false)
+      panes.collapseToSingle()
+      window.api.clearTabWorkspace()
+      return
+    }
+    if (action === 'activate') {
+      setTabWorkspaceReady(false)
+      void window.api
+        .activateTabWorkspace()
+        .then((saved) => {
+          if (!tabsEnabledRef.current) return
+          if (!saved) {
+            window.api.finishTabWorkspaceActivation()
+            setTabWorkspaceReady(true)
+            return
+          }
+          pendingWorkspaceKeyRef.current = JSON.stringify(saved)
+          panes.restoreLayout(saved)
+        })
+        .catch(() => {})
+      return
+    }
+    if (action === 'persist' && canPersistTabWorkspace(tabsEnabled, tabWorkspaceReady)) {
+      window.api.persistTabLayout(persistedTabLayout)
+    }
+  }, [tabsEnabled, persistedTabLayoutKey, tabWorkspaceReady, panes.collapseToSingle, panes.restoreLayout])
+
+  useEffect(() => {
+    const pending = pendingWorkspaceKeyRef.current
+    if (!tabsEnabled || !restoredWorkspaceApplied(pending, persistedTabLayoutKey)) return
+    pendingWorkspaceKeyRef.current = null
+    window.api.finishTabWorkspaceActivation()
+    setTabWorkspaceReady(true)
   }, [tabsEnabled, persistedTabLayoutKey])
 
   useEffect(() => {
     const offElsewhere = window.api.onTabsElsewhere((ids: string[]) => {
       setOpenElsewhere(new Set(ids))
-    })
-    // Another window asked us to show a conversation we hold. `openTab` on an existing tab activates
-    // it and focuses its pane — main has already raised the window.
-    const offActivate = window.api.onTabActivate((sessionId: string) => {
-      if (locateTab(paneLayoutRef.current, sessionId)) panes.openTab(sessionId, 'persistent')
     })
     const offResume = window.api.onTabResume((sessionId: string) => {
       if (!locateTab(paneLayoutRef.current, sessionId)) return
@@ -1268,7 +1387,6 @@ export default function App() {
     })
     return () => {
       offElsewhere()
-      offActivate()
       offResume()
       offRelease()
     }
@@ -1276,10 +1394,12 @@ export default function App() {
 
   useEffect(() => {
     if (!pendingResumeId) return
+    const tabPresent = !!locateTab(paneLayout, pendingResumeId)
     const meta = metaById.get(pendingResumeId)
-    if (!meta || !locateTab(paneLayout, pendingResumeId)) return
+    const action = deferredResumeAction(tabPresent, !!meta)
+    if (action === 'wait') return
     setPendingResumeId(null)
-    void resume(meta)
+    if (action === 'resume' && meta) void resume(meta)
   }, [pendingResumeId, metaById, paneLayout, resume])
 
   // Show that this window will accept a tab currently being dragged over it. Driven by main, because
@@ -1300,16 +1420,18 @@ export default function App() {
   // terminal app-wide, so this is a move, not a copy — the other window falls back to the transcript.
   const claimTerminal = useCallback(
     (ptyId: string, pane: number) => {
+      const current = beginVisit()
       void window.api.claimTerminal(ptyId).then((claimed) => {
-        if (claimed) goLive(pane)
+        if (claimed && current()) goLive(pane)
       })
     },
-    [goLive]
+    [goLive, beginVisit]
   )
   const toggleSplit = useCallback(() => {
+    beginVisit()
     if (paneLayoutRef.current.panes.length > 1) panes.unsplit()
     else panes.splitActiveTab()
-  }, [panes.splitActiveTab, panes.unsplit])
+  }, [panes.splitActiveTab, panes.unsplit, beginVisit])
   const killSession = useCallback((ptyId: string) => window.api.kill(ptyId), [])
   // Stop a session by its conversation id — the rail's right-click menu works in session ids, while
   // the PtyManager kills by ptyId, so resolve the live process first (mirrors the pane header's
@@ -1424,13 +1546,6 @@ export default function App() {
       setSessionView(selectedId, 'transcript')
     }
   }, [selectedId, effectiveView, setSessionView])
-
-  const closeFind = useCallback(() => {
-    setFindOpen(false)
-    const prior = [...findPriorTerminalIdsRef.current]
-    findPriorTerminalIdsRef.current.clear()
-    for (const sessionId of prior) setSessionView(sessionId, 'terminal')
-  }, [setSessionView])
 
   // The pane-header magnifier toggles find (closeFind restores the prior view on the way out).
   const toggleFind = useCallback(() => {
@@ -1576,10 +1691,10 @@ export default function App() {
       } else if (mod && e.key === '[') {
         // Browser-style back: retrace to the previously-opened conversation.
         e.preventDefault()
-        back()
+        goHistory(-1)
       } else if (mod && e.key === ']') {
         e.preventDefault()
-        forward()
+        goHistory(1)
       } else if (e.key === 'Escape') {
         if (findOpen) closeFind()
         else if (query) setQuery('')
@@ -1611,8 +1726,7 @@ export default function App() {
     resume,
     enterLive,
     switchTo,
-    back,
-    forward,
+    goHistory,
     togglePane,
     toggleUnread,
     newConversation,
@@ -1646,7 +1760,7 @@ export default function App() {
         // The wordmark goes back to the welcome screen. With tabs open that is a pane showing nothing
         // rather than a window with nothing in it — the tabs stay put, which is why `deselect` exists
         // instead of this either closing them or becoming a control that silently does nothing.
-        onHome={panes.deselect}
+        onHome={() => { beginVisit(); panes.deselect() }}
         onOpenSettings={() => setSettingsPage('appearance')}
         resolvedTheme={themeResolved}
         onToggleTheme={toggleTheme}
@@ -1774,7 +1888,7 @@ export default function App() {
                   paneIndex={i}
                   paneFocused={isFocused}
                   style={split ? { flexGrow: grow, flexBasis: 0 } : undefined}
-                  onPaneFocus={split ? () => panes.focusPane(i) : undefined}
+                  onPaneFocus={split ? () => focusPane(i) : undefined}
                   terminalAt={v.terminalAt}
                   onClaimTerminal={() => {
                     if (v.pty) claimTerminal(v.pty.ptyId, i)
@@ -1817,7 +1931,7 @@ export default function App() {
                     if (v.meta) void resume(v.meta, i)
                   }}
                   onShowHistory={() => {
-                    if (v.id) setSessionView(v.id, 'transcript')
+                    if (v.id) chooseSessionView(v.id, 'transcript')
                   }}
                   onGoLive={() => goLive(i)}
                   onKill={() => {

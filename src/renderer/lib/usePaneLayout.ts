@@ -1,11 +1,10 @@
 import { useCallback, useMemo, useReducer, useRef } from 'react'
-import type { PersistedTabLayout } from '@shared/types'
+import type { PersistedTabLayout, TabOpenMode } from '@shared/types'
 import {
   activeTabId,
   initialLayout,
   paneReducer,
   restorePaneLayout,
-  type OpenMode,
   type PaneLayout
 } from './paneModel'
 
@@ -25,7 +24,7 @@ export interface PaneLayoutApi {
   layout: PaneLayout
   /** The selection — the active tab of the focused pane. */
   selectedId: string | null
-  openTab: (sessionId: string, mode: OpenMode, opts?: { pane?: number; focus?: boolean }) => void
+  openTab: (sessionId: string, mode: TabOpenMode, opts?: { pane?: number; focus?: boolean }) => void
   openTabs: (sessionIds: string[], activeSessionId: string, pane?: number) => void
   promoteTab: (sessionId: string, pane?: number) => void
   activateTab: (pane: number, index: number) => void
@@ -49,6 +48,7 @@ export interface PaneLayoutApi {
   setSplitFraction: (value: number) => void
   rekeyTabs: (from: string, to: string) => void
   retargetTabs: (from: string, to: string) => void
+  restoreLayout: (saved: PersistedTabLayout) => void
   collapseToSingle: () => void
 }
 
@@ -60,9 +60,11 @@ export function usePaneLayout(restored?: PersistedTabLayout | null): PaneLayoutA
   )
   // Next unused pane id. Starts at 1 because `initialLayout` took p0.
   const nextPaneId = useRef(layout.panes.length)
+  const layoutRef = useRef(layout)
+  layoutRef.current = layout
 
   const openTab = useCallback(
-    (sessionId: string, mode: OpenMode, opts?: { pane?: number; focus?: boolean }) =>
+    (sessionId: string, mode: TabOpenMode, opts?: { pane?: number; focus?: boolean }) =>
       dispatch({ type: 'open', sessionId, mode, pane: opts?.pane, focus: opts?.focus }),
     []
   )
@@ -126,6 +128,14 @@ export function usePaneLayout(restored?: PersistedTabLayout | null): PaneLayoutA
     (from: string, to: string) => dispatch({ type: 'retarget', from, to }),
     []
   )
+  const restoreLayout = useCallback((saved: PersistedTabLayout) => {
+    const paneIds = [layoutRef.current.panes[0].id]
+    for (let index = 1; index < saved.panes.length; index += 1) {
+      paneIds.push(`p${nextPaneId.current}`)
+      nextPaneId.current += 1
+    }
+    dispatch({ type: 'restore', saved, paneIds })
+  }, [])
   const collapseToSingle = useCallback(() => dispatch({ type: 'collapseToSingle' }), [])
 
   const selectedId = useMemo(() => activeTabId(layout), [layout])
@@ -150,6 +160,7 @@ export function usePaneLayout(restored?: PersistedTabLayout | null): PaneLayoutA
     setSplitFraction,
     rekeyTabs,
     retargetTabs,
+    restoreLayout,
     collapseToSingle
   }
 }

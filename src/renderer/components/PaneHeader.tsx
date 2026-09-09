@@ -199,15 +199,25 @@ export default function PaneHeader({
                 <span className="sb-seg-label">Terminal</span>
               </button>
             </div>
-            <button className="sb-btn-ghost danger" onClick={onKill} data-tip="Stop session">
+            <button
+              className="sb-btn-ghost danger"
+              onClick={onKill}
+              data-tip="Stop session"
+              aria-label="Stop session"
+            >
               <Stop size={12} />
               <span className="sb-pane-action-label">Stop</span>
             </button>
           </>
         ) : (
-          <button className="sb-btn-resume" onClick={onResume} data-tip="Resume session (⏎)">
+          <button
+            className="sb-btn-resume"
+            onClick={onResume}
+            data-tip="Resume session (⏎)"
+            aria-label="Resume session"
+          >
             <Play size={12} />
-            Resume
+            <span className="sb-pane-action-label">Resume</span>
           </button>
         )}
       </div>

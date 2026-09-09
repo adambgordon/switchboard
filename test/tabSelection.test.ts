@@ -4,9 +4,12 @@ import {
   actionTargets,
   extendSelection,
   hasGroup,
+  keyboardCloseTargets,
   pruneSelection,
   retargetSelection,
   selectOnly,
+  shouldClearSelectionOnPointerDown,
+  shouldClearSelectionOnWindowBlur,
   toggleSelected,
   type TabSelection
 } from '../src/renderer/lib/tabSelection'
@@ -27,6 +30,23 @@ const sel = (pane: number, ids: string[], anchor: string | null): TabSelection =
 })
 
 const ORDER = ['A', 'B', 'C', 'D', 'E']
+
+describe('keyboardCloseTargets', () => {
+  it('closes the focused group even when the active tab was explicitly deselected', () => {
+    let selection = toggleSelected(NO_SELECTION, 1, 'C', 'D')
+    selection = toggleSelected(selection, 1, 'C', 'E')
+    selection = toggleSelected(selection, 1, 'C', 'C')
+    expect(keyboardCloseTargets(selection, 1, 'C')).toEqual(['D', 'E'])
+    expect(actionTargets(selection, 1, 'C')).toEqual(['C'])
+    expect(keyboardCloseTargets(selection, 0, 'A')).toEqual(['A'])
+  })
+
+  it('uses the active tab without a group and returns no target for an empty pane', () => {
+    expect(keyboardCloseTargets(NO_SELECTION, 0, 'A')).toEqual(['A'])
+    expect(keyboardCloseTargets(sel(0, ['B'], 'B'), 0, 'A')).toEqual(['A'])
+    expect(keyboardCloseTargets(NO_SELECTION, 0, null)).toEqual([])
+  })
+})
 
 describe('hasGroup', () => {
   it('is false for an empty selection and for a single tab', () => {
@@ -178,6 +198,34 @@ describe('selectOnly — a plain click', () => {
   it('drops any group', () => {
     // The gesture that means "just this one", and the way out of a selection.
     expect(selectOnly()).toEqual(NO_SELECTION)
+  })
+})
+
+describe('click-away dismissal', () => {
+  const group = sel(0, ['B', 'C'], 'B')
+
+  it('clears on chrome, transcript, or any other non-tab target', () => {
+    expect(shouldClearSelectionOnPointerDown(group, null, false)).toBe(true)
+    expect(shouldClearSelectionOnPointerDown(group, null, true)).toBe(true)
+  })
+
+  it('clears when a plain press starts on an unselected tab', () => {
+    expect(shouldClearSelectionOnPointerDown(group, 'D', false)).toBe(true)
+  })
+
+  it('keeps the group for presses inside it and for modifier selection gestures', () => {
+    expect(shouldClearSelectionOnPointerDown(group, 'B', false)).toBe(false)
+    expect(shouldClearSelectionOnPointerDown(group, 'D', true)).toBe(false)
+  })
+
+  it('does nothing when no group exists', () => {
+    expect(shouldClearSelectionOnPointerDown(NO_SELECTION, null, false)).toBe(false)
+  })
+
+  it('clears when this window loses focus and otherwise leaves the group alone', () => {
+    expect(shouldClearSelectionOnWindowBlur(group, false)).toBe(true)
+    expect(shouldClearSelectionOnWindowBlur(group, true)).toBe(false)
+    expect(shouldClearSelectionOnWindowBlur(NO_SELECTION, false)).toBe(false)
   })
 })
 

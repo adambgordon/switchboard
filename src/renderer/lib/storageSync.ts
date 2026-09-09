@@ -13,3 +13,23 @@
 export function shouldResync(eventKey: string | null, key: string): boolean {
   return eventKey === null || eventKey === key
 }
+
+export interface StorageChange {
+  key: string | null
+}
+
+export function startStorageSync<T>(
+  key: string,
+  read: () => T,
+  setValue: (value: T) => void,
+  subscribe: (listener: (event: StorageChange) => void) => () => void
+): () => void {
+  const onStorage = (event: StorageChange): void => {
+    if (shouldResync(event.key, key)) setValue(read())
+  }
+  const unsubscribe = subscribe(onStorage)
+  // Close the render-to-effect gap only after the listener is live: a write before subscription is
+  // observed by this read, while one after subscription is observed by the listener.
+  setValue(read())
+  return unsubscribe
+}

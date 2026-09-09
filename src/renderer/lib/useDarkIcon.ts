@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useStorageSync } from './useStorageSync'
 
 /**
@@ -17,6 +17,14 @@ function load(): boolean {
   }
 }
 
+function save(value: boolean): void {
+  try {
+    localStorage.setItem(KEY, String(value))
+  } catch {
+    /* storage unavailable — the choice just won't persist this run */
+  }
+}
+
 export interface DarkIcon {
   value: boolean
   set: (v: boolean) => void
@@ -26,14 +34,9 @@ export function useDarkIcon(): DarkIcon {
   const [value, setValue] = useState<boolean>(load)
   useStorageSync(KEY, load, setValue)
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, String(value))
-    } catch {
-      /* storage unavailable — the choice just won't persist this run */
-    }
-  }, [value])
-
-  const set = useCallback((v: boolean) => setValue(v), [])
+  const set = useCallback((v: boolean) => {
+    save(v)
+    setValue(v)
+  }, [])
   return { value, set }
 }

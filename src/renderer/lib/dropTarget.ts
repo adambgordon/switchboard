@@ -31,7 +31,13 @@ export interface TabRect {
  * Returns a value in `0..rects.length`. Order of `rects` is not assumed: every tab is classified
  * against the resolved row rather than by its position in the array.
  */
-export function tabDropIndex(rects: TabRect[], x: number, y: number, skipIndex = -1): number {
+export function tabDropIndex(
+  rects: TabRect[],
+  x: number,
+  y: number,
+  skip: number | readonly number[] = -1
+): number {
+  const skipped = new Set(typeof skip === 'number' ? (skip >= 0 ? [skip] : []) : skip)
   // An empty strip needs no special case and deliberately does not get one: with no rects there are no
   // rows to resolve and nothing to count, so both loops below are skipped and the result is 0 — which
   // is the right answer (dropping into a pane with no tabs inserts at the front). An early return here
@@ -40,7 +46,7 @@ export function tabDropIndex(rects: TabRect[], x: number, y: number, skipIndex =
   // Rows are exact rather than approximate: tabs are uniform height and wrap, so every tab in a row
   // shares a `top`. No clustering tolerance needed, and none wanted — a tolerance would be a second
   // threshold to tune with nothing to tune it against.
-  const tops = [...new Set(rects.map((r) => r.top))]
+  const tops = [...new Set(rects.map((r) => r.top))].sort((a, b) => a - b)
 
   // Resolve the pointer to a row. Being OUTSIDE every band is the common case, not the exception: the
   // pointer spends most of a drag slightly above or below the row it is aiming at, and it may leave
@@ -63,13 +69,79 @@ export function tabDropIndex(rects: TabRect[], x: number, y: number, skipIndex =
 
   let index = 0
   for (let i = 0; i < rects.length; i++) {
-    if (i === skipIndex) continue
+    if (skipped.has(i)) continue
     const r = rects[i]
     // A tab above the pointer's row always precedes it; one below never does.
     if (r.top < row) index++
     else if (r.top === row && x > (r.left + r.right) / 2) index++
   }
   return index
+}
+
+/** Translate a post-removal drop index back to a boundary in the original rectangle list. */
+export function tabCaretIndex(
+  dropIndex: number,
+  rectCount: number,
+  skip: number | readonly number[] = -1,
+  originIndex?: number
+): number {
+  const skipped = new Set(typeof skip === 'number' ? (skip >= 0 ? [skip] : []) : skip)
+  if (skipped.size === 0) return Math.max(0, Math.min(dropIndex, rectCount))
+  const origin = originIndex ?? Math.min(...skipped)
+  let homeIndex = 0
+  for (let index = 0; index < origin; index += 1) {
+    if (!skipped.has(index)) homeIndex += 1
+  }
+  if (dropIndex === homeIndex) return origin
+
+  let remainingIndex = 0
+  for (let index = 0; index < rectCount; index += 1) {
+    if (skipped.has(index)) continue
+    if (remainingIndex === dropIndex) return index
+    remainingIndex += 1
+  }
+  return rectCount
+}
+
+/** Original indices of a carried group, in source order. */
+export function groupDragIndices(
+  order: readonly string[],
+  carrying: readonly string[]
+): number[] {
+  const selected = new Set(carrying)
+  const indices: number[] = []
+  for (let index = 0; index < order.length; index += 1) {
+    if (selected.has(order[index])) indices.push(index)
+  }
+  return indices
+}
+
+/** First visible tab after each selected run, whose missing left rule must be repainted. */
+export function groupDragFollowerIndices(
+  selectedIndices: readonly number[],
+  rowTops: readonly number[]
+): number[] {
+  const selected = new Set(selectedIndices)
+  const followers: number[] = []
+  for (const index of selected) {
+    const follower = index + 1
+    if (
+      follower < rowTops.length &&
+      !selected.has(follower) &&
+      rowTops[index] === rowTops[follower]
+    ) {
+      followers.push(follower)
+    }
+  }
+  return followers
+}
+
+export function isGroupOriginDrop(
+  sourcePane: number,
+  originIndex: number,
+  destination: { pane: number; index: number }
+): boolean {
+  return destination.pane === sourcePane && destination.index === originIndex
 }
 
 /** Whether a point is inside a rect — used to decide which strip, if any, a drag is over. */

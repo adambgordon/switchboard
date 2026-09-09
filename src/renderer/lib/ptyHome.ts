@@ -1,9 +1,8 @@
 /**
  * Which pane each live terminal is mounted in.
  *
- * A window can hold only ONE xterm per terminal: the renderer's output fan-out keeps a single writer
- * per pty id, and a second one silently replaces the first. Moving the xterm therefore unmounts and
- * rebuilds it from `ptyStream`'s self-contained serialized snapshot.
+ * A window holds one stable xterm per terminal in the window-level TerminalDeck. Moving its tab
+ * changes the portal host while keeping that component, parser state and scrollback mounted.
  *
  * A terminal follows the pane holding its tab, so moving a live tab cannot strand its xterm behind a
  * disabled "other pane" control. With no local tab it remains sticky: focus changes and transient
@@ -67,8 +66,8 @@ export function nextPtyHomes(
  *
  * Two deliberate asymmetries:
  *  - A terminal with **no home yet** goes in NO pane, for that one frame. Mounting it in a guessed
- *    pane and correcting next frame would remount it, which is the one thing this module exists to
- *    avoid; while it is unmounted the pty stream buffers its output rather than losing it.
+ *    pane and correcting next frame would move it twice, which is the one thing this module exists
+ *    to avoid; main retains output until an owner can mount it.
  *  - A terminal homed to a pane that has just **gone away** falls to pane 0 here rather than waiting
  *    for the home map to catch up, so it moves in one step instead of blinking out for a frame first.
  */

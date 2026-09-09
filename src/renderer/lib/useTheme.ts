@@ -25,9 +25,9 @@ export interface Theme {
  * useLayout — owned once in App.
  */
 export function useTheme(): Theme {
-  const [mode, setMode] = useState<ThemeMode>(readThemeMode)
+  const [mode, setModeState] = useState<ThemeMode>(readThemeMode)
   const [sysDark, setSysDark] = useState<boolean>(systemPrefersDark)
-  useStorageSync(THEME_KEY, readThemeMode, setMode)
+  useStorageSync(THEME_KEY, readThemeMode, setModeState)
 
   // Track the OS preference so 'system' resolves live. Harmless for explicit modes (resolveTheme
   // ignores sysDark for them), so no need to gate the listener on mode.
@@ -41,13 +41,14 @@ export function useTheme(): Theme {
 
   const resolved = resolveTheme(mode, sysDark)
 
-  useEffect(() => {
+  const setMode = useCallback((next: ThemeMode) => {
     try {
-      localStorage.setItem(THEME_KEY, mode)
+      localStorage.setItem(THEME_KEY, next)
     } catch {
       /* storage unavailable */
     }
-  }, [mode])
+    setModeState(next)
+  }, [])
 
   useEffect(() => {
     applyTheme(resolved)
@@ -55,7 +56,7 @@ export function useTheme(): Theme {
 
   const toggle = useCallback(
     () => setMode(resolveTheme(mode, sysDark) === 'dark' ? 'light' : 'dark'),
-    [mode, sysDark]
+    [mode, sysDark, setMode]
   )
 
   return { mode, resolved, setMode, toggle }

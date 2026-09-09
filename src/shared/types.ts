@@ -1,3 +1,5 @@
+import type { NavigationCommand, NavigationVisit } from './navigation'
+
 /**
  * Shared contract between the Electron main process, the preload bridge, and the
  * renderer. This file MUST stay free of any Node or DOM imports so both sides can
@@ -177,8 +179,8 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  *    id itself. Earlier stops were genuine visits to a conversation that still exists.
  *  - terminal-owned — the current selection, the CURRENT history stop, the surface that selection is
  *    showing, and the row's Live slot — describes the terminal in front of the user, and follows it.
- *    The current stop is not optional: moving the selection without it leaves the history "drifted"
- *    (selectedId !== stack[cursor]), which makes the next Back snap in place and Forward inert.
+ *    Main retargets the current app-wide visit after the focused corrected tab's adoption commits;
+ *    earlier visits retain their original conversation.
  *
  * - `initial`: a provisional PTY's throwaway placeholder was replaced by its real rollout id. The
  *   placeholder names no conversation and is about to cease existing, so there is no conversation-owned
@@ -252,9 +254,9 @@ export interface PtySession {
  * A live terminal as the renderer sees it: the session above, plus which window may render it.
  *
  * The split is deliberate. `PtyManager` owns terminal LIFECYCLE and knows nothing about windows — it
- * streams bytes to every renderer. Which window is allowed to mount an xterm is a window-layer
- * concern, stamped on by `ipc.ts`, which is also the only place that can know it (the spawning
- * window is the IPC sender).
+ * emits bytes without a destination. The window layer in `ipc.ts` routes them only to the owner and
+ * stamps that per-recipient answer here; it is also the only place that can know the spawning IPC
+ * sender.
  */
 export interface PtyState extends PtySession {
   /**
@@ -301,7 +303,7 @@ export const IPC = {
   ptySetMaxLive: 'pty:setMaxLive', // renderer -> main: update the live-PTY cap
   ptyData: 'pty:data', // push (ptyId, data)
   ptyExit: 'pty:exit', // push (ptyId, exitCode)
-  ptyBound: 'pty:bound', // push (ptyId, oldSessionId, newSessionId, kind: PtyBindKind) — a Codex PTY's id changed; `kind` says whether state migrates
+  ptyBound: 'pty:bound', // per-window push (ptyId, oldSessionId, newSessionId, kind, ownedHere, adoptionToken)
   ptyActiveList: 'pty:activeList',
   ptyActiveChanged: 'pty:activeChanged', // push (PtyState[])
   agentsAvailable: 'agents:available', // which agent CLIs are launchable from the login shell (cached)
@@ -329,14 +331,25 @@ export const IPC = {
   // open somewhere else" and "then show it / hand it over".
   tabsChanged: 'tab:changed', // renderer -> main: the full set of conversations this window has tabs for
   tabWorkspaceChanged: 'tab:workspaceChanged', // renderer -> main: restart-safe pane membership/order/active tabs
+  tabWorkspaceActivate: 'tab:workspaceActivate', // renderer -> main: retrieve the dormant primary layout
+  tabWorkspaceActivated: 'tab:workspaceActivated', // renderer -> main: primary applied; open dormant satellites
+  tabWorkspaceClear: 'tab:workspaceClear', // renderer -> main: explicit feature disable clears all saved layouts
   tabsElsewhere: 'tab:elsewhere', // push (sessionIds): conversations OTHER windows hold tabs for
   conversationReveal: 'tab:reveal', // renderer -> main: focus the window holding this and show its tab
   conversationResume: 'tab:resume', // renderer -> main: resume in the window already holding the tab
   conversationClaim: 'tab:claim', // renderer -> main: tell that window to give the tab up
-  tabActivate: 'tab:activate', // push (sessionId): bring your tab for this conversation forward
+  tabActivate: 'tab:activate', // push (NavigationCommand): apply a tagged visit or history replay
+  navigationReport: 'navigation:report', // renderer -> main: committed view and whether it is a visit
+  navigationStep: 'navigation:step', // renderer -> main: step the app-wide cursor
+  navigationInterrupt: 'navigation:interrupt', // renderer -> main: a local user action supersedes playback
+  navigationComplete: 'navigation:complete', // renderer -> main: tagged activation committed
+  navigationCancelled: 'navigation:cancelled', // push (requestId): discard superseded activation
   tabResume: 'tab:resumeHere', // push (sessionId): resume the tab in this window
   tabRelease: 'tab:release', // push (sessionId): close your tab for this conversation
   tabShouldRelease: 'tab:shouldRelease', // renderer -> main: confirm a queued release is still current
+  tabReserveBound: 'tab:reserveBound', // renderer -> main: validate a corrected PTY before retargeting
+  tabCommitBound: 'tab:commitBound', // renderer -> main: adoption committed; claim its tab
+  tabCancelBound: 'tab:cancelBound', // renderer -> main: adoption was abandoned
   ptyClaim: 'pty:claim', // renderer -> main: take ownership of a terminal from another window
   ptySnapshotRequest: 'pty:snapshotRequest', // push (requestId, ptyId): owner serializes after draining writes
   ptySnapshotReply: 'pty:snapshotReply', // renderer -> main (requestId, ptyId, snapshot|null)
@@ -408,6 +421,9 @@ export interface PersistedTabPane {
 export interface PersistedTabLayout {
   panes: PersistedTabPane[]
 }
+
+/** Whether navigating to a conversation should replace the preview slot or make its tab stick. */
+export type TabOpenMode = 'preview' | 'persistent'
 
 /** What a freshly-created window should show. Passed synchronously through `additionalArguments`,
  *  parsed by the preload, and exposed as `window.sbWindow` before the first renderer frame. */
@@ -485,7 +501,15 @@ export interface SwitchboardApi {
   /** A Codex PTY's sessionId changed from `oldSessionId` to `newSessionId` (same `ptyId`).
    *  `kind` is load-bearing and must not be inferred — see `PtyBindKind`. Returns an unsubscribe fn. */
   onPtyBound(
-    cb: (ptyId: string, oldSessionId: string, newSessionId: string, kind: PtyBindKind) => void
+    cb: (
+      ptyId: string,
+      oldSessionId: string,
+      newSessionId: string,
+      kind: PtyBindKind,
+      ownedHere: boolean,
+      /** Only the initial placeholder's tab owner receives a token to confirm or reject adoption. */
+      adoptionToken: string | null
+    ) => void
   ): () => void
   listActive(): Promise<PtyState[]>
   onActiveChanged(cb: (states: PtyState[]) => void): () => void
@@ -562,24 +586,39 @@ export interface SwitchboardApi {
   tabsChanged(sessionIds: string[]): void
   /** Persist this window's restart-safe tab layout, or clear it when tabs are disabled/empty. */
   persistTabLayout(layout: PersistedTabLayout | null): void
+  /** Retrieve this window's dormant saved layout when the feature is enabled after launch. */
+  activateTabWorkspace(): Promise<PersistedTabLayout | null>
+  /** Confirm the primary layout is active so main may open saved satellite windows. */
+  finishTabWorkspaceActivation(): void
+  /** Explicitly switching the feature off clears active and dormant saved layouts. */
+  clearTabWorkspace(): void
   /** The conversations OTHER windows hold tabs for. Lets this window decide locally — and
    *  synchronously — whether an open should reveal rather than duplicate. */
   onTabsElsewhere(cb: (sessionIds: string[]) => void): () => void
   /** Focus the window holding this conversation and bring its tab forward. For an implicit open ("show
    *  me this"), where the tab already exists and should not be relocated. */
-  revealConversation(sessionId: string): void
+  revealConversation(sessionId: string, mode: TabOpenMode): void
   /** Route Resume to the window already holding the conversation's tab. */
   resumeConversationElsewhere(sessionId: string): void
   /** Ask whichever window holds this conversation to give its tab up, because this window is about to
    *  place it. For an explicit placement, where relocating IS what was asked for. */
   claimConversation(sessionId: string): void
   /** Another window asked for our tab to be shown. */
-  onTabActivate(cb: (sessionId: string) => void): () => void
+  onTabActivate(cb: (command: NavigationCommand) => void): () => void
+  reportNavigation(visit: NavigationVisit | null, record: boolean, revision: number): void
+  stepNavigation(direction: -1 | 1): void
+  interruptNavigation(revision: number): void
+  completeNavigation(requestId: number, visit: NavigationVisit | null): void
+  onNavigationCancelled(cb: (requestId: number) => void): () => void
   onTabResume(cb: (sessionId: string) => void): () => void
   /** Another window is taking this conversation — close our tab for it. */
   onTabRelease(cb: (sessionId: string) => void): () => void
   /** Recheck a queued release against main's current owner before closing the local tab. */
   shouldReleaseTab(sessionId: string): Promise<boolean>
+  /** Reserve a corrected tab after main validates this window's PTY ownership and identity. */
+  reserveBoundTab(ptyId: string, oldSessionId: string, sessionId: string): Promise<string | null>
+  commitBoundTab(token: string): void
+  cancelBoundTab(token: string): void
   /** Take ownership of a terminal currently owned by another window, so this one can show it. Main
    *  transfers a drained xterm snapshot before changing ownership. */
   claimTerminal(ptyId: string): Promise<boolean>

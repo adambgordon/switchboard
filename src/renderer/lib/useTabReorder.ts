@@ -1,6 +1,13 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { makeTabDragPayload } from '@shared/tabDrag'
-import { pointInRect, tabDropIndex } from './dropTarget'
+import {
+  groupDragFollowerIndices,
+  groupDragIndices,
+  isGroupOriginDrop,
+  pointInRect,
+  tabCaretIndex,
+  tabDropIndex
+} from './dropTarget'
 
 /**
  * Drag a tab: to reorder its own strip, to the other pane, to another window, or off on its own.
@@ -68,12 +75,16 @@ export function useTabReorder(
     if (!el) return
 
     let pressed: HTMLElement | null = null
+    let pointerId: number | null = null
     let sessionId = ''
     let fromIndex = -1
     /** What this drag carries. Fixed when the drag begins — see TabReorderOpts.targetsFor. */
     let carrying: string[] = []
     /** Every tab hidden for the duration, so a whole group vacates rather than just the one grabbed. */
     let vacated: HTMLElement[] = []
+    let sourcePlaceholder: HTMLElement | null = null
+    let sourceSkippedIndices: number[] = []
+    let vacancyFollowers: HTMLElement[] = []
     let startX = 0
     let startY = 0
     let dragging = false
@@ -113,6 +124,9 @@ export function useTabReorder(
         el: s,
         pane: Number(s.dataset.pane ?? 0)
       }))
+
+    const stripTabs = (strip: HTMLElement): HTMLElement[] =>
+      Array.from(strip.querySelectorAll<HTMLElement>('.sb-tab'))
 
     const dropCaret = (): void => {
       caret?.remove()
@@ -156,11 +170,11 @@ export function useTabReorder(
         window.api.tabDragHover()
         return
       }
-      const tabs = Array.from(hit.el.querySelectorAll<HTMLElement>('.sb-tab'))
+      const tabs = stripTabs(hit.el)
       const rects = tabs.map((t) => t.getBoundingClientRect())
-      // The dragged tab keeps its slot, so it must not count toward its own destination — but only in
-      // the strip it came from; in the other pane it is not present at all.
-      const skip = hit.pane === optsRef.current.paneIndex ? fromIndex : -1
+      // Every carried tab remains in flow so surrounding tabs never move. Excluding all of their
+      // indices only from the count still produces the fully-stripped destination moveMany expects.
+      const skip = hit.pane === optsRef.current.paneIndex ? sourceSkippedIndices : []
       const index = tabDropIndex(rects, x, y, skip)
       target = { pane: hit.pane, index }
       if (overStrip !== hit.el) {
@@ -168,15 +182,26 @@ export function useTabReorder(
         overStrip = hit.el
         hit.el.classList.add('sb-drop-target')
       }
-      // No caret when the drop would change nothing — the tab landing back on its own index. Only
-      // that one index: `skipIndex` means the result is already post-removal, so one past it is a real
-      // move (see the note in onPointerUp).
-      if (skip >= 0 && index === fromIndex) {
-        caret?.remove()
-        caret = null
-        return
-      }
-      drawCaret(hit.el, rects, index)
+      // Always paint the destination, including the starting slot. The release path still treats
+      // that index as a no-op; the caret is feedback about WHERE, not whether the move changes state.
+      drawCaret(
+        hit.el,
+        rects,
+        tabCaretIndex(index, rects.length, skip, sourceSkippedIndices[0])
+      )
+    }
+
+    const showOriginTarget = (): void => {
+      if (!sourcePlaceholder) return
+      const tabs = stripTabs(el)
+      const origin = sourceSkippedIndices[0]
+      if (origin == null) return
+      const rects = tabs.map((tab) => tab.getBoundingClientRect())
+      target = { pane: optsRef.current.paneIndex, index: origin }
+      dropCaret()
+      overStrip = el
+      el.classList.add('sb-drop-target')
+      drawCaret(el, rects, tabCaretIndex(origin, rects.length, sourceSkippedIndices, origin))
     }
 
     const finish = (): void => {
@@ -187,18 +212,33 @@ export function useTabReorder(
       dropCaret()
       // Restore every tab that vacated, not only the grabbed one — a group left hidden would look
       // like the drag deleted it.
-      for (const n of vacated) n.style.visibility = ''
+      for (const n of vacated) {
+        n.style.visibility = ''
+      }
       vacated = []
+      sourcePlaceholder = null
+      sourceSkippedIndices = []
+      for (const follower of vacancyFollowers) follower.classList.remove('sb-tab-after-drag-gap')
+      vacancyFollowers = []
       if (pressed) pressed.style.visibility = ''
       document.body.classList.remove('sb-dragging-tab')
       document.removeEventListener('keydown', onKey, true)
+      const pressedTab = pressed
+      const capturedId = pointerId
       pressed = null
+      pointerId = null
       dragging = false
       target = null
+      if (capturedId != null) {
+        if (el.hasPointerCapture(capturedId)) el.releasePointerCapture(capturedId)
+        else if (pressedTab?.hasPointerCapture(capturedId)) pressedTab.releasePointerCapture(capturedId)
+      }
     }
 
     const onPointerDown = (e: PointerEvent): void => {
-      if (e.button !== 0 || !optsRef.current.enabled) return
+      // A new press cannot be the click finishing an escaped drag released outside this strip.
+      suppressClick = false
+      if (pointerId != null || e.button !== 0 || !optsRef.current.enabled) return
       // ⌘ and ⇧ build a multi-selection; they must not also arm a drag, or picking out several tabs
       // would drag whichever one the pointer wandered off first.
       if (e.metaKey || e.shiftKey) return
@@ -213,13 +253,21 @@ export function useTabReorder(
       sessionId = optsRef.current.order[fromIndex] ?? ''
       if (!sessionId) return
       pressed = tab
+      pointerId = e.pointerId
+      // Capture on the tab until the threshold, so plain clicks still activate it. Capturing only
+      // after an in-strip move misses a fast exit and leaves the press armed after an outside release.
+      tab.setPointerCapture(e.pointerId)
       startX = e.clientX
       startY = e.clientY
       dragging = false
     }
 
     const onPointerMove = (e: PointerEvent): void => {
-      if (!pressed) return
+      if (!pressed || e.pointerId !== pointerId) return
+      if (!(e.buttons & 1)) {
+        onPointerCancel()
+        return
+      }
       if (!dragging) {
         if (Math.abs(e.clientX - startX) < DRAG_THRESHOLD && Math.abs(e.clientY - startY) < DRAG_THRESHOLD) {
           return
@@ -231,33 +279,45 @@ export function useTabReorder(
           sessionId
         )
         carrying = payload.sessionIds
-        pressed.setPointerCapture?.(e.pointerId)
+        el.setPointerCapture(e.pointerId)
         const r = pressed.getBoundingClientRect()
+        const shell = document.createElement('div')
+        shell.className = 'sb-tab-drag-shell'
+        shell.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;pointer-events:none;z-index:1200`
         const c = pressed.cloneNode(true) as HTMLElement
         c.classList.add('sb-tab-dragging')
-        c.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;margin:0;pointer-events:none;z-index:1200`
+        c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;margin:0;pointer-events:none;z-index:2'
         // A group reads as a small stack with a count, the way a multi-file drag does everywhere else.
         // Two tabs get one backing card; three or more get two. The badge carries the exact count, so
         // another visual layer would add cost without adding information.
         if (carrying.length > 1) {
-          c.classList.add('stacked')
-          if (carrying.length > 2) c.classList.add('stacked-many')
+          shell.classList.add('stacked')
+          if (carrying.length > 2) shell.classList.add('stacked-many')
           const badge = document.createElement('span')
           badge.className = 'sb-tab-dragcount'
           badge.textContent = String(carrying.length)
           c.appendChild(badge)
         }
-        document.body.appendChild(c)
-        clone = c
-        // Every carried tab gives up its space, not just the grabbed one — otherwise the rest sit
-        // there looking untouched while the count says they are moving. Resolved by index against
-        // `order`, which is the same list the strip renders from.
+        shell.appendChild(c)
+        document.body.appendChild(shell)
+        clone = shell
+        // Every carried tab stays in flow but becomes invisible, so the rest of the strip does not
+        // move when the drag begins. The leftmost carried tab owns the default/origin caret.
         const els = Array.from(el.querySelectorAll<HTMLElement>('.sb-tab'))
-        vacated = carrying
-          .map((id) => els[optsRef.current.order.indexOf(id)])
-          .filter((n): n is HTMLElement => !!n)
+        sourceSkippedIndices = groupDragIndices(optsRef.current.order, carrying)
+        const placeholder = els[sourceSkippedIndices[0]] ?? pressed
+        sourcePlaceholder = placeholder
+        vacated = sourceSkippedIndices
+          .map((index) => els[index])
+          .filter((node): node is HTMLElement => !!node)
         if (!vacated.includes(pressed)) vacated.push(pressed)
         for (const n of vacated) n.style.visibility = 'hidden'
+        const rowTops = els.map((tab) => tab.getBoundingClientRect().top)
+        vacancyFollowers = groupDragFollowerIndices(sourceSkippedIndices, rowTops)
+          .map((index) => els[index])
+          .filter((node): node is HTMLElement => !!node)
+        for (const follower of vacancyFollowers) follower.classList.add('sb-tab-after-drag-gap')
+        showOriginTarget()
         document.body.classList.add('sb-dragging-tab')
         document.addEventListener('keydown', onKey, true)
         window.api.tabDragBegin(payload)
@@ -278,9 +338,9 @@ export function useTabReorder(
     }
 
     const onPointerUp = (e: PointerEvent): void => {
-      if (!pressed) return
+      if (!pressed || e.pointerId !== pointerId) return
       if (!dragging) {
-        pressed = null
+        finish()
         return
       }
       // A real drag ends in a click on the tab; swallow it so the tab is not also activated.
@@ -298,15 +358,14 @@ export function useTabReorder(
       const landed = target
       const group = carrying
       const from = { pane: optsRef.current.paneIndex, index: fromIndex }
+      const groupOrigin = sourceSkippedIndices[0] ?? fromIndex
       finish()
       if (landed) {
         window.api.tabDragCancel()
         if (group.length > 1) {
-          // A group's tabs are scattered, so there is no single from-index to shift against; the
-          // reducer takes them all out and reinserts them together. `tabDropIndex` already excluded
-          // only the dragged tab, so the target can be off by the others — accepted, because the
-          // alternative is excluding every carried tab from the geometry and leaving the caret
-          // pointing somewhere the group cannot actually land.
+          if (isGroupOriginDrop(from.pane, groupOrigin, landed)) return
+          // Every carried source index was excluded from the count, so this destination addresses the
+          // same fully-stripped list moveMany inserts into.
           optsRef.current.onMoveGroup(group, sessionId, landed)
           return
         }
@@ -328,9 +387,17 @@ export function useTabReorder(
       })
     }
 
-    const onPointerCancel = (): void => {
+    const onPointerCancel = (e?: PointerEvent): void => {
+      if (e && e.pointerId !== pointerId) return
       if (dragging) window.api.tabDragCancel()
       finish()
+    }
+
+    const onLostCapture = (e: PointerEvent): void => {
+      if (e.pointerId !== pointerId) return
+      // Moving capture from the tab to the strip emits loss on the tab too; that is not cancellation.
+      if (el.hasPointerCapture(e.pointerId) || pressed?.hasPointerCapture(e.pointerId)) return
+      onPointerCancel()
     }
 
     const onClickCapture = (ev: MouseEvent): void => {
@@ -344,12 +411,14 @@ export function useTabReorder(
     el.addEventListener('pointermove', onPointerMove)
     el.addEventListener('pointerup', onPointerUp)
     el.addEventListener('pointercancel', onPointerCancel)
+    el.addEventListener('lostpointercapture', onLostCapture)
     el.addEventListener('click', onClickCapture, true)
     return () => {
       el.removeEventListener('pointerdown', onPointerDown)
       el.removeEventListener('pointermove', onPointerMove)
       el.removeEventListener('pointerup', onPointerUp)
       el.removeEventListener('pointercancel', onPointerCancel)
+      el.removeEventListener('lostpointercapture', onLostCapture)
       el.removeEventListener('click', onClickCapture, true)
       if (dragging) window.api.tabDragCancel()
       finish()
