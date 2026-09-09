@@ -22,6 +22,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { defaultCodexHome } from './codexThreadsDb'
+import { cleanTitle } from './parser'
 
 /** Codex's session-index filename under `~/.codex`. */
 const SESSION_INDEX_FILE = 'session_index.jsonl'
@@ -76,7 +77,7 @@ export interface CodexTitleSources {
  *      still present in the column (e.g. just renamed, not yet reverted by a resume).
  *   2. Else the session-index name — the durable rename, used once the DB title has been re-derived
  *      back to the first message on resume. This is the case the prior DB-title-only read missed.
- *   3. Else the DB title when present (an auto-derived first-message title) — prior behavior.
+ *   3. Else a cleaned, bounded DB auto-title.
  *   4. Else the rollout-derived title.
  */
 export function resolveCodexTitle(sources: CodexTitleSources): string {
@@ -86,6 +87,6 @@ export function resolveCodexTitle(sources: CodexTitleSources): string {
 
   if (dbTitle.length > 0 && dbTitle !== firstUser) return dbTitle
   if (sessionName.length > 0) return sessionName
-  if (dbTitle.length > 0) return dbTitle
+  if (dbTitle.length > 0) return cleanTitle(dbTitle) || sources.rolloutTitle
   return sources.rolloutTitle
 }

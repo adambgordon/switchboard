@@ -7,6 +7,7 @@ import {
   Menu,
   shell,
   nativeImage,
+  powerMonitor,
   screen,
   webContents,
   type MenuItemConstructorOptions
@@ -21,7 +22,7 @@ import {
   IPC,
   type AgentAvailability,
   type AgentKind,
-  type ConversationGroup,
+  type ConversationIndexSnapshot,
   type PersistedTabLayout,
   type PtyBindKind,
   type PtySnapshot,
@@ -35,6 +36,7 @@ import {
   type WindowInit
 } from '../shared/types'
 import { parseTabDragPayload } from '../shared/tabDrag'
+import { EMPTY_SESSION_INDEX, retainHiddenSessions, visibleTabDrag } from '../shared/sessionVisibility'
 import { appendUpdateLog } from '../shared/updateLog'
 import {
   BoundTabReservations,
@@ -54,7 +56,8 @@ import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
 import { syncTrafficLights } from './trafficLights'
 import { buildInfo, checkForUpdates, runUpdate, relaunchForUpdate } from './updater'
-import { cachedSingleFlight, singleFlight } from './updater-core'
+import { singleFlight } from './updater-core'
+import { UpdateChecks } from './updateChecks'
 import { LatestTask } from './latestTask'
 import { TranscriptLoader, type TranscriptSource } from './transcriptLoader'
 import { loadTabWorkspace, TabWorkspaceStore } from './tabWorkspaceStore'
@@ -79,6 +82,7 @@ export function initializeTabWorkspace(
     restored,
     (sessionId) => tabOwner.get(sessionId)
   )
+  tabWorkspace.excludeSessions(hiddenSessionIds)
   return tabWorkspace.takePrimary()
 }
 
@@ -134,6 +138,7 @@ let tabDrag: { sourceId: number; payload: TabDragPayload; hoveringId: number | n
 const tabOwner = new Map<string, number>()
 /** Eager claims protected from stale target reports until that target first reports the tab. */
 const pendingTabClaims = new Map<string, number>()
+let hiddenSessionIds: ReadonlySet<string> = new Set()
 const boundTabReservations = new BoundTabReservations()
 
 const navigation = new NavigationCoordinator({
@@ -175,7 +180,7 @@ const pendingSnapshots = new Map<
 let updateRunState: UpdateRunState = { phase: 'idle', log: '' }
 
 function claimTabsForWindow(windowId: number, sessionIds: string[]): void {
-  const releases = claimWindowTabs(tabOwner, windowId, sessionIds, pendingTabClaims)
+  const releases = claimWindowTabs(tabOwner, windowId, sessionIds.filter((id) => !hiddenSessionIds.has(id)), pendingTabClaims)
   for (const { ownerId, sessionId } of releases) sendToWindow(ownerId, IPC.tabRelease, sessionId)
   emitTabsElsewhere()
 }
@@ -196,7 +201,7 @@ function emitTabsElsewhere(): void {
 }
 
 function setWindowTabs(wcId: number, sessionIds: string[]): void {
-  const releases = reconcileWindowTabs(tabOwner, wcId, sessionIds, pendingTabClaims)
+  const releases = reconcileWindowTabs(tabOwner, wcId, sessionIds.filter((id) => !hiddenSessionIds.has(id)), pendingTabClaims)
   for (const { ownerId, sessionId } of releases) sendToWindow(ownerId, IPC.tabRelease, sessionId)
   emitTabsElsewhere()
 }
@@ -252,6 +257,7 @@ function emitUpdateRunState(): void {
 }
 
 const runUpdateOnce = singleFlight(async () => {
+  updateChecks.setPaused(true)
   updateRunState = { phase: 'updating', log: '' }
   emitUpdateRunState()
   const result = await runUpdate((line) => {
@@ -259,11 +265,17 @@ const runUpdateOnce = singleFlight(async () => {
     broadcast(IPC.updatesProgress, line)
   })
   updateRunState = { ...updateRunState, phase: result.ok ? 'done' : 'failed' }
+  updateChecks.setPaused(result.ok)
   emitUpdateRunState()
   return result
 })
 
-const getUpdateCheck = cachedSingleFlight(checkForUpdates)
+const updateChecks = new UpdateChecks(
+  checkForUpdates,
+  (state) => broadcast(IPC.updatesCheckStateChanged, state),
+  { periodic: app.isPackaged && process.env.SWITCHBOARD_SMOKE !== '1' }
+)
+const onUpdateCheckWake = (): void => updateChecks.wake()
 
 function endTabDrag(): void {
   if (!tabDrag) return
@@ -427,8 +439,19 @@ function broadcast(channel: string, ...args: unknown[]): void {
 }
 
 const conversationIndex = new LatestTask(
-  () => indexConversations(PROJECTS_ROOT, undefined, metaCache),
-  (groups) => {
+  async () => retainHiddenSessions(await indexConversations(PROJECTS_ROOT, undefined, metaCache), hiddenSessionIds),
+  (snapshot) => {
+    const { groups } = snapshot
+    if (snapshot.hiddenSessionIds.length !== hiddenSessionIds.size) {
+      hiddenSessionIds = new Set(snapshot.hiddenSessionIds)
+      navigation.setHiddenSessions(hiddenSessionIds)
+      tabWorkspace?.excludeSessions(hiddenSessionIds)
+      for (const id of hiddenSessionIds) {
+        tabOwner.delete(id)
+        pendingTabClaims.delete(id)
+      }
+      emitTabsElsewhere()
+    }
     // Keep every live Codex terminal's identity honest: a new rollout only lands on disk at its first
     // turn, which is exactly when this re-index fires (the live session goes active). Hand the manager
     // the eligible rollout ids so it can ask the OS which one the Codex process in each terminal
@@ -454,19 +477,19 @@ const conversationIndex = new LatestTask(
       )
       void mgr.probeCodexIdentity(eligibleCodexIds)
     }
-    const sig = JSON.stringify(groups)
+    const sig = JSON.stringify(snapshot)
     if (sig !== lastBroadcastSig) {
       lastBroadcastSig = sig
-      broadcast(IPC.sessionsChanged, groups)
+      broadcast(IPC.sessionsChanged, snapshot)
     }
   }
 )
 
 /** Re-index both agents' sessions and push the result to the renderer. Swallows transient fs errors. */
-function reindexAndBroadcast(queueIfRunning = true): Promise<ConversationGroup[]> {
+function reindexAndBroadcast(queueIfRunning = true): Promise<ConversationIndexSnapshot> {
   return conversationIndex
     .refresh(queueIfRunning)
-    .catch(() => conversationIndex.peek() ?? [])
+    .catch(() => conversationIndex.peek() ?? EMPTY_SESSION_INDEX)
 }
 
 async function transcriptSource(sessionId: string): Promise<TranscriptSource | null> {
@@ -703,18 +726,24 @@ export function registerIpc(): void {
   void listAgents()
 
   // --- conversations (read-only) ---
-  ipcMain.handle(IPC.sessionsList, () => conversationIndex.get().catch(() => []))
-  ipcMain.handle(IPC.sessionsGet, (_e, sessionId: string, revision: string) =>
-    transcriptLoader.load(sessionId, revision)
-  )
+  ipcMain.handle(IPC.sessionsList, () => conversationIndex.get().catch(() => ({ ...EMPTY_SESSION_INDEX, hiddenSessionIds: [...hiddenSessionIds] })))
+  ipcMain.handle(IPC.sessionsGet, async (_e, sessionId: string, revision: string) => {
+    await conversationIndex.get()
+    if (hiddenSessionIds.has(sessionId)) return null
+    const transcript = await transcriptLoader.load(sessionId, revision)
+    return hiddenSessionIds.has(sessionId) ? null : transcript
+  })
   // Set/clear a conversation's title, then re-index + broadcast IMMEDIATELY so the new title lands in
   // the UI now rather than when the watcher/poll next fires. Dispatch by agent: a Claude session has a
   // JSONL file (we append its own `custom-title` line); otherwise it's Codex — the sessionId IS the
   // app-server threadId, and the rename writes Codex's own DB (`threads.title`), which the re-index's
   // title read then surfaces (the rollout is untouched).
   ipcMain.handle(IPC.sessionsRename, async (_e, sessionId: string, title: string): Promise<boolean> => {
+    await conversationIndex.get()
+    if (hiddenSessionIds.has(sessionId)) return false
     const claudeFp = await resolveSessionFile(sessionId)
     try {
+      if (hiddenSessionIds.has(sessionId)) return false
       if (claudeFp) await appendCustomTitle(claudeFp, sessionId, title)
       else await renameCodexThread(sessionId, title.trim())
       await reindexAndBroadcast()
@@ -728,9 +757,11 @@ export function registerIpc(): void {
   // The spawning window owns the terminal it started. That is the only implicit assignment; every
   // later move is an explicit claim.
   ipcMain.handle(IPC.ptyResume, async (e, sessionId: string, cwd: string, agent: AgentKind, title?: string) => {
+    await conversationIndex.get()
+    if (hiddenSessionIds.has(sessionId)) throw new Error('This conversation is hidden')
     const existing = mgr!.findBySession(sessionId)
     if (existing) {
-      await transferTerminal(existing.ptyId, e.sender.id)
+      await transferTerminal(existing.ptyId, e.sender.id, () => !hiddenSessionIds.has(sessionId))
       return forWindow([existing], e.sender.id)[0]
     }
     const st = mgr!.resume(sessionId, cwd, agent, title, (spawned) => {
@@ -747,7 +778,10 @@ export function registerIpc(): void {
     })
     return forWindow([st], e.sender.id)[0]
   })
-  ipcMain.handle(IPC.ptyClaim, (e, ptyId: string) => transferTerminal(ptyId, e.sender.id))
+  ipcMain.handle(IPC.ptyClaim, (e, ptyId: string) => transferTerminal(ptyId, e.sender.id, () => {
+    const pty = mgr?.list().find((p) => p.ptyId === ptyId)
+    return !!pty && !hiddenSessionIds.has(pty.sessionId)
+  }))
   ipcMain.on(
     IPC.ptySnapshotReply,
     (e, requestId: string, ptyId: string, snapshot: PtySnapshot | null) => {
@@ -818,7 +852,8 @@ export function registerIpc(): void {
   // in, so no other window can see the pointer over itself; main is the only party that can. It reads
   // the cursor ON DEMAND — never on a timer — and only between dragBegin and drop/cancel.
   ipcMain.on(IPC.tabDragBegin, (e, value: unknown) => {
-    const payload = parseTabDragPayload(value)
+    const parsed = parseTabDragPayload(value)
+    const payload = parsed ? visibleTabDrag(parsed, hiddenSessionIds) : null
     if (!payload) return
     tabDrag = { sourceId: e.sender.id, payload, hoveringId: null }
   })
@@ -845,23 +880,25 @@ export function registerIpc(): void {
     const drag = tabDrag
     endTabDrag()
     if (!drag || drag.sourceId !== e.sender.id) return 'cancelled'
+    const payload = visibleTabDrag(drag.payload, hiddenSessionIds)
+    if (!payload) return 'cancelled'
     const target = windowUnderCursor(drag.sourceId)
     if (target) {
-      claimTabsForWindow(target.webContents.id, drag.payload.sessionIds)
-      target.webContents.send(IPC.tabDropHere, drag.payload)
-      navigation.reveal(e.sender.id, drag.payload.activeSessionId, 'persistent')
+      claimTabsForWindow(target.webContents.id, payload.sessionIds)
+      target.webContents.send(IPC.tabDropHere, payload)
+      navigation.reveal(e.sender.id, payload.activeSessionId, 'persistent')
       return 'moved'
     }
     // No other window under the cursor. Over the source's own body means the user released somewhere
     // that is not a strip, which does nothing; over the desktop is the detach gesture.
     if (cursorInWindow(drag.sourceId)) return 'cancelled'
     const opened = openWindow?.({
-      ...drag.payload,
+      ...payload,
       restoredTabs: null,
       primary: false,
       collapseRail: true
     })
-    if (opened) claimTabsForWindow(opened.webContents.id, drag.payload.sessionIds)
+    if (opened) claimTabsForWindow(opened.webContents.id, payload.sessionIds)
     return 'detached'
   })
   ipcMain.on(IPC.tabDragCancel, () => endTabDrag())
@@ -908,6 +945,7 @@ export function registerIpc(): void {
     navigation.complete(e.sender.id, requestId, visit)
   })
   ipcMain.on(IPC.conversationResume, (e, sessionId: string) => {
+    if (hiddenSessionIds.has(sessionId)) return
     const owner = tabOwner.get(sessionId)
     if (owner == null || owner === e.sender.id) return
     for (const w of BrowserWindow.getAllWindows()) {
@@ -926,6 +964,7 @@ export function registerIpc(): void {
     return shouldReleaseTab(tabOwner, e.sender.id, sessionId)
   })
   ipcMain.handle(IPC.tabReserveBound, (e, ptyId: string, oldSessionId: string, sessionId: string): string | null => {
+    if (hiddenSessionIds.has(sessionId)) return null
     if (!canReserveTabForBoundPty(
       ptyOwner,
       mgr?.list() ?? [],
@@ -939,7 +978,7 @@ export function registerIpc(): void {
   })
   ipcMain.on(IPC.tabCommitBound, (e, token: string) => {
     const reservation = boundTabReservations.take(token, e.sender.id)
-    if (!reservation) return
+    if (!reservation || hiddenSessionIds.has(reservation.sessionId)) return
     if (reservation.fromSessionId) {
       navigation.retarget(reservation.windowId, reservation.fromSessionId, reservation.sessionId)
     }
@@ -955,7 +994,8 @@ export function registerIpc(): void {
   // one ⌘B away, rather than a second cut-down shell that would have to reimplement it. A group moved
   // here lands in ONE window holding all of them, not one window each.
   ipcMain.on(IPC.windowOpenConversation, (e, value: unknown) => {
-    const payload = parseTabDragPayload(value)
+    const parsed = parseTabDragPayload(value)
+    const payload = parsed ? visibleTabDrag(parsed, hiddenSessionIds) : null
     if (!payload) return
     const opened = openWindow?.({
       ...payload,
@@ -1000,13 +1040,18 @@ export function registerIpc(): void {
     }
   )
 
-  // --- self-update: check compares the build commit to main (GitHub API, HTTPS); run shells out to
+  // --- self-update: check compares the build commit to main via Git; run shells out to
   // `git pull --ff-only <https> main && npm run setup` in the source repo, streaming output. ---
   ipcMain.handle(IPC.updatesGetInfo, () => buildInfo())
-  ipcMain.handle(IPC.updatesCheck, (_e, force: boolean) => getUpdateCheck(force === true))
+  ipcMain.handle(IPC.updatesCheck, (_e, force: boolean) => updateChecks.check(force === true))
+  ipcMain.handle(IPC.updatesCheckStateGet, () => updateChecks.state)
   ipcMain.handle(IPC.updatesRun, () => runUpdateOnce())
   ipcMain.handle(IPC.updatesRunStateGet, () => updateRunState)
   ipcMain.on(IPC.updatesRelaunch, () => relaunchForUpdate())
+  powerMonitor.on('resume', onUpdateCheckWake)
+  if (process.env.SWITCHBOARD_SMOKE !== '1' && process.env.SWITCHBOARD_FAKE_UPDATING !== '1') {
+    updateChecks.start()
+  }
 
   // --- live re-index on file changes (structural: new conversations, renames, other windows) ---
   watcher = new SessionWatcher({
@@ -1034,6 +1079,8 @@ export function registerIpc(): void {
 }
 
 export function disposeIpc(): void {
+  updateChecks.dispose()
+  powerMonitor.off('resume', onUpdateCheckWake)
   if (liveTick) {
     clearInterval(liveTick)
     liveTick = null

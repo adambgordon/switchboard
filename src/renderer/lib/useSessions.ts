@@ -1,26 +1,20 @@
-import { useEffect, useState } from 'react'
-import type { ConversationGroup } from '@shared/types'
+import { useEffect, useMemo, useState } from 'react'
+import { EMPTY_SESSION_INDEX } from '@shared/sessionVisibility'
+import { startSnapshotSync } from './snapshotSync'
 
 /** Live-updating conversation index: initial load + watcher-driven re-indexes. */
-export function useSessions(): { groups: ConversationGroup[]; loading: boolean } {
-  const [groups, setGroups] = useState<ConversationGroup[]>([])
+export function useSessions() {
+  const [snapshot, setSnapshot] = useState(EMPTY_SESSION_INDEX)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let alive = true
-    window.api.listConversations().then((g) => {
-      if (!alive) return
-      setGroups(g)
+    return startSnapshotSync(window.api.onSessionsChanged, window.api.listConversations, (value) => {
+      setSnapshot(value)
       setLoading(false)
     })
-    const off = window.api.onSessionsChanged((g) => {
-      if (alive) setGroups(g)
-    })
-    return () => {
-      alive = false
-      off()
-    }
   }, [])
 
-  return { groups, loading }
+  const hiddenKey = JSON.stringify(snapshot.hiddenSessionIds)
+  const hiddenSessionIds = useMemo<ReadonlySet<string>>(() => new Set(JSON.parse(hiddenKey)), [hiddenKey])
+  return { groups: snapshot.groups, hiddenSessionIds, loading }
 }

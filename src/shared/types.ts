@@ -142,6 +142,8 @@ export interface ConversationMeta {
    * Undefined for Claude and older Codex rollouts that predate the field.
    */
   threadSource?: string
+  /** Codex delegation identified from session metadata, including guardian reviews. */
+  codexSubagent?: boolean
   /** true when this is a freshly-started session with no persisted history yet. */
   provisional?: boolean
 }
@@ -157,6 +159,11 @@ export interface Transcript {
 }
 
 /** Conversations grouped by exact cwd (the sidebar's primary structure). */
+export interface ConversationIndexSnapshot {
+  groups: ConversationGroup[]
+  hiddenSessionIds: string[]
+}
+
 export interface ConversationGroup {
   /** Absolute cwd; the grouping key. */
   cwd: string
@@ -363,7 +370,9 @@ export const IPC = {
   appRefreshStart: 'app:refreshStart', // push: ⌘R refresh begun — renderer covers the window with the white veil
   appRefreshEnd: 'app:refreshEnd', // push: ⌘R refresh restored — renderer fades the veil back out
   updatesGetInfo: 'updates:getInfo', // build version/sha + whether this copy can self-update
-  updatesCheck: 'updates:check', // compare the build commit to main (GitHub API)
+  updatesCheck: 'updates:check', // compare the build commit to main via Git
+  updatesCheckStateGet: 'updates:checkStateGet',
+  updatesCheckStateChanged: 'updates:checkStateChanged', // push (UpdateCheckState)
   updatesRun: 'updates:run', // git pull + npm run setup in the source repo
   updatesProgress: 'updates:progress', // push (line) — streamed update output
   updatesRunStateGet: 'updates:runStateGet',
@@ -392,6 +401,11 @@ export type UpdateCheck =
   | { status: 'current' }
   | { status: 'behind' }
   | { status: 'unknown'; reason: string }
+
+export interface UpdateCheckState {
+  check: UpdateCheck | null
+  checking: boolean
+}
 
 /** What the native tab context menu resolved to. */
 export type TabMenuAction =
@@ -467,10 +481,10 @@ export interface UpdateRunState {
 /** The typed surface exposed on `window.api` by the preload bridge. */
 export interface SwitchboardApi {
   // --- conversations (read-only) ---
-  listConversations(): Promise<ConversationGroup[]>
+  listConversations(): Promise<ConversationIndexSnapshot>
   getTranscript(sessionId: string, revision: string): Promise<Transcript | null>
   /** Subscribe to live re-indexes (file watcher). Returns an unsubscribe fn. */
-  onSessionsChanged(cb: (groups: ConversationGroup[]) => void): () => void
+  onSessionsChanged(cb: (snapshot: ConversationIndexSnapshot) => void): () => void
   /**
    * Set a conversation's title by appending Claude Code's own `custom-title` line to its JSONL
    * (the same mechanism as `/rename`) — so the rename is real and survives into `claude --resume`.
@@ -660,8 +674,10 @@ export interface SwitchboardApi {
   // --- self-update ---
   /** Build version/sha + whether this copy can rebuild itself (source repo findable, packaged). */
   getUpdateInfo(): Promise<UpdateInfo>
-  /** Compare the build's commit to the latest on `main` (GitHub compare API). */
+  /** Compare the build's commit to the latest on `main`; forced checks bypass the settled cache. */
   checkForUpdates(force?: boolean): Promise<UpdateCheck>
+  getUpdateCheckState(): Promise<UpdateCheckState>
+  onUpdateCheckState(cb: (state: UpdateCheckState) => void): () => void
   /** Run `git pull --ff-only <https> main && npm run setup` in the source repo, streaming output via
    *  onUpdateProgress. Resolves when it finishes (ok=false on any failure, or in a dev run). */
   runUpdate(): Promise<UpdateRunResult>

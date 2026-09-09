@@ -17,6 +17,7 @@ import type {
   Transcript
 } from '@shared/types'
 import { makeTabDragPayload } from '@shared/tabDrag'
+import { visibleTabLayout } from '@shared/sessionVisibility'
 import { useSessions } from './lib/useSessions'
 import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
@@ -122,7 +123,9 @@ function synthMeta(p: PtyState): ConversationMeta {
 }
 
 export default function App() {
-  const { groups, loading } = useSessions()
+  const { groups, hiddenSessionIds, loading } = useSessions()
+  const hiddenSessionIdsRef = useRef(hiddenSessionIds)
+  hiddenSessionIdsRef.current = hiddenSessionIds
   const ptys = usePtys()
   const { pinned, order: pinnedOrder, toggle: togglePin, reorder: reorderPins } = usePins()
   // A nonce bumped on each drag-reorder commit, folded into the rail's FLIP controlSig so the commit
@@ -140,8 +143,8 @@ export default function App() {
   // order it makes Live rows drag-reorderable AND immune to any activity-driven re-sort: a row holds
   // its slot until you drag it. Every newly-live session (new or resumed) lands on top.
   const liveUnpinnedIds = useMemo(
-    () => ptys.active.filter((p) => !pinned.has(p.sessionId)).map((p) => p.sessionId),
-    [ptys.active, pinned]
+    () => ptys.active.filter((p) => !pinned.has(p.sessionId) && !hiddenSessionIds.has(p.sessionId)).map((p) => p.sessionId),
+    [ptys.active, pinned, hiddenSessionIds]
   )
   const {
     order: liveOrder,
@@ -220,7 +223,7 @@ export default function App() {
   // before tabs existed. So the flag gates only the strip's presence, the promotion gestures, and the
   // split / window commands; nothing below asks about it. See useTabsEnabled.
   const { enabled: tabsEnabled, setEnabled: setTabsEnabled } = useTabsEnabled()
-  const panes = usePaneLayout(tabsEnabled ? windowInit.restoredTabs : null)
+  const panes = usePaneLayout(tabsEnabled ? windowInit.restoredTabs : null, hiddenSessionIds)
   const { layout: paneLayout } = panes
   const [tabWorkspaceReady, setTabWorkspaceReady] = useState(
     () => tabsEnabled && !windowInit.restoredTabs
@@ -236,7 +239,7 @@ export default function App() {
     go: goHistory,
     rekey: rekeyPendingNavigation,
     report: reportNavigation
-  } = useAppNavigation(navigationApplyRef)
+  } = useAppNavigation(navigationApplyRef, hiddenSessionIds)
   const focusPane = useCallback((index: number) => {
     beginVisit()
     panes.focusPane(index)
@@ -266,6 +269,9 @@ export default function App() {
   // Conversation-info modal target: which session, and whether to open straight into title-edit vs
   // view (both the pane title and the right-click "Session details…" open in view). Null when closed.
   const [infoModal, setInfoModal] = useState<{ sessionId: string; edit: boolean } | null>(null)
+  useLayoutEffect(() => {
+    if (infoModal && hiddenSessionIds.has(infoModal.sessionId)) setInfoModal(null)
+  }, [infoModal, hiddenSessionIds])
   const overlayOpenRef = useRef(false)
   // Section keys revealed past their cap via "Show more" (ephemeral — resets on reload).
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
@@ -737,6 +743,7 @@ export default function App() {
 
   const railSections = useMemo<RailSection[]>(() => {
     const pinnedEntries: RailEntry[] = pinnedOrder
+      .filter((id) => !hiddenSessionIds.has(id))
       .map((id) => {
         const pty = ptys.bySession.get(id) ?? null
         // Prefer indexed meta; fall back to the live process so a pinned-but-
@@ -755,7 +762,7 @@ export default function App() {
     const liveEntries: RailEntry[] = liveOrder
       .map((id): RailEntry | null => {
         const pty = ptys.bySession.get(id)
-        if (!pty || pinned.has(id)) return null
+        if (!pty || pinned.has(id) || hiddenSessionIds.has(id)) return null
         const meta = metaById.get(id) ?? synthMeta(pty)
         return { sessionId: id, pty, meta, pinned: false, liveState: liveStateFor(pty, meta, id) }
       })
@@ -775,7 +782,7 @@ export default function App() {
       ? all.map((s) => ({ ...s, entries: s.entries.filter((e) => matchIds.has(e.sessionId)) }))
       : all
     return scoped.filter((s) => s.entries.length > 0)
-  }, [pinned, pinnedOrder, liveOrder, metaById, ptys.bySession, allConversations, matchIds, liveStateFor])
+  }, [pinned, pinnedOrder, liveOrder, metaById, ptys.bySession, allConversations, matchIds, liveStateFor, hiddenSessionIds])
 
   // Live-session tally over ALL live sessions — never the search-filtered rail set, so the rail's
   // count + status line reflect everything running even while a query narrows the visible rows.
@@ -791,7 +798,10 @@ export default function App() {
     // identify — and "1 idle" over a terminal the user is actively typing in is exactly the kind of
     // wrong-dot report this work exists to fix. Sharing the hollow visual does not fold it into idle.
     let unlinked = 0
+    let count = 0
     for (const p of ptys.active) {
+      if (hiddenSessionIds.has(p.sessionId)) continue
+      count++
       const st = liveStateFor(p, metaById.get(p.sessionId) ?? synthMeta(p), p.sessionId)
       // Every `p` here is live by construction, so the only way to get no state is the unlinked
       // gate — which makes this bucket definitionally "the rows that were given no dot" rather
@@ -802,8 +812,8 @@ export default function App() {
       else if (st === 'awaiting') unreadCount++
       else idle++
     }
-    return { count: ptys.active.length, working, asking, unread: unreadCount, idle, unlinked }
-  }, [ptys.active, metaById, liveStateFor])
+    return { count, working, asking, unread: unreadCount, idle, unlinked }
+  }, [ptys.active, metaById, liveStateFor, hiddenSessionIds])
 
   // Capacity modal: warn once the live set reaches the configured cap (maxLive). `capWarnDismissed`
   // silences only the current episode — the re-arm effect clears it once the count drops back below
@@ -812,14 +822,14 @@ export default function App() {
   // render would needlessly re-subscribe the listener).
   const [capWarnDismissed, setCapWarnDismissed] = useState(false)
   useEffect(() => {
-    if (liveTally.count < maxLive) setCapWarnDismissed(false)
-  }, [liveTally.count, maxLive])
+    if (ptys.active.length < maxLive) setCapWarnDismissed(false)
+  }, [ptys.active.length, maxLive])
   const capWarning = useMemo(
     () =>
-      liveTally.count >= maxLive && !capWarnDismissed
-        ? { count: liveTally.count, max: maxLive }
+      ptys.active.length >= maxLive && !capWarnDismissed
+        ? { count: ptys.active.length, max: maxLive }
         : null,
-    [liveTally.count, capWarnDismissed, maxLive]
+    [ptys.active.length, capWarnDismissed, maxLive]
   )
   overlayOpenRef.current = settingsPage !== null || capWarning !== null || infoModal !== null
 
@@ -1016,6 +1026,7 @@ export default function App() {
    */
   const land = useCallback(
     (id: string, mode: TabOpenMode, opts?: { pane?: number; focus?: boolean }) => {
+      if (hiddenSessionIdsRef.current.has(id)) return
       beginVisit()
       // One conversation, one tab — across windows as well as across panes. Within this window the
       // reducer handles it; another window's tab is only knowable through main, so it is decided here.
@@ -1037,6 +1048,7 @@ export default function App() {
   // `pane` is passed explicitly by the per-pane header buttons rather than relying on the pointer
   // having already moved keyboard focus to that pane — the spawn must land where the button lives.
   const resume = useCallback(async (meta: ConversationMeta, pane?: number) => {
+    if (hiddenSessionIdsRef.current.has(meta.sessionId)) return
     if (
       pane === undefined &&
       openElsewhereRef.current.has(meta.sessionId) &&
@@ -1048,7 +1060,11 @@ export default function App() {
     land(meta.sessionId, 'persistent', { pane })
     chooseSessionView(meta.sessionId, 'terminal')
     requestFocus(meta.sessionId)
-    await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
+    try {
+      await window.api.resume(meta.sessionId, meta.cwd, meta.agent, meta.title)
+    } catch (error) {
+      if (!hiddenSessionIdsRef.current.has(meta.sessionId)) throw error
+    }
   }, [land, requestFocus, chooseSessionView, beginVisit])
   const resumeRef = useRef(resume)
   resumeRef.current = resume
@@ -1342,6 +1358,7 @@ export default function App() {
         .activateTabWorkspace()
         .then((saved) => {
           if (!tabsEnabledRef.current) return
+          saved = visibleTabLayout(saved, hiddenSessionIdsRef.current)
           if (!saved) {
             window.api.finishTabWorkspaceActivation()
             setTabWorkspaceReady(true)
@@ -1360,11 +1377,12 @@ export default function App() {
 
   useEffect(() => {
     const pending = pendingWorkspaceKeyRef.current
-    if (!tabsEnabled || !restoredWorkspaceApplied(pending, persistedTabLayoutKey)) return
+    const visiblePending = pending === null ? null : JSON.stringify(visibleTabLayout(JSON.parse(pending), hiddenSessionIds))
+    if (!tabsEnabled || !restoredWorkspaceApplied(visiblePending, persistedTabLayoutKey)) return
     pendingWorkspaceKeyRef.current = null
     window.api.finishTabWorkspaceActivation()
     setTabWorkspaceReady(true)
-  }, [tabsEnabled, persistedTabLayoutKey])
+  }, [tabsEnabled, persistedTabLayoutKey, hiddenSessionIds])
 
   useEffect(() => {
     const offElsewhere = window.api.onTabsElsewhere((ids: string[]) => {
@@ -1746,9 +1764,10 @@ export default function App() {
 
   // Resolve the info-modal target's meta + live process. A live-but-unindexed session still resolves
   // via the synthesized meta, mirroring the rail.
-  const infoPty = infoModal ? ptys.bySession.get(infoModal.sessionId) ?? null : null
-  const infoMeta = infoModal
-    ? metaById.get(infoModal.sessionId) ?? (infoPty ? synthMeta(infoPty) : null)
+  const visibleInfoModal = infoModal && !hiddenSessionIds.has(infoModal.sessionId) ? infoModal : null
+  const infoPty = visibleInfoModal ? ptys.bySession.get(visibleInfoModal.sessionId) ?? null : null
+  const infoMeta = visibleInfoModal
+    ? metaById.get(visibleInfoModal.sessionId) ?? (infoPty ? synthMeta(infoPty) : null)
     : null
 
   return (
@@ -1993,7 +2012,7 @@ export default function App() {
       />
       <CapWarningModal capWarning={capWarning} onDismiss={() => setCapWarnDismissed(true)} />
       <ConversationInfoModal
-        open={!!infoModal}
+        open={visibleInfoModal !== null}
         meta={infoMeta}
         pty={infoPty}
         startInEdit={infoModal?.edit ?? false}

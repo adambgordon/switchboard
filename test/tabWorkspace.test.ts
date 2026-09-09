@@ -125,6 +125,30 @@ describe('TabWorkspaceStore', () => {
     expect(store.snapshot()).toEqual(restored)
   })
 
+  it('excludes recognized ids from active and dormant layouts and rejects stale reports', () => {
+    const store = new TabWorkspaceStore(dir, file, [onePane(['A', 'H', 'B'], 'H'), onePane(['J']), onePane(['unknown'])])
+    store.register(10, store.takePrimary())
+    store.excludeSessions(new Set(['H', 'J']))
+    expect(store.layoutFor(10)).toEqual(onePane(['A', 'B'], 'B'))
+    expect(store.takeDormant()).toEqual([onePane(['unknown'])])
+    store.update(10, onePane(['A', 'H', 'B'], 'H'))
+    store.register(20, onePane(['J']))
+    expect(store.layoutFor(20)).toBeNull()
+    vi.runAllTimers()
+    expect(loadTabWorkspace(dir, file)).toEqual([onePane(['A', 'B'], 'B')])
+  })
+
+  it('persists all-hidden removal but performs no write for an unaffected workspace', () => {
+    const store = new TabWorkspaceStore(dir, file, [onePane(['H'])])
+    store.register(10, store.takePrimary())
+    store.excludeSessions(new Set(['H']))
+    vi.runAllTimers()
+    expect(loadTabWorkspace(dir, file)).toEqual([])
+    expect(store.layoutFor(10)).toBeNull()
+    store.excludeSessions(new Set(['H', 'J']))
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('clears registered and dormant layouts together on explicit disable', () => {
     const store = new TabWorkspaceStore(dir, file, [onePane(['A']), onePane(['B'])])
     const primary = store.takePrimary()

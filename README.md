@@ -50,7 +50,7 @@ Because you built it locally, macOS doesn't quarantine it — it opens without t
 
 ## Updates
 
-**In the app** — open Preferences (`⌘,`) → **Application** → **Updates** → **Check for updates**. If you're behind, **Download update** pulls the latest and rebuilds in place (a few minutes), then **Relaunch** loads the new build. A dot on the gear (and the **Application** row) marks when an update is waiting. *(Needs the app running from its built `dist/` folder; if you moved it elsewhere, it shows you the manual command below instead.)*
+**In the app** — Switchboard checks at startup and every 30 minutes while running, including in the background. An overdue check runs after waking from sleep. To check immediately, open Preferences (`⌘,`) → **Application** → **Updates**. If you're behind, **Download update** pulls the latest and rebuilds in place (a few minutes), then **Relaunch** loads the new build. A dot on the gear (and the **Application** row) marks when an update is waiting. *(Needs the app running from its built `dist/` folder; if you moved it elsewhere, it shows you the manual command below instead.)*
 
 **Or ask Claude:**
 
@@ -79,7 +79,7 @@ Then quit (⌘Q) (if already running) and reopen the app.
 
 ## What it does
 
-- **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped together by folder so a repo's conversations from both agents sit side by side; titles and previews update live as a file watcher re-indexes. A Claude Code background continuation appears beside the original (whose transcript stops at the handoff) as its own independently resumable row; repeated handoffs can therefore produce several rows from one lineage. Each background row is marked by a dashed ring around the Claude logo; internal Claude daemons and delegated Codex subagent threads are omitted. Switchboard owns no data of its own.
+- **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped together by folder so a repo's conversations from both agents sit side by side; titles and previews update live as a file watcher re-indexes. A Claude Code background continuation appears beside the original (whose transcript stops at the handoff) as its own independently resumable row; repeated handoffs can therefore produce several rows from one lineage. Each background row is marked by a dashed ring around the Claude logo; internal Claude daemons and delegated Codex sessions, including approval reviews, are omitted. Recognized Codex subagents are also removed from restored tabs and skipped by Back/Forward. Automatically derived Codex names use a bounded first-line title, including when copied. Switchboard owns no data of its own.
 - **Preview without disturbing** — click any conversation to render its transcript instantly from disk. **No `claude` process is started**, so you can click through dozens to find the one you want.
 - **Resume / start, explicitly** — the only way to spawn a live process is **Resume** or **New**, each dropping you into a real terminal running the right agent (`claude --resume` / `codex resume`, and so on). **New** lets you pick the agent when more than one is installed.
 - **Formatted ⇄ Terminal** — for a live conversation, toggle between the raw **Terminal** (where you type) and a **Formatted** view that renders both your prompts and the agent's replies as Markdown — with syntax-highlighted code blocks — and stays pinned to the latest message. The chosen view and each Formatted reading position stick per conversation while the app is open; hovering a link reveals its URL.
@@ -164,6 +164,7 @@ src/
     windowState.ts         persists window bounds/position across launches
     trafficLights.ts       re-aligns the native traffic lights to the page zoom (renderer pings on resize)
     updater.ts             self-update: git ls-remote check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
+    updateChecks.ts        shared update-check cache, coalescing, and 30-minute background schedule
     sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexSessionIndex · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
     pty/manager.ts         spawns login shells, types the agent command; output activity → LRU eviction (configurable cap, default 8)
     pty/codexInputNotifications.ts  scans explicit Codex OSC 9 question/approval notifications for live-dot liveness

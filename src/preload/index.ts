@@ -84,6 +84,8 @@ const api: SwitchboardApi = {
 
   getUpdateInfo: () => ipcRenderer.invoke(IPC.updatesGetInfo),
   checkForUpdates: (force = false) => ipcRenderer.invoke(IPC.updatesCheck, force),
+  getUpdateCheckState: () => ipcRenderer.invoke(IPC.updatesCheckStateGet),
+  onUpdateCheckState: (cb) => subscribe(IPC.updatesCheckStateChanged, cb as never),
   runUpdate: () => ipcRenderer.invoke(IPC.updatesRun),
   onUpdateProgress: (cb) => subscribe(IPC.updatesProgress, cb as never),
   getUpdateRunState: () => ipcRenderer.invoke(IPC.updatesRunStateGet),

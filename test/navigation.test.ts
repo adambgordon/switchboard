@@ -30,6 +30,67 @@ function harness(restore?: NavigationHost['restoreTerminal'], immediateFocus = t
 }
 
 describe('NavigationCoordinator', () => {
+  it('skips hidden history stops in both directions without erasing the route', async () => {
+    const h = harness()
+    h.seed()
+    for (const window of [1, 2, 3]) h.nav.focused(window)
+    h.nav.setHiddenSessions(new Set(['B']))
+    h.nav.go(3, -1); await flush(); h.ack()
+    expect(h.commands.at(-1)?.command.sessionId).toBe('A')
+    expect(h.nav.state.cursor).toBe(0)
+    h.nav.go(1, 1); await flush(); h.ack()
+    expect(h.commands.at(-1)?.command.sessionId).toBe('C')
+    expect(h.nav.state.entries.map((visit) => visit.sessionId)).toEqual(['A', 'B', 'C'])
+    expect(h.restores).toEqual([])
+  })
+
+  it('keeps the cursor and pending command when a stale hidden reveal or blocked step arrives', () => {
+    const h = harness()
+    h.seed(); h.nav.focused(1); h.nav.focused(2); h.nav.focused(3)
+    h.nav.setHiddenSessions(new Set(['A', 'B']))
+    const before = h.nav.state
+    h.nav.go(3, -1)
+    expect(h.nav.state).toBe(before)
+    expect(h.commands).toEqual([])
+    h.nav.reveal(3, 'C', 'preview')
+    h.nav.reveal(3, 'B', 'preview')
+    h.ack()
+    expect(h.focuses).toEqual([3])
+    expect(h.commands.map((c) => c.command.sessionId)).toEqual(['C'])
+    h.nav.report(3, v('B'), true)
+    expect(h.nav.state).toBe(before)
+  })
+
+  it('cancels a newly hidden terminal replay before its handoff finishes', async () => {
+    let finish = (_result: boolean) => {}
+    let current = () => true
+    const h = harness((_window, _session, isCurrent) => {
+      current = isCurrent
+      return new Promise((resolve) => { finish = resolve })
+    })
+    h.seed(); h.nav.focused(1); h.nav.focused(2); h.nav.focused(3)
+    h.nav.go(3, -1)
+    expect(current()).toBe(true)
+    h.nav.setHiddenSessions(new Set(['B']))
+    expect(current()).toBe(false)
+    expect(h.cancels).toEqual([[2, 1]])
+    finish(true); await flush()
+    expect(h.commands).toEqual([])
+    expect(h.focuses).toEqual([])
+    h.nav.go(3, -1); await flush(); h.ack()
+    expect(h.commands.at(-1)?.command.sessionId).toBe('A')
+  })
+
+  it('ignores late acknowledgements and cached focus visits after a target becomes hidden', () => {
+    const h = harness()
+    h.seed(); h.nav.focused(1); h.nav.reveal(1, 'B', 'preview')
+    const stale = h.commands[0]
+    h.nav.setHiddenSessions(new Set(['B']))
+    h.ack(stale); h.nav.focused(2)
+    expect(h.focuses).toEqual([])
+    expect(h.nav.state.entries.map((visit) => visit.sessionId)).toEqual(['A'])
+  })
+
   it('continues complete Back/Forward round trips from any of three windows', async () => {
     const h = harness()
     h.seed()

@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useReducer, useRef } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
 import type { PersistedTabLayout, TabOpenMode } from '@shared/types'
+import { visibleTabDrag, visibleTabLayout } from '@shared/sessionVisibility'
 import {
   activeTabId,
   initialLayout,
@@ -52,25 +53,38 @@ export interface PaneLayoutApi {
   collapseToSingle: () => void
 }
 
-export function usePaneLayout(restored?: PersistedTabLayout | null): PaneLayoutApi {
-  const [layout, dispatch] = useReducer(
+export function usePaneLayout(restored: PersistedTabLayout | null, hidden: ReadonlySet<string>): PaneLayoutApi {
+  const [rawLayout, dispatch] = useReducer(
     paneReducer,
     restored,
     (saved) => restorePaneLayout(saved, ['p0', 'p1'])
   )
+  const hiddenRef = useRef(hidden)
+  hiddenRef.current = hidden
+  const layout = useMemo(() => hidden.size === 0 ? rawLayout : paneReducer(rawLayout, {
+    type: 'closeMany', sessionIds: [...hidden]
+  }), [rawLayout, hidden])
+  useLayoutEffect(() => {
+    if (layout !== rawLayout) dispatch({ type: 'closeMany', sessionIds: [...hidden] })
+  }, [layout, rawLayout, hidden])
   // Next unused pane id. Starts at 1 because `initialLayout` took p0.
-  const nextPaneId = useRef(layout.panes.length)
+  const nextPaneId = useRef(rawLayout.panes.length)
   const layoutRef = useRef(layout)
   layoutRef.current = layout
 
   const openTab = useCallback(
-    (sessionId: string, mode: TabOpenMode, opts?: { pane?: number; focus?: boolean }) =>
-      dispatch({ type: 'open', sessionId, mode, pane: opts?.pane, focus: opts?.focus }),
+    (sessionId: string, mode: TabOpenMode, opts?: { pane?: number; focus?: boolean }) => {
+      if (!hiddenRef.current.has(sessionId)) {
+        dispatch({ type: 'open', sessionId, mode, pane: opts?.pane, focus: opts?.focus })
+      }
+    },
     []
   )
   const openTabs = useCallback(
-    (sessionIds: string[], activeSessionId: string, pane?: number) =>
-      dispatch({ type: 'openMany', sessionIds, activeSessionId, pane }),
+    (sessionIds: string[], activeSessionId: string, pane?: number) => {
+      const payload = visibleTabDrag({ sessionIds, activeSessionId }, hiddenRef.current)
+      if (payload) dispatch({ type: 'openMany', ...payload, pane })
+    },
     []
   )
   const promoteTab = useCallback(
@@ -129,6 +143,7 @@ export function usePaneLayout(restored?: PersistedTabLayout | null): PaneLayoutA
     []
   )
   const restoreLayout = useCallback((saved: PersistedTabLayout) => {
+    saved = visibleTabLayout(saved, hiddenRef.current) ?? { panes: [] }
     const paneIds = [layoutRef.current.panes[0].id]
     for (let index = 1; index < saved.panes.length; index += 1) {
       paneIds.push(`p${nextPaneId.current}`)
