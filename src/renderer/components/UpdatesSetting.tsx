@@ -43,7 +43,7 @@ function UpdatingStatus({ dots }: { dots: string }): ReactNode {
 }
 
 interface Props {
-  /** The shared self-update state, owned by App's useUpdates() so it survives this modal closing and so
+  /** The shared self-update state, consumed by App's useUpdates() so it survives this modal closing and so
    *  the launch check / attention dot can read it too. */
   updates: Updates
 }

@@ -30,7 +30,7 @@
  *
  * Only INTERACTIVE sessions (`session_meta.originator === 'codex-tui'`) are parsed into metadata;
  * `codex exec` / non-interactive rollouts (originator `codex_exec`) are dropped. The indexer then
- * removes interactive subagent threads using `session_meta.thread_source`.
+ * removes delegated threads using `session_meta` classification and structured source markers.
  *
  * Pure Node — no Electron, no DOM. Malformed lines are skipped, never thrown. The `*FromText`
  * functions are pure (string in, value out) so they're unit-testable without the filesystem.
@@ -305,6 +305,7 @@ export function extractCodexMetaFromText(
   let cwd: string | null = null
   let originator: string | null = null
   let threadSource: string | null = null
+  let codexSubagent = false
   let version: string | null = null
   let model: string | null = null
   let firstUser: string | null = null
@@ -337,6 +338,10 @@ export function extractCodexMetaFromText(
     const at = typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN
 
     if (obj.type === 'session_meta') {
+      const source = asRecord(payload.source)
+      codexSubagent ||= payload.thread_source === 'subagent' ||
+        payload.thread_source === 'guardian_review' ||
+        (source != null && Object.hasOwn(source, 'subagent'))
       if (cwd == null && typeof payload.cwd === 'string' && payload.cwd.length > 0) cwd = payload.cwd
       if (originator == null && typeof payload.originator === 'string') originator = payload.originator
       if (threadSource == null && typeof payload.thread_source === 'string') {
@@ -479,6 +484,7 @@ export function extractCodexMetaFromText(
     turnEndedAt,
     lastActivityAt,
     threadSource: threadSource ?? undefined,
+    codexSubagent,
     provisional: false
   }
 }

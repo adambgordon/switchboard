@@ -7,7 +7,12 @@ interface ReportedVisit {
 }
 
 /** Renderer adapter: local actions paint immediately; only tagged remote activation needs an ack. */
-export function useAppNavigation(apply: RefObject<((command: NavigationCommand) => void) | null>) {
+export function useAppNavigation(
+  apply: RefObject<((command: NavigationCommand) => void) | null>,
+  hidden: ReadonlySet<string>
+) {
+  const hiddenRef = useRef(hidden)
+  hiddenRef.current = hidden
   const pending = useRef<NavigationCommand | null>(null)
   const latestRequest = useRef(0)
   // Intent rejects queued activations; generation also invalidates asynchronous work on replay/blur.
@@ -21,7 +26,7 @@ export function useAppNavigation(apply: RefObject<((command: NavigationCommand) 
     const offActivate = window.api.onTabActivate((command) => {
       if (command.requestId <= latestRequest.current) return
       latestRequest.current = command.requestId
-      if (command.targetRevision !== intent.current) {
+      if (command.targetRevision !== intent.current || hiddenRef.current.has(command.sessionId)) {
         window.api.completeNavigation(command.requestId, null)
         return
       }
@@ -41,6 +46,13 @@ export function useAppNavigation(apply: RefObject<((command: NavigationCommand) 
     })
     return () => { offActivate(); offCancel(); offFocus() }
   }, [apply])
+
+  useLayoutEffect(() => {
+    if (pending.current && hidden.has(pending.current.sessionId)) {
+      pending.current = null
+      generation.current += 1
+    }
+  }, [hidden])
 
   const beginVisit = useCallback((view: NavigationVisit | null = null) => {
     pending.current = null
@@ -80,7 +92,8 @@ export function useAppNavigation(apply: RefObject<((command: NavigationCommand) 
     if (previous && sameVisit(previous.visit, visit) && previous.intent === intent.current) return
     const choiceArrived = chosenView.current !== null && sameVisit(chosenView.current, visit)
     if (choiceArrived) chosenView.current = null
-    const record = !previous || previous.visit?.sessionId !== visit?.sessionId || previous.intent !== intent.current || choiceArrived
+    const cleanup = previous?.visit && hiddenRef.current.has(previous.visit.sessionId) && previous.intent === intent.current
+    const record = !cleanup && (!previous || previous.visit?.sessionId !== visit?.sessionId || previous.intent !== intent.current || choiceArrived)
     reported.current = { visit, intent: intent.current }
     window.api.reportNavigation(visit, record, intent.current)
   }, [])

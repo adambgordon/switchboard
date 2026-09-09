@@ -24,6 +24,19 @@ afterAll(async () => {
 })
 
 describe('appendCustomTitle (rename)', () => {
+  it('keeps Claude auto and custom titles bounded through rename/reset without truncating messages', async () => {
+    const prompt = 'C'.repeat(150) + '\n' + 'Message content. '.repeat(1000)
+    const { fp, sessionId } = await writeSession([
+      { type: 'user', cwd: '/project', uuid: 'u1', message: { role: 'user', content: prompt } }
+    ])
+    expect((await extractMeta(fp))?.title).toBe('C'.repeat(80))
+    expect((await parseTranscript(fp)).messages[0].blocks).toEqual([{ kind: 'text', text: prompt }])
+    await appendCustomTitle(fp, sessionId, 'N'.repeat(110))
+    expect((await extractMeta(fp))?.title).toBe('N'.repeat(80))
+    await appendCustomTitle(fp, sessionId, '')
+    expect((await extractMeta(fp))?.title).toBe('C'.repeat(80))
+  })
+
   it('sets the title by appending a custom-title line (wins in extractMeta + parseTranscript)', async () => {
     const { fp, sessionId } = await writeSession([
       { type: 'user', cwd: '/x', sessionId: 's', uuid: 'u1', message: { role: 'user', content: 'hello' } },

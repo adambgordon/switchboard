@@ -29,6 +29,7 @@ export class NavigationCoordinator {
   private activeWindow: number | null = null
   private pending: PendingNavigation | null = null
   private nextRequest = 0
+  private hiddenSessionIds: ReadonlySet<string> = new Set()
 
   constructor(private readonly host: NavigationHost) {}
 
@@ -36,11 +37,20 @@ export class NavigationCoordinator {
     return this.history
   }
 
+  setHiddenSessions(ids: ReadonlySet<string>): void {
+    this.hiddenSessionIds = ids
+    if (this.pending && ids.has(this.pending.command.sessionId)) this.interrupt()
+    for (const [windowId, visit] of this.windows) {
+      if (visit && ids.has(visit.sessionId)) this.windows.set(windowId, null)
+    }
+  }
+
   private record(visit: NavigationVisit | null): void {
     this.history = historyReducer(this.history, visit ? { type: 'visit', visit } : { type: 'home' })
   }
 
   report(windowId: number, visit: NavigationVisit | null, record: boolean, revision = 0): void {
+    if (visit && this.hiddenSessionIds.has(visit.sessionId)) return
     const first = !this.windows.has(windowId)
     this.windows.set(windowId, visit)
     this.revisions.set(windowId, revision)
@@ -80,11 +90,18 @@ export class NavigationCoordinator {
   }
 
   go(requester: number, direction: -1 | 1): void {
-    const next = historyReducer(this.history, { type: 'step', direction })
-    if (next === this.history) return
-    this.history = next
-    const visit = next.entries[next.cursor]
-    this.start(requester, visit.sessionId, 'preview', visit.view, 'replay')
+    let state = this.history
+    for (let attempts = 0; attempts <= state.entries.length; attempts += 1) {
+      const next = historyReducer(state, { type: 'step', direction })
+      if (next === state) return
+      const visit = next.entries[next.cursor]
+      if (!this.hiddenSessionIds.has(visit.sessionId)) {
+        this.history = next
+        this.start(requester, visit.sessionId, 'preview', visit.view, 'replay')
+        return
+      }
+      state = next
+    }
   }
 
   reveal(requester: number, sessionId: string, mode: TabOpenMode): void {
@@ -98,6 +115,7 @@ export class NavigationCoordinator {
     view: NavigationVisit['view'] | null,
     kind: NavigationCommand['kind']
   ): void {
+    if (this.hiddenSessionIds.has(sessionId)) return
     this.interrupt()
     const owner = this.host.ownerOf(sessionId)
     const target = owner != null && this.host.exists(owner) ? owner : requester

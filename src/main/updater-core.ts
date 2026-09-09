@@ -74,16 +74,3 @@ export function singleFlight<T>(start: () => Promise<T>): () => Promise<T> {
     return inFlight
   }
 }
-
-/** Reuse the settled value until an explicit refresh; concurrent refreshes still share one start. */
-export function cachedSingleFlight<T>(start: () => Promise<T>): (force?: boolean) => Promise<T> {
-  let hasCached = false
-  let cached: T
-  const run = singleFlight(async () => {
-    const value = await start()
-    cached = value
-    hasCached = true
-    return value
-  })
-  return (force = false) => (!force && hasCached ? Promise.resolve(cached) : run())
-}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { UpdateCheck, UpdateInfo, UpdateRunPhase } from '@shared/types'
+import type { UpdateCheck, UpdateCheckState, UpdateInfo, UpdateRunPhase } from '@shared/types'
 import { appendUpdateLog } from '@shared/updateLog'
+import { startSnapshotSync } from './snapshotSync'
 
 export type UpdatePhase = UpdateRunPhase
 
@@ -26,36 +27,30 @@ export interface Updates {
 }
 
 /**
- * The self-update lifecycle, owned ONCE by App (not by the Preferences modal). Lifting it here — out of
- * the old self-contained UpdatesSetting — is what lets the check run at launch (so the attention dot can
- * appear before you ever open Preferences) and lets the "downloaded, awaiting relaunch" state survive the
- * modal closing. UpdatesSetting now just renders this state. The main-backed engine is src/main/updater.ts.
+ * Each window consumes main's shared check and update-run state. Keeping the subscription above
+ * Preferences lets the attention dot update while the modal is closed.
  */
 export function useUpdates(): Updates {
   const fakeUpdating = window.fakeUpdating
   const [info, setInfo] = useState<UpdateInfo | null>(null)
-  const [check, setCheck] = useState<UpdateCheck | null>(null)
-  const [checking, setChecking] = useState(!fakeUpdating) // the launch check fires immediately
+  const [{ check, checking }, setCheckState] = useState<UpdateCheckState>({
+    check: null, checking: !fakeUpdating
+  })
   const [phase, setPhase] = useState<UpdatePhase>(fakeUpdating ? 'updating' : 'idle')
   const [log, setLog] = useState(fakeUpdating ? '» Previewing update progress…\n' : '')
 
-  // Re-check without blanking the last result, so the attention dot stays stable across a re-check
-  // (a brief null would make the dot flicker off and back on).
-  const checkNow = useCallback(async (force: boolean): Promise<void> => {
-    setChecking(true)
-    const result = await window.api.checkForUpdates(force)
-    setCheck(result)
-    setChecking(false)
+  const runCheck = useCallback(async (): Promise<void> => {
+    await window.api.checkForUpdates(true)
   }, [])
-  const runCheck = useCallback(() => checkNow(true), [checkNow])
 
-  // At launch: fetch the one-shot build info and run the first check. App never unmounts, so no
-  // mounted-guard is needed (unlike the old in-modal version).
   useEffect(() => {
     void window.api.getUpdateInfo().then(setInfo)
+  }, [])
+
+  useEffect(() => {
     if (fakeUpdating) return
-    void checkNow(false)
-  }, [fakeUpdating, checkNow])
+    return startSnapshotSync(window.api.onUpdateCheckState, window.api.getUpdateCheckState, setCheckState)
+  }, [fakeUpdating])
 
   useEffect(() => {
     if (fakeUpdating) return

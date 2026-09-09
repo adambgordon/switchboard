@@ -1,6 +1,7 @@
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PersistedTabLayout } from '../shared/types'
+import { visibleTabLayout } from '../shared/sessionVisibility'
 import {
   sanitizeTabLayout,
   sanitizeTabWorkspace,
@@ -38,6 +39,7 @@ export class TabWorkspaceStore {
   private readonly windows = new Map<number, PersistedTabLayout>()
   private dormant: PersistedTabLayout[]
   private timer: ReturnType<typeof setTimeout> | null = null
+  private hiddenSessionIds: ReadonlySet<string> = new Set()
 
   constructor(
     private readonly dir: string,
@@ -60,22 +62,44 @@ export class TabWorkspaceStore {
     return this.windows.get(windowId) ?? null
   }
 
-  takeDormant(): PersistedTabLayout[] {
+  /** Indexing may remove entire saved windows; resolve eligibility before consuming their layouts. */
+  async takeDormant(
+    ready: Promise<unknown>,
+    canRestore: () => boolean
+  ): Promise<PersistedTabLayout[]> {
+    try {
+      await ready
+    } catch {
+      return []
+    }
+    if (!canRestore()) return []
     const layouts = this.dormant
     this.dormant = []
     return layouts
   }
 
   register(windowId: number, layout: unknown): void {
-    const valid = sanitizeTabLayout(layout)
+    const valid = visibleTabLayout(sanitizeTabLayout(layout), this.hiddenSessionIds)
     if (valid) this.windows.set(windowId, valid)
+    else this.windows.delete(windowId)
   }
 
   update(windowId: number, layout: unknown): void {
-    const valid = layout ? sanitizeTabLayout(layout) : null
+    const valid = visibleTabLayout(sanitizeTabLayout(layout), this.hiddenSessionIds)
     if (valid) this.windows.set(windowId, valid)
     else this.windows.delete(windowId)
     this.schedule()
+  }
+
+  excludeSessions(ids: ReadonlySet<string>): void {
+    const before = JSON.stringify(this.snapshot())
+    this.hiddenSessionIds = ids
+    for (const [windowId, layout] of this.windows) this.register(windowId, layout)
+    this.dormant = this.dormant.flatMap((layout) => {
+      const visible = visibleTabLayout(layout, ids)
+      return visible ? [visible] : []
+    })
+    if (JSON.stringify(this.snapshot()) !== before) this.schedule()
   }
 
   remove(windowId: number): void {

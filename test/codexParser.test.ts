@@ -160,6 +160,39 @@ function itemStreamLines(opts: { cwd?: string; userItem?: object } = {}): object
 }
 
 describe('extractCodexMetaFromText', () => {
+  it('ignores delegation keys outside session metadata and preserves full transcript content', () => {
+    const prompt = 'Discuss guardian reviews\n' + 'Transcript details. '.repeat(1000)
+    const text = jsonl([
+      { type: 'session_meta', payload: { cwd: '/project', originator: 'codex-tui' } },
+      { type: 'event_msg', payload: { type: 'user_message', message: prompt, thread_source: 'subagent', source: { subagent: {} } } }
+    ])
+    expect(extractCodexMetaFromText(text, 'thread', 1, 1)?.codexSubagent).toBe(false)
+    expect(parseCodexTranscriptText(text, 'thread').messages[0].blocks).toEqual([{ kind: 'text', text: prompt }])
+  })
+
+  it.each([
+    [{ thread_source: 'subagent', source: 'cli' }, true],
+    [{ thread_source: 'guardian_review', source: 'cli' }, true],
+    [{ source: { subagent: { other: 'guardian' } } }, true],
+    [{ thread_source: 'future_kind', source: { subagent: { thread_spawn: { depth: 1 } } } }, true],
+    [{ thread_source: 'user', source: 'cli' }, false],
+    [{ thread_source: 'future_kind' }, false],
+    [{ parent_thread_id: 'parent' }, false],
+    [{ source: ['subagent'], thread_source: {} }, false],
+    [{ source: null }, false],
+    [{ source: '{"subagent":{}}' }, false],
+    [{}, false]
+  ])('classifies delegation only from metadata: %j', (fields, expected) => {
+    const lines = [
+      { type: 'session_meta', payload: { cwd: '/project', originator: 'codex-tui', ...fields } },
+      { type: 'event_msg', payload: { type: 'user_message', message: 'Quoted: "thread_source":"subagent", "source":{"subagent":{}}' } }
+    ]
+    const meta = extractCodexMetaFromText(jsonl(lines), 'thread', 1, 1)
+    expect(meta).not.toBeNull()
+    expect(meta!.codexSubagent).toBe(expected)
+    expect(meta!.messageCount).toBe(1)
+  })
+
   it('parses an interactive session into codex meta', () => {
     const meta = extractCodexMetaFromText(jsonl(interactiveLines()), 'abc', 123, 456)
     expect(meta).not.toBeNull()

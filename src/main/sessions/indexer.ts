@@ -11,7 +11,7 @@
 import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
-import type { ConversationGroup, ConversationMeta } from '../../shared/types'
+import type { ConversationGroup, ConversationIndexSnapshot, ConversationMeta } from '../../shared/types'
 import { extractMeta } from './parser'
 import { defaultCodexRoot, extractCodexMeta, listCodexRollouts } from './codexParser'
 import { readCodexThreads } from './codexThreadsDb'
@@ -179,9 +179,12 @@ async function indexClaudeMetas(root: string, cache: MetaCache): Promise<Convers
 /**
  * Gather Codex conversation metadata from the sessions root. `extractCodexMeta` already returns null
  * for non-interactive (`codex exec`) rollouts; here we additionally drop zero-message and subagent
- * threads. [] if the root is missing.
+ * threads and report their ids separately. Empty results if the root is missing.
  */
-async function indexCodexMetas(root: string, cache: MetaCache): Promise<ConversationMeta[]> {
+async function indexCodexMetas(root: string, cache: MetaCache): Promise<{
+  metas: ConversationMeta[]
+  hiddenSessionIds: string[]
+}> {
   const files = await listCodexRollouts(root)
   const metas = await mapWithConcurrency(files, CONCURRENCY, (f) =>
     extractWithCache(f, cache, safeExtractCodexMeta)
@@ -198,10 +201,14 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<Conversa
   const sessionNames = readCodexSessionNames(path.dirname(root))
 
   const out: ConversationMeta[] = []
+  const hiddenSessionIds: string[] = []
   for (const meta of metas) {
     if (!meta) continue
+    if (meta.codexSubagent) {
+      hiddenSessionIds.push(meta.sessionId)
+      continue
+    }
     if (meta.messageCount === 0) continue
-    if (meta.threadSource === 'subagent') continue
     const row = threads.get(meta.sessionId)
     if (row?.archived) continue
     const title = resolveCodexTitle({
@@ -212,7 +219,7 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<Conversa
     })
     out.push(title === meta.title ? meta : { ...meta, title })
   }
-  return out
+  return { metas: out, hiddenSessionIds }
 }
 
 /**
@@ -224,18 +231,18 @@ export async function indexConversations(
   projectsRoot?: string,
   codexRoot?: string,
   cache?: MetaCache
-): Promise<ConversationGroup[]> {
+): Promise<ConversationIndexSnapshot> {
   const claudeRoot = projectsRoot ?? defaultProjectsRoot()
   const codexSessionsRoot = codexRoot ?? defaultCodexRoot()
   const fileCache = cache ?? new Map()
 
-  const [claudeMetas, codexMetas] = await Promise.all([
+  const [claudeMetas, codex] = await Promise.all([
     indexClaudeMetas(claudeRoot, fileCache),
     indexCodexMetas(codexSessionsRoot, fileCache)
   ])
 
   const groups = new Map<string, ConversationMeta[]>()
-  for (const meta of [...claudeMetas, ...codexMetas]) {
+  for (const meta of [...claudeMetas, ...codex.metas]) {
     const existing = groups.get(meta.cwd)
     if (existing) existing.push(meta)
     else groups.set(meta.cwd, [meta])
@@ -249,5 +256,5 @@ export async function indexConversations(
   }
 
   result.sort((a, b) => b.latestMtime - a.latestMtime)
-  return result
+  return { groups: result, hiddenSessionIds: codex.hiddenSessionIds.sort() }
 }

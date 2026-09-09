@@ -77,6 +77,34 @@ describe('readCodexSessionNames', () => {
 describe('resolveCodexTitle', () => {
   const base = { rolloutTitle: 'rollout', dbTitle: null, dbFirstUserMessage: null, sessionName: null }
 
+  it('cleans an auto-title without copying the rest of a large prompt', () => {
+    const prompt = '`Discuss   the release`\n' + 'Detailed transcript. '.repeat(10000)
+    expect(resolveCodexTitle({ ...base, dbTitle: prompt, dbFirstUserMessage: prompt })).toBe('Discuss the release')
+  })
+
+  it.each([79, 80, 81, 10000])('bounds an auto-title of length %i', (length) => {
+    const prompt = 'A'.repeat(length)
+    const expected = length === 79 ? 'A'.repeat(79) : 'A'.repeat(80)
+    expect(resolveCodexTitle({ ...base, dbTitle: prompt, dbFirstUserMessage: prompt })).toBe(expected)
+  })
+
+  it('falls back when cleaning removes the whole auto-title', () => {
+    const prompt = '<command-name>/clear</command-name>'
+    expect(resolveCodexTitle({ ...base, dbTitle: prompt, dbFirstUserMessage: prompt })).toBe('rollout')
+  })
+
+  it('compares complete values before cleaning and preserves an explicit long name', () => {
+    const prefix = 'A'.repeat(90)
+    expect(resolveCodexTitle({ ...base, dbTitle: prefix + ' custom', dbFirstUserMessage: prefix + ' prompt' })).toBe(prefix + ' custom')
+  })
+
+  it('preserves the durable name over a long auto-title, and cleans again after reset', () => {
+    const prompt = 'A'.repeat(300)
+    const sources = { ...base, dbTitle: prompt, dbFirstUserMessage: prompt }
+    expect(resolveCodexTitle({ ...sources, sessionName: 'Named thread' })).toBe('Named thread')
+    expect(resolveCodexTitle({ ...sources, sessionName: '' })).toBe('A'.repeat(80))
+  })
+
   it('prefers a distinct DB title (a fresh rename still in the column)', () => {
     expect(
       resolveCodexTitle({

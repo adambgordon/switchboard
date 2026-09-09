@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import {
-  cachedSingleFlight,
   findRepoRootFrom,
   interpretRemoteSha,
   parseFakeUpdate,
@@ -96,34 +95,5 @@ describe('singleFlight', () => {
     })
     await expect(run()).rejects.toThrow('nope')
     await expect(run()).resolves.toBe('ok')
-  })
-})
-
-describe('cachedSingleFlight', () => {
-  it('reuses a settled result until a forced refresh', async () => {
-    let starts = 0
-    const get = cachedSingleFlight(async () => ++starts)
-    await expect(get()).resolves.toBe(1)
-    await expect(get()).resolves.toBe(1)
-    await expect(get(true)).resolves.toBe(2)
-    await expect(get()).resolves.toBe(2)
-    expect(starts).toBe(2)
-  })
-
-  it('shares concurrent forced refreshes', async () => {
-    let release = (_value: number): void => {}
-    let starts = 0
-    const get = cachedSingleFlight(
-      () => new Promise<number>((resolve) => {
-        starts += 1
-        release = resolve
-      })
-    )
-    const first = get(true)
-    const second = get(true)
-    expect(second).toBe(first)
-    expect(starts).toBe(1)
-    release(7)
-    await expect(first).resolves.toBe(7)
   })
 })

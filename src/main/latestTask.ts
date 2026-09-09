@@ -1,8 +1,8 @@
 /**
  * One cached async value with concurrent sharing and at most one caller-visible trailing refresh.
  *
- * Deliberately not `cachedSingleFlight` (updater-core): that has no trailing pass, so a `force`
- * arriving during a run joins it and returns the result the run had already computed. Here the
+ * A cache without a trailing pass lets a refresh arriving during a run join it and return the
+ * result the run had already computed. Here the
  * mid-run request comes from a file watcher, so joining would mean silently dropping the change
  * that triggered it.
  */

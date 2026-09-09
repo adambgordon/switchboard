@@ -366,7 +366,7 @@ export class PtyManager extends EventEmitter {
    * conversation the terminal is no longer running.
    *
    * `eligibleSessionIds` must be the FULLY FILTERED indexed set, so archived, non-interactive,
-   * zero-message and `thread_source:"subagent"` rollouts can never become bind targets even while
+   * zero-message and delegated subagent/review rollouts can never become bind targets even while
    * Codex holds their files open (it really does hold subagent rollouts open alongside its own).
    *
    * It is passed through UNMODIFIED — in particular, ids that live PTYs already own are NOT subtracted,
