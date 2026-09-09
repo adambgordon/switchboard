@@ -483,15 +483,10 @@ export function extractCodexMetaFromText(
   }
 }
 
-/** Parse a rollout file into a transcript. Tolerant: a read failure yields an empty transcript. */
+/** Parse a rollout file; file-read errors propagate to the loader for path recovery. */
 export async function parseCodexTranscript(filePath: string): Promise<Transcript> {
   const sessionId = sessionIdFromPath(filePath)
-  let text: string
-  try {
-    text = await readFile(filePath, 'utf8')
-  } catch {
-    return { sessionId, agent: 'codex', cwd: '', title: 'Untitled', messages: [] }
-  }
+  const text = await readFile(filePath, 'utf8')
   return parseCodexTranscriptText(text, sessionId)
 }
 

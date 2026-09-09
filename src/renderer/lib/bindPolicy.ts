@@ -1,4 +1,5 @@
 import type { PtyBindKind } from '@shared/types'
+import { activeTabId, locateTab, type PaneLayout } from './paneModel'
 
 /**
  * What a `pty:bound` event must do to session-keyed renderer state.
@@ -14,7 +15,7 @@ import type { PtyBindKind } from '@shared/types'
  * to the id) versus TERMINAL-owned state (the selection, the CURRENT history stop, the surface it
  * shows, the Live slot — describes the terminal, follows it). Two summaries to avoid, both too
  * strong: "a correction migrates nothing" (it migrates nothing *durable*) and "history never moves"
- * (the current stop must move with the selection, or Back/Forward drift — see navReducer.retarget).
+ * (the current stop must move with the selection, or Back/Forward drift — see the main navigation coordinator).
  *
  * See `PtyBindKind` for why the two cases are opposites and why the kind is told rather than
  * inferred.
@@ -25,14 +26,28 @@ export interface BindEvent {
   kind: PtyBindKind
 }
 
+export interface PendingBoundTab extends BindEvent {
+  token: string
+}
+
+/** Read committed layout, not the intended dispatch: another action may have removed the tab. */
+export function boundTabAdoption(
+  claim: BindEvent,
+  layout: PaneLayout
+): 'wait' | 'commit' | 'cancel' {
+  if (claim.kind === 'initial') {
+    if (locateTab(layout, claim.oldId)) return 'wait'
+    return locateTab(layout, claim.newId) ? 'commit' : 'cancel'
+  }
+  const selected = activeTabId(layout)
+  if (selected === claim.newId) return 'commit'
+  return selected === claim.oldId ? 'wait' : 'cancel'
+}
+
 export interface BindActions {
   /** Migrate persisted seen/unread markers old → new. NEVER on a correction: both ids are durable
    *  conversations, so this deletes one's read state and overwrites the other's. */
   rekeySeen: boolean
-  /** `rekey` rewrites every history stop (right when the old id is a placeholder that is ceasing to
-   *  exist); `retarget` moves only the stop the user is standing on (right when earlier stops on the
-   *  old id are genuine visits to a conversation that still exists). */
-  nav: 'rekey' | 'retarget' | 'none'
   /** `move` transfers the remembered Formatted/Terminal surface and drops the old entry; `copy`
    *  carries it across while leaving the old conversation's own entry intact. */
   view: 'move' | 'copy' | 'none'
@@ -43,36 +58,60 @@ export interface BindActions {
   retargetLiveOrder: boolean
   /** Re-request focus so the terminal stays hot across the id change. */
   focus: boolean
+  /** Tabs are session-keyed too, so a bind has to reach them or a tab keeps naming an id that no
+   *  longer means anything. `rekey` rewrites every tab holding the old id (right when it is a
+   *  placeholder); `retarget` moves only the tab the user is standing on (right when the old id is a
+   *  real conversation that still exists and other tabs on it are still correct). A correction is
+   *  terminal-owned, so a transcript-only window never retargets its tab for another window's PTY. */
+  tabs: 'rekey' | 'retarget' | 'none'
+  /** Multi-selected tabs are terminal-owned for the member whose id changes. */
+  tabSelection: 'rekey' | 'retarget' | 'none'
 }
 
 const INERT: BindActions = {
   rekeySeen: false,
-  nav: 'none',
   view: 'none',
   retargetLiveOrder: false,
-  focus: false
+  focus: false,
+  tabs: 'none',
+  tabSelection: 'none'
 }
 
 /**
  * Decide what one bind event must do. `selectedId` is the conversation the user is currently
- * looking at, which only matters for a correction: the terminal itself is what moved, so the
- * selection follows it only when the user is actually on it.
+ * looking at; `terminalOwnedHere` comes from main on the event itself, so a stale renderer snapshot
+ * cannot make a transcript-only window follow another window's terminal.
  */
-export function bindActions(ev: BindEvent, selectedId: string | null): BindActions {
+export function bindActions(
+  ev: BindEvent,
+  selectedId: string | null,
+  terminalOwnedHere: boolean
+): BindActions {
   if (ev.oldId === ev.newId) return INERT
+  const selected = selectedId === ev.oldId
   if (ev.kind === 'initial') {
     // The old id is a throwaway placeholder naming no conversation, and it is about to stop
     // existing. Everything keyed to it has to come along or it is orphaned.
-    return { rekeySeen: true, nav: 'rekey', view: 'move', retargetLiveOrder: true, focus: true }
+    return {
+      rekeySeen: true,
+      view: 'move',
+      retargetLiveOrder: true,
+      // Rekeying is global because the placeholder is disappearing, but a terminal that bound in
+      // an unfocused pane must not take the keyboard from the pane the user moved to meanwhile.
+      focus: selected,
+      tabs: 'rekey',
+      tabSelection: 'rekey'
+    }
   }
   // A correction. Both ids name durable conversations: the old one drops back to Recent with its
   // own history and read state, and the new one may already carry its own. Nothing durable moves.
-  const selected = selectedId === ev.oldId
+  const followsTerminal = terminalOwnedHere && selected
   return {
     rekeySeen: false,
-    nav: 'retarget',
-    view: selected ? 'copy' : 'none',
+    view: followsTerminal ? 'copy' : 'none',
     retargetLiveOrder: true,
-    focus: selected
+    focus: followsTerminal,
+    tabs: followsTerminal ? 'retarget' : 'none',
+    tabSelection: followsTerminal ? 'retarget' : 'none'
   }
 }

@@ -2,8 +2,8 @@ import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
-import { displayTitleForRow, isParkedOnlyRow, isUnlinkedRow } from '../lib/rowIdentity'
-import { DashedCircle, Dots } from './icons'
+import { displayTitleForRow, isParkedOnlyRow, liveDotClass } from '../lib/rowIdentity'
+import { DashedCircle, Dots, NewWindow } from './icons'
 import AgentLogo from './AgentLogo'
 
 interface Props {
@@ -13,12 +13,24 @@ interface Props {
   /** Resolved liveness for the dot (working / asking / awaiting / quiet); null when not live. */
   liveState?: LiveState | null
   pinned: boolean
+  /** Another window holds this conversation's tab, so clicking the row raises THAT window rather than
+   *  opening it here. Marked, because a click that brings a different window forward is startling
+   *  when nothing said it would. */
+  elsewhere?: boolean
   showCwd?: boolean
   /** Raised card chrome — used by the rail's Pinned/Live sections. */
   card?: boolean
   onSelect: (id: string) => void
   /** When set and the row is live, clicking jumps to its terminal instead of previewing. */
   onJump?: (id: string) => void
+  /** Double-click — open it as a KEPT tab rather than the replaceable preview one. Absent when tabs
+   *  are switched off, which is what makes the gesture inert there rather than half-working. */
+  onStick?: (id: string) => void
+  // There are deliberately NO ⌘/⇧ click gestures for tab placement. They were borrowed from browsers
+  // (⌘ = new tab, ⇧ = new window), but this row belongs to an editor-shaped app, and editors do not
+  // overload a click that way — so the borrowing read as arbitrary rather than familiar. Placement is
+  // on the ⋮ and right-click menus, which name what they do. ⌥ stays: marking unread is Switchboard's
+  // own idea, not an import.
   /** Option+click on a live row — always mark it unread (never toggles). */
   onMarkUnread?: (id: string) => void
   /** Open the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume) by clicking the ⋮
@@ -34,10 +46,12 @@ function ConversationRowImpl({
   live,
   liveState,
   pinned,
+  elsewhere,
   showCwd,
   card,
   onSelect,
   onJump,
+  onStick,
   onMarkUnread,
   onOpenMenu,
   onContextMenu
@@ -50,19 +64,9 @@ function ConversationRowImpl({
   // Visually it shares the hollow marker with `quiet` because there are no linked messages to be
   // unread, plus the ordinary empty-row placeholder.
   const parkedOnly = isParkedOnlyRow(live, meta)
-  const unlinked = isUnlinkedRow(live, meta)
-  // Map the resolved liveness to the dot's modifier class (working reuses the .busy breathe).
-  const liveDotState: LiveState | null =
-    live && !unlinked ? liveState ?? (live.status === 'busy' ? 'working' : 'awaiting') : null
-  const dotClass = unlinked
-    ? 'unlinked'
-    : liveDotState === 'working'
-      ? 'busy'
-      : liveDotState === 'asking'
-        ? 'asking'
-        : liveDotState === 'quiet'
-          ? 'quiet'
-          : 'awaiting'
+  // Which dot to draw. Shared with the tab strip, which draws the SAME session at the same moment —
+  // see liveDotClass for why that has to be one derivation rather than two agreeing ones.
+  const dotClass = liveDotClass(live, meta, liveState)
   // Phase-lock the breathing/ripple to the app-wide beat (a no-op for the static quiet/awaiting dots).
   const dotRef = useSyncedAnimation<HTMLSpanElement>(dotClass)
   return (
@@ -76,6 +80,16 @@ function ConversationRowImpl({
           return
         }
         live && onJump ? onJump(meta.sessionId) : onSelect(meta.sessionId)
+      }}
+      // Double-click keeps the tab. The two ordinary clicks that precede it (DOM order is
+      // click, click, dblclick) each re-open the same conversation, which is idempotent — the second
+      // lands on the current history stop and changes nothing — so no click-count dedupe is needed.
+      onDoubleClick={(e) => {
+        // Only ⌥ is excluded, because it means something else here (mark unread) and must not also
+        // keep the tab. ⌘ and ⇧ carry no meaning on a row any more, so a stray one is let through
+        // rather than silently swallowing the gesture.
+        if (e.altKey || !onStick) return
+        onStick(meta.sessionId)
       }}
       onContextMenu={(e) => {
         if (!onContextMenu) return
@@ -127,6 +141,19 @@ function ConversationRowImpl({
           </span>
           <span className="sb-sep">·</span>
           <span className="mono">{meta.messageCount} msg</span>
+          {elsewhere && (
+            <>
+              <span className="sb-sep">·</span>
+              <span
+                className="sb-row-elsewhere"
+                data-tip="Open in another window — click to go there"
+                role="img"
+                aria-label="Open in another window"
+              >
+                <NewWindow size={11} />
+              </span>
+            </>
+          )}
           {showCwd && (
             <>
               <span className="sb-sep">·</span>
@@ -138,7 +165,7 @@ function ConversationRowImpl({
         </span>
       </span>
       <span className="sb-row-gutter">
-        {live && (
+        {dotClass && (
           <span
             ref={dotRef}
             className={`sb-dot ${dotClass}`}
@@ -149,13 +176,13 @@ function ConversationRowImpl({
             aria-label={
               parkedOnly
                 ? 'live terminal, work is in a background agent'
-                : unlinked
+                : dotClass === 'unlinked'
                   ? 'live terminal, transcript not linked'
-                  : liveDotState === 'working'
+                  : dotClass === 'busy'
                     ? 'live, working'
-                    : liveDotState === 'asking'
+                    : dotClass === 'asking'
                       ? 'live, waiting for your reply'
-                      : liveDotState === 'quiet'
+                      : dotClass === 'quiet'
                         ? 'live, idle'
                         : 'live, finished — not yet seen'
             }

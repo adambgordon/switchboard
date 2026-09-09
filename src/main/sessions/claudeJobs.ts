@@ -5,11 +5,10 @@
  * new `sessionKind:"bg"` transcript and hands it to its own daemon, which outlives whatever launched
  * it. The daemon records each job at `~/.claude/jobs/<short>/state.json`.
  *
- * Only the job's NAME is read. Its lifecycle state is deliberately not surfaced — see the note on
- * background liveness dots in the work-stream findings: a dot on a row the user cannot type into
- * reports on a daemon rather than on a conversation, and the resting states in particular read as
- * false liveness. A job parked on a question stays "running" indefinitely, so such a row would sit
- * lit for days.
+ * Only the job's NAME is read. Its lifecycle state is deliberately not surfaced: a dot on a row the
+ * user cannot type into reports on a daemon rather than on a conversation, and the resting states
+ * in particular read as false liveness. A job parked on a question stays "running" indefinitely,
+ * so such a row would sit lit for days.
  *
  * Claude-only: Codex has no background-agent concept, so there is no Codex counterpart.
  *

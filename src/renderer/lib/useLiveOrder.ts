@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { reorderArray } from './usePins'
+import { reorderArray } from './reorder'
 
 /**
  * The Live section's row order — a MANUALLY ordered list of currently-live, unpinned session IDs.

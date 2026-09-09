@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reorderArray } from '../src/renderer/lib/usePins'
+import { reorderArray } from '../src/renderer/lib/reorder'
 
 describe('reorderArray', () => {
   const base = ['a', 'b', 'c', 'd']

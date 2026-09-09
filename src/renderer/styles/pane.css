@@ -1,5 +1,14 @@
 /* Center pane: header, body, empty states. (Transcript styles live in transcript.css.) */
 
+/* Holds the one or two conversation panes and, when split, the divider between them. A wrapper rather
+   than putting the panes straight in `.sb-body`, so the rail and its own resize handle keep sizing
+   against the body and know nothing about the split. */
+.sb-panes {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
 .sb-pane {
   flex: 1;
   display: flex;
@@ -7,6 +16,22 @@
   min-width: 0;
   background: var(--paper-pane);
   position: relative;
+  /* The header collapses against the PANE's width, not the window's — the two part company the moment
+     there is a split, and it is the pane that actually crowds. A media query cannot see that.
+     Safe to establish here: `inline-size` containment makes this a containing block for fixed-position
+     descendants, and a pane has none — the tooltip, the launch veil, modal scrims and the row menus all
+     render at the app root or inside the rail. */
+  container-type: inline-size;
+  container-name: pane;
+}
+/* Which pane has the keyboard is shown IN the pane, never in the rail — the rail rings only the
+   focused pane's active tab, so selection stays the single tier the design requires. The primary cue
+   is the tab strip's own active-tab ink (see .sb-tab.active.focused); the header rule softens as a
+   quieter second signal, which also covers a pane holding no tabs at all. Scoped to `.split` because
+   a lone pane is always the focused one and must look untouched. Tab-row rules deliberately stay
+   constant: changing their strength when split focus is recreated reads as their weight changing. */
+.sb-panes.split .sb-pane:not(.pane-focused) .sb-pane-header {
+  border-bottom-color: var(--rule-soft);
 }
 /* The pane is programmatically focusable (tabIndex -1) so a conversation click can hand it the
    keyboard immediately — quiet selection + ⌘F routing — before the transcript mounts/loads. No
@@ -24,6 +49,31 @@
   border-bottom: 1px solid var(--rule);
   flex-shrink: 0;
   background: var(--paper-pane);
+  /* A FIXED height, so two panes' headers line up by construction instead of by their contents
+     happening to measure the same. They did not: the action row never shrinks, so a narrow pane
+     squeezed it until a button label wrapped to a second line, and that pane's header grew while its
+     neighbour's did not — the content areas beside each other then started at different heights. */
+  height: 66px;
+  box-sizing: border-box;
+}
+/* NOTHING in the header may wrap — not the action row, not the meta line, not a unit label. Scoped to
+   the whole subtree rather than to the controls, because the first attempt covered only the actions and
+   a meta item still broke ("8 msg" split across two lines under pressure). Text that runs out of room
+   truncates or is dropped by a stage below; it never reflows. */
+.sb-pane-header,
+.sb-pane-header * {
+  white-space: nowrap;
+}
+/* Give the meta line somewhere to put the overflow: it truncates rather than pushing the actions. */
+.sb-pane-meta {
+  overflow: hidden;
+}
+/* A collapsible meta item and its own leading separator, so hiding the item takes the `·` with it. */
+.sb-pane-meta-part {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .sb-pane-id {
   flex: 1;
@@ -76,6 +126,49 @@
   gap: 10px;
   flex-shrink: 0;
 }
+
+/* ---- header collapse, in stages, against the PANE's width ----
+   Ordered by what a crowded header can most afford to lose. Each stage removes something whose
+   meaning is still available elsewhere, so narrowing costs legibility and never function. */
+
+/* Stage 1 — the view toggle drops to icons, FIRST. It is by far the widest control in the row, so it
+   buys the most room per thing given up, and it gives up the least: the two icons (a document, and the
+   live dot) already carry the distinction, restated as tooltips and aria-labels. */
+@container pane (max-width: 640px) {
+  .sb-seg-label {
+    display: none;
+  }
+  .sb-seg-btn {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+}
+
+/* Stage 2 — the path and the branch. The longest items in the meta row, and the least load-bearing:
+   the title above already says which conversation this is, and both are in Session Details. */
+@container pane (max-width: 520px) {
+  .sb-pane-part-cwd,
+  .sb-pane-part-branch {
+    display: none;
+  }
+}
+
+/* Stage 3 — the terminal action keeps its icon and hit target but drops its text. Both actions carry
+   a tooltip and explicit aria-label, so this gives up no function or accessible name. */
+@container pane (max-width: 500px) {
+  .sb-pane-action-label {
+    display: none;
+  }
+  .sb-pane-actions > .sb-btn-resume,
+  .sb-pane-actions > .sb-btn-ghost {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+  }
+}
+
 .sb-pane-pin {
   display: inline-flex;
   align-items: center;
@@ -275,4 +368,82 @@ kbd {
 }
 .sb-pane-find.active {
   color: var(--ink-soft);
+}
+
+/* Find adds a second wide control to the header, so its compact stages start sooner than the
+   resting header's. First collapse the view toggle to its already-labelled icons; once the title
+   would be reduced to a fragment, Find replaces that whole identity block and takes its space. */
+@container pane (max-width: 900px) {
+  .sb-pane-header:has(.sb-find) .sb-seg-label {
+    display: none;
+  }
+  .sb-pane-header:has(.sb-find) .sb-seg-btn {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+}
+
+@container pane (max-width: 760px) {
+  .sb-pane-header:has(.sb-find) .sb-pane-id {
+    display: none;
+  }
+  .sb-pane-header:has(.sb-find) .sb-find {
+    flex: 1;
+    min-width: 0;
+  }
+  .sb-pane-header:has(.sb-find) .sb-find-input {
+    flex: 1;
+    width: auto;
+    min-width: 60px;
+  }
+}
+
+/* Stage 4 — Find and Pin leave the header. This must follow both controls' base display rules or the
+   equal-specificity declarations above win by source order. Both actions remain available elsewhere:
+   ⌘F opens find, and the rail row menu owns pinning. */
+@container pane (max-width: 400px) {
+  .sb-pane-find,
+  .sb-pane-pin {
+    display: none;
+  }
+  .sb-pane-header:has(.sb-find) .sb-pane-id,
+  .sb-pane-header:has(.sb-find) .sb-pane-actions {
+    display: none;
+  }
+  .sb-find {
+    flex: 1;
+    min-width: 0;
+  }
+  .sb-find-input {
+    flex: 1;
+    width: auto;
+    min-width: 60px;
+  }
+}
+
+@container pane (max-width: 240px) {
+  .sb-pane-header {
+    gap: 4px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .sb-pane-id {
+    display: none;
+  }
+  .sb-pane-actions {
+    flex: 1;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+  .sb-btn-ghost {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .sb-find-count {
+    display: none;
+  }
+  .sb-find {
+    gap: 4px;
+    padding-left: 8px;
+  }
 }

@@ -1,4 +1,4 @@
-import { Gear, Moon, PanelLeft, Sun } from './icons'
+import { Gear, Moon, PanelLeft, SplitVertical, Sun } from './icons'
 import type { ResolvedTheme } from '../lib/theme'
 
 interface Props {
@@ -14,6 +14,12 @@ interface Props {
   /** The app isn't up to date (update available, or downloaded-but-not-relaunched) — show a neutral
    *  ink dot on the gear. */
   updatesNeedAttention?: boolean
+  /** Whether the main area is currently split into two panes. Undefined hides the control entirely
+   *  (the tabs-and-split preference is off). */
+  split?: boolean
+  /** An unsplit window needs another tab to move right before it can create a second pane. */
+  splitDisabled?: boolean
+  onToggleSplit?: () => void
 }
 
 export default function TitleBar({
@@ -23,7 +29,10 @@ export default function TitleBar({
   onOpenSettings,
   resolvedTheme,
   onToggleTheme,
-  updatesNeedAttention
+  updatesNeedAttention,
+  split,
+  splitDisabled,
+  onToggleSplit
 }: Props) {
   return (
     <header className="sb-titlebar">
@@ -40,6 +49,20 @@ export default function TitleBar({
       >
         <PanelLeft size={16} />
       </button>
+      {/* The split toggle is the sibling of the rail toggle beside it: both are window-level layout,
+          so they live together here rather than in a pane header, which describes one conversation. */}
+      {onToggleSplit && (
+        <button
+          className={`sb-panel-toggle${split ? ' active' : ''}`}
+          onClick={onToggleSplit}
+          disabled={splitDisabled}
+          data-tip={`${split ? 'Close' : 'Open'} split view (⌘\\)`}
+          aria-label={`${split ? 'Close' : 'Open'} split view`}
+          aria-pressed={!!split}
+        >
+          <SplitVertical size={16} />
+        </button>
+      )}
       <div className="sb-titlebar-spacer" />
       {window.devLabel && <span className="sb-titlebar-devlabel mono">{window.devLabel}</span>}
       <button

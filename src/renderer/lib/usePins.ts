@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { reorderArray } from './reorder'
 
 /**
  * Pinned conversations — a user-curated, MANUALLY ORDERED list of session IDs that surface in the
@@ -42,15 +43,6 @@ function save(order: string[]): void {
   }
 }
 
-/** Pure move-one-item reorder (extracted for unit tests). Returns the SAME array on a no-op. */
-export function reorderArray<T>(arr: T[], from: number, to: number): T[] {
-  if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return arr
-  const next = arr.slice()
-  const [item] = next.splice(from, 1)
-  next.splice(to, 0, item)
-  return next
-}
-
 export interface Pins {
   /** Membership set, derived from `order` — for the rail's `.has()` filters. */
   pinned: Set<string>
@@ -64,22 +56,48 @@ export interface Pins {
 export function usePins(): Pins {
   const [order, setOrder] = useState<string[]>(load)
 
-  const toggle = useCallback((sessionId: string) => {
-    setOrder((prev) => {
-      // New pin lands at the bottom (end of the list); unpin removes.
-      const next = prev.includes(sessionId) ? prev.filter((id) => id !== sessionId) : [...prev, sessionId]
-      save(next)
-      return next
-    })
+  // Every window shares this list and none of them owns it, so a pin is applied to what is ON DISK
+  // rather than to what this window last rendered. Otherwise one window's save serialises its whole
+  // stale list and silently unpins everything another window pinned since it loaded — the list is a
+  // single value, so there is no per-entry granularity to save it.
+  const mutate = useCallback((fn: (stored: string[]) => string[]): void => {
+    const stored = load()
+    const next = fn(stored)
+    if (next === stored) {
+      // Adopt the fresh read anyway: our change being a no-op usually means another window already
+      // made it.
+      setOrder(stored)
+      return
+    }
+    save(next)
+    setOrder(next)
   }, [])
 
-  const reorder = useCallback((from: number, to: number) => {
-    setOrder((prev) => {
-      const next = reorderArray(prev, from, to)
-      if (next !== prev) save(next)
-      return next
-    })
+  // Another window wrote the list. It folded its change into what is on disk, so disk is newer.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent): void => {
+      if (e.key === null || e.key === KEY) setOrder(load())
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
   }, [])
+
+  const toggle = useCallback(
+    (sessionId: string) => {
+      // New pin lands at the bottom (end of the list); unpin removes.
+      mutate((prev) =>
+        prev.includes(sessionId) ? prev.filter((id) => id !== sessionId) : [...prev, sessionId]
+      )
+    },
+    [mutate]
+  )
+
+  const reorder = useCallback(
+    (from: number, to: number) => {
+      mutate((prev) => reorderArray(prev, from, to))
+    },
+    [mutate]
+  )
 
   const pinned = useMemo(() => new Set(order), [order])
 

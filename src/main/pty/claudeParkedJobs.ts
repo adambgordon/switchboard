@@ -16,8 +16,8 @@
  * `pid`, `procStart`, and `surface` (`"fleet"` = Agent View). No debug flag, no banner — but it
  * records no job identifier, so it can say a terminal is in Agent View and never which agent is on
  * screen. The `--debug=fv-attach` log does carry the job id, and is rejected because that flag prints
- * a debug banner into every terminal it is passed to. Both are written up in the work-stream findings;
- * nothing here needs either.
+ * a debug banner into every terminal it is passed to. Neither signal is needed to identify a terminal
+ * with a background job and no indexed conversation.
  *
  * What this IS good for: a terminal whose own transcript is empty because its work went into a
  * background agent. That row would otherwise read "New conversation · 0 msg" while the user is busy

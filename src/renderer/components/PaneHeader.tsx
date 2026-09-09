@@ -19,6 +19,11 @@ interface Props {
    * so they are hidden rather than rendered as controls that quietly do nothing. Mirrors the ⋮ menu.
    */
   unlinked: boolean
+  /** Where this conversation's live terminal is: rendered here, in this window's other pane, or in
+   *  another window (from which it can be moved). Null when there is no live terminal. */
+  terminalAt?: 'here' | 'other-pane' | 'claimable' | null
+  /** Bring the terminal into this window and show it. */
+  onClaimTerminal?: () => void
   onTogglePin: () => void
   onResume: () => void
   onShowHistory: () => void
@@ -49,6 +54,8 @@ export default function PaneHeader({
   view,
   pinned,
   unlinked,
+  terminalAt,
+  onClaimTerminal,
   onTogglePin,
   onResume,
   onShowHistory,
@@ -87,13 +94,17 @@ export default function PaneHeader({
               </span>
               <span className="sb-sep">·</span>
               <span>{meta.messageCount} msg</span>
-              <span className="sb-sep">·</span>
-              <span className="sb-pane-cwd truncate">{cwd || '—'}</span>
+              {/* Each collapsible item OWNS its leading separator, so hiding it in a narrow pane does
+                  not leave a dangling `·` behind. */}
+              <span className="sb-pane-meta-part sb-pane-part-cwd">
+                <span className="sb-sep">·</span>
+                <span className="sb-pane-cwd truncate">{cwd || '—'}</span>
+              </span>
               {meta.gitBranch && meta.gitBranch !== 'HEAD' && (
-                <>
+                <span className="sb-pane-meta-part sb-pane-part-branch">
                   <span className="sb-sep">·</span>
                   <span>{meta.gitBranch}</span>
-                </>
+                </span>
               )}
             </>
           ) : (
@@ -150,32 +161,63 @@ export default function PaneHeader({
         {live ? (
           <>
             <div className="sb-seg" role="tablist">
+              {/* aria-label on both, because the visible labels are DISPLAY:NONE in a narrow pane —
+                  which removes them from the accessibility tree, not just from view. */}
               <button
                 className={`sb-seg-btn${view === 'transcript' ? ' active' : ''}`}
                 onClick={onShowHistory}
+                aria-label="Show the formatted transcript"
+                data-tip="Formatted transcript"
               >
                 <TranscriptIcon size={13} />
-                Formatted
+                {/* The labels are dropped in a narrow pane (see the container queries): this is the
+                    widest control in the row, and the icons — a document, and a live dot — already
+                    carry the distinction on their own. */}
+                <span className="sb-seg-label">Formatted</span>
               </button>
+              {/* A terminal exists in exactly one place, and WHERE decides what this button does.
+                  Here: switch to it. In another WINDOW: bring it over — clicking "Terminal" in a
+                  window that does not hold it plainly means "show it here", so that is what it does.
+                  In the other PANE of this window: disabled with a tip. Homes normally follow their
+                  tabs during render; this is the fail-closed state if they ever disagree. */}
               <button
                 className={`sb-seg-btn${view === 'terminal' ? ' active' : ''}`}
-                onClick={onGoLive}
+                onClick={terminalAt === 'claimable' ? onClaimTerminal : onGoLive}
+                disabled={terminalAt === 'other-pane'}
+                aria-label="Show the live terminal"
+                data-tip={
+                  terminalAt === 'other-pane'
+                    ? 'Terminal is open in the other pane'
+                    : terminalAt === 'claimable'
+                      ? 'Live terminal isn’t shown here — click to show it here'
+                      : 'Live terminal'
+                }
               >
                 {/* a static solid cobalt dot — marks the live session; turn-state animation
                     lives on the left-pane rows, not here */}
                 <span className="sb-dot" />
-                Terminal
+                <span className="sb-seg-label">Terminal</span>
               </button>
             </div>
-            <button className="sb-btn-ghost danger" onClick={onKill} data-tip="Stop session">
+            <button
+              className="sb-btn-ghost danger"
+              onClick={onKill}
+              data-tip="Stop session"
+              aria-label="Stop session"
+            >
               <Stop size={12} />
-              Stop
+              <span className="sb-pane-action-label">Stop</span>
             </button>
           </>
         ) : (
-          <button className="sb-btn-resume" onClick={onResume} data-tip="Resume session (⏎)">
+          <button
+            className="sb-btn-resume"
+            onClick={onResume}
+            data-tip="Resume session (⏎)"
+            aria-label="Resume session"
+          >
             <Play size={12} />
-            Resume
+            <span className="sb-pane-action-label">Resume</span>
           </button>
         )}
       </div>

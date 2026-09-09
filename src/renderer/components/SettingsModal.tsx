@@ -1,5 +1,5 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
-import { Close, Folder, Info, Reset } from './icons'
+import { Close, Folder, Info, Reset, Warning } from './icons'
 import { basename } from '../lib/format'
 import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
 import { AGENTS, type AgentKind } from '@shared/types'
@@ -20,7 +20,7 @@ const THEME_MODES: { value: ThemeMode; label: string }[] = [
 const CAP_TIP =
   "Each live session is a real agent process with its own terminal. At the limit, starting another reclaims whichever session has been idle longest — sessions still working are never stopped, and you're never blocked from starting a new one. Raising the limit means a higher cap on resource consumption: more memory, CPU, and GPU per live terminal. This is intended to prevent agent processes from overwhelming your machine. Increase at your own risk."
 
-type Page = 'appearance' | 'application' | 'shortcuts' | 'faq'
+type Page = 'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq'
 
 interface Shortcut {
   keys: string[]
@@ -77,39 +77,67 @@ function LivenessLegend() {
   )
 }
 
-// The Shortcuts page mirrors the README keyboard table. ⌘Q / zoom are macOS default-menu
-// shortcuts (no app code) — surfaced here because they're useful and undocumented.
-const GROUPS: Group[] = [
-  {
-    title: 'Navigation',
-    items: [
-      { keys: ['⌘[', '⌘]'], desc: 'Back / forward' },
-      { keys: ['⌥⌘↑', '⌥⌘↓'], desc: 'Previous / next conversation' },
-      { keys: ['⏎'], desc: 'Resume conversation' }
-    ]
-  },
-  {
-    title: 'Conversations',
-    items: [
-      { keys: ['⌘N'], desc: 'New conversation' },
-      { keys: ['⌘F'], desc: 'Search' },
-      { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
-      { keys: ['⌥-click'], desc: 'Mark conversation unread' }
-    ]
-  },
-  {
-    title: 'Window & app',
-    items: [
-      { keys: ['⌘Q'], desc: 'Quit — ends all live sessions' },
-      { keys: ['⌘B'], desc: 'Toggle the sidebar' },
-      { keys: ['⌘+', '⌘−'], desc: 'Zoom in / out' },
-      { keys: ['⌘0'], desc: 'Reset zoom' },
-      { keys: ['⌘R'], desc: 'Refresh the terminal (does not reload)' },
-      { keys: ['⌘,'], desc: 'Open Preferences' },
-      { keys: ['⌘?'], desc: 'Show keyboard shortcuts' }
-    ]
-  }
-]
+/**
+ * The Shortcuts page. ⌘Q / zoom are macOS default-menu shortcuts (no app code) — surfaced here
+ * because they're useful and undocumented.
+ *
+ * A function of the tabs preference rather than a constant: with tabs off, ⌘W closes the window and
+ * none of the tab or split chords exist, so listing them would be listing shortcuts that do nothing.
+ */
+function groupsFor(tabsEnabled: boolean): Group[] {
+  return [
+    {
+      title: 'Navigation',
+      items: [
+        { keys: ['⌘[', '⌘]'], desc: 'Back / forward' },
+        { keys: ['⌥⌘↑', '⌥⌘↓'], desc: 'Previous / next conversation' },
+        ...(tabsEnabled
+          ? [{ keys: ['⌥⌘←', '⌥⌘→'], desc: 'Previous / next tab' }]
+          : []),
+        ...(tabsEnabled ? [{ keys: ['⌘1', '…', '⌘9'], desc: 'Go to tab' }] : []),
+        { keys: ['⏎'], desc: 'Resume conversation' }
+      ]
+    },
+    {
+      title: 'Conversations',
+      items: [
+        { keys: ['⌘N'], desc: 'New conversation' },
+        { keys: ['⌘F'], desc: 'Search' },
+        { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
+        { keys: ['⌥-click'], desc: 'Mark conversation unread' },
+        // Double-click is the only click gesture tabs add. The ⌘/⇧ variants were removed: they came
+        // from browsers, and in an editor-shaped app they read as arbitrary rather than familiar.
+        // Opening to the side or in a new window lives on the ⋮ and right-click menus, which say so.
+        ...(tabsEnabled ? [{ keys: ['double-click'], desc: 'Keep a conversation’s tab' }] : [])
+      ]
+    },
+    ...(tabsEnabled
+      ? [
+          {
+            title: 'Tabs & panes',
+            items: [
+              { keys: ['⌘W'], desc: 'Close tab' },
+              { keys: ['⌘\\'], desc: 'Split / unsplit the view' },
+              { keys: ['⇧⌘N'], desc: 'Open the conversation in a new window' }
+            ]
+          }
+        ]
+      : []),
+    {
+      title: 'Window & app',
+      items: [
+        { keys: ['⌘Q'], desc: 'Quit — ends all live sessions' },
+        { keys: [tabsEnabled ? '⇧⌘W' : '⌘W'], desc: 'Close window' },
+        { keys: ['⌘B'], desc: 'Toggle the sidebar' },
+        { keys: ['⌘+', '⌘−'], desc: 'Zoom in / out' },
+        { keys: ['⌘0'], desc: 'Reset zoom' },
+        { keys: ['⌘R'], desc: 'Refresh the terminal (does not reload)' },
+        { keys: ['⌘,'], desc: 'Open Preferences' },
+        { keys: ['⌘?'], desc: 'Show keyboard shortcuts' }
+      ]
+    }
+  ]
+}
 
 // A few orientation notes for the FAQ page — the non-obvious interactions worth surfacing.
 const FAQ: Faq[] = [
@@ -222,14 +250,19 @@ interface Props {
   // --- App page: Markdown copy ---
   /** Whether ⌘C over a Formatted-view selection copies Markdown source rather than rendered text. */
   markdownCopy: boolean
+  /** The single switch governing tabs, the vertical split, and detached windows. */
+  tabsEnabled: boolean
+  onSetTabsEnabled: (value: boolean) => void
   /** Toggle the Markdown-copy behavior (an On / Off segmented control, like Theme). */
   onSetMarkdownCopy: (value: boolean) => void
 }
 
 /**
- * The Preferences modal — a left nav (Appearance / Application / Shortcuts / FAQ) over the shared
+ * The Preferences modal — a left nav (Appearance / Application / Beta Features / Shortcuts / FAQ)
+ * over the shared
  * scrim+card. Appearance holds theme + dock icon; Application holds Updates (first), the live-session
- * cap, and the new-conversation defaults; Shortcuts / FAQ are reference. Open it to a specific page via
+ * cap, and the new-conversation defaults; Beta Features holds the tabs / split / windows flag;
+ * Shortcuts / FAQ are reference. Open it to a specific page via
  * `page` (⌘, / title-bar gear → appearance; ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is
  * handled by App's global key handler, which also makes the rest of the keyboard inert while open.
  */
@@ -255,6 +288,8 @@ export default function SettingsModal({
   onSetMaxLive,
   onResetMaxLive,
   markdownCopy,
+  tabsEnabled,
+  onSetTabsEnabled,
   onSetMarkdownCopy
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -315,6 +350,12 @@ export default function SettingsModal({
               {updates.needsAttention && (
                 <span className="sb-attn-dot sb-attn-dot-nav" aria-hidden="true" />
               )}
+            </button>
+            <button
+              className={`sb-settings-nav-item${page === 'beta' ? ' active' : ''}`}
+              onClick={() => onChangePage('beta')}
+            >
+              Beta Features
             </button>
             <button
               className={`sb-settings-nav-item${page === 'shortcuts' ? ' active' : ''}`}
@@ -547,8 +588,44 @@ export default function SettingsModal({
                   </div>
                 </div>
               </>
+            ) : page === 'beta' ? (
+              <div className="sb-modal-group">
+                <div className="sb-setting">
+                  <div className="sb-beta-callout">
+                    <Warning size={16} />
+                    <span>Beta features are experimental and subject to change.</span>
+                  </div>
+                  <div className="sb-setting-title">Tabs and split view</div>
+                  <div className="sb-seg" role="radiogroup" aria-label="Tabs and split view">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={tabsEnabled}
+                      className={`sb-seg-btn${tabsEnabled ? ' active' : ''}`}
+                      onClick={() => onSetTabsEnabled(true)}
+                    >
+                      On
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={!tabsEnabled}
+                      className={`sb-seg-btn${!tabsEnabled ? ' active' : ''}`}
+                      onClick={() => onSetTabsEnabled(false)}
+                    >
+                      Off
+                    </button>
+                  </div>
+                  <div className="sb-setting-desc">
+                    Keep several conversations open at once in a tab strip, split the view into two
+                    panes, and open conversations in their own windows. Clicking a conversation
+                    previews it in a replaceable tab; double-clicking or resuming it keeps that tab.
+                    Turn this off to show one conversation at a time.
+                  </div>
+                </div>
+              </div>
             ) : page === 'shortcuts' ? (
-              GROUPS.map((group) => (
+              groupsFor(tabsEnabled).map((group) => (
                 <div className="sb-modal-group" key={group.title}>
                   <div className="sb-modal-group-label">{group.title}</div>
                   <div className="sb-shortcuts">

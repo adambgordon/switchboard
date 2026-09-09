@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { AgentKind } from '@shared/types'
+import { useStorageSync } from './useStorageSync'
 
 /**
  * The "default agent for new conversations" preference, persisted in localStorage. Mirrors
@@ -33,6 +34,14 @@ function load(): DefaultAgentState {
   }
 }
 
+function save(state: DefaultAgentState): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(state))
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export interface NewConvoDefaultAgent extends DefaultAgentState {
   setAgent: (agent: AgentKind) => void
   setEnabled: (enabled: boolean) => void
@@ -41,17 +50,21 @@ export interface NewConvoDefaultAgent extends DefaultAgentState {
 /** Persisted default-agent preference for new conversations (agent + enabled toggle). */
 export function useNewConvoDefaultAgent(): NewConvoDefaultAgent {
   const [state, setState] = useState<DefaultAgentState>(load)
+  useStorageSync(KEY, load, setState)
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state))
-    } catch {
-      /* storage unavailable */
-    }
-  }, [state])
-
-  const setAgent = useCallback((agent: AgentKind) => setState((s) => ({ ...s, agent })), [])
-  const setEnabled = useCallback((enabled: boolean) => setState((s) => ({ ...s, enabled })), [])
+  const commit = useCallback((update: (state: DefaultAgentState) => DefaultAgentState) => {
+    const next = update(load())
+    save(next)
+    setState(next)
+  }, [])
+  const setAgent = useCallback(
+    (agent: AgentKind) => commit((current) => ({ ...current, agent })),
+    [commit]
+  )
+  const setEnabled = useCallback(
+    (enabled: boolean) => commit((current) => ({ ...current, enabled })),
+    [commit]
+  )
 
   return { ...state, setAgent, setEnabled }
 }

@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { advanceMark, clearMark, rekeyMark, setMark, type Marks } from './marks'
 
 /**
  * Per-conversation read/unread state, persisted in localStorage (renderer state; survives
@@ -11,17 +12,29 @@ import { useCallback, useState } from 'react'
  *    Forces the solid dot regardless of `seen`/`lookingNow`. It auto-expires once a *new*
  *    turn lands (the caller compares `turnEndedAt > markedAt`), handing back to the `seen`
  *    logic, and is cleared outright by `markRead` (an explicit toggle, or selecting it).
+ *
+ * EVERY WINDOW SHARES THIS STORE, and none of them is the owner. Two consequences shape the code
+ * below. Mutations are applied to what is on DISK, not to what this window last rendered: each one
+ * re-reads, folds in a single change, and writes back — so a window can no longer revert changes it
+ * never saw. (It previously serialised its whole in-memory map, which meant one window's save undid
+ * every marker another had touched since it loaded, not just the one they disagreed about.) And a
+ * `storage` subscription keeps the rendered copy current when another window writes, so two windows
+ * do not sit showing different dots for the same conversation.
+ *
+ * What remains is two windows writing in the same instant, where one loses — bounded to the single
+ * conversation they raced on, and self-correcting on the next act. Serialising through the main
+ * process would close even that, at the price of an IPC round trip on a first-paint path.
  */
 const SEEN_KEY = 'switchboard.seenAt'
 const UNREAD_KEY = 'switchboard.unreadAt'
 
-function loadMap(key: string): Record<string, number> {
+function loadMap(key: string): Marks {
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return {}
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return {}
-    const out: Record<string, number> = {}
+    const out: Marks = {}
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
       if (typeof v === 'number') out[k] = v
     }
@@ -31,7 +44,7 @@ function loadMap(key: string): Record<string, number> {
   }
 }
 
-function saveMap(key: string, map: Record<string, number>): void {
+function saveMap(key: string, map: Marks): void {
   try {
     localStorage.setItem(key, JSON.stringify(map))
   } catch {
@@ -41,9 +54,9 @@ function saveMap(key: string, map: Record<string, number>): void {
 
 export interface Seen {
   /** sessionId -> ms epoch the user last viewed it (selected + focused). */
-  seen: Record<string, number>
+  seen: Marks
   /** sessionId -> ms epoch the user manually marked it unread (the solid-dot override). */
-  unread: Record<string, number>
+  unread: Marks
   /** Record that `sessionId` was seen at `ts`. Only ever advances forward. */
   markSeen: (sessionId: string, ts: number) => void
   /** Manually mark a conversation unread as of now (forces the solid dot). */
@@ -56,60 +69,77 @@ export interface Seen {
 }
 
 export function useSeen(): Seen {
-  const [seen, setSeen] = useState<Record<string, number>>(() => loadMap(SEEN_KEY))
-  const [unread, setUnread] = useState<Record<string, number>>(() => loadMap(UNREAD_KEY))
+  const [seen, setSeen] = useState<Marks>(() => loadMap(SEEN_KEY))
+  const [unread, setUnread] = useState<Marks>(() => loadMap(UNREAD_KEY))
 
-  const markSeen = useCallback((sessionId: string, ts: number) => {
-    setSeen((prev) => {
-      // Never move a marker backward; bailing with `prev` also skips a needless re-render.
-      if ((prev[sessionId] ?? 0) >= ts) return prev
-      const next = { ...prev, [sessionId]: ts }
-      saveMap(SEEN_KEY, next)
-      return next
-    })
+  /**
+   * Apply one change to the stored map and adopt the result.
+   *
+   * `fn` is handed what is ON DISK, not React's copy — that is the whole point. The merge helpers
+   * return their input by identity when nothing changes, so an unchanged result skips both the write
+   * and the re-render; and when it DOES change, the state we adopt already includes whatever other
+   * windows had written.
+   */
+  const mutate = useCallback(
+    (key: string, set: (m: Marks) => void, fn: (stored: Marks) => Marks): void => {
+      const stored = loadMap(key)
+      const next = fn(stored)
+      if (next === stored) {
+        // Nothing to persist. Still adopt the fresh read: another window may have moved this marker,
+        // and that is the reason our own change was a no-op.
+        set(stored)
+        return
+      }
+      saveMap(key, next)
+      set(next)
+    },
+    []
+  )
+
+  // Another window wrote. Re-read rather than merge: it has already folded its change into what is on
+  // disk, so disk is the newer truth. A null `key` means the whole area was cleared.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent): void => {
+      if (e.key === null || e.key === SEEN_KEY) setSeen(loadMap(SEEN_KEY))
+      if (e.key === null || e.key === UNREAD_KEY) setUnread(loadMap(UNREAD_KEY))
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  const markUnread = useCallback((sessionId: string) => {
-    const ts = Date.now()
-    setUnread((prev) => {
-      const next = { ...prev, [sessionId]: ts }
-      saveMap(UNREAD_KEY, next)
-      return next
-    })
-  }, [])
+  const markSeen = useCallback(
+    (sessionId: string, ts: number) => {
+      mutate(SEEN_KEY, setSeen, (m) => advanceMark(m, sessionId, ts))
+    },
+    [mutate]
+  )
 
-  const markRead = useCallback((sessionId: string) => {
-    const ts = Date.now()
-    // Advance the seen marker (forward-only), so the timestamp logic also reads "read".
-    setSeen((prev) => {
-      if ((prev[sessionId] ?? 0) >= ts) return prev
-      const next = { ...prev, [sessionId]: ts }
-      saveMap(SEEN_KEY, next)
-      return next
-    })
-    // Drop any manual-unread override.
-    setUnread((prev) => {
-      if (!(sessionId in prev)) return prev
-      const next = { ...prev }
-      delete next[sessionId]
-      saveMap(UNREAD_KEY, next)
-      return next
-    })
-  }, [])
+  const markUnread = useCallback(
+    (sessionId: string) => {
+      const ts = Date.now()
+      mutate(UNREAD_KEY, setUnread, (m) => setMark(m, sessionId, ts))
+    },
+    [mutate]
+  )
 
-  const rekey = useCallback((oldId: string, newId: string) => {
-    if (oldId === newId) return
-    const migrate = (key: string, set: typeof setSeen): void =>
-      set((prev) => {
-        if (!(oldId in prev)) return prev
-        const next = { ...prev, [newId]: prev[oldId] }
-        delete next[oldId]
-        saveMap(key, next)
-        return next
-      })
-    migrate(SEEN_KEY, setSeen)
-    migrate(UNREAD_KEY, setUnread)
-  }, [])
+  const markRead = useCallback(
+    (sessionId: string) => {
+      const ts = Date.now()
+      // Advance the seen marker (forward-only), so the timestamp logic also reads "read".
+      mutate(SEEN_KEY, setSeen, (m) => advanceMark(m, sessionId, ts))
+      // Drop any manual-unread override.
+      mutate(UNREAD_KEY, setUnread, (m) => clearMark(m, sessionId))
+    },
+    [mutate]
+  )
+
+  const rekey = useCallback(
+    (oldId: string, newId: string) => {
+      mutate(SEEN_KEY, setSeen, (m) => rekeyMark(m, oldId, newId))
+      mutate(UNREAD_KEY, setUnread, (m) => rekeyMark(m, oldId, newId))
+    },
+    [mutate]
+  )
 
   return { seen, unread, markSeen, markUnread, markRead, rekey }
 }

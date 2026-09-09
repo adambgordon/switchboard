@@ -20,6 +20,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  */
 const ptyPids = vi.hoisted(() => ({
   table: new Map<number, number>(),
+  sizes: new Map<number, { cols: number; rows: number }>(),
+  resizes: [] as Array<{ index: number; cols: number; rows: number }>,
+  flows: [] as Array<{ index: number; action: 'pause' | 'resume' }>,
   spawns: 0,
   /** Each PTY's onData callback, by spawn index — lets a test push real terminal output so runtime
    *  state (an OSC input-request timestamp) can be SET before asserting that a correction clears it.
@@ -30,6 +33,7 @@ vi.mock('node-pty', () => ({
   spawn: () => {
     const index = ptyPids.spawns++
     ptyPids.table.set(index, 1000 + index)
+    ptyPids.sizes.set(index, { cols: 80, rows: 30 })
     // `kill()` fires the exit callback, as a real pty does — that's what makes the manager drop the
     // entry from its live map, so "the terminal is gone" is reproducible without reaching into it.
     let exited: ((e: { exitCode: number }) => void) | null = null
@@ -37,9 +41,20 @@ vi.mock('node-pty', () => ({
       get pid(): number {
         return ptyPids.table.get(index) ?? -1
       },
+      get cols(): number {
+        return ptyPids.sizes.get(index)?.cols ?? 0
+      },
+      get rows(): number {
+        return ptyPids.sizes.get(index)?.rows ?? 0
+      },
       write: () => {},
-      resize: () => {},
+      resize: (cols: number, rows: number) => {
+        ptyPids.sizes.set(index, { cols, rows })
+        ptyPids.resizes.push({ index, cols, rows })
+      },
       kill: () => exited?.({ exitCode: 0 }),
+      pause: () => ptyPids.flows.push({ index, action: 'pause' }),
+      resume: () => ptyPids.flows.push({ index, action: 'resume' }),
       onData: (cb: (data: string) => void) => {
         ptyPids.feeds[index] = cb
         return { dispose: () => {} }
@@ -100,6 +115,9 @@ describe('PtyManager Codex identity probing', () => {
 
   beforeEach(() => {
     ptyPids.table.clear()
+    ptyPids.sizes.clear()
+    ptyPids.resizes = []
+    ptyPids.flows = []
     ptyPids.spawns = 0
     ptyPids.feeds = []
     calls = []
@@ -123,6 +141,58 @@ describe('PtyManager Codex identity probing', () => {
 
   afterEach(() => {
     mgr.killAll()
+  })
+
+  it('assigns spawn ownership before announcing the active set', () => {
+    events = []
+    mgr.startNew(CWD, 'claude', () => events.push('owner'))
+    expect(events).toEqual(['owner', 'active'])
+  })
+
+  describe('repaint', () => {
+    it('nudges a sized PTY one column and restores its exact geometry', () => {
+      const live = mgr.startNew(CWD, 'claude')
+      mgr.resize(live.ptyId, 100, 40)
+      ptyPids.resizes = []
+
+      mgr.repaint(live.ptyId)
+
+      expect(ptyPids.resizes).toEqual([
+        { index: 0, cols: 101, rows: 40 },
+        { index: 0, cols: 100, rows: 40 }
+      ])
+    })
+
+    it('does not size or boot a PTY that no renderer has measured yet', () => {
+      const live = mgr.startNew(CWD, 'claude')
+      mgr.repaint(live.ptyId)
+      expect(ptyPids.resizes).toEqual([])
+    })
+  })
+
+  describe('output flow control', () => {
+    it('resumes only after every independent pause reason clears', () => {
+      const live = mgr.startNew(CWD, 'claude')
+      mgr.setOutputPaused(live.ptyId, 'renderer:1', true)
+      mgr.setOutputPaused(live.ptyId, 'transfer:1', true)
+      mgr.setOutputPaused(live.ptyId, 'transfer:1', false)
+      expect(ptyPids.flows).toEqual([{ index: 0, action: 'pause' }])
+      mgr.setOutputPaused(live.ptyId, 'renderer:1', false)
+      expect(ptyPids.flows).toEqual([
+        { index: 0, action: 'pause' },
+        { index: 0, action: 'resume' }
+      ])
+    })
+
+    it('releases a renderer pause when its window disappears', () => {
+      const live = mgr.startNew(CWD, 'claude')
+      mgr.setOutputPaused(live.ptyId, 'renderer:7', true)
+      mgr.releaseOutputPause('renderer:7')
+      expect(ptyPids.flows).toEqual([
+        { index: 0, action: 'pause' },
+        { index: 0, action: 'resume' }
+      ])
+    })
   })
 
   // --- who gets probed ---

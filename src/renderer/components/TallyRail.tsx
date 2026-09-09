@@ -8,7 +8,18 @@ import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
 import { isUnlinkedRow } from '../lib/rowIdentity'
 import NewConversationMenu from './NewConversationMenu'
-import { Chevron, Close, Plus, Search, Pin, Info, Stop, Play } from './icons'
+import {
+  Chevron,
+  Close,
+  Plus,
+  Search,
+  Pin,
+  Info,
+  NewWindow,
+  SplitVertical,
+  Stop,
+  Play
+} from './icons'
 
 /** One row in the pane: a conversation that may be live, pinned, both, or neither. */
 export interface RailEntry {
@@ -63,9 +74,19 @@ interface Props {
   }
   /** True during the initial conversation index, before sections are populated. */
   loading: boolean
+  /** Conversations another window holds tabs for — those rows are marked, since clicking one raises
+   *  that window instead of opening here. */
+  openElsewhere: Set<string>
   selectedSessionId: string | null
   onJump: (sessionId: string) => void
   onSelect: (sessionId: string) => void
+  /** Double-click a row — keep its tab. Undefined while tabs are switched off. */
+  onStick?: (sessionId: string) => void
+  /** The ⋮ menu's Open to the Side — show it in the other pane. */
+  onOpenToSide?: (sessionId: string) => void
+  canOpenToSide?: (sessionId: string) => boolean
+  /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
+  onOpenInNewWindow?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
   // search — lives on the status line; opening it replaces the working/idle sub-label
   query: string
@@ -138,9 +159,14 @@ export default function TallyRail({
   sections,
   live,
   loading,
+  openElsewhere,
   selectedSessionId,
   onJump,
   onSelect,
+  onStick,
+  onOpenToSide,
+  canOpenToSide,
+  onOpenInNewWindow,
   onTogglePin,
   query,
   onQueryChange,
@@ -264,16 +290,18 @@ export default function TallyRail({
     unread: boolean
     pinned: boolean
     unlinked: boolean
+    side: boolean
   } | null>(null)
   const menuStateFor = (
     id: string
-  ): { live: boolean; unread: boolean; pinned: boolean; unlinked: boolean } | null => {
+  ): { live: boolean; unread: boolean; pinned: boolean; unlinked: boolean; side: boolean } | null => {
     const entry = entryById(id)
     if (!entry) return null
     return {
       live: !!entry.pty,
       unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
       pinned: entry.pinned,
+      side: canOpenToSide?.(id) ?? false,
       // Pin, read state, and session details are all keyed to a conversation this row does not have,
       // so they would silently do nothing. Hide them rather than offer a no-op.
       unlinked: isUnlinkedRow(entry.pty, entry.meta)
@@ -485,10 +513,15 @@ export default function TallyRail({
                     live={entry.pty}
                     liveState={entry.liveState}
                     pinned={entry.pinned}
+                    elsewhere={openElsewhere.has(entry.sessionId)}
                     showCwd
                     card={section.variant === 'card' && !!entry.pty}
                     onSelect={onSelect}
                     onJump={onJump}
+                    onStick={onStick}
+                    // onOpenToSide / onOpenInNewWindow are deliberately NOT passed down: they are
+                    // menu actions now, not click gestures. The rail still holds them for its own ⋮
+                    // and right-click menus below.
                     onMarkUnread={onMarkUnread}
                     onOpenMenu={openRowMenuFromButton}
                     onContextMenu={openRowMenu}
@@ -547,6 +580,33 @@ export default function TallyRail({
             >
               <Info size={14} />
               <span>Session details…</span>
+            </button>
+          )}
+          {/* Sits with the benign items rather than behind the destructive divider: it opens a view,
+              it does not start or stop anything. Hidden on an unlinked row for the same reason the
+              three above are — a terminal with no conversation has no transcript to show beside one. */}
+          {onOpenToSide && ctxMenu.side && !ctxMenu.unlinked && (
+            <button
+              className="sb-ctxmenu-item"
+              onClick={() => {
+                onOpenToSide(ctxMenu.id)
+                closeMenu()
+              }}
+            >
+              <SplitVertical size={14} />
+              <span>Open to the side</span>
+            </button>
+          )}
+          {onOpenInNewWindow && !ctxMenu.unlinked && (
+            <button
+              className="sb-ctxmenu-item"
+              onClick={() => {
+                onOpenInNewWindow(ctxMenu.id)
+                closeMenu()
+              }}
+            >
+              <NewWindow size={14} />
+              <span>Open in new window</span>
             </button>
           )}
           {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**

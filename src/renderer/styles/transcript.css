@@ -26,6 +26,13 @@
      body). So the container sets NO cursor of its own. */
 }
 
+/* One native text-selection gesture belongs to one pane. Set before the mousedown default action and
+   held through mouseup, so Chromium never paints the sibling's text into the range; TranscriptView
+   normalizes the endpoint once before removing this guard. */
+body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scroll {
+  user-select: none;
+}
+
 /* Chrome exempted from the selectable region above. The invariant: NOTHING HERE IS LIFTED FROM THE DOM
    BY A COPY, SO NOTHING HERE HIGHLIGHTS — otherwise a drag promises text it can't deliver (the timestamp
    used to sweep into the highlight and then be absent from the paste).

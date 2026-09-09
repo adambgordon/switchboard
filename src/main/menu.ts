@@ -101,9 +101,28 @@ export function installAppMenu(): void {
   // File: the default macOS File menu (the `fileMenu` role) is just "Close Window"; we also
   // surface Quit here. Quit already lives in the app menu by macOS convention, but it's wanted in
   // File too — both items share the ⌘Q accelerator, which is harmless since both simply quit.
+  //
+  // ⌘W is Close TAB, with Close Window moved to ⇧⌘W — the editor and browser convention, and the
+  // only assignment that leaves the most-used action on the most-reachable chord. It cannot be
+  // handled in the renderer's key handler: a menu accelerator is consumed by the app and the keydown
+  // never reaches the page, so the item pushes to the focused window instead and the renderer decides
+  // whether it has a tab to close. When it does not — no tabs open, or the feature switched off — it
+  // calls back through `IPC.windowClose`, so ⌘W still closes the window exactly as macOS expects.
   const file: MenuItemConstructorOptions = {
     label: 'File',
-    submenu: [{ role: 'close' }, { type: 'separator' }, { role: 'quit' }]
+    submenu: [
+      {
+        label: 'Close Tab',
+        accelerator: 'Cmd+W',
+        click: () => {
+          const win = BrowserWindow.getFocusedWindow()
+          if (win && !win.isDestroyed()) win.webContents.send(IPC.menuCloseTab)
+        }
+      },
+      { role: 'close', label: 'Close Window', accelerator: 'Cmd+Shift+W' },
+      { type: 'separator' },
+      { role: 'quit' }
+    ]
   }
 
   const template: MenuItemConstructorOptions[] = [

@@ -57,17 +57,36 @@ export interface Layout extends LayoutState {
   toggleSection: (key: SectionKey) => void
 }
 
+export interface LayoutOptions {
+  /**
+   * Start with the rail collapsed regardless of what is stored — a window opened to show one
+   * conversation. Applied to the initial state only, so ⌘B still works normally afterwards.
+   */
+  collapseRail?: boolean
+  /**
+   * Whether to write changes back to localStorage. **False for a detached window**, and that is not a
+   * nicety: localStorage is shared by every window of the app, so a window that opens with the rail
+   * hidden would otherwise persist "collapsed" and hand it to the browser window on next launch.
+   */
+  persist?: boolean
+}
+
 /** Persisted, clamped layout: pane width + collapsed state, and per-section collapse. */
-export function useLayout(): Layout {
-  const [state, setState] = useState<LayoutState>(load)
+export function useLayout(opts?: LayoutOptions): Layout {
+  const [state, setState] = useState<LayoutState>(() => {
+    const loaded = load()
+    return opts?.collapseRail ? { ...loaded, paneCollapsed: true } : loaded
+  })
+  const persist = opts?.persist !== false
 
   useEffect(() => {
+    if (!persist) return
     try {
       localStorage.setItem(KEY, JSON.stringify(state))
     } catch {
       /* storage unavailable */
     }
-  }, [state])
+  }, [state, persist])
 
   const setPaneWidth = useCallback((w: number) => {
     setState((s) => ({ ...s, paneWidth: clamp(w, PANE_LIMITS.min, PANE_LIMITS.max) }))

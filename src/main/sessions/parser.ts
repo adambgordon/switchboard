@@ -240,16 +240,11 @@ export function resolveTitle(sources: TitleSources): string {
 /**
  * Parse a full transcript: build the ordered list of user/assistant messages
  * with normalized blocks, plus the resolved title and the cwd from the file.
- * Tolerant of malformed lines (they are skipped).
+ * Tolerant of malformed lines (they are skipped); file-read errors propagate to the loader.
  */
 export async function parseTranscript(filePath: string): Promise<Transcript> {
   const sessionId = basename(filePath, '.jsonl')
-  let text: string
-  try {
-    text = await readFile(filePath, 'utf8')
-  } catch {
-    return { sessionId, agent: 'claude', cwd: '', title: 'Untitled', messages: [] }
-  }
+  const text = await readFile(filePath, 'utf8')
 
   const messages: TranscriptMessage[] = []
   let cwd = ''

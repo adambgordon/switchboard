@@ -70,3 +70,36 @@ export function resolveRowLiveState(
     pty.inputRequestedAt
   )
 }
+
+/** The `.sb-dot` modifier classes, which are the dot's four liveness forms plus the unlinked marker. */
+export type LiveDotClass = 'busy' | 'asking' | 'quiet' | 'awaiting' | 'unlinked'
+
+/**
+ * Which dot a session shows, as a CSS modifier class — `null` for no dot at all.
+ *
+ * Every surface that draws a session's dot MUST come through here. That is not tidiness: the same
+ * session is drawn in two places at once (a rail row and a tab), and a viewer reads them as one claim
+ * about one session. Two derivations are two claims, and the moment they disagree the app is lying in
+ * at least one of them — which is precisely how a tab came to show a solid "finished, unseen" dot
+ * beside a row showing the hollow "idle" one, for the same session, at the same moment.
+ *
+ * `unlinked` is resolved from the pty and meta rather than accepted as an argument, so a caller cannot
+ * pass a flag that disagrees with {@link isUnlinkedRow}.
+ *
+ * `liveState` is optional because a caller may not have resolved one; the fallback reads the process's
+ * own coarse status, which distinguishes only working from finished. Prefer passing a resolved state —
+ * the fallback cannot see `quiet` or `asking` and will over-report a seen session as unread.
+ */
+export function liveDotClass(
+  pty: PtyState | null,
+  meta: ConversationMeta,
+  liveState: LiveState | null | undefined
+): LiveDotClass | null {
+  if (!pty) return null
+  if (isUnlinkedRow(pty, meta)) return 'unlinked'
+  const state = liveState ?? (pty.status === 'busy' ? 'working' : 'awaiting')
+  if (state === 'working') return 'busy'
+  if (state === 'asking') return 'asking'
+  if (state === 'quiet') return 'quiet'
+  return 'awaiting'
+}

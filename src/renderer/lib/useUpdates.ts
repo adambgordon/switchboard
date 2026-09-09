@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { UpdateCheck, UpdateInfo } from '@shared/types'
+import type { UpdateCheck, UpdateInfo, UpdateRunPhase } from '@shared/types'
+import { appendUpdateLog } from '@shared/updateLog'
 
-export type UpdatePhase = 'idle' | 'updating' | 'done' | 'failed'
+export type UpdatePhase = UpdateRunPhase
 
 export interface Updates {
   /** Build identity (version + sha + whether this copy can self-update). One-shot, fetched on mount. */
@@ -40,27 +41,45 @@ export function useUpdates(): Updates {
 
   // Re-check without blanking the last result, so the attention dot stays stable across a re-check
   // (a brief null would make the dot flicker off and back on).
-  const runCheck = useCallback(async (): Promise<void> => {
+  const checkNow = useCallback(async (force: boolean): Promise<void> => {
     setChecking(true)
-    const result = await window.api.checkForUpdates()
+    const result = await window.api.checkForUpdates(force)
     setCheck(result)
     setChecking(false)
   }, [])
+  const runCheck = useCallback(() => checkNow(true), [checkNow])
 
   // At launch: fetch the one-shot build info and run the first check. App never unmounts, so no
   // mounted-guard is needed (unlike the old in-modal version).
   useEffect(() => {
     void window.api.getUpdateInfo().then(setInfo)
     if (fakeUpdating) return
-    void runCheck()
-  }, [fakeUpdating, runCheck])
+    void checkNow(false)
+  }, [fakeUpdating, checkNow])
+
+  useEffect(() => {
+    if (fakeUpdating) return
+    const offState = window.api.onUpdateRunState((state) => {
+      setPhase(state.phase)
+      setLog(state.log)
+    })
+    const offProgress = window.api.onUpdateProgress((line) => {
+      setLog((current) => appendUpdateLog(current, line))
+    })
+    void window.api.getUpdateRunState().then((state) => {
+      setPhase(state.phase)
+      setLog(state.log)
+    })
+    return () => {
+      offState()
+      offProgress()
+    }
+  }, [fakeUpdating])
 
   const runUpdate = useCallback(async (): Promise<void> => {
     setPhase('updating')
     setLog('')
-    const off = window.api.onUpdateProgress((line) => setLog((prev) => prev + line))
     const result = await window.api.runUpdate()
-    off()
     setPhase(result.ok ? 'done' : 'failed')
   }, [])
 

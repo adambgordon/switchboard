@@ -3,6 +3,8 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 interface Props {
   /** Called during drag with the pointer delta (px) from the drag start. */
   onResize: (deltaX: number) => void
+  /** Called once on release so durable state can be committed outside the pointer-rate path. */
+  onResizeEnd: (deltaX: number) => void
   onResizeStart: () => void
   /** Double-click resets to the default width. */
   onReset: () => void
@@ -15,15 +17,27 @@ interface Props {
  * terminal/main pane. `body.sb-resizing` forces the col-resize cursor + disables
  * pane pointer events for the duration.
  */
-export default function ResizeHandle({ onResize, onResizeStart, onReset, ariaLabel }: Props) {
+export default function ResizeHandle({ onResize, onResizeEnd, onResizeStart, onReset, ariaLabel }: Props) {
   const begin = (e: ReactMouseEvent): void => {
     e.preventDefault()
     const startX = e.clientX
     onResizeStart()
     document.body.classList.add('sb-resizing')
 
-    const move = (ev: MouseEvent): void => onResize(ev.clientX - startX)
+    let latest = 0
+    let frame: number | null = null
+    const flush = (): void => {
+      frame = null
+      onResize(latest)
+    }
+    const move = (ev: MouseEvent): void => {
+      latest = ev.clientX - startX
+      if (frame == null) frame = requestAnimationFrame(flush)
+    }
     const end = (): void => {
+      if (frame != null) cancelAnimationFrame(frame)
+      onResize(latest)
+      onResizeEnd(latest)
       document.body.classList.remove('sb-resizing')
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', end)

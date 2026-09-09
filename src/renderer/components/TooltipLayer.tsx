@@ -3,6 +3,8 @@ import { clampTipText, placeTip } from '../lib/tooltip'
 
 interface Tip {
   text: string
+  /** Optional supporting line beneath the title, from `data-tip-sub`. Null when the host has none. */
+  sub: string | null
   /** Viewport x of the host's horizontal center. */
   x: number
   /** Viewport y of the host's top edge. */
@@ -48,8 +50,13 @@ export default function TooltipLayer() {
       const text = el.getAttribute('data-tip')
       if (!text) return
       const r = el.getBoundingClientRect()
+      const sub = el.getAttribute('data-tip-sub')
       setTip({
         text: clampTipText(text),
+        // Clamped by the same rule as the title. In practice this never fires — the only producer is
+        // a conversation preview, already capped at the same length upstream — but the label must be
+        // bounded by what it renders, not by what its current callers happen to pass.
+        sub: sub ? clampTipText(sub) : null,
         x: r.left + r.width / 2,
         hostTop: r.top,
         hostBottom: r.bottom,
@@ -58,6 +65,12 @@ export default function TooltipLayer() {
       })
     }
     const onOver = (e: MouseEvent): void => {
+      // Never while a button is held. A drag sweeps the pointer across the whole window, so every
+      // `data-tip` host it passes would arm a tooltip — and one duly appeared over a tab being
+      // dragged, describing a conversation the user was in the middle of moving. Stated as "no
+      // tooltips during any drag" rather than as a check for this particular one: a label explaining
+      // what is under the pointer is meaningless while the pointer is carrying something.
+      if (e.buttons !== 0) return
       const el = (e.target as Element | null)?.closest('[data-tip]') ?? null
       if (!el || el === activeRef.current) return
       activeRef.current = el
@@ -124,7 +137,14 @@ export default function TooltipLayer() {
       style={{ left: tip.x, top: tip.hostBottom + GAP, transform: 'translate(-50%, 0)' }}
       role="tooltip"
     >
-      {tip.text}
+      {tip.sub ? (
+        <>
+          <div className="sb-tip-title">{tip.text}</div>
+          <div className="sb-tip-sub">{tip.sub}</div>
+        </>
+      ) : (
+        tip.text
+      )}
     </div>
   )
 }

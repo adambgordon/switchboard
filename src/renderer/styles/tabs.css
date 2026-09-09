@@ -1,0 +1,346 @@
+/* Tab strip above a pane's header. Strictly ink / paper / rule: cobalt means a session is ALIVE and
+   red means destructive, so "this tab is selected" gets neither. The one cobalt here is the shared
+   `.sb-dot`, which means exactly what it means everywhere else. */
+
+.sb-tabstrip {
+  /* Height of one tab row, and the most rows the strip may grow to before it scrolls. The cap is what
+     keeps a pane full of tabs from eating the content it exists to label — at three rows a strip is
+     still obviously chrome. */
+  --tab-h: 32px;
+  --tab-rows: 3;
+  /* Shared by the strip gradient and the active/selected tabs that redraw the rule beneath their own
+     opaque fill. One value keeps the line's apparent weight stable through split focus changes. */
+  --tab-rule: var(--rule);
+  display: flex;
+  /* Tabs WRAP rather than scrolling sideways: sideways overflow hides the tab you want behind an edge,
+     in a direction you cannot see, which defeats the point of having tabs at all. */
+  flex-wrap: wrap;
+  align-items: stretch;
+  align-content: flex-start;
+  flex-shrink: 0;
+  max-height: calc(var(--tab-h) * var(--tab-rows));
+  background-color: var(--paper-sunken);
+  /* Row separators, drawn as a rule at the foot of every row band rather than as a border on each tab.
+     A border per tab cannot complete the line: the last row is usually ragged, so the line would stop
+     where the tabs stop and leave the remainder bare — and under a FULL row it would double up against
+     the strip's own bottom border. A repeating gradient spans the whole width regardless of how many
+     tabs sit in a row, and its final line lands exactly where the strip ends, so it serves as the
+     bottom border too (hence there is no `border-bottom` here).
+     `local` attachment is what keeps the lines pinned to the rows once the strip scrolls past its row
+     cap; the default would hold them still while the rows moved underneath. */
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--tab-h) - 1px),
+    var(--tab-rule) calc(var(--tab-h) - 1px),
+    var(--tab-rule) var(--tab-h)
+  );
+  background-attachment: local;
+  /* Only the row cap can overflow, and only downward. There is deliberately NO always-reserved
+     scrollbar gutter: the lane exists only once the rows actually overflow. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* The insertion caret is positioned in the strip's own scrolled coordinates. */
+  position: relative;
+}
+/* A styled Chromium scrollbar reserves width even when `overflow-y:auto` has nothing to scroll.
+   Collapse only that idle lane; once rows exceed the cap, `.is-overflowing` restores the shared
+   `--bar-thin` width and the strip keeps a stable layout for the whole scrolling episode. */
+.sb-tabstrip:not(.is-overflowing)::-webkit-scrollbar {
+  width: 0;
+}
+/* A custom Chromium scrollbar consumes an inline lane even without `scrollbar-gutter`. The shared
+   transparent track otherwise exposes the white pane behind the strip, reading as stray whitespace
+   until the thumb appears. Keep the lane on the strip's own chrome surface. */
+.sb-tabstrip::-webkit-scrollbar-track,
+.sb-tabstrip::-webkit-scrollbar-track-piece {
+  background-color: var(--paper-sunken);
+}
+
+/* ---- dragging a tab ---- */
+
+/* One transparent shell moves the whole visual. Its pseudo-elements are real same-size rounded card
+   shapes, so every corner has identical geometry; only the shell transform changes per frame. */
+.sb-tab-drag-shell {
+  --tab-drag-surface: var(--paper-raised);
+}
+.sb-tab-drag-shell::before,
+.sb-tab-drag-shell::after {
+  content: none;
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--tab-drag-surface);
+  pointer-events: none;
+}
+.sb-tab-drag-shell.stacked::before {
+  content: '';
+  z-index: 1;
+  transform: translate(3px, 3px);
+  box-shadow: var(--shadow-pop);
+}
+.sb-tab-drag-shell.stacked-many::before {
+  box-shadow: none;
+}
+.sb-tab-drag-shell.stacked-many::after {
+  content: '';
+  z-index: 0;
+  transform: translate(6px, 6px);
+  box-shadow: var(--shadow-pop);
+}
+:root[data-theme='dark'] .sb-tab-drag-shell {
+  --tab-drag-surface: var(--paper-pane);
+}
+
+/* The moving tab clone lives inside the fixed shell on <body>, so the strip's scroll container cannot
+   clip it and the whole stack travels anywhere in the window as one visual. Two class selectors keep
+   its drag surface stronger than the state classes copied from the source tab. */
+.sb-tab.sb-tab-dragging {
+  border-radius: var(--r-sm);
+  /* A real BORDER, not just a shadow. The clone travels over every surface in the window — the
+     transcript, the terminal, another pane — and a soft shadow against a light surface leaves it
+     edgeless: over the terminal's own paper it read as nothing at all. A 1px rule is the only thing
+     that holds an edge against an arbitrary background. */
+  border: 1px solid var(--rule-strong);
+  background: var(--tab-drag-surface, var(--paper-raised));
+  color: var(--ink);
+  box-shadow: var(--shadow-pop);
+  /* Fully opaque: at 0.92 the surface beneath showed through and undid the border's whole job. */
+  opacity: 1;
+}
+/* Carrying several: a fake stack behind the clone plus a count, so the drag says how much it holds.
+   Exactly two tabs show two cards; three or more show three. More layers add no information because
+   the badge carries the exact count.
+   Faked rather than N real clones — only the top one is ever legible, so the rest would cost N times
+   the work to communicate one number.
+   The backing cards live on the transparent shell above rather than being composite shadows on the
+   front card; that is what keeps their rounded corners identical. */
+.sb-tab-drag-shell.stacked > .sb-tab.sb-tab-dragging {
+  box-shadow: none;
+}
+/* The count. Ink on paper, never an accent — this is a quantity, not a live session. */
+.sb-tab-dragcount {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The whole window shows the grab cursor for the duration, not just the strip — the pointer is
+   captured, so it keeps dragging wherever it goes and the cursor should say so. */
+body.sb-dragging-tab,
+body.sb-dragging-tab * {
+  cursor: grabbing !important;
+}
+/* Where it would land. A 2px rule rather than a gap opened in the strip: opening a gap would reflow
+   every tab under the pointer and move the very targets the drop is being aimed at. Ink, not cobalt —
+   cobalt means a session is alive. */
+.sb-tab-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  pointer-events: none;
+  z-index: 2;
+}
+/* The strip currently under the drag. Deliberately quiet: the caret says WHERE, this only says which
+   strip is answering, which matters when there are two side by side. */
+/* background-COLOR, not the shorthand: the shorthand would drop the row-separator gradient. */
+.sb-tabstrip.sb-drop-target {
+  background-color: var(--paper-hover);
+}
+/* This WINDOW will take a tab dragged from another one. It cannot show a caret — the drop appends,
+   because the cursor's position inside this window is not knowable while another window holds the
+   pointer — so the whole window answers instead. */
+body.sb-window-drop-target .sb-tabstrip {
+  background-color: var(--paper-hover);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+}
+
+.sb-tab {
+  --tab-close-surface: var(--paper-sunken);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--tab-h);
+  /* Symmetric, now that the close button overlays the title instead of reserving a slot: the text sits
+     the same distance from both edges, and the ✕ borrows that space on hover rather than owning it. */
+  padding: 0 11px;
+  /* Natural width, floored and capped. Never flex: a tab that shrinks to fit its row would make the
+     same conversation a different width in each pane, and the floor keeps a three-character title
+     from producing a tab too small to aim at. */
+  flex: 0 0 auto;
+  min-width: 88px;
+  max-width: 210px;
+  border-right: 1px solid var(--rule);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  /* The three-step ink ladder used by every other control group in the app: rest --ink-faint,
+     hover --ink-soft, active --ink. */
+  color: var(--ink-faint);
+  /* The whole tab is the click target, so the whole tab shows the hand — not just the close button.
+     A default cursor over a control that activates on click reads as inert. */
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  /* Hover and activation are one atomic paint. Letting the old active background fade after its rule
+     disappeared produced a visible borderless frame, while the new tab's close fade changed surface
+     immediately and rendered as a separate rectangle during the same transition. */
+}
+.sb-tab:hover {
+  --tab-close-surface: var(--paper-hover);
+  color: var(--ink-soft);
+  background: var(--paper-hover);
+}
+/* The active tab is lifted onto the surface of the content directly beneath it, so the tab and the
+   pane read as one sheet. In dark this makes it DARKER than the strip rather than lighter — the same
+   inverted elevation the pane already has against the rail, and correct for the same reason. */
+.sb-tab.active {
+  --tab-close-surface: var(--paper-pane);
+  background: var(--paper-pane);
+  color: var(--ink-soft);
+}
+.sb-tab.active:hover {
+  background: var(--paper-pane);
+}
+/* Only the FOCUSED pane's active tab reads fully selected, so a split never shows two equally
+   selected tabs. Ink weight alone carries it — the marker is deliberately not a bar along the tab's
+   edge: at the width of a tab that bar is a slab, and it read as a piece of chrome in its own right
+   rather than as an attribute of the tab. */
+.sb-tab.active.focused {
+  color: var(--ink);
+}
+
+/* Selected tabs share the ACTIVE tab's surface and differ only in ink: the whole group is lifted onto
+   `--paper-pane`, inactive members use faint ink, and the one on screen keeps full ink. Selection stays
+   neutral — cobalt means a session is alive, not that a command will act on it. */
+.sb-tab.picked {
+  --tab-close-surface: var(--paper-pane);
+  background: var(--paper-pane);
+  color: var(--ink-faint);
+}
+/* The active tab keeps full ink inside a selection: being acted on next and being the one on screen
+   are separate claims, and it must not lose its place among its own group. */
+.sb-tab.picked.active {
+  background: var(--paper-pane);
+  color: var(--ink);
+}
+/* Active and multi-selected fills cover the strip's row-separator gradient, so redraw that pixel on
+   the tab itself. This must be the tab's LAST painted child, not a parent inset shadow: the close
+   control's full-height title fade is a child and otherwise paints over the rule beneath it. */
+.sb-tab.active::after,
+.sb-tab.picked::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--tab-rule);
+  pointer-events: none;
+  z-index: 1;
+}
+/* Hidden dragged tabs take their right-hand dividers with them. Repaint the first visible follower's
+   leading edge without adding border width, so every non-dragged tab stays exactly where it was. */
+.sb-tab.sb-tab-after-drag-gap::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
+  background: var(--tab-rule);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* A preview tab is the one the next ordinary click replaces. Italic is the editor convention for it
+   and costs no width — which matters, because a tab is already the most width-starved thing here.
+   The padding is not cosmetic: a tab sizes to its content, so the title's box ends exactly where the
+   upright glyphs do, and an italic's lean past that edge is clipped by `.truncate`'s overflow. */
+.sb-tab.preview .sb-tab-title {
+  font-style: italic;
+  padding-right: 3px;
+}
+
+.sb-tab-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The live dot's slot — present only when there IS a dot, so a not-live tab spends no width on it. */
+.sb-tab-gutter {
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.sb-tab .sb-dot {
+  transition: opacity var(--dur-fast);
+}
+.sb-tab:hover .sb-dot {
+  opacity: 0;
+}
+/* Anchored to the TAB's right edge rather than living inside the dot's slot. On a live tab it lands
+   exactly over that slot (the dot fades out beneath it); on a not-live tab it overlays the title's
+   tail, which costs nothing at rest and is where the ellipsis already is. */
+.sb-tab-close {
+  position: absolute;
+  /* Matches the tab's own padding, which puts the button centred over the dot's slot on a live tab —
+     any other offset and the ✕ would appear beside the dot it replaces rather than on top of it. */
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  background-color: var(--tab-close-surface);
+  color: var(--ink-faint);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast);
+}
+/* A not-live tab has no reserved gutter, so the close button borrows the title's tail. Fade the text
+   into the button's solid surface instead of cutting it off at a hard vertical edge. This child fades
+   in with the button's own opacity, keeping the spatial and temporal transitions together. */
+.sb-tab-close::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  right: 100%;
+  width: 26px;
+  background: linear-gradient(to right, transparent, var(--tab-close-surface));
+  pointer-events: none;
+}
+.sb-tab:has(.sb-tab-gutter) .sb-tab-close::before {
+  content: none;
+}
+.sb-tab:hover .sb-tab-close,
+.sb-tab:focus-within .sb-tab-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sb-tab-close:hover {
+  background: var(--paper-active);
+  color: var(--ink);
+}

@@ -4,7 +4,7 @@ import { bootCommandFor, bootPayloadFor } from '../src/main/pty/bootCommand'
 const ID = 'eb583f11-9020-45a7-af51-b23f2e2cb3cc'
 const CLEAR = '\x05\x15' // Ctrl-E + Ctrl-U — kill whatever is on the input line
 const CODEX =
-  "codex -c 'tui.terminal_resize_reflow_max_rows=2000' " +
+  "codex -c 'tui.terminal_resize_reflow_max_rows=1000' " +
   "-c 'tui.notifications=[\"approval-requested\",\"plan-mode-prompt\"]' " +
   "-c 'tui.notification_method=\"osc9\"' -c 'tui.notification_condition=\"always\"'"
 

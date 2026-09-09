@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { CONFIG } from '@shared/types'
+import { useStorageSync } from './useStorageSync'
 
 /**
  * The "maximum live sessions" preference — the LRU cap on concurrent live PTYs. Persisted in
@@ -28,6 +29,14 @@ function load(): number {
   }
 }
 
+function save(value: number): void {
+  try {
+    localStorage.setItem(KEY, String(value))
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export interface MaxLiveSessions {
   /** Current cap. */
   value: number
@@ -44,19 +53,21 @@ export interface MaxLiveSessions {
 /** Persisted, clamped max-live-sessions preference (the LRU cap). */
 export function useMaxLiveSessions(): MaxLiveSessions {
   const [value, setValue] = useState<number>(load)
+  const valueRef = useRef(value)
+  valueRef.current = value
+  useStorageSync(KEY, load, setValue)
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, String(value))
-    } catch {
-      /* storage unavailable */
-    }
-  }, [value])
+  const commit = useCallback((next: number) => {
+    if (valueRef.current === next) return
+    valueRef.current = next
+    save(next)
+    setValue(next)
+  }, [])
 
-  // setValue bails when the clamped value is unchanged (React's primitive Object.is check), so a
-  // slider drag only re-renders / pushes IPC when it crosses an integer step.
-  const set = useCallback((n: number) => setValue(clamp(n)), [])
-  const reset = useCallback(() => setValue(CONFIG.maxLivePtys), [])
+  // The ref bails before both storage and state, so a slider drag writes only when it crosses an
+  // integer step rather than on every pixel event within that step.
+  const set = useCallback((n: number) => commit(clamp(n)), [commit])
+  const reset = useCallback(() => commit(CONFIG.maxLivePtys), [commit])
 
   return {
     value,

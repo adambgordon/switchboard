@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useStorageSync } from './useStorageSync'
 
 /**
  * The "copy Formatted-view selections as Markdown" preference, persisted in localStorage.
@@ -27,6 +28,14 @@ function load(): boolean {
   }
 }
 
+function save(enabled: boolean): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ enabled }))
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export interface MarkdownCopy {
   enabled: boolean
   setEnabled: (value: boolean) => void
@@ -35,16 +44,12 @@ export interface MarkdownCopy {
 /** Persisted markdown-copy preference (default on). */
 export function useMarkdownCopy(): MarkdownCopy {
   const [enabled, setEnabledState] = useState<boolean>(load)
+  useStorageSync(KEY, load, setEnabledState)
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify({ enabled }))
-    } catch {
-      /* storage unavailable */
-    }
-  }, [enabled])
-
-  const setEnabled = useCallback((v: boolean) => setEnabledState(v), [])
+  const setEnabled = useCallback((v: boolean) => {
+    save(v)
+    setEnabledState(v)
+  }, [])
 
   return { enabled, setEnabled }
 }
