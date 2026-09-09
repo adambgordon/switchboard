@@ -108,7 +108,7 @@ describe('TabWorkspaceStore', () => {
     ])
   })
 
-  it('keeps satellite layouts dormant until the primary activates them', () => {
+  it('keeps satellite layouts dormant until the primary activates them', async () => {
     const restored = [onePane(['A']), onePane(['B']), onePane(['C'])]
     const store = new TabWorkspaceStore(dir, file, restored)
     const primary = store.takePrimary()
@@ -117,20 +117,20 @@ describe('TabWorkspaceStore', () => {
 
     expect(store.layoutFor(10)).toEqual(onePane(['A']))
     expect(store.snapshot()).toEqual(restored)
-    expect(store.takeDormant()).toEqual([onePane(['B']), onePane(['C'])])
-    expect(store.takeDormant()).toEqual([])
+    expect(await store.takeDormant(Promise.resolve(), () => true)).toEqual([onePane(['B']), onePane(['C'])])
+    expect(await store.takeDormant(Promise.resolve(), () => true)).toEqual([])
 
     store.register(20, onePane(['B']))
     store.register(30, onePane(['C']))
     expect(store.snapshot()).toEqual(restored)
   })
 
-  it('excludes recognized ids from active and dormant layouts and rejects stale reports', () => {
+  it('excludes recognized ids from active and dormant layouts and rejects stale reports', async () => {
     const store = new TabWorkspaceStore(dir, file, [onePane(['A', 'H', 'B'], 'H'), onePane(['J']), onePane(['unknown'])])
     store.register(10, store.takePrimary())
     store.excludeSessions(new Set(['H', 'J']))
     expect(store.layoutFor(10)).toEqual(onePane(['A', 'B'], 'B'))
-    expect(store.takeDormant()).toEqual([onePane(['unknown'])])
+    expect(await store.takeDormant(Promise.resolve(), () => true)).toEqual([onePane(['unknown'])])
     store.update(10, onePane(['A', 'H', 'B'], 'H'))
     store.register(20, onePane(['J']))
     expect(store.layoutFor(20)).toBeNull()
@@ -147,6 +147,65 @@ describe('TabWorkspaceStore', () => {
     expect(store.layoutFor(10)).toBeNull()
     store.excludeSessions(new Set(['H', 'J']))
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('waits for indexing before consuming the current filtered satellite layouts', async () => {
+    const store = new TabWorkspaceStore(dir, file, [onePane(['A']), onePane(['H']), onePane(['B', 'J', 'unknown'], 'J')])
+    store.register(10, store.takePrimary())
+    let ready = (): void => {}
+    const indexing = new Promise<void>((resolve) => { ready = resolve })
+    let settled = false
+    const restoration = store.takeDormant(indexing, () => true).then((layouts) => {
+      settled = true
+      return layouts
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(store.snapshot()).toEqual([onePane(['A']), onePane(['H']), onePane(['B', 'J', 'unknown'], 'J')])
+    store.excludeSessions(new Set(['H', 'J']))
+    ready()
+    expect(await restoration).toEqual([onePane(['B', 'unknown'], 'unknown')])
+  })
+
+  it('honors a workspace clear while activation waits for indexing', async () => {
+    const store = new TabWorkspaceStore(dir, file, [onePane(['A']), onePane(['B'])])
+    store.register(10, store.takePrimary())
+    let ready = (): void => {}
+    const restoration = store.takeDormant(new Promise<void>((resolve) => { ready = resolve }), () => true)
+    store.clear()
+    ready()
+    expect(await restoration).toEqual([])
+    expect(store.snapshot()).toEqual([])
+  })
+
+  it('consumes satellites once when multiple activation requests await the same index', async () => {
+    const store = new TabWorkspaceStore(dir, file, [onePane(['B']), onePane(['C'])])
+    let ready = (): void => {}
+    const indexing = new Promise<void>((resolve) => { ready = resolve })
+    const first = store.takeDormant(indexing, () => true)
+    const second = store.takeDormant(indexing, () => true)
+    ready()
+    expect(await first).toEqual([onePane(['B']), onePane(['C'])])
+    expect(await second).toEqual([])
+  })
+
+  it('checks cancellation after readiness and preserves layouts for a later valid request', async () => {
+    const store = new TabWorkspaceStore(dir, file, [onePane(['B'])])
+    let active = true
+    let ready = (): void => {}
+    const restoration = store.takeDormant(new Promise<void>((resolve) => { ready = resolve }), () => active)
+    active = false
+    ready()
+    expect(await restoration).toEqual([])
+    expect(store.snapshot()).toEqual([onePane(['B'])])
+    expect(await store.takeDormant(Promise.resolve(), () => true)).toEqual([onePane(['B'])])
+  })
+
+  it('retains dormant layouts when indexing fails and allows a later retry', async () => {
+    const store = new TabWorkspaceStore(dir, file, [onePane(['B'])])
+    expect(await store.takeDormant(Promise.reject(new Error('index unavailable')), () => true)).toEqual([])
+    expect(store.snapshot()).toEqual([onePane(['B'])])
+    expect(await store.takeDormant(Promise.resolve(), () => true)).toEqual([onePane(['B'])])
   })
 
   it('clears registered and dormant layouts together on explicit disable', () => {

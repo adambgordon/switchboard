@@ -915,8 +915,12 @@ export function registerIpc(): void {
     tabWorkspace?.update(e.sender.id, layout)
   })
   ipcMain.handle(IPC.tabWorkspaceActivate, (e) => tabWorkspace?.layoutFor(e.sender.id) ?? null)
-  ipcMain.on(IPC.tabWorkspaceActivated, () => {
-    for (const layout of tabWorkspace?.takeDormant() ?? []) {
+  ipcMain.on(IPC.tabWorkspaceActivated, async (e) => {
+    const layouts = await tabWorkspace?.takeDormant(
+      conversationIndex.get(),
+      () => mgr !== null && !e.sender.isDestroyed()
+    )
+    for (const layout of layouts ?? []) {
       openWindow?.({
         sessionIds: [],
         activeSessionId: null,

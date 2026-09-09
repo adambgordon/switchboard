@@ -62,7 +62,17 @@ export class TabWorkspaceStore {
     return this.windows.get(windowId) ?? null
   }
 
-  takeDormant(): PersistedTabLayout[] {
+  /** Indexing may remove entire saved windows; resolve eligibility before consuming their layouts. */
+  async takeDormant(
+    ready: Promise<unknown>,
+    canRestore: () => boolean
+  ): Promise<PersistedTabLayout[]> {
+    try {
+      await ready
+    } catch {
+      return []
+    }
+    if (!canRestore()) return []
     const layouts = this.dormant
     this.dormant = []
     return layouts
