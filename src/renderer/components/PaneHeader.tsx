@@ -167,7 +167,7 @@ export default function PaneHeader({
                 className={`sb-seg-btn${view === 'transcript' ? ' active' : ''}`}
                 onClick={onShowHistory}
                 aria-label="Show the formatted transcript"
-                data-tip="Formatted transcript"
+                data-tip="Formatted transcript (⌘J)"
               >
                 <TranscriptIcon size={13} />
                 {/* The labels are dropped in a narrow pane (see the container queries): this is the
@@ -189,8 +189,8 @@ export default function PaneHeader({
                   terminalAt === 'other-pane'
                     ? 'Terminal is open in the other pane'
                     : terminalAt === 'claimable'
-                      ? 'Live terminal isn’t shown here — click to show it here'
-                      : 'Live terminal'
+                      ? 'Live terminal isn’t shown here — click to show it here (⌘J)'
+                      : 'Live terminal (⌘J)'
                 }
               >
                 {/* a static solid cobalt dot — marks the live session; turn-state animation

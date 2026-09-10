@@ -24,6 +24,7 @@ import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
+import { viewToggleAction } from './lib/viewToggle'
 import {
   canPersistTabWorkspace,
   restoredWorkspaceApplied,
@@ -1622,7 +1623,16 @@ export default function App() {
         }
         return
       }
-      if (tabsEnabled && e.metaKey && e.shiftKey && !e.altKey && e.code === 'KeyN') {
+      const viewAction = viewToggleAction(e, effectiveView, focusedView.terminalAt)
+      if (viewAction !== null && selectedId && selectedPty) {
+        e.preventDefault()
+        if (viewAction === 'claim') {
+          claimTerminal(selectedPty.ptyId, paneLayout.focusIndex)
+        } else {
+          chooseSessionView(selectedId, viewAction)
+          requestFocus(selectedId)
+        }
+      } else if (tabsEnabled && e.metaKey && e.shiftKey && !e.altKey && e.code === 'KeyN') {
         // ⇧⌘N — open the selected conversation in its own window. Must come BEFORE the ⌘N branch:
         // that one matches on `e.key.toLowerCase()`, so Shift+N lowercases to 'n' and it would
         // otherwise swallow this chord and start a new conversation instead. (The same shadowing
@@ -1740,6 +1750,11 @@ export default function App() {
     selectedId,
     selectedMeta,
     selectedPty,
+    effectiveView,
+    focusedView.terminalAt,
+    claimTerminal,
+    chooseSessionView,
+    requestFocus,
     orderedIds,
     resume,
     enterLive,
