@@ -25,20 +25,17 @@ interface Params {
   onCount: (n: number) => void
 }
 
-/** Walk the text nodes under `root` and build a DOM Range for every substring match. Skips only
- *  transcript chrome (end-of-transcript footer, loading skeleton); collapsed sections (closed tool
- *  `<details>`, clamped result tails) ARE included so their matches can be navigated to + revealed. */
+/** Build match ranges from message text, pruning tool sections and transcript chrome as subtrees. */
 function collectRanges(root: HTMLElement, query: string): Range[] {
   const ranges: Range[] = []
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
     acceptNode(node: Node): number {
-      const parent = node.parentElement
-      if (!parent) return NodeFilter.FILTER_REJECT
-      // `.md-math-tex` is the LaTeX source parked beside a rendered formula for the clipboard
-      // (see MathBlock.tsx). It is invisible, so matching it would inflate the count with hits that
-      // highlight nothing — and double-count every formula, since its glyphs are searchable too.
-      if (parent.closest('.transcript-foot, .transcript-loading, .md-math-tex')) {
-        return NodeFilter.FILTER_REJECT
+      if (node instanceof Element) {
+        // Reject the whole subtree, including expanded tools, so large tool outputs are never
+        // searched. Hidden LaTeX source stays excluded to avoid invisible/duplicate formula hits.
+        return node.matches('.tool-run, .transcript-foot, .transcript-loading, .md-math-tex')
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_SKIP
       }
       const text = node.nodeValue
       if (!text || !text.trim()) return NodeFilter.FILTER_REJECT
@@ -78,37 +75,14 @@ function scrollRangeIntoView(range: Range, scroll: HTMLElement | null): void {
 }
 
 /**
- * If the active match sits inside a collapsed section, reveal it so the highlight is visible: a
- * closed tool `<details>` is opened directly (native + uncontrolled, so the change sticks), and a
- * clamped tool result is expanded by asking its React component via an `sb-reveal` event. Returns
- * true when a React-driven expand was requested, so the caller defers the scroll one frame (the
- * re-render + relayout hasn't happened yet).
- */
-function revealContainer(range: Range): boolean {
-  const start = range.startContainer
-  const el = start instanceof Element ? start : start.parentElement
-  if (!el) return false
-  const details = el.closest('details:not([open])')
-  if (details instanceof HTMLDetailsElement) details.open = true
-  const clamped = el.closest('.tool-result-clip.is-clamped')
-  if (clamped) {
-    clamped.dispatchEvent(new CustomEvent('sb-reveal'))
-    return true
-  }
-  return false
-}
-
-/**
  * Find-in-conversation engine for the Formatted transcript. Walks the rendered text nodes under
  * `contentRef`, builds Ranges for each case-insensitive substring match, and paints them with the
  * CSS Custom Highlight API — **no DOM mutation**, so it never fights react-markdown's element tree
  * or defeats `MessageBlock`'s `memo` (snappiness-first). The active match gets a second, stronger
  * highlight and is scrolled into view. Matches rebuild when the query or transcript content changes.
  *
- * Coverage includes collapsed sections: matches inside closed tool `<details>` and the clamped tail
- * of long tool results ARE found, and navigating to one reveals its section (opens the details /
- * expands the result) before scrolling it into view. Only transcript chrome (footer, loading
- * skeleton) is excluded. Matches are found within a single text node, so a phrase spanning element
+ * Tool sections are excluded regardless of their expansion state, along with transcript chrome and
+ * hidden LaTeX source. Matches are found within a single text node, so a phrase spanning element
  * boundaries (e.g. across a bold run) won't match — a deliberate Phase-1 limitation.
  */
 export function useTranscriptSearch({
@@ -158,21 +132,12 @@ export function useTranscriptSearch({
     }
     const i = Math.max(0, Math.min(activeIndex, ranges.length - 1))
     const range = ranges[i]
-    // Reveal the active match first if it's inside a collapsed section, so the highlight is visible.
-    const deferred = revealContainer(range)
     if (HAS_HIGHLIGHT_API) {
       const hl = new Highlight()
       hl.add(range)
       CSS.highlights.set(HL_CURRENT, hl)
     }
-    // A native <details> opens synchronously → scroll now; a clamped result expands via a React
-    // re-render → wait one frame for the relayout before scrolling to the (now visible) match.
-    if (!deferred) {
-      scrollRangeIntoView(range, scrollRef.current)
-      return
-    }
-    const raf = requestAnimationFrame(() => scrollRangeIntoView(range, scrollRef.current))
-    return () => cancelAnimationFrame(raf)
+    scrollRangeIntoView(range, scrollRef.current)
   }, [activeIndex, query, revision, scrollRef])
 
   // Drop highlights when the consumer unmounts (e.g. switching away from the transcript).
