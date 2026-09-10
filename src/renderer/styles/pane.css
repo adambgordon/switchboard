@@ -134,7 +134,7 @@
 /* Stage 1 — the view toggle drops to icons, FIRST. It is by far the widest control in the row, so it
    buys the most room per thing given up, and it gives up the least: the two icons (a document, and the
    live dot) already carry the distinction, restated as tooltips and aria-labels. */
-@container pane (max-width: 640px) {
+@container pane (max-width: 840px) {
   .sb-seg-label {
     display: none;
   }
@@ -144,18 +144,9 @@
   }
 }
 
-/* Stage 2 — the path and the branch. The longest items in the meta row, and the least load-bearing:
-   the title above already says which conversation this is, and both are in Session Details. */
-@container pane (max-width: 520px) {
-  .sb-pane-part-cwd,
-  .sb-pane-part-branch {
-    display: none;
-  }
-}
-
-/* Stage 3 — the terminal action keeps its icon and hit target but drops its text. Both actions carry
+/* Stage 2 — the terminal action keeps its icon and hit target but drops its text. Both actions carry
    a tooltip and explicit aria-label, so this gives up no function or accessible name. */
-@container pane (max-width: 500px) {
+@container pane (max-width: 700px) {
   .sb-pane-action-label {
     display: none;
   }
@@ -167,6 +158,33 @@
     justify-content: center;
     gap: 0;
   }
+}
+
+/* Stage 3 — the path and the branch. The longest items in the meta row, and the least load-bearing:
+   the title above already says which conversation this is, and both are in Session Details. */
+@container pane (max-width: 520px) {
+  .sb-pane-part-cwd,
+  .sb-pane-part-branch {
+    display: none;
+  }
+}
+
+/* Split panes keep the compact controls at every width. */
+.sb-panes.split .sb-seg-label,
+.sb-panes.split .sb-pane-action-label {
+  display: none;
+}
+.sb-panes.split .sb-seg-btn {
+  padding-left: 9px;
+  padding-right: 9px;
+}
+.sb-panes.split .sb-pane-actions > .sb-btn-resume,
+.sb-panes.split .sb-pane-actions > .sb-btn-ghost {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
 }
 
 .sb-pane-pin {

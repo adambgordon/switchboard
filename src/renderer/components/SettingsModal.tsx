@@ -103,6 +103,7 @@ function groupsFor(tabsEnabled: boolean): Group[] {
       items: [
         { keys: ['⌘N'], desc: 'New conversation' },
         { keys: ['⌘F'], desc: 'Search' },
+        { keys: ['⌘J'], desc: 'Toggle Formatted / Terminal (live conversation)' },
         { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
         { keys: ['⌥-click'], desc: 'Mark conversation unread' },
         // Double-click is the only click gesture tabs add. The ⌘/⇧ variants were removed: they came

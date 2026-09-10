@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Children, isValidElement, memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentPropsWithoutRef, MutableRefObject, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
@@ -488,15 +488,6 @@ function ToolResultBlock({ text, isError }: { text: string; isError: boolean }):
     ro.observe(txt)
     return () => ro.disconnect()
   }, [text, expanded])
-  // Find-in-conversation reveals a match hidden in the clamped tail by dispatching `sb-reveal` on
-  // the clip — expand so the active highlight becomes visible (see useTranscriptSearch).
-  useEffect(() => {
-    const clip = clipRef.current
-    if (!clip) return
-    const onReveal = (): void => setExpanded(true)
-    clip.addEventListener('sb-reveal', onReveal)
-    return () => clip.removeEventListener('sb-reveal', onReveal)
-  }, [])
   // The whole block toggles when there's more to show/hide — unless the user is drag-selecting text
   // (that leaves a non-empty selection; a plain click doesn't). CopyButton stops its own propagation,
   // so copy clicks never reach here.
@@ -588,8 +579,8 @@ function ToolPairView({ pair }: { pair: ToolPair }): ReactNode {
  * Tool run — a maximal stretch of consecutive tool activity collapses
  * behind ONE "⚙ N tool calls" disclosure (sibling of the earlier tool
  * head grammar). Native (uncontrolled) <details>: browser-instant
- * toggle, find-in-conversation opens it for free, open-state tracked
- * only to word the tooltip. Expanding shows every call + its result.
+ * toggle, open-state tracked only to word the tooltip. Expanding
+ * shows every call + its result.
  * ------------------------------------------------------------------ */
 function ToolRun({ item }: { item: ToolRunItem }): ReactNode {
   const [open, setOpen] = useState(false)
