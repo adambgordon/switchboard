@@ -91,6 +91,66 @@ describe('NavigationCoordinator', () => {
     expect(h.nav.state.entries.map((visit) => visit.sessionId)).toEqual(['A'])
   })
 
+  it('steps over a retired terminal without erasing the route', async () => {
+    // A new agent terminal carries a placeholder id until the OS proves which conversation it holds.
+    // Reclaimed before that happens, the id names nothing — so Back must pass over it rather than
+    // land on a row backed by no conversation. Asserted separately from the hidden case because the
+    // two arrive by different routes and only share the skip.
+    const h = harness()
+    h.seed()
+    for (const window of [1, 2, 3]) h.nav.focused(window)
+    h.nav.retire('B')
+    h.nav.go(3, -1); await flush(); h.ack()
+    expect(h.commands.at(-1)?.command.sessionId).toBe('A')
+    // The stop survives: deleting entries would shift the cursor under the user.
+    expect(h.nav.state.entries.map((visit) => visit.sessionId)).toEqual(['A', 'B', 'C'])
+    h.nav.go(1, 1); await flush(); h.ack()
+    expect(h.commands.at(-1)?.command.sessionId).toBe('C')
+  })
+
+  it('refuses to reveal a retired session or re-record a late report of one', () => {
+    const h = harness()
+    h.seed()
+    for (const window of [1, 2, 3]) h.nav.focused(window)
+    h.nav.retire('B')
+    const before = h.commands.length
+    h.nav.reveal(1, 'B', 'preview')
+    expect(h.commands.length).toBe(before)
+    // A renderer that has not caught up still names the dead id. Recording it would make a stop
+    // nobody can return to the newest one, and Back would then have to skip its way out again.
+    h.nav.report(3, v('B'), true)
+    expect(h.nav.state.entries.map((visit) => visit.sessionId)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('interrupts a navigation already in flight toward a terminal that gets retired', async () => {
+    const h = harness()
+    h.seed()
+    for (const window of [1, 2, 3]) h.nav.focused(window)
+    h.nav.go(3, -1); await flush()
+    const inFlight = h.commands.at(-1)!
+    expect(inFlight.command.sessionId).toBe('B')
+    h.nav.retire('B')
+    h.ack(inFlight)
+    // The target answered a command for a terminal that no longer exists; completing it would focus
+    // that window onto a dead row and record the visit.
+    expect(h.focuses).toEqual([])
+    expect(h.nav.state.entries.map((visit) => visit.sessionId)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('drops a retired id from window routing so refocusing cannot resurrect it', () => {
+    const h = harness()
+    h.seed()
+    for (const window of [1, 2, 3]) h.nav.focused(window)
+    expect(h.nav.state.entries.map((visit) => visit.sessionId)).toEqual(['A', 'B', 'C'])
+    h.nav.retire('B')
+    // Window 2's CACHED visit still names B, and `focused` records from that cache rather than from
+    // a fresh report — so the report-time guard cannot catch this one. Left uncleared, a refocus
+    // truncates Forward and appends the dead id as the newest stop.
+    h.nav.focused(2)
+    expect(h.nav.state.entries.map((visit) => visit.sessionId)).toEqual(['A', 'B', 'C'])
+    expect(h.nav.state.away).toBe(true)
+  })
+
   it('continues complete Back/Forward round trips from any of three windows', async () => {
     const h = harness()
     h.seed()

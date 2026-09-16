@@ -6,10 +6,12 @@ import {
   type AgentKind,
   type PtyBindKind,
   type PtySession,
-  type PtyStatus
+  type PtyStatus,
+  type TurnState
 } from '../../shared/types'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
+import { chooseEvictionTargets } from './evictionPolicy'
 import {
   resolveCodexBindings,
   type CodexBinding,
@@ -66,6 +68,16 @@ interface Live {
   proc: pty.IPty
   status: PtyStatus
   lastActivity: number
+  /**
+   * ms epoch of the last time a person used this terminal, seeded to spawn time. The LRU key for
+   * eviction, because `lastActivity` tracks terminal OUTPUT and an agent TUI that repaints on a
+   * timer keeps that permanently fresh — see evictionPolicy. Advanced only by markUsed.
+   */
+  lastInputAt: number
+  /** Whether a person has ever used this terminal. Separate from `lastInputAt` so that first use in
+   *  the same millisecond as the spawn still counts, and so an untouched terminal stays untouched
+   *  however long it lives. */
+  usedByUser: boolean
   startedAt: number
   inputRequestedAt: number | null
   // [Codex] Streaming OSC 9 scanner for this terminal. Held on the entry rather than only in the
@@ -115,11 +127,12 @@ interface Live {
  *   ~/.local/bin, no Homebrew), so invoking `claude` directly would fail with
  *   ENOENT. A login shell sources the user's profile and gets the real PATH — and
  *   it gives a genuine terminal: when claude exits, you're back at a prompt.
- * - Busy vs idle is inferred from output activity (debounced). It does NOT drive the
- *   liveness dot (a live agent TUI repaints constantly — every keystroke echoes as output —
- *   so a PTY is ~always "busy"; transcript state drives the dot, with explicit Codex OSC input
- *   notifications as the narrow exception). Here it ONLY gates LRU eviction (we never kill busy
- *   work).
+ * - Busy vs idle is inferred from output activity (debounced) and is now only a coarse status
+ *   reported to the renderer as a FALLBACK for the live dot. It drives no decision here: terminal
+ *   output cannot separate a working agent from a resting one, because an agent TUI may repaint on
+ *   a fixed timer whether or not anything is happening — which leaves such a PTY permanently
+ *   "busy". Both the dot (transcript turn-state, plus explicit Codex OSC input notifications) and
+ *   LRU eviction (see evictionPolicy) read signals that do not have that problem.
  */
 export class PtyManager extends EventEmitter {
   private live = new Map<string, Live>()
@@ -185,6 +198,28 @@ export class PtyManager extends EventEmitter {
     this.maxLive = Math.max(CONFIG.liveSessionsMin, Math.min(CONFIG.liveSessionsMax, Math.floor(n)))
   }
 
+  /**
+   * Latest transcript turn-state per conversation, pushed from the conversation index — the only
+   * signal that can tell a working agent from a resting one (see evictionPolicy). A session absent
+   * from the map has no known state and is therefore never evicted, which is also what holds before
+   * the first index lands.
+   */
+  private turnStates = new Map<string, TurnState>()
+
+  setTurnStates(states: Map<string, TurnState>): void {
+    this.turnStates = states
+  }
+
+  /**
+   * Every PTY currently showing in a pane, across all windows — union, because a terminal visible
+   * in a background window is still being looked at. Never evicted (see evictionPolicy).
+   */
+  private visiblePtyIds: ReadonlySet<string> = new Set()
+
+  setVisiblePtyIds(ids: ReadonlySet<string>): void {
+    this.visiblePtyIds = ids
+  }
+
   resume(
     sessionId: string,
     cwd: string,
@@ -234,9 +269,26 @@ export class PtyManager extends EventEmitter {
    * rollout, and every variant of that (a bare `\r`, a discrete post-boot Enter, nearest-timestamp
    * pairing) was defeated by a real counterexample. Identity now comes from the OS instead — see
    * codexIdentity — so this is back to being the hot path it should be.
+   *
+   * In particular it does NOT record that the terminal was used: this channel also carries xterm's
+   * automatic answers to an agent's startup terminal queries, so treating everything here as input
+   * marks every terminal used the instant it boots. Real use arrives separately — see markUsed.
    */
   write(ptyId: string, data: string): void {
     this.live.get(ptyId)?.proc.write(data)
+  }
+
+  /**
+   * A person typed, pasted or dropped into this terminal. Reported by the renderer from its keyboard
+   * and paste handlers rather than inferred from written bytes, because only the renderer can tell a
+   * keystroke from the terminal answering a query on the program's behalf. Throttled there, so this
+   * is a coarse "recently used" rather than a per-keystroke timestamp — which is all the cap needs.
+   */
+  markUsed(ptyId: string): void {
+    const entry = this.live.get(ptyId)
+    if (!entry) return
+    entry.lastInputAt = Date.now()
+    entry.usedByUser = true
   }
 
   resize(ptyId: string, cols: number, rows: number): void {
@@ -573,6 +625,8 @@ export class PtyManager extends EventEmitter {
       proc,
       status: 'busy',
       lastActivity: now,
+      lastInputAt: now,
+      usedByUser: false,
       startedAt: now,
       inputRequestedAt: null,
       inputScanner: o.agent === 'codex' ? new CodexInputNotificationScanner() : null,
@@ -635,7 +689,11 @@ export class PtyManager extends EventEmitter {
       if (entry.bootTimer) clearTimeout(entry.bootTimer)
       this.live.delete(ptyId)
       this.parkedJobs?.unregister(ptyId)
-      this.emit('exit', ptyId, entry.exitCode)
+      // `provisional` still set means this terminal died without ever proving which conversation it
+      // held, so its sessionId is a placeholder that now names nothing at all. Reported so the
+      // navigation history can step over it instead of landing on a row backed by nothing — see
+      // NavigationCoordinator.retire.
+      this.emit('exit', ptyId, entry.exitCode, entry.sessionId, entry.provisional)
       this.emitActive()
     })
 
@@ -659,15 +717,21 @@ export class PtyManager extends EventEmitter {
   }
 
   /**
-   * Keep the live set bounded. Evict the least-recently-active IDLE session.
-   * If everything is busy we let the set grow rather than kill active work.
+   * Keep the live set bounded, stopping as many eligible sessions as it takes to fit one more.
+   * The choice itself is pure and tested in evictionPolicy; this only supplies the candidates.
    */
   private enforceCap(): void {
-    if (this.live.size < this.maxLive) return
-    const idle = [...this.live.values()]
-      .filter((l) => l.status === 'idle')
-      .sort((a, b) => a.lastActivity - b.lastActivity)
-    if (idle.length > 0) this.kill(idle[0].ptyId)
+    const targets = chooseEvictionTargets(
+      [...this.live.values()].map((l) => ({
+        ptyId: l.ptyId,
+        lastInputAt: l.lastInputAt,
+        used: l.usedByUser,
+        turnState: this.turnStates.get(l.sessionId),
+        onScreen: this.visiblePtyIds.has(l.ptyId)
+      })),
+      this.maxLive
+    )
+    for (const ptyId of targets) this.kill(ptyId)
   }
 
   private toState(e: Live): PtySession {

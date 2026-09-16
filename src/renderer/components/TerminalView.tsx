@@ -150,6 +150,27 @@ export default function TerminalView({
   const replayFollowUntilRef = useRef(0)
   const replayFollowTimerRef = useRef<number | null>(null)
   const restoringHandoffRef = useRef(false)
+  const lastUsedReportRef = useRef(0)
+
+  /**
+   * "A person used this terminal", which decides whether the live-session cap may reclaim it.
+   *
+   * Deliberately NOT derived from `onData`: xterm answers an agent's startup terminal queries
+   * (device attributes, cursor position) through that same channel, so treating written bytes as
+   * input marks every terminal used within milliseconds of booting — and then no untouched terminal
+   * is ever reclaimable. Callers are the keyboard, paste and drop handlers, which are the only
+   * places a person is unambiguously responsible.
+   *
+   * Throttled because the cap orders by recency in minutes: per-keystroke precision buys nothing and
+   * this sits on the typing path.
+   */
+  const markUsed = useCallback((): void => {
+    const now = performance.now()
+    if (now - lastUsedReportRef.current < 5000) return
+    lastUsedReportRef.current = now
+    window.api.reportTerminalUsed(ptyId)
+  }, [ptyId])
+
   const attachHostRef = useCallback((node: HTMLDivElement | null): void => {
     hostRef.current = node
     const element = termRef.current?.element
@@ -386,11 +407,15 @@ export default function TerminalView({
         : null
     const onInput = term.onData((d) => window.api.sendInput(ptyId, d))
 
+    // `onKey` fires only from a real DOM keyboard event, unlike `onData` — see markUsed.
+    const onRealKey = term.onKey(markUsed)
+
     // Image input is agent-specific. Claude reads the clipboard after an empty bracketed paste;
     // Codex reserves the real Ctrl+V key and reads the clipboard from that key event.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.ctrlKey && !e.metaKey && !e.altKey && e.code === 'KeyV') {
         window.api.sendInput(ptyId, agent === 'codex' ? '\x16' : '\x1b[200~\x1b[201~')
+        markUsed()
         return false
       }
       return true
@@ -408,6 +433,7 @@ export default function TerminalView({
       stopReplayFollow()
       offExit()
       onInput.dispose()
+      onRealKey.dispose()
       followRefreshScroll?.dispose()
       detach()
       scrollbackReset?.dispose()
@@ -417,7 +443,7 @@ export default function TerminalView({
       fitRef.current = null
       lastSentRef.current = null
     }
-  }, [ptyId, agent, fitAndResize])
+  }, [ptyId, agent, fitAndResize, markUsed])
 
   // The React component is window-owned and stable; only this DOM host moves between pane portals.
   // Rebind host-local listeners and sizing without touching the xterm, its parser, or its scrollback.
@@ -437,6 +463,7 @@ export default function TerminalView({
       if (files.length === 0) return
       const paths = files.map((f) => escapePath(window.api.getPathForFile(f))).join(' ')
       window.api.sendInput(ptyId, `\x1b[200~${paths}\x1b[201~`)
+      markUsed()
     }
     const onPaste = (e: ClipboardEvent): void => {
       const text = e.clipboardData?.getData('text/plain') ?? ''
@@ -458,7 +485,7 @@ export default function TerminalView({
       host.removeEventListener('drop', onDrop)
       host.removeEventListener('paste', onPaste, true)
     }
-  }, [mountNode, ptyId, fitAndResize])
+  }, [mountNode, ptyId, fitAndResize, markUsed])
 
   // Re-skin the terminal when the app theme flips. xterm applies term.options.theme live (re-reads
   // the palette and repaints), so a running claude session recolors in place — no remount. The

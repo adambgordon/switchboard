@@ -59,6 +59,12 @@ export interface TranscriptMessage {
 }
 
 /** Lightweight metadata for one conversation — what the sidebar list renders. */
+/**
+ * Coarse state of a conversation's latest turn. Named because both the liveness dot and the
+ * live-PTY eviction policy branch on it, and they must branch on the same set of values.
+ */
+export type TurnState = 'in_progress' | 'awaiting' | 'awaiting_input'
+
 export interface ConversationMeta {
   /** UUID; also the JSONL filename stem and the agent's resume token. */
   sessionId: string
@@ -114,7 +120,7 @@ export interface ConversationMeta {
    * ExitPlanMode). Undefined when there are no messages yet. Drives the live dot's
    * working/asking/awaiting/quiet split.
    */
-  turnState?: 'in_progress' | 'awaiting' | 'awaiting_input'
+  turnState?: TurnState
   /** ms epoch when the last turn ended (assistant end_turn / turn_duration), or null. */
   turnEndedAt?: number | null
   /**
@@ -308,6 +314,8 @@ export const IPC = {
   ptyFlowPause: 'pty:flowPause',
   ptyFlowResume: 'pty:flowResume',
   ptySetMaxLive: 'pty:setMaxLive', // renderer -> main: update the live-PTY cap
+  ptyVisible: 'pty:visible', // renderer -> main: which terminals this window has on screen
+  ptyUsed: 'pty:used', // renderer -> main: a person actually typed/pasted into this terminal
   ptyData: 'pty:data', // push (ptyId, data)
   ptyExit: 'pty:exit', // push (ptyId, exitCode)
   ptyBound: 'pty:bound', // per-window push (ptyId, oldSessionId, newSessionId, kind, ownedHere, adoptionToken)
@@ -529,6 +537,10 @@ export interface SwitchboardApi {
   onActiveChanged(cb: (states: PtyState[]) => void): () => void
   /** Update the main-process live-PTY cap (LRU eviction threshold). Fire-and-forget. */
   setMaxLiveSessions(n: number): void
+  /** Report which terminals this window currently has on screen, so they are never reclaimed. */
+  reportVisiblePtys(ptyIds: string[]): void
+  /** Report that a person typed, pasted or dropped into this terminal (throttled by the caller). */
+  reportTerminalUsed(ptyId: string): void
   /** Which agent CLIs are launchable from the login shell. Probed once in main and cached. */
   listAgents(): Promise<AgentAvailability>
 

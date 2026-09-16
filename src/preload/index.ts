@@ -28,6 +28,8 @@ const api: SwitchboardApi = {
   listActive: () => ipcRenderer.invoke(IPC.ptyActiveList),
   onActiveChanged: (cb) => subscribe(IPC.ptyActiveChanged, cb as never),
   setMaxLiveSessions: (n) => ipcRenderer.send(IPC.ptySetMaxLive, n),
+  reportVisiblePtys: (ptyIds) => ipcRenderer.send(IPC.ptyVisible, ptyIds),
+  reportTerminalUsed: (ptyId) => ipcRenderer.send(IPC.ptyUsed, ptyId),
   listAgents: () => ipcRenderer.invoke(IPC.agentsAvailable),
 
   pickDirectory: () => ipcRenderer.invoke(IPC.dialogPickDirectory),

@@ -167,7 +167,8 @@ src/
     updater.ts             self-update: git ls-remote check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
     updateChecks.ts        shared update-check cache, coalescing, and 30-minute background schedule
     sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexSessionIndex · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
-    pty/manager.ts         spawns login shells, types the agent command; output activity → LRU eviction (configurable cap, default 8)
+    pty/manager.ts         spawns login shells, types the agent command; holds the live-session cap (configurable, default 8)
+    pty/evictionPolicy.ts  which live terminal the cap may stop — turn-state and real use, never terminal output
     pty/codexInputNotifications.ts  scans explicit Codex OSC 9 question/approval notifications for live-dot liveness
     pty/agentEnv.ts        removes inherited agent runtime identity while preserving explicit configuration (pure, unit-tested)
     pty/bootCommand.ts     per-agent boot command + Ctrl-E/Ctrl-U line-clear so stray prompt content can't fuse onto it (pure, unit-tested)

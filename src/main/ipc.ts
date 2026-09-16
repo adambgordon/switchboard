@@ -32,6 +32,7 @@ import {
   type TabDropOutcome,
   type TabMenuAction,
   type TabOpenMode,
+  type TurnState,
   type UpdateRunState,
   type WindowInit
 } from '../shared/types'
@@ -109,6 +110,20 @@ export function flushTabWorkspace(): void {
  * size changes. A non-owning window shows the transcript and offers to take the terminal over.
  */
 const ptyOwner = new Map<string, number>()
+
+/**
+ * Which terminals each window currently has ON SCREEN — reported by the renderer, because only it
+ * knows which tab is active in which pane. Kept per window and unioned rather than collapsed on
+ * arrival, so one window's report cannot erase another's, and a closed window's entry can be
+ * dropped wholesale. Feeds the eviction policy, which never takes a terminal being looked at.
+ */
+const visiblePtysByWindow = new Map<number, Set<string>>()
+
+function unionVisiblePtys(): Set<string> {
+  const all = new Set<string>()
+  for (const ids of visiblePtysByWindow.values()) for (const id of ids) all.add(id)
+  return all
+}
 
 /** Supplied by `index.ts`, which owns geometry and first-window bookkeeping. */
 let openWindow: ((init?: WindowInit) => BrowserWindow) | null = null
@@ -357,6 +372,7 @@ export function releaseWindow(webContentsId: number, preserveTabs = false): void
   }
   boundTabReservations.discardWindow(webContentsId)
   if (forgot) emitTabsElsewhere()
+  if (visiblePtysByWindow.delete(webContentsId)) mgr?.setVisiblePtyIds(unionVisiblePtys())
   navigation.closed(webContentsId)
   tabWorkspace?.close(webContentsId, preserveTabs)
   if (released) emitActive()
@@ -476,6 +492,19 @@ const conversationIndex = new LatestTask(
           .map((c) => c.sessionId)
       )
       void mgr.probeCodexIdentity(eligibleCodexIds)
+    }
+    // Turn-state is the only signal that separates a working agent from a resting one, so the
+    // manager needs it to decide which live PTY the cap may stop (see pty/evictionPolicy). Rebuilt
+    // from the same pass rather than tracked incrementally: this snapshot IS the current answer,
+    // and a conversation that drops out of it correctly becomes unknown — hence unevictable.
+    if (mgr) {
+      const turnStates = new Map<string, TurnState>()
+      for (const group of groups) {
+        for (const conversation of group.conversations) {
+          if (conversation.turnState) turnStates.set(conversation.sessionId, conversation.turnState)
+        }
+      }
+      mgr.setTurnStates(turnStates)
     }
     const sig = JSON.stringify(snapshot)
     if (sig !== lastBroadcastSig) {
@@ -679,9 +708,12 @@ export function registerIpc(): void {
   mgr.on('data', (ptyId: string, data: string) =>
     sendToWindow(ptyOwner.get(ptyId) ?? null, IPC.ptyData, ptyId, data)
   )
-  mgr.on('exit', (ptyId: string, code: number | null) => {
+  mgr.on('exit', (ptyId: string, code: number | null, sessionId: string, provisional: boolean) => {
     boundTabReservations.discardPty(ptyId)
     ptyOwner.delete(ptyId)
+    visiblePtysByWindow.forEach((ids) => ids.delete(ptyId))
+    mgr!.setVisiblePtyIds(unionVisiblePtys())
+    if (provisional) navigation.retire(sessionId)
     broadcast(IPC.ptyExit, ptyId, code)
   })
   mgr.on('active-changed', () => emitActive())
@@ -800,6 +832,16 @@ export function registerIpc(): void {
   })
   ipcMain.on(IPC.ptyResize, (e, ptyId: string, cols: number, rows: number) => {
     if (ptyOwner.get(ptyId) === e.sender.id) mgr!.resize(ptyId, cols, rows)
+  })
+  // Deliberately NOT owner-gated, unlike input and resize: those mutate a terminal and must come
+  // from its owner, whereas this only says "this window is showing these", which is true of a
+  // non-owning window displaying a claimable terminal too.
+  ipcMain.on(IPC.ptyVisible, (e, ptyIds: string[]) => {
+    visiblePtysByWindow.set(e.sender.id, new Set(ptyIds))
+    mgr?.setVisiblePtyIds(unionVisiblePtys())
+  })
+  ipcMain.on(IPC.ptyUsed, (e, ptyId: string) => {
+    if (ptyOwner.get(ptyId) === e.sender.id) mgr!.markUsed(ptyId)
   })
   ipcMain.on(IPC.ptyKill, (_e, ptyId: string) => mgr!.kill(ptyId))
   ipcMain.on(IPC.ptyFlowPause, (e, ptyId: string) => {
