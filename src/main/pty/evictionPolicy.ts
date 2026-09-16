@@ -9,7 +9,7 @@ import type { TurnActivity } from '../../shared/turnActivity'
  * permanent one would be a way to exceed the cap without limit — the mistake this policy is
  * written to avoid. Generous against a window that normally closes in seconds.
  */
-export const UNATTRIBUTED_GRACE_MS = 3 * 60_000
+export const UNATTRIBUTED_GRACE_MS = 10 * 60_000
 
 /** One live PTY, reduced to the facts the eviction decision rests on. */
 export interface EvictionCandidate {
