@@ -32,7 +32,6 @@ import {
   type TabDropOutcome,
   type TabMenuAction,
   type TabOpenMode,
-  type TurnState,
   type UpdateRunState,
   type WindowInit
 } from '../shared/types'
@@ -64,6 +63,7 @@ import { TranscriptLoader, type TranscriptSource } from './transcriptLoader'
 import { loadTabWorkspace, TabWorkspaceStore } from './tabWorkspaceStore'
 import { NavigationCoordinator } from './navigation'
 import type { NavigationVisit } from '../shared/navigation'
+import type { TurnSnapshot } from '../shared/turnActivity'
 
 const PROJECTS_ROOT = join(os.homedir(), '.claude', 'projects')
 
@@ -493,18 +493,26 @@ const conversationIndex = new LatestTask(
       )
       void mgr.probeCodexIdentity(eligibleCodexIds)
     }
-    // Turn-state is the only signal that separates a working agent from a resting one, so the
+    // The transcript is the only signal that separates a working agent from a resting one, so the
     // manager needs it to decide which live PTY the cap may stop (see pty/evictionPolicy). Rebuilt
     // from the same pass rather than tracked incrementally: this snapshot IS the current answer,
-    // and a conversation that drops out of it correctly becomes unknown — hence unevictable.
+    // and a conversation that drops out of it correctly becomes unattributable again.
+    //
+    // `lastActivityAt` is carried even when there is no turn-state, because the pair is what
+    // `resolveTurnActivity` needs — the timestamp is what distinguishes a live turn from one a
+    // previous process abandoned, and sending only the state would protect every resumed
+    // interrupted session forever.
     if (mgr) {
-      const turnStates = new Map<string, TurnState>()
+      const snapshots = new Map<string, TurnSnapshot>()
       for (const group of groups) {
         for (const conversation of group.conversations) {
-          if (conversation.turnState) turnStates.set(conversation.sessionId, conversation.turnState)
+          snapshots.set(conversation.sessionId, {
+            turnState: conversation.turnState,
+            lastActivityAt: conversation.lastActivityAt
+          })
         }
       }
-      mgr.setTurnStates(turnStates)
+      mgr.setTurnSnapshots(snapshots)
     }
     const sig = JSON.stringify(snapshot)
     if (sig !== lastBroadcastSig) {
@@ -708,11 +716,14 @@ export function registerIpc(): void {
   mgr.on('data', (ptyId: string, data: string) =>
     sendToWindow(ptyOwner.get(ptyId) ?? null, IPC.ptyData, ptyId, data)
   )
+  // Deliberately touches no manager: `disposeIpc` kills every PTY and then clears `mgr`, while
+  // node-pty delivers the resulting exits asynchronously — so anything dereferencing it here throws
+  // during quit. Nothing needs to: a dead ptyId left in the visible set can never match a future
+  // one, since ids are freshly generated and never reused, and the eviction policy only ever reads
+  // that set for PTYs currently alive.
   mgr.on('exit', (ptyId: string, code: number | null, sessionId: string, provisional: boolean) => {
     boundTabReservations.discardPty(ptyId)
     ptyOwner.delete(ptyId)
-    visiblePtysByWindow.forEach((ids) => ids.delete(ptyId))
-    mgr!.setVisiblePtyIds(unionVisiblePtys())
     if (provisional) navigation.retire(sessionId)
     broadcast(IPC.ptyExit, ptyId, code)
   })

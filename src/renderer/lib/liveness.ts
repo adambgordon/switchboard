@@ -2,31 +2,15 @@
 // renderer otherwise isn't). Imports the shared contract by RELATIVE path (not the `@shared`
 // alias) so vitest, which has no alias config, resolves it; the import is type-only anyway.
 import type { ConversationMeta, LiveState } from '../../shared/types'
+import { inputRequestedAt, isStaleTurnCarryover } from '../../shared/turnActivity'
 
 /**
- * Is this `in_progress` turn a CARRYOVER from a dead process rather than live work?
- *
- * The PtyManager wraps a login shell and types `claude` into it, so a session can be "live"
- * (shell pty alive) yet show a turn that belongs to a PRIOR claude run: you quit/kill Switchboard
- * mid-turn (which writes no `[Request interrupted]` sentinel — unlike Esc), then later **resume**
- * the session. Resume spawns a brand-new process; the resumed claude just replays history and
- * sits idle at its prompt — it never finishes that dangling turn — so the dot would breathe
- * forever.
- *
- * The tell: anything the CURRENT process actually does is timestamped AFTER it started. So if the
- * last real activity (`lastActivityAt`) predates the live process's spawn (`liveStartedAt`), the
- * turn was written by an earlier, now-dead process → it isn't live work. A genuinely working turn
- * — including a multi-minute tool still running — has activity AFTER spawn, so it's never flagged
- * (no special-casing of tool_use vs tool_result needed). `liveStartedAt` is the live
- * `PtyState.startedAt`; null when the row isn't live (no demotion — and no dot anyway).
+ * Both rules below are the SHARED ones in `shared/turnActivity.ts` — the live-session cap reads
+ * the same two, because a session cannot be idle for one consumer and busy for another. These are
+ * thin `ConversationMeta` adapters over them, nothing more; put any change to the rules there.
  */
 function isStaleCarryover(meta: ConversationMeta | undefined, liveStartedAt: number | null): boolean {
-  return (
-    meta?.turnState === 'in_progress' &&
-    liveStartedAt != null &&
-    meta.lastActivityAt != null &&
-    liveStartedAt > meta.lastActivityAt
-  )
+  return isStaleTurnCarryover(meta, liveStartedAt)
 }
 
 /**
@@ -40,22 +24,12 @@ export function isManualUnread(markedAt: number | undefined, meta: ConversationM
   return endedAt <= markedAt
 }
 
-/**
- * Timestamp of the current user-input request, if any. A structured transcript question remains
- * authoritative; otherwise a Codex OSC notification is current only until newer rollout activity
- * appears. This deliberately ignores generic PTY activity and user keystrokes.
- */
+/** See the note above `isStaleCarryover`: the rule itself lives in `shared/turnActivity.ts`. */
 export function currentInputRequestedAt(
   meta: ConversationMeta | undefined,
   runtimeInputRequestedAt: number | null
 ): number | null {
-  if (meta?.turnState === 'awaiting_input') {
-    return Math.max(meta.lastActivityAt ?? 0, runtimeInputRequestedAt ?? 0)
-  }
-  const parsedActivityAt = meta?.lastActivityAt ?? 0
-  return runtimeInputRequestedAt != null && runtimeInputRequestedAt > parsedActivityAt
-    ? runtimeInputRequestedAt
-    : null
+  return inputRequestedAt(meta, runtimeInputRequestedAt)
 }
 
 /**

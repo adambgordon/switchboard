@@ -1,11 +1,22 @@
-import type { TurnState } from '../../shared/types'
+import type { TurnActivity } from '../../shared/turnActivity'
+
+/**
+ * How long a USED terminal with no attributable transcript stays protected after its last use.
+ *
+ * It exists for one window: a first turn has been submitted, but the conversation it created is
+ * not yet attributable to this terminal, so nothing can say the agent is working. Stopping it
+ * there destroys live work. The protection is time-bounded rather than absolute because a
+ * permanent one would be a way to exceed the cap without limit — the mistake this policy is
+ * written to avoid. Generous against a window that normally closes in seconds.
+ */
+export const UNATTRIBUTED_GRACE_MS = 3 * 60_000
 
 /** One live PTY, reduced to the facts the eviction decision rests on. */
 export interface EvictionCandidate {
   ptyId: string
   /**
-   * ms epoch of the last keystroke sent to this terminal, seeded to its spawn time so a terminal
-   * that has never been typed into is not automatically the oldest.
+   * ms epoch of the last time a person used this terminal, seeded to its spawn time so one that
+   * has never been used is not automatically the oldest.
    */
   lastInputAt: number
   /**
@@ -14,8 +25,14 @@ export interface EvictionCandidate {
    * millisecond as the spawn. Affects only ORDER, never whether a terminal can be reclaimed.
    */
   used: boolean
-  /** The turn-state of the conversation this terminal is known to own; undefined when none is. */
-  turnState: TurnState | undefined
+  /**
+   * What the session is doing, RESOLVED — `shared/turnActivity.ts#resolveTurnActivity`, the same
+   * derivation the liveness dot uses. Deliberately not the raw `turnState`: that reads
+   * `in_progress` for a turn abandoned by a previous process (so a resumed interrupted session
+   * would be protected forever) and `awaiting` for a terminal holding an unanswered runtime
+   * question (so the prompt would be discarded). Both corrections live in that one module.
+   */
+  activity: TurnActivity
   /** Showing in some window's pane right now, in any window. */
   onScreen: boolean
 }
@@ -28,23 +45,27 @@ export interface EvictionCandidate {
  * permission, because any rule that protects a terminal forever is a way to exceed the cap without
  * limit: whatever the rule is, a user can keep making terminals that satisfy it.
  *
- * The three protected cases are protected because stopping them destroys something that exists
- * nowhere else: `in_progress` is a turn mid-flight, `awaiting_input` is a question whose prompt
- * lives only in that terminal, and an on-screen terminal is one being looked at — a pane going
- * blank reads as a glitch even when nothing is lost. None of these can be sustained indefinitely
- * across many terminals the way an idle one can.
+ * The protected cases are protected because stopping them destroys something that exists nowhere
+ * else: `working` is a turn mid-flight, `asking` is a question whose prompt lives only in that
+ * terminal, and an on-screen terminal is one being looked at — a pane going blank reads as a
+ * glitch even when nothing is lost. None can be sustained indefinitely across many terminals the
+ * way an idle one can, which is what makes them safe to treat as absolute.
  *
  * The tiers rank by WHAT IS LOST, not by age:
  *
- * 0. No conversation and never used — an empty terminal. Nothing to come back to.
- * 1. A finished turn. The transcript is on disk, so stopping it costs only the running process.
- * 2. No conversation but used — possibly an unsent message, or a shell the agent exited to. Last
+ * 0. Unattributable and never used — an empty terminal. Nothing to come back to.
+ * 1. Idle. The transcript is on disk, so stopping it costs only the running process.
+ * 2. Unattributable but used — possibly an unsent message, or a shell the agent exited to. Last
  *    resort, because this is the only tier whose content exists nowhere but in that terminal.
+ *    Held out of reach entirely for {@link UNATTRIBUTED_GRACE_MS} after its last use.
  */
-function tierOf(candidate: EvictionCandidate): number | null {
+function tierOf(candidate: EvictionCandidate, now: number): number | null {
   if (candidate.onScreen) return null
-  if (candidate.turnState === 'in_progress' || candidate.turnState === 'awaiting_input') return null
-  if (candidate.turnState === undefined) return candidate.used ? 2 : 0
+  if (candidate.activity === 'working' || candidate.activity === 'asking') return null
+  if (candidate.activity === 'unknown') {
+    if (!candidate.used) return 0
+    return now - candidate.lastInputAt < UNATTRIBUTED_GRACE_MS ? null : 2
+  }
   return 1
 }
 
@@ -61,21 +82,24 @@ function tierOf(candidate: EvictionCandidate): number | null {
  * conversation however much older that conversation is, and a terminal that may hold unsent text
  * goes last of all. Within a tier the least recently used goes first.
  *
- * **Both inputs are transcript- or use-derived, never terminal output.** Output cannot separate a
- * working agent from a resting one: an agent TUI may repaint on a fixed timer whether or not
- * anything is happening, which makes a terminal untouched for hours indistinguishable from one
- * mid-task. That is also why recency counts real use rather than bytes written — a repaint tick
+ * **No input is terminal output.** Output cannot separate a working agent from a resting one: an
+ * agent TUI may repaint on a fixed timer whether or not anything is happening, which makes a
+ * terminal untouched for hours indistinguishable from one mid-task. That is why `activity` comes
+ * from the transcript and why recency counts real use rather than bytes written — a repaint tick
  * would keep resetting it forever, and so would the terminal answering the program's own queries.
+ *
+ * `now` is passed rather than read so the grace window is testable without a clock.
  */
 export function chooseEvictionTargets(
   candidates: readonly EvictionCandidate[],
-  maxLive: number
+  maxLive: number,
+  now: number
 ): string[] {
   // The caller is about to add one, so the set has to end up at maxLive INCLUDING the newcomer.
   const needed = candidates.length + 1 - maxLive
   if (needed <= 0) return []
   return candidates
-    .map((candidate) => ({ candidate, tier: tierOf(candidate) }))
+    .map((candidate) => ({ candidate, tier: tierOf(candidate, now) }))
     .filter((ranked): ranked is { candidate: EvictionCandidate; tier: number } => ranked.tier !== null)
     .sort((a, b) => a.tier - b.tier || a.candidate.lastInputAt - b.candidate.lastInputAt)
     .slice(0, needed)

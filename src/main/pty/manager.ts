@@ -6,9 +6,9 @@ import {
   type AgentKind,
   type PtyBindKind,
   type PtySession,
-  type PtyStatus,
-  type TurnState
+  type PtyStatus
 } from '../../shared/types'
+import { resolveTurnActivity, type TurnSnapshot } from '../../shared/turnActivity'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
 import { chooseEvictionTargets } from './evictionPolicy'
@@ -199,15 +199,18 @@ export class PtyManager extends EventEmitter {
   }
 
   /**
-   * Latest transcript turn-state per conversation, pushed from the conversation index — the only
-   * signal that can tell a working agent from a resting one (see evictionPolicy). A session absent
-   * from the map has no known state and is therefore never evicted, which is also what holds before
-   * the first index lands.
+   * Latest transcript facts per conversation, pushed from the conversation index — the only signal
+   * that can tell a working agent from a resting one (see evictionPolicy). `lastActivityAt` rides
+   * along because `turnState` alone cannot: an `in_progress` turn abandoned by a previous process
+   * stays `in_progress` forever, and only the timestamp reveals it as a carryover.
+   *
+   * A session absent from the map resolves to `unknown` rather than idle — it is a terminal with no
+   * transcript we can attribute, which the policy treats differently from a resting one.
    */
-  private turnStates = new Map<string, TurnState>()
+  private turnSnapshots = new Map<string, TurnSnapshot>()
 
-  setTurnStates(states: Map<string, TurnState>): void {
-    this.turnStates = states
+  setTurnSnapshots(snapshots: Map<string, TurnSnapshot>): void {
+    this.turnSnapshots = snapshots
   }
 
   /**
@@ -726,10 +729,18 @@ export class PtyManager extends EventEmitter {
         ptyId: l.ptyId,
         lastInputAt: l.lastInputAt,
         used: l.usedByUser,
-        turnState: this.turnStates.get(l.sessionId),
+        // Resolved through the SHARED rules, so the cap and the liveness dot cannot disagree about
+        // whether a session is working. `startedAt` is what exposes a carryover turn; the runtime
+        // request is what exposes a question the transcript never recorded.
+        activity: resolveTurnActivity(
+          this.turnSnapshots.get(l.sessionId),
+          l.startedAt,
+          l.inputRequestedAt
+        ),
         onScreen: this.visiblePtyIds.has(l.ptyId)
       })),
-      this.maxLive
+      this.maxLive,
+      Date.now()
     )
     for (const ptyId of targets) this.kill(ptyId)
   }

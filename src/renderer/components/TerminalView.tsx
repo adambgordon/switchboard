@@ -150,7 +150,10 @@ export default function TerminalView({
   const replayFollowUntilRef = useRef(0)
   const replayFollowTimerRef = useRef<number | null>(null)
   const restoringHandoffRef = useRef(false)
-  const lastUsedReportRef = useRef(0)
+  // -Infinity, not 0: `performance.now()` counts from page load, so a zero start would compare the
+  // first report against the renderer's own age and swallow every use during its first throttle
+  // window — silently, and with no trailing flush to recover it.
+  const lastUsedReportRef = useRef(Number.NEGATIVE_INFINITY)
 
   /**
    * "A person used this terminal", which decides whether the live-session cap may reclaim it.
@@ -158,8 +161,11 @@ export default function TerminalView({
    * Deliberately NOT derived from `onData`: xterm answers an agent's startup terminal queries
    * (device attributes, cursor position) through that same channel, so treating written bytes as
    * input marks every terminal used within milliseconds of booting — and then no untouched terminal
-   * is ever reclaimable. Callers are the keyboard, paste and drop handlers, which are the only
-   * places a person is unambiguously responsible.
+   * is ever reclaimable.
+   *
+   * Callers must therefore cover every way a person supplies input, and `onKey` alone does not:
+   * pasted text and an IME composition commit both reach the process without a key event. Missing
+   * one means a terminal holding a real draft is ranked as empty and discarded first.
    *
    * Throttled because the cap orders by recency in minutes: per-keystroke precision buys nothing and
    * this sits on the typing path.
@@ -470,7 +476,15 @@ export default function TerminalView({
       if (!text) {
         e.preventDefault()
         e.stopImmediatePropagation()
+        return
       }
+      // xterm handles the paste itself and emits it through `onData`, which fires no key event —
+      // so without this a pasted draft leaves the terminal looking untouched.
+      markUsed()
+    }
+    // An IME commit likewise reaches the process without a key event.
+    const onCompositionEnd = (e: CompositionEvent): void => {
+      if (e.data) markUsed()
     }
     const raf = requestAnimationFrame(fitWhenReady)
     const ro = new ResizeObserver(fitWhenReady)
@@ -478,12 +492,14 @@ export default function TerminalView({
     host.addEventListener('dragover', onDragOver)
     host.addEventListener('drop', onDrop)
     host.addEventListener('paste', onPaste, true)
+    host.addEventListener('compositionend', onCompositionEnd, true)
     return () => {
       cancelAnimationFrame(raf)
       ro.disconnect()
       host.removeEventListener('dragover', onDragOver)
       host.removeEventListener('drop', onDrop)
       host.removeEventListener('paste', onPaste, true)
+      host.removeEventListener('compositionend', onCompositionEnd, true)
     }
   }, [mountNode, ptyId, fitAndResize, markUsed])
 
