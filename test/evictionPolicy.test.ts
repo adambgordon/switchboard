@@ -152,19 +152,17 @@ describe('chooseEvictionTargets', () => {
   })
 
   it('gives an unattributable used terminal no protection beyond the recent-use window', () => {
-    // A longer grace lived here and was REMOVED. It was written for the seconds between submitting
-    // a first turn and its conversation becoming attributable — which the recency guard below
-    // already covers for every activity — but in practice it caught a terminal merely typed into
-    // and never submitted, a state that never resolves, so a half-written line held a slot for as
-    // long as the user kept touching it. Past the recency window it is reclaimable; its rank, not a
-    // timer, is what keeps it safe.
+    // The recency window is the ONLY protection such a terminal gets. A longer one would hold a
+    // slot for as long as the user kept touching a half-written line, because typed-but-never-
+    // submitted never resolves on its own — so past the window it is reclaimable, and its rank
+    // rather than a timer is what keeps it safe.
     const typedLongAgo = unsent('draft', NOW - RECENT_USE_GRACE_MS)
     expect(choose([typedLongAgo, doing('busy', NOW, 'working')], 2)).toEqual(['draft'])
   })
 
   it('still takes a possible draft only as the last resort', () => {
-    // The replacement for that grace. Ordered so age argues the other way: the draft is the OLDEST
-    // candidate, so a rule that sorted by recency alone would take it first.
+    // That rank, asserted. Ordered so age argues the other way: the draft is the OLDEST candidate,
+    // so a rule that sorted by recency alone would take it first.
     const live = [unsent('draft', 100), idle('convo', 500), empty('never-used', 900)]
     expect(choose(live, 1)).toEqual(['never-used', 'convo', 'draft'])
   })
@@ -204,8 +202,7 @@ describe('chooseEvictionTargets', () => {
 
   it('ranks a lapsed question like the finished turn it sits on, not like an empty terminal', () => {
     // Lapsing removes the veto; it does not reclassify what the terminal holds. The transcript still
-    // shows a conversation, so an empty terminal goes first — and this is what a mutation collapsing
-    // the two would break.
+    // shows a conversation, so an empty terminal goes first — the two tiers must stay distinct.
     const asked = { ...idle('asked', 100), activity: 'asking' as const, askedAt: 0 }
     expect(choose([asked, empty('blank', 900)], 2, STALE_REQUEST_MS)).toEqual(['blank'])
   })

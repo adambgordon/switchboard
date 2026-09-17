@@ -329,11 +329,10 @@ export class ClaudeParkedJobMonitor {
     // only a spawn in that window could act on it), which is the safe direction to be wrong in.
     //
     // **The retraction is the EMPTY MAP, and the ordering is what delivers it.** A failed `readdir`
-    // throws before either map is filled, so the plain lookup below already yields null; running
-    // this loop BEFORE the return is the entire fix. Testing `readable` here as well was tried and
-    // removed — a mutation run showed it changed nothing, because there is no path that reaches this
-    // loop with an unreadable registry and a populated map. Do not "restore" it, and do not move
-    // this loop below the return.
+    // throws before either map is filled, so the plain lookup below already yields null. Running
+    // this loop ABOVE the return is therefore the whole mechanism — no path reaches it with an
+    // unreadable registry and a populated map, so testing `readable` here would add nothing. Do not
+    // move this loop below the return.
     for (const [ptyId, controller] of this.controllers) {
       const status = statusBySession.get(controller.sessionId) ?? null
       if (controller.reportedStatus === status) continue

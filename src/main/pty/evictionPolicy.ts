@@ -101,12 +101,12 @@ function tierOf(candidate: EvictionCandidate, now: number): number | null {
   // a moment ago. Gated on `used` — an untouched terminal holds nothing whenever it was opened, so
   // extending this to one would briefly make a burst of new conversations unreclaimable.
   if (candidate.used && now - candidate.lastInputAt < RECENT_USE_GRACE_MS) return null
-  // No grace beyond that 30 seconds, deliberately. A longer window was tried and removed: it was
-  // written for the seconds between submitting a first turn and its conversation becoming
-  // attributable, which the recency guard above already covers for every tier — while in practice it
-  // caught a terminal merely TYPED INTO and never submitted, a state that never resolves on its own,
-  // so a half-written line held a slot for as long as the user kept touching it. What protects a
-  // possible draft is its rank, not a timer: tier 2 goes after every empty terminal and every
+  // No grace beyond that 30 seconds, and do not add one here. A longer window would be reaching for
+  // the gap between submitting a first turn and its conversation becoming attributable, which the
+  // recency guard above already covers for every tier — while what it would actually catch is a
+  // terminal merely TYPED INTO and never submitted, a state that never resolves on its own, so a
+  // half-written line would hold a slot for as long as the user kept touching it. What protects a
+  // possible draft is its RANK, not a timer: tier 2 goes after every empty terminal and every
   // finished conversation, and is reached only when it is the last candidate left.
   if (candidate.activity === 'unknown') return candidate.used ? 2 : 0
   return 1

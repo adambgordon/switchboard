@@ -54,9 +54,9 @@ import type { TurnSnapshot } from '../src/shared/turnActivity'
 const CWD = '/repo'
 /**
  * Session ids for the registry fixtures. Claude's records are keyed by a real session UUID and the
- * parser rejects anything else — the short ids the rest of this suite uses look fine to the manager
- * but are silently unmatchable here, which is exactly how these tests first passed for the wrong
- * reason (every status arrived as null).
+ * parser rejects anything else, so the short ids the rest of this suite uses satisfy the manager but
+ * are silently unmatchable here — a registry fixture must use these, or every status arrives as null
+ * and the assertion holds for the wrong reason.
  */
 const S1 = '6aa9d622-7904-479f-99c5-343458067a72'
 const S2 = '5364d27e-bc41-4d50-95a6-74e708ac6069'
