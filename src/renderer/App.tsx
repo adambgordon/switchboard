@@ -25,6 +25,7 @@ import { useLiveOrder } from './lib/useLiveOrder'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
 import { viewToggleAction } from './lib/viewToggle'
+import { useTabLayout } from './lib/useTabLayout'
 import {
   canPersistTabWorkspace,
   restoredWorkspaceApplied,
@@ -223,6 +224,7 @@ export default function App() {
   // before tabs existed. So the flag gates only the strip's presence, the promotion gestures, and the
   // split / window commands; nothing below asks about it. See useTabsEnabled.
   const { enabled: tabsEnabled, setEnabled: setTabsEnabled } = useTabsEnabled()
+  const { tabLayout, setTabLayout } = useTabLayout()
   const panes = usePaneLayout(tabsEnabled ? windowInit.restoredTabs : null, hiddenSessionIds)
   const { layout: paneLayout } = panes
   const [tabWorkspaceReady, setTabWorkspaceReady] = useState(
@@ -1606,11 +1608,17 @@ export default function App() {
         }
         return
       }
-      const viewAction = viewToggleAction(e, effectiveView, focusedView.terminalAt)
-      if (viewAction !== null && selectedId && selectedPty) {
+      const viewAction = viewToggleAction(
+        e,
+        effectiveView,
+        focusedView.terminalAt ?? (selectedMeta ? 'resumable' : null)
+      )
+      if (viewAction !== null && selectedId) {
         e.preventDefault()
-        if (viewAction === 'claim') {
-          claimTerminal(selectedPty.ptyId, paneLayout.focusIndex)
+        if (viewAction === 'resume') {
+          if (selectedMeta) void resume(selectedMeta, paneLayout.focusIndex)
+        } else if (viewAction === 'claim') {
+          if (selectedPty) claimTerminal(selectedPty.ptyId, paneLayout.focusIndex)
         } else {
           chooseSessionView(selectedId, viewAction)
           requestFocus(selectedId)
@@ -1910,6 +1918,7 @@ export default function App() {
                     if (v.pty) claimTerminal(v.pty.ptyId, i)
                   }}
                   showTabs={tabsEnabled}
+                  tabLayout={tabLayout}
                   tabs={tabsByPane[i] ?? []}
                   activeTabIndex={pane.activeIndex}
                   onActivateTab={goToTab}
@@ -2006,6 +2015,8 @@ export default function App() {
         onSetMarkdownCopy={setMarkdownCopy}
         tabsEnabled={tabsEnabled}
         onSetTabsEnabled={setTabsEnabled}
+        tabLayout={tabLayout}
+        onSetTabLayout={setTabLayout}
       />
       <ConversationInfoModal
         open={visibleInfoModal !== null}

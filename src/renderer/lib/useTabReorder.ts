@@ -1,11 +1,14 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { makeTabDragPayload } from '@shared/tabDrag'
+import type { TabLayout } from './tabLayoutPreference'
+import { tabEdgeScrollSpeed } from './tabScroll'
 import {
   groupDragFollowerIndices,
   groupDragIndices,
   isGroupOriginDrop,
   pointInRect,
   tabCaretIndex,
+  tabCaretPosition,
   tabDropIndex
 } from './dropTarget'
 
@@ -38,6 +41,7 @@ import {
 const DRAG_THRESHOLD = 4
 
 export interface TabReorderOpts {
+  layout: TabLayout
   /** Which pane this strip belongs to. */
   paneIndex: number
   /** Session ids in this strip, in display order — resolves the pressed tab to an index. */
@@ -93,6 +97,9 @@ export function useTabReorder(
     let overStrip: HTMLElement | null = null
     let target: { pane: number; index: number } | null = null
     let moveFrame: number | null = null
+    let edgeFrame: number | null = null
+    let edgeTime = 0
+    let edgeRemainder = 0
     let latestX = 0
     let latestY = 0
     let suppressClick = false
@@ -153,8 +160,7 @@ export function useTabReorder(
       // leading edge of the tab it would push along.
       const atEnd = index >= rects.length
       const r = atEnd ? rects[rects.length - 1] : rects[index]
-      const x = (atEnd ? r.right : r.left) - box.left
-      const y = r.top - box.top + strip.scrollTop
+      const { x, y } = tabCaretPosition(r, box, atEnd, strip.scrollLeft, strip.scrollTop)
       caret.style.transform = `translate(${x}px, ${y}px)`
       caret.style.height = `${r.height}px`
     }
@@ -204,9 +210,37 @@ export function useTabReorder(
       drawCaret(el, rects, tabCaretIndex(origin, rects.length, sourceSkippedIndices, origin))
     }
 
+    const scrollAtEdge = (time: number): void => {
+      edgeFrame = null
+      if (!dragging || !overStrip || overStrip.dataset.layout !== 'scroll') return
+      const box = overStrip.getBoundingClientRect()
+      if (!pointInRect(box, latestX, latestY)) return
+      const speed = tabEdgeScrollSpeed(latestX, box.left, box.right)
+      const before = overStrip.scrollLeft
+      const maxScroll = overStrip.scrollWidth - overStrip.clientWidth
+      if (!speed || (speed < 0 ? before <= 0 : before >= maxScroll)) return
+      // Bound a delayed frame so returning from an inactive window cannot jump the whole strip.
+      const delta = edgeRemainder + speed * Math.min(time - edgeTime, 32) / 1000
+      overStrip.scrollLeft += delta
+      // Keep subpixel movement across frames; a slow edge drag may round to zero on one frame.
+      edgeRemainder = delta - (overStrip.scrollLeft - before)
+      edgeTime = time
+      if (overStrip.scrollLeft !== before) updateTarget(latestX, latestY)
+      edgeFrame = requestAnimationFrame(scrollAtEdge)
+    }
+
+    const startEdgeScroll = (): void => {
+      if (edgeFrame != null) return
+      edgeTime = performance.now()
+      edgeRemainder = 0
+      edgeFrame = requestAnimationFrame(scrollAtEdge)
+    }
+
     const finish = (): void => {
       if (moveFrame != null) cancelAnimationFrame(moveFrame)
       moveFrame = null
+      if (edgeFrame != null) cancelAnimationFrame(edgeFrame)
+      edgeFrame = null
       clone?.remove()
       clone = null
       dropCaret()
@@ -333,6 +367,7 @@ export function useTabReorder(
             clone.style.transform = `translate3d(${latestX - startX}px, ${latestY - startY}px, 0)`
           }
           updateTarget(latestX, latestY)
+          startEdgeScroll()
         })
       }
     }
@@ -400,6 +435,14 @@ export function useTabReorder(
       onPointerCancel()
     }
 
+    // Wheel scrolling during pointer capture also moves the target geometry beneath a still pointer.
+    const onScroll = (event: Event): void => {
+      if (dragging && event.target instanceof HTMLElement && event.target.matches('.sb-tabstrip')) {
+        updateTarget(latestX, latestY)
+        startEdgeScroll()
+      }
+    }
+
     const onClickCapture = (ev: MouseEvent): void => {
       if (!suppressClick) return
       ev.stopPropagation()
@@ -413,6 +456,7 @@ export function useTabReorder(
     el.addEventListener('pointercancel', onPointerCancel)
     el.addEventListener('lostpointercapture', onLostCapture)
     el.addEventListener('click', onClickCapture, true)
+    document.addEventListener('scroll', onScroll, true)
     return () => {
       el.removeEventListener('pointerdown', onPointerDown)
       el.removeEventListener('pointermove', onPointerMove)
@@ -420,8 +464,9 @@ export function useTabReorder(
       el.removeEventListener('pointercancel', onPointerCancel)
       el.removeEventListener('lostpointercapture', onLostCapture)
       el.removeEventListener('click', onClickCapture, true)
+      document.removeEventListener('scroll', onScroll, true)
       if (dragging) window.api.tabDragCancel()
       finish()
     }
-  }, [stripRef])
+  }, [stripRef, opts.layout])
 }

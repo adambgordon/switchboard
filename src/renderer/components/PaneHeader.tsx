@@ -213,7 +213,7 @@ export default function PaneHeader({
           <button
             className="sb-btn-resume"
             onClick={onResume}
-            data-tip="Resume session (⏎)"
+            data-tip="Resume session (⏎ or ⌘J)"
             aria-label="Resume session"
           >
             <Play size={12} />

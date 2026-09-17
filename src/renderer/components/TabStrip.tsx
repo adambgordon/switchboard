@@ -1,5 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type MouseEvent } from 'react'
-import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
+import { useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
+import { useTabStripScroll } from '../lib/useTabStripScroll'
+import { TAB_SCROLL_EDGE } from '../lib/tabScroll'
+import type { TabLayout } from '../lib/tabLayoutPreference'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { useTabReorder } from '../lib/useTabReorder'
 import type { LiveDotClass } from '../lib/rowIdentity'
@@ -24,6 +26,7 @@ export interface TabDescriptor {
 }
 
 interface Props {
+  layout: TabLayout
   paneIndex: number
   tabs: TabDescriptor[]
   activeIndex: number
@@ -156,17 +159,12 @@ function Tab({
       onContextMenu={onContextMenu}
     >
       <span className="sb-tab-title truncate">{tab.title}</span>
-      {/* The dot's slot exists ONLY when there is a dot. It used to be reserved unconditionally, so
-          the close button always had somewhere to appear without resizing the tab — but that left
-          every not-live tab carrying ~30px of permanent dead space to hold a button that is not
-          there. The button is positioned against the tab's own right edge instead (see CSS): over the
-          gutter when one exists, over the title's tail when it does not. Nothing reflows either way,
-          and the tail it covers is the ellipsis on any title long enough to need one. */}
-      {tab.dot && (
-        <span className="sb-tab-gutter">
+      {/* Reserve the dot/close slot even when stopped so liveness cannot resize or rewrap tabs. */}
+      <span className="sb-tab-gutter">
+        {tab.dot && (
           <span ref={dotRef} className={`sb-dot ${tab.dot}`} aria-label="live" role="img" />
-        </span>
-      )}
+        )}
+      </span>
       <button
         className="sb-tab-close"
         // The tooltip is generic while the accessible name is specific: the tip appears under the
@@ -194,11 +192,8 @@ function Tab({
  * means destructive, and "this tab is selected" is neither. The only cobalt here is the shared
  * `.sb-dot`, which means what it means everywhere else.
  *
- * Tabs WRAP into rows rather than scrolling sideways. A horizontal strip hides its overflow behind an
- * edge, so the tab you want is both invisible and in an unknown direction; wrapped rows keep every
- * tab addressable at a glance, which is the whole reason to have tabs instead of just the rail. Rows
- * are capped (`--tab-rows`) so a pane full of tabs cannot eat the content beneath it — past the cap
- * the strip scrolls vertically, and the active tab is kept in view.
+ * Tabs wrap by default, capped at `--tab-rows`, or scroll in one horizontal row. Either layout keeps
+ * the active tab in view when selected; horizontal edge fades show where more tabs remain.
  *
  * Deliberately NOT copied from the editors this borrows from: moving the active tab's row to the
  * bottom. It buys a seam between the tab and the pane, and costs having tabs rearrange themselves
@@ -210,6 +205,7 @@ function Tab({
  * from under it cannot close it.
  */
 export default function TabStrip({
+  layout,
   paneIndex,
   tabs,
   activeIndex,
@@ -236,6 +232,7 @@ export default function TabStrip({
   // Dragging: reorder here, move to the other pane, move to another window, or off into a new one.
   // The strip's own tab order is derived rather than passed — it is already in `tabs`.
   useTabReorder(stripRef, {
+    layout,
     paneIndex,
     order: tabs.map((t) => t.sessionId),
     // Any tab can be dragged, including a pane's only one: it cannot be reordered, but moving it to
@@ -246,43 +243,10 @@ export default function TabStrip({
     targetsFor: (sessionId) => onResolveTargets(paneIndex, sessionId),
     onLeaveWindow: onTabLeftWindow
   })
-  // Past the row cap the strip becomes a vertical scroller, and it carries the same hide-at-rest
-  // behavior as every other scroller in the app.
-  useAutoHideScrollbar(stripRef)
-
   const overflowGeometryKey = JSON.stringify(
-    tabs.map((tab) => [tab.sessionId, tab.title, tab.preview, !!tab.dot])
+    tabs.map((tab) => [tab.sessionId, tab.title, tab.preview])
   )
-  const keepActiveVisible = (): void => {
-    const active = stripRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
-    active?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }
-  // Chromium's custom vertical scrollbar consumes an inline lane even when there is nothing to
-  // scroll. Mark real overflow before paint so CSS can collapse that idle lane without making tabs
-  // jump when a working scrollbar is actually needed. ResizeObserver covers pane resizing and wrap
-  // changes; the key covers only tab properties that can alter geometry. Activation is deliberately
-  // absent, so selecting a tab never forces a synchronous layout read or rebuilds the observer.
-  useLayoutEffect(() => {
-    const el = stripRef.current
-    if (!el) return
-    const update = (): void => {
-      el.classList.toggle('is-overflowing', el.scrollHeight - el.clientHeight > 1)
-      keepActiveVisible()
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [overflowGeometryKey])
-
-  // Keep the active tab visible when the rows overflow the cap — otherwise ⌘1-9, ⌥⌘←/→, and opening
-  // a conversation from the rail can all select a tab in a row that is scrolled out of sight, leaving
-  // the strip looking as though nothing happened. Queried from the DOM rather than threaded through a
-  // ref: the selected tab is already marked for assistive technology, so there is one source for it.
-  // `nearest` on both axes so this scrolls the minimum, and never the pane behind it.
-  useEffect(() => {
-    keepActiveVisible()
-  }, [activeIndex, tabs.length])
+  useTabStripScroll(stripRef, layout, overflowGeometryKey, tabs[activeIndex]?.sessionId)
 
   const navigateFrom = (index: number, delta: number): void => {
     if (tabs.length === 0) return
@@ -322,42 +286,48 @@ export default function TabStrip({
 
   return (
     <div
-      className="sb-tabstrip sb-autoscroll"
-      ref={stripRef}
-      role="tablist"
-      // Read by the drag hook when it hit-tests every strip in the window: a drop has to resolve to a
-      // pane, and the DOM is where both strips are visible to each other.
-      data-pane={paneIndex}
+      className={`sb-tabstrip-frame${layout === 'scroll' ? ' horizontal' : ''}`}
+      style={{ '--tab-edge': `${TAB_SCROLL_EDGE}px` } as CSSProperties}
     >
-      {tabs.map((tab, i) => (
-        <Tab
-          key={tab.sessionId}
-          tab={tab}
-          active={i === activeIndex}
-          focused={focused}
-          selected={selectedIds.has(tab.sessionId)}
-          // ⇧ is tested before ⌘ so ⇧⌘ extends rather than toggling — extending is the more
-          // destructive of the two (it replaces the run), so it should be the one that wins outright
-          // rather than being reachable only by accident.
-          onModifierPress={(e) => {
-            if (e.shiftKey) {
-              onExtendSelect(paneIndex, tab.sessionId)
-              return true
-            }
-            if (e.metaKey) {
-              onToggleSelect(paneIndex, tab.sessionId)
-              return true
-            }
-            return false
-          }}
-          onActivate={() => onActivate(paneIndex, i)}
-          onKeyboardActivate={() => onActivate(paneIndex, i, false)}
-          onNavigate={(delta) => navigateFrom(i, delta)}
-          onPromote={() => onPromote(tab.sessionId, paneIndex)}
-          onClose={() => onClose(paneIndex, i)}
-          onContextMenu={(e) => void contextMenu(e, i)}
-        />
-      ))}
+      <div
+        className={`sb-tabstrip${layout === 'scroll' ? ' horizontal' : ' sb-autoscroll'}`}
+        data-layout={layout}
+        ref={stripRef}
+        role="tablist"
+        // Read by the drag hook when it hit-tests every strip in the window: a drop has to resolve to a
+        // pane, and the DOM is where both strips are visible to each other.
+        data-pane={paneIndex}
+      >
+        {tabs.map((tab, i) => (
+          <Tab
+            key={tab.sessionId}
+            tab={tab}
+            active={i === activeIndex}
+            focused={focused}
+            selected={selectedIds.has(tab.sessionId)}
+            // ⇧ is tested before ⌘ so ⇧⌘ extends rather than toggling — extending is the more
+            // destructive of the two (it replaces the run), so it should be the one that wins outright
+            // rather than being reachable only by accident.
+            onModifierPress={(e) => {
+              if (e.shiftKey) {
+                onExtendSelect(paneIndex, tab.sessionId)
+                return true
+              }
+              if (e.metaKey) {
+                onToggleSelect(paneIndex, tab.sessionId)
+                return true
+              }
+              return false
+            }}
+            onActivate={() => onActivate(paneIndex, i)}
+            onKeyboardActivate={() => onActivate(paneIndex, i, false)}
+            onNavigate={(delta) => navigateFrom(i, delta)}
+            onPromote={() => onPromote(tab.sessionId, paneIndex)}
+            onClose={() => onClose(paneIndex, i)}
+            onContextMenu={(e) => void contextMenu(e, i)}
+          />
+        ))}
+      </div>
     </div>
   )
 }

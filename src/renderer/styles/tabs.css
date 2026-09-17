@@ -2,6 +2,37 @@
    red means destructive, so "this tab is selected" gets neither. The one cobalt here is the shared
    `.sb-dot`, which means exactly what it means everywhere else. */
 
+.sb-tabstrip-frame {
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
+}
+/* Viewport-fixed fades, like the rail's bottom fade. Leave the bottom rule visible beneath them. */
+.sb-tabstrip-frame.horizontal::before,
+.sb-tabstrip-frame.horizontal::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 1px;
+  width: var(--tab-edge);
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.sb-tabstrip-frame.horizontal::before {
+  left: 0;
+  background: linear-gradient(to right, var(--paper-sunken), transparent);
+}
+.sb-tabstrip-frame.horizontal::after {
+  right: 0;
+  background: linear-gradient(to left, var(--paper-sunken), transparent);
+}
+.sb-tabstrip-frame:has(> .has-tabs-before)::before,
+.sb-tabstrip-frame:has(> .has-tabs-after)::after {
+  opacity: 1;
+}
+
 .sb-tabstrip {
   /* Height of one tab row, and the most rows the strip may grow to before it scrolls. The cap is what
      keeps a pane full of tabs from eating the content it exists to label — at three rows a strip is
@@ -12,8 +43,7 @@
      opaque fill. One value keeps the line's apparent weight stable through split focus changes. */
   --tab-rule: var(--rule);
   display: flex;
-  /* Tabs WRAP rather than scrolling sideways: sideways overflow hides the tab you want behind an edge,
-     in a direction you cannot see, which defeats the point of having tabs at all. */
+  /* Wrapping is the default; the horizontal preference overrides only the overflow axis. */
   flex-wrap: wrap;
   align-items: stretch;
   align-content: flex-start;
@@ -55,6 +85,20 @@
 .sb-tabstrip::-webkit-scrollbar-track,
 .sb-tabstrip::-webkit-scrollbar-track-piece {
   background-color: var(--paper-sunken);
+}
+
+.sb-tabstrip.horizontal {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scroll-padding-inline: var(--tab-edge);
+  overscroll-behavior-x: contain;
+}
+.sb-tabstrip.horizontal::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 /* ---- dragging a tab ---- */
@@ -179,8 +223,7 @@ body.sb-window-drop-target .sb-tabstrip {
   align-items: center;
   gap: 7px;
   height: var(--tab-h);
-  /* Symmetric, now that the close button overlays the title instead of reserving a slot: the text sits
-     the same distance from both edges, and the ✕ borrows that space on hover rather than owning it. */
+  /* The right gutter holds either the live dot or its hover close control. */
   padding: 0 11px;
   /* Natural width, floored and capped. Never flex: a tab that shrinks to fit its row would make the
      same conversation a different width in each pane, and the floor keeps a three-character title
@@ -241,9 +284,8 @@ body.sb-window-drop-target .sb-tabstrip {
   background: var(--paper-pane);
   color: var(--ink);
 }
-/* Tab fills and the close control's title fade can cover the strip's row-separator gradient. Keep
-   that pixel above every tab, including through hover and the close control's fade-out. This must be
-   the tab's LAST painted child, not a parent inset shadow, so the title fade cannot cover it. */
+/* Tab fills cover the strip's row-separator gradient. Redraw that pixel above each tab so the
+   divider stays continuous through hover and selection changes. */
 .sb-tab::after {
   content: '';
   position: absolute;
@@ -281,7 +323,7 @@ body.sb-window-drop-target .sb-tabstrip {
   min-width: 0;
 }
 
-/* The live dot's slot — present only when there IS a dot, so a not-live tab spends no width on it. */
+/* Always reserved: stopping a session must not shrink its tab or move its neighbours. */
 .sb-tab-gutter {
   width: 17px;
   height: 17px;
@@ -296,9 +338,7 @@ body.sb-window-drop-target .sb-tabstrip {
 .sb-tab:hover .sb-dot {
   opacity: 0;
 }
-/* Anchored to the TAB's right edge rather than living inside the dot's slot. On a live tab it lands
-   exactly over that slot (the dot fades out beneath it); on a not-live tab it overlays the title's
-   tail, which costs nothing at rest and is where the ellipsis already is. */
+/* The close button shares the reserved gutter with the live dot. */
 .sb-tab-close {
   position: absolute;
   /* Matches the tab's own padding, which puts the button centred over the dot's slot on a live tab —
@@ -317,22 +357,6 @@ body.sb-window-drop-target .sb-tabstrip {
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-fast);
-}
-/* A not-live tab has no reserved gutter, so the close button borrows the title's tail. Fade the text
-   into the button's solid surface instead of cutting it off at a hard vertical edge. This child fades
-   in with the button's own opacity, keeping the spatial and temporal transitions together. */
-.sb-tab-close::before {
-  content: '';
-  position: absolute;
-  top: -8px;
-  bottom: -8px;
-  right: 100%;
-  width: 26px;
-  background: linear-gradient(to right, transparent, var(--tab-close-surface));
-  pointer-events: none;
-}
-.sb-tab:has(.sb-tab-gutter) .sb-tab-close::before {
-  content: none;
 }
 .sb-tab:hover .sb-tab-close,
 .sb-tab:focus-within .sb-tab-close {

@@ -20,7 +20,15 @@ describe('viewToggleAction', () => {
     expect(viewToggleAction(cmdJ, 'transcript', 'claimable')).toBe('claim')
   })
 
-  it('leaves a conversation without a terminal unchanged', () => {
+  it('resumes a known conversation from Formatted view', () => {
+    expect(viewToggleAction(cmdJ, 'transcript', 'resumable')).toBe('resume')
+  })
+
+  it('does not resume from a terminal surface', () => {
+    expect(viewToggleAction(cmdJ, 'terminal', 'resumable')).toBeNull()
+  })
+
+  it('leaves an unavailable conversation unchanged', () => {
     expect(viewToggleAction(cmdJ, 'transcript', null)).toBeNull()
   })
 
@@ -39,5 +47,6 @@ describe('viewToggleAction', () => {
   ])('leaves %s available without changing the view', (_name, changes) => {
     expect(viewToggleAction({ ...cmdJ, ...changes }, 'terminal', 'here')).toBeNull()
     expect(viewToggleAction({ ...cmdJ, ...changes }, 'transcript', 'claimable')).toBeNull()
+    expect(viewToggleAction({ ...cmdJ, ...changes }, 'transcript', 'resumable')).toBeNull()
   })
 })

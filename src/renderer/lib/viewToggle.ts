@@ -9,19 +9,20 @@ interface ToggleKey {
   repeat: boolean
 }
 
-type TerminalLocation = 'here' | 'other-pane' | 'claimable' | null
+type ViewAvailability = 'here' | 'other-pane' | 'claimable' | 'resumable' | null
 
-/** Match the header controls: a remote terminal is claimed, and an unavailable one stays put. */
+/** Match the header controls: switch, claim a remote terminal, or explicitly resume a conversation. */
 export function viewToggleAction(
   key: ToggleKey,
   view: ConversationView,
-  terminalAt: TerminalLocation
-): ConversationView | 'claim' | null {
+  availability: ViewAvailability
+): ConversationView | 'claim' | 'resume' | null {
   // Ctrl+J is terminal input. Holding Cmd+J must not repeatedly swap the focused surface.
   if (key.code !== 'KeyJ' || !key.metaKey || key.ctrlKey || key.altKey || key.shiftKey || key.repeat) {
     return null
   }
-  if (terminalAt === 'claimable') return 'claim'
-  if (terminalAt !== 'here') return null
+  if (availability === 'resumable' && view === 'transcript') return 'resume'
+  if (availability === 'claimable') return 'claim'
+  if (availability !== 'here') return null
   return view === 'terminal' ? 'transcript' : 'terminal'
 }

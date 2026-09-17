@@ -14,6 +14,7 @@ import TabStrip, { type TabDescriptor } from './TabStrip'
 import TranscriptView, { type TranscriptScrollState } from './TranscriptView'
 import { Play } from './icons'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
+import type { TabLayout } from '../lib/tabLayoutPreference'
 
 type View = 'transcript' | 'terminal'
 
@@ -34,6 +35,7 @@ interface Props {
   onClaimTerminal?: () => void
   /** Preferences → Beta Features → Tabs and split view. False renders no strip at all. */
   showTabs: boolean
+  tabLayout: TabLayout
   tabs: TabDescriptor[]
   activeTabIndex: number
   onActivateTab: (pane: number, index: number, focusSurface?: boolean) => void
@@ -157,6 +159,7 @@ export default function MainPane(props: Props) {
     terminalAt,
     onClaimTerminal,
     showTabs,
+    tabLayout,
     tabs,
     activeTabIndex,
     onActivateTab,
@@ -305,6 +308,7 @@ export default function MainPane(props: Props) {
           including while the welcome screen shows, since the tabs are still there to go back to. */}
       {showTabs && tabs.length > 0 && (
         <TabStrip
+          layout={tabLayout}
           paneIndex={paneIndex}
           tabs={tabs}
           activeIndex={activeTabIndex}
