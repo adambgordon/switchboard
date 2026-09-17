@@ -317,9 +317,20 @@ export class PtyManager extends EventEmitter {
   markUsed(ptyId: string): void {
     const entry = this.live.get(ptyId)
     if (!entry) return
+    const hadRequest = entry.inputRequestedAt != null
     entry.inputRequestedAt = null
     entry.lastInputAt = Date.now()
     entry.usedByUser = true
+    // Announce the CLEARED request, or the renderer keeps pulsing `asking` for a prompt that has
+    // been answered: nothing else republishes this. `markBusy` emits only on a busy TRANSITION, and
+    // a repainting agent TUI never leaves `busy`, so the snapshot can sit stale indefinitely — the
+    // cap and the dot would then disagree about an outstanding question, which is exactly what the
+    // one shared derivation exists to prevent.
+    //
+    // Gated on there having BEEN a request, so ordinary use stays silent. This arrives on the typing
+    // path (throttled, but still every few seconds), and an unconditional emit would rebroadcast the
+    // whole active set to every window while someone types, for a value no consumer reads.
+    if (hadRequest) this.emitActive()
   }
 
   resize(ptyId: string, cols: number, rows: number): void {

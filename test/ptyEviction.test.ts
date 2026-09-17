@@ -64,6 +64,8 @@ const S2 = '5364d27e-bc41-4d50-95a6-74e708ac6069'
 describe('PtyManager live-session cap', () => {
   let mgr: PtyManager
   let exits: string[]
+  /** How many times the active set was republished — the renderer's only view of this state. */
+  let announced: number
 
   /** Stand in for the conversation index, which is what feeds the manager its transcript facts. */
   const indexed = (entries: Record<string, TurnSnapshot>): void => {
@@ -75,8 +77,12 @@ describe('PtyManager live-session cap', () => {
     ptys.writes = []
     ptys.feeds = []
     exits = []
+    announced = 0
     mgr = new PtyManager({ resolveBindings: async () => [] })
     mgr.on('exit', (ptyId: string) => exits.push(ptyId))
+    mgr.on('active-changed', () => {
+      announced += 1
+    })
     mgr.setMaxLive(2)
   })
 
@@ -166,6 +172,33 @@ describe('PtyManager live-session cap', () => {
     ptys.feeds[0]?.('\x1b]9;Approval requested: run tests\x07')
     mgr.startNew(CWD, 'codex')
     expect(exits).toEqual([plain.ptyId])
+  })
+
+  it('republishes the active set when answering clears a question', () => {
+    // Clearing the request in main is not enough: the renderer holds the previous snapshot, and
+    // nothing else republishes this one. `markBusy` emits only on a busy TRANSITION, and a
+    // repainting agent TUI never leaves `busy`, so the row can pulse `asking` for a prompt that has
+    // already been answered until some unrelated change refreshes it. Driven through the real
+    // scanner so the timestamp is set the way production sets it.
+    const asked = mgr.resume('s1', CWD, 'codex')
+    indexed({ s1: { turnState: 'awaiting', lastActivityAt: asked.startedAt - 60_000 } })
+    ptys.feeds[0]?.('\x1b]9;Approval requested: run tests\x07')
+    announced = 0
+    mgr.markUsed(asked.ptyId)
+    expect(announced).toBe(1)
+  })
+
+  it('stays silent for ordinary use, with no question outstanding', () => {
+    // The same call on the same terminal, differing only in whether a request was pending — so a
+    // fix that simply announces on every input report fails here. This arrives on the typing path,
+    // and rebroadcasting the whole active set to every window while someone types would be a real
+    // cost for a value no consumer reads.
+    const plain = mgr.resume('s1', CWD, 'codex')
+    indexed({ s1: { turnState: 'awaiting', lastActivityAt: plain.startedAt - 60_000 } })
+    announced = 0
+    mgr.markUsed(plain.ptyId)
+    mgr.markUsed(plain.ptyId)
+    expect(announced).toBe(0)
   })
 
   it('stops protecting a question once the user has responded to it', () => {
