@@ -4,12 +4,15 @@ import * as pty from 'node-pty'
 import {
   CONFIG,
   type AgentKind,
+  type ClaudeSessionStatus,
   type PtyBindKind,
   type PtySession,
   type PtyStatus
 } from '../../shared/types'
+import { inputRequestedAt, resolveTurnActivity, type TurnSnapshot } from '../../shared/turnActivity'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
+import { chooseEvictionTargets } from './evictionPolicy'
 import {
   resolveCodexBindings,
   type CodexBinding,
@@ -66,6 +69,16 @@ interface Live {
   proc: pty.IPty
   status: PtyStatus
   lastActivity: number
+  /**
+   * ms epoch of the last time a person used this terminal, seeded to spawn time. The LRU key for
+   * eviction, because `lastActivity` tracks terminal OUTPUT and an agent TUI that repaints on a
+   * timer keeps that permanently fresh — see evictionPolicy. Advanced only by markUsed.
+   */
+  lastInputAt: number
+  /** Whether a person has ever used this terminal. Separate from `lastInputAt` so that first use in
+   *  the same millisecond as the spawn still counts, and so an untouched terminal stays untouched
+   *  however long it lives. */
+  usedByUser: boolean
   startedAt: number
   inputRequestedAt: number | null
   // [Codex] Streaming OSC 9 scanner for this terminal. Held on the entry rather than only in the
@@ -93,6 +106,10 @@ interface Live {
   // [Claude] The background agent this session launched, once its registry marker is confirmed. Says
   // nothing about what the terminal is currently showing — see claudeParkedJobs.
   parkedJob: ParkedJob | null
+  // [Claude] What Claude says this session is doing, from its own registry; null for Codex (never
+  // registered) and whenever no live record backs a claim. The only signal that catches an in-process
+  // subagent whose parent writes no transcript — see claudeParkedJobs.
+  registryStatus: ClaudeSessionStatus | null
   booted: boolean
   // Claude boots (the `claude` command is typed) only once the shell is ready AND the renderer
   // has sized the PTY to the real terminal dimensions. Booting before the resize makes claude
@@ -115,11 +132,12 @@ interface Live {
  *   ~/.local/bin, no Homebrew), so invoking `claude` directly would fail with
  *   ENOENT. A login shell sources the user's profile and gets the real PATH — and
  *   it gives a genuine terminal: when claude exits, you're back at a prompt.
- * - Busy vs idle is inferred from output activity (debounced). It does NOT drive the
- *   liveness dot (a live agent TUI repaints constantly — every keystroke echoes as output —
- *   so a PTY is ~always "busy"; transcript state drives the dot, with explicit Codex OSC input
- *   notifications as the narrow exception). Here it ONLY gates LRU eviction (we never kill busy
- *   work).
+ * - Busy vs idle is inferred from output activity (debounced) and is now only a coarse status
+ *   reported to the renderer as a FALLBACK for the live dot. It drives no decision here: terminal
+ *   output cannot separate a working agent from a resting one, because an agent TUI may repaint on
+ *   a fixed timer whether or not anything is happening — which leaves such a PTY permanently
+ *   "busy". Both the dot (transcript turn-state, plus explicit Codex OSC input notifications) and
+ *   LRU eviction (see evictionPolicy) read signals that do not have that problem.
  */
 export class PtyManager extends EventEmitter {
   private live = new Map<string, Live>()
@@ -159,7 +177,8 @@ export class PtyManager extends EventEmitter {
     this.parkedJobs = opts.claudeParkedJobs
       ? new ClaudeParkedJobMonitor({
           ...opts.claudeParkedJobs,
-          onChange: (ptyId, parked) => this.setParkedJob(ptyId, parked)
+          onChange: (ptyId, parked) => this.setParkedJob(ptyId, parked),
+          onStatus: (ptyId, status) => this.setRegistryStatus(ptyId, status)
         })
       : null
   }
@@ -168,6 +187,18 @@ export class PtyManager extends EventEmitter {
     const entry = this.live.get(ptyId)
     if (!entry) return
     entry.parkedJob = parked
+    this.emitActive()
+  }
+
+  /**
+   * Record Claude's own busy/idle for this terminal. The monitor fires only on a change, and this
+   * re-checks anyway: `emitActive` broadcasts to every window and re-renders every row, so an
+   * unchanged value must not reach it.
+   */
+  private setRegistryStatus(ptyId: string, status: ClaudeSessionStatus | null): void {
+    const entry = this.live.get(ptyId)
+    if (!entry || entry.registryStatus === status) return
+    entry.registryStatus = status
     this.emitActive()
   }
 
@@ -183,6 +214,31 @@ export class PtyManager extends EventEmitter {
    */
   setMaxLive(n: number): void {
     this.maxLive = Math.max(CONFIG.liveSessionsMin, Math.min(CONFIG.liveSessionsMax, Math.floor(n)))
+  }
+
+  /**
+   * Latest transcript facts per conversation, pushed from the conversation index — the only signal
+   * that can tell a working agent from a resting one (see evictionPolicy). `lastActivityAt` rides
+   * along because `turnState` alone cannot: an `in_progress` turn abandoned by a previous process
+   * stays `in_progress` forever, and only the timestamp reveals it as a carryover.
+   *
+   * A session absent from the map resolves to `unknown` rather than idle — it is a terminal with no
+   * transcript we can attribute, which the policy treats differently from a resting one.
+   */
+  private turnSnapshots = new Map<string, TurnSnapshot>()
+
+  setTurnSnapshots(snapshots: Map<string, TurnSnapshot>): void {
+    this.turnSnapshots = snapshots
+  }
+
+  /**
+   * Every PTY currently showing in a pane, across all windows — union, because a terminal visible
+   * in a background window is still being looked at. Never evicted (see evictionPolicy).
+   */
+  private visiblePtyIds: ReadonlySet<string> = new Set()
+
+  setVisiblePtyIds(ids: ReadonlySet<string>): void {
+    this.visiblePtyIds = ids
   }
 
   resume(
@@ -234,9 +290,47 @@ export class PtyManager extends EventEmitter {
    * rollout, and every variant of that (a bare `\r`, a discrete post-boot Enter, nearest-timestamp
    * pairing) was defeated by a real counterexample. Identity now comes from the OS instead — see
    * codexIdentity — so this is back to being the hot path it should be.
+   *
+   * In particular it does NOT record that the terminal was used: this channel also carries xterm's
+   * automatic answers to an agent's startup terminal queries, so treating everything here as input
+   * marks every terminal used the instant it boots. Real use arrives separately — see markUsed.
    */
   write(ptyId: string, data: string): void {
     this.live.get(ptyId)?.proc.write(data)
+  }
+
+  /**
+   * A person typed, pasted or dropped into this terminal. Reported by the renderer from its keyboard
+   * and paste handlers rather than inferred from written bytes, because only the renderer can tell a
+   * keystroke from the terminal answering a query on the program's behalf. Throttled there, so this
+   * is a coarse "recently used" rather than a per-keystroke timestamp — which is all the cap needs.
+   *
+   * Also the answer to an outstanding runtime input request, which is why it clears one. A request
+   * detected from output has no completion event of its own: accepting one lets the transcript
+   * overtake it, but DECLINING leaves nothing behind, so the terminal would read as blocked on the
+   * user for as long as it lived — and `asking` is protection the cap never overrides. A person
+   * typing here is the response. The renderer's throttle means a keystroke inside an earlier
+   * report's window is swallowed and the clear waits for the next one; acceptable because a terminal
+   * holding a prompt is idle beforehand, so the window is normally already clear, and the cap bounds
+   * a stale request independently (see evictionPolicy).
+   */
+  markUsed(ptyId: string): void {
+    const entry = this.live.get(ptyId)
+    if (!entry) return
+    const hadRequest = entry.inputRequestedAt != null
+    entry.inputRequestedAt = null
+    entry.lastInputAt = Date.now()
+    entry.usedByUser = true
+    // Announce the CLEARED request, or the renderer keeps pulsing `asking` for a prompt that has
+    // been answered: nothing else republishes this. `markBusy` emits only on a busy TRANSITION, and
+    // a repainting agent TUI never leaves `busy`, so the snapshot can sit stale indefinitely — the
+    // cap and the dot would then disagree about an outstanding question, which is exactly what the
+    // one shared derivation exists to prevent.
+    //
+    // Gated on there having BEEN a request, so ordinary use stays silent. This arrives on the typing
+    // path (throttled, but still every few seconds), and an unconditional emit would rebroadcast the
+    // whole active set to every window while someone types, for a value no consumer reads.
+    if (hadRequest) this.emitActive()
   }
 
   resize(ptyId: string, cols: number, rows: number): void {
@@ -573,6 +667,8 @@ export class PtyManager extends EventEmitter {
       proc,
       status: 'busy',
       lastActivity: now,
+      lastInputAt: now,
+      usedByUser: false,
       startedAt: now,
       inputRequestedAt: null,
       inputScanner: o.agent === 'codex' ? new CodexInputNotificationScanner() : null,
@@ -581,6 +677,7 @@ export class PtyManager extends EventEmitter {
       provisional: o.provisional ?? false,
       identityConfirmed: false,
       parkedJob: o.agent === 'claude' ? this.fakeParkedJob : null,
+      registryStatus: null,
       booted: false,
       shellReady: false,
       sized: false,
@@ -635,7 +732,11 @@ export class PtyManager extends EventEmitter {
       if (entry.bootTimer) clearTimeout(entry.bootTimer)
       this.live.delete(ptyId)
       this.parkedJobs?.unregister(ptyId)
-      this.emit('exit', ptyId, entry.exitCode)
+      // `provisional` still set means this terminal died without ever proving which conversation it
+      // held, so its sessionId is a placeholder that now names nothing at all. Reported so the
+      // navigation history can step over it instead of landing on a row backed by nothing — see
+      // NavigationCoordinator.retire.
+      this.emit('exit', ptyId, entry.exitCode, entry.sessionId, entry.provisional)
       this.emitActive()
     })
 
@@ -659,15 +760,35 @@ export class PtyManager extends EventEmitter {
   }
 
   /**
-   * Keep the live set bounded. Evict the least-recently-active IDLE session.
-   * If everything is busy we let the set grow rather than kill active work.
+   * Keep the live set bounded, stopping as many eligible sessions as it takes to fit one more.
+   * The choice itself is pure and tested in evictionPolicy; this only supplies the candidates.
    */
   private enforceCap(): void {
-    if (this.live.size < this.maxLive) return
-    const idle = [...this.live.values()]
-      .filter((l) => l.status === 'idle')
-      .sort((a, b) => a.lastActivity - b.lastActivity)
-    if (idle.length > 0) this.kill(idle[0].ptyId)
+    const targets = chooseEvictionTargets(
+      [...this.live.values()].map((l) => ({
+        ptyId: l.ptyId,
+        lastInputAt: l.lastInputAt,
+        used: l.usedByUser,
+        // Resolved through the SHARED rules, so the cap and the liveness dot cannot disagree about
+        // whether a session is working. `startedAt` is what exposes a carryover turn; the runtime
+        // request is what exposes a question the transcript never recorded; the registry status is
+        // what exposes a subagent running inside a session that has written nothing.
+        activity: resolveTurnActivity(
+          this.turnSnapshots.get(l.sessionId),
+          l.startedAt,
+          l.inputRequestedAt,
+          l.registryStatus === 'busy'
+        ),
+        // The same resolution the activity above used, kept as a timestamp so the policy can bound
+        // it. Derived here rather than passed raw: a transcript-recorded question and one seen only
+        // in output both need bounding, and only this function knows which of them applies.
+        askedAt: inputRequestedAt(this.turnSnapshots.get(l.sessionId), l.inputRequestedAt),
+        onScreen: this.visiblePtyIds.has(l.ptyId)
+      })),
+      this.maxLive,
+      Date.now()
+    )
+    for (const ptyId of targets) this.kill(ptyId)
   }
 
   private toState(e: Live): PtySession {
@@ -684,6 +805,7 @@ export class PtyManager extends EventEmitter {
       origin: e.origin,
       provisional: e.provisional,
       parkedJob: e.parkedJob,
+      registryStatus: e.registryStatus,
       exitCode: e.exitCode
     }
   }

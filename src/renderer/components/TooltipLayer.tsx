@@ -51,12 +51,28 @@ export default function TooltipLayer() {
       if (!text) return
       const r = el.getBoundingClientRect()
       const sub = el.getAttribute('data-tip-sub')
+      // Preferences copy is never truncated. The clamp exists for strings the app does not author and
+      // cannot bound — a link's tip is its raw href, a row's is a conversation title — where losing
+      // the middle is the lesser harm. Every tooltip in Preferences is prose written to be read, and
+      // cutting it mid-sentence produced exactly the nonsense the clamp is meant to prevent
+      // ("starting another recl…s is intended to prevent").
+      //
+      // Scoped by CONTAINER, not by an opt-in attribute, and deliberately so: the failure being fixed
+      // is that authored copy got truncated at all, and an attribute someone must remember to add
+      // reintroduces it for the next setting written. `data-tip-wide` is NOT the signal here — a
+      // markdown link carries it alongside a thousand-character href (see MessageBlock), which is the
+      // case the clamp most needs to keep.
+      //
+      // Safe without a length bound because placement already has one: `placeTip` measures the
+      // rendered label and clamps it into the viewport, so over-long copy is pinned at the top edge
+      // rather than breaking the layout.
+      const authored = !!el.closest('.sb-modal-settings')
       setTip({
-        text: clampTipText(text),
+        text: authored ? text : clampTipText(text),
         // Clamped by the same rule as the title. In practice this never fires — the only producer is
         // a conversation preview, already capped at the same length upstream — but the label must be
         // bounded by what it renders, not by what its current callers happen to pass.
-        sub: sub ? clampTipText(sub) : null,
+        sub: sub ? (authored ? sub : clampTipText(sub)) : null,
         x: r.left + r.width / 2,
         hostTop: r.top,
         hostBottom: r.bottom,

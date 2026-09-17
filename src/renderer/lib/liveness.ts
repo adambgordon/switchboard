@@ -2,31 +2,15 @@
 // renderer otherwise isn't). Imports the shared contract by RELATIVE path (not the `@shared`
 // alias) so vitest, which has no alias config, resolves it; the import is type-only anyway.
 import type { ConversationMeta, LiveState } from '../../shared/types'
+import { inputRequestedAt, isStaleTurnCarryover } from '../../shared/turnActivity'
 
 /**
- * Is this `in_progress` turn a CARRYOVER from a dead process rather than live work?
- *
- * The PtyManager wraps a login shell and types `claude` into it, so a session can be "live"
- * (shell pty alive) yet show a turn that belongs to a PRIOR claude run: you quit/kill Switchboard
- * mid-turn (which writes no `[Request interrupted]` sentinel — unlike Esc), then later **resume**
- * the session. Resume spawns a brand-new process; the resumed claude just replays history and
- * sits idle at its prompt — it never finishes that dangling turn — so the dot would breathe
- * forever.
- *
- * The tell: anything the CURRENT process actually does is timestamped AFTER it started. So if the
- * last real activity (`lastActivityAt`) predates the live process's spawn (`liveStartedAt`), the
- * turn was written by an earlier, now-dead process → it isn't live work. A genuinely working turn
- * — including a multi-minute tool still running — has activity AFTER spawn, so it's never flagged
- * (no special-casing of tool_use vs tool_result needed). `liveStartedAt` is the live
- * `PtyState.startedAt`; null when the row isn't live (no demotion — and no dot anyway).
+ * Both rules below are the SHARED ones in `shared/turnActivity.ts` — the live-session cap reads
+ * the same two, because a session cannot be idle for one consumer and busy for another. These are
+ * thin `ConversationMeta` adapters over them, nothing more; put any change to the rules there.
  */
 function isStaleCarryover(meta: ConversationMeta | undefined, liveStartedAt: number | null): boolean {
-  return (
-    meta?.turnState === 'in_progress' &&
-    liveStartedAt != null &&
-    meta.lastActivityAt != null &&
-    liveStartedAt > meta.lastActivityAt
-  )
+  return isStaleTurnCarryover(meta, liveStartedAt)
 }
 
 /**
@@ -40,22 +24,12 @@ export function isManualUnread(markedAt: number | undefined, meta: ConversationM
   return endedAt <= markedAt
 }
 
-/**
- * Timestamp of the current user-input request, if any. A structured transcript question remains
- * authoritative; otherwise a Codex OSC notification is current only until newer rollout activity
- * appears. This deliberately ignores generic PTY activity and user keystrokes.
- */
+/** See the note above `isStaleCarryover`: the rule itself lives in `shared/turnActivity.ts`. */
 export function currentInputRequestedAt(
   meta: ConversationMeta | undefined,
   runtimeInputRequestedAt: number | null
 ): number | null {
-  if (meta?.turnState === 'awaiting_input') {
-    return Math.max(meta.lastActivityAt ?? 0, runtimeInputRequestedAt ?? 0)
-  }
-  const parsedActivityAt = meta?.lastActivityAt ?? 0
-  return runtimeInputRequestedAt != null && runtimeInputRequestedAt > parsedActivityAt
-    ? runtimeInputRequestedAt
-    : null
+  return inputRequestedAt(meta, runtimeInputRequestedAt)
 }
 
 /**
@@ -79,11 +53,29 @@ export function resolveLiveState(
   lookingNow: boolean,
   manualUnread: boolean,
   liveStartedAt: number | null,
-  runtimeInputRequestedAt: number | null = null
+  runtimeInputRequestedAt: number | null = null,
+  claudeBusy = false
 ): LiveState {
   // Carryover from a dead process → treat as a finished (aborted) turn.
   const turn = isStaleCarryover(meta, liveStartedAt) ? 'awaiting' : meta?.turnState
   const askedAt = currentInputRequestedAt(meta, runtimeInputRequestedAt)
+  // Claude's own `busy` UPGRADES A DIM DOT AND NOTHING ELSE — applied at the end, to the result,
+  // rather than as a branch of its own.
+  //
+  // It is ranked BELOW every state that has something for the user in it, which is where this
+  // deliberately differs from the live-session cap: the cap treats busy as work in flight and
+  // refuses to stop the terminal, while the dot keeps showing a question or an unseen finished turn,
+  // because those are things to read and "working" would bury them. The same fact, answering two
+  // different questions — a session can legitimately show a solid unread dot while the cap declines
+  // to reclaim it.
+  //
+  // Not additionally guarded on `askedAt`, deliberately: the question branch below returns without
+  // ever calling this, so a session waiting on you cannot be upgraded — a `askedAt == null` clause
+  // here would be unreachable, and an unreachable guard is indistinguishable from a working one.
+  // What keeps that true is the early return, so any refactor that folds the branches back together
+  // has to reinstate the check.
+  const upgrade = (state: LiveState): LiveState =>
+    claudeBusy && state === 'quiet' ? 'working' : state
   if (askedAt != null) {
     // The agent is blocked on your reply. A manual "mark unread"
     // forces the pulse back — the asking counterpart to the `awaiting` override below — even while
@@ -99,13 +91,15 @@ export function resolveLiveState(
   // `lookingNow` and the seen timestamp (the active states above keep their own animation).
   if (manualUnread) return 'awaiting'
   if (turn === 'awaiting') {
-    if (lookingNow) return 'quiet'
+    if (lookingNow) return upgrade('quiet')
     // For a demoted carryover, turnEndedAt is null, so this falls back to lastActivityAt (the
     // pre-resume activity) — the right "unread since" anchor.
     const endedAt = meta?.turnEndedAt ?? meta?.lastActivityAt ?? 0
-    return endedAt > lastSeenAt ? 'awaiting' : 'quiet'
+    return upgrade(endedAt > lastSeenAt ? 'awaiting' : 'quiet')
   }
   // No transcript turn-state yet (freshly spawned, nothing written): the session is live but
   // idle at its prompt. Quiet, NOT working — PTY output (incl. keystroke echo) is not a turn.
-  return 'quiet'
+  // Unless Claude says otherwise: this is the case where a subagent is running and the parent's
+  // transcript has nothing in it, which read as an idle terminal before the registry was consulted.
+  return upgrade('quiet')
 }

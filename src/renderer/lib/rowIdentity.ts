@@ -67,7 +67,8 @@ export function resolveRowLiveState(
     lookingNow,
     isManualUnread(manualUnreadAt, meta),
     pty.startedAt,
-    pty.inputRequestedAt
+    pty.inputRequestedAt,
+    pty.registryStatus === 'busy'
   )
 }
 

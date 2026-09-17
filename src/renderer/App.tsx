@@ -88,7 +88,6 @@ import type { TabDescriptor } from './components/TabStrip'
 import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
 import ResizeHandle from './components/ResizeHandle'
 import SettingsModal from './components/SettingsModal'
-import CapWarningModal from './components/CapWarningModal'
 import ConversationInfoModal from './components/ConversationInfoModal'
 import TooltipLayer from './components/TooltipLayer'
 import AppVeil from './components/AppVeil'
@@ -741,6 +740,15 @@ export default function App() {
     view0.view === 'terminal' && view0.terminalAt === 'here' ? view0.pty?.ptyId ?? null : null,
     view1.view === 'terminal' && view1.terminalAt === 'here' ? view1.pty?.ptyId ?? null : null
   ]
+  // Tell main which terminals are actually on screen here, so the live-session cap never reclaims one
+  // being looked at. Only a RENDERED terminal counts: a pane showing the Formatted view is unaffected
+  // by its terminal going away, so protecting it would pin sessions for no visible benefit. Keyed on
+  // the joined ids rather than the array, which is rebuilt every render.
+  const visiblePtySig = visiblePtyIds.join('|')
+  useEffect(() => {
+    window.api.reportVisiblePtys(visiblePtyIds.filter((id): id is string => id !== null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- visiblePtyIds folded into the signature
+  }, [visiblePtySig])
 
   const railSections = useMemo<RailSection[]>(() => {
     const pinnedEntries: RailEntry[] = pinnedOrder
@@ -816,23 +824,7 @@ export default function App() {
     return { count, working, asking, unread: unreadCount, idle, unlinked }
   }, [ptys.active, metaById, liveStateFor, hiddenSessionIds])
 
-  // Capacity modal: warn once the live set reaches the configured cap (maxLive). `capWarnDismissed`
-  // silences only the current episode — the re-arm effect clears it once the count drops back below
-  // the cap, so the modal returns the next time you climb into it. Ephemeral (not persisted).
-  // Memoized so its identity is stable (the keyboard effect depends on it, and a fresh object each
-  // render would needlessly re-subscribe the listener).
-  const [capWarnDismissed, setCapWarnDismissed] = useState(false)
-  useEffect(() => {
-    if (ptys.active.length < maxLive) setCapWarnDismissed(false)
-  }, [ptys.active.length, maxLive])
-  const capWarning = useMemo(
-    () =>
-      ptys.active.length >= maxLive && !capWarnDismissed
-        ? { count: ptys.active.length, max: maxLive }
-        : null,
-    [ptys.active.length, capWarnDismissed, maxLive]
-  )
-  overlayOpenRef.current = settingsPage !== null || capWarning !== null || infoModal !== null
+  overlayOpenRef.current = settingsPage !== null || infoModal !== null
 
   // "This row stands for no conversation" (see rowIdentity), by id — the ONE place that resolution
   // lives. Every consumer of the gate routes through here rather than re-deriving it: an unlinked
@@ -1604,16 +1596,7 @@ export default function App() {
         }
         return
       }
-      // While the capacity modal is up it owns the keyboard like Preferences: Esc dismisses it,
-      // everything else is inert (no list-nav behind the scrim).
-      if (capWarning) {
-        if (e.key === 'Escape') {
-          e.preventDefault()
-          setCapWarnDismissed(true)
-        }
-        return
-      }
-      // The conversation-info modal owns the keyboard the same way: Esc closes it, the rest is inert.
+      // The conversation-info modal owns the keyboard like Preferences: Esc closes it, the rest is inert.
       // (While its title field is editing, the input's own Esc handler stopPropagation's to cancel the
       // edit without bubbling here — so a first Esc backs out of edit, a second closes the modal.)
       if (infoModal) {
@@ -1743,7 +1726,6 @@ export default function App() {
   }, [
     query,
     settingsPage,
-    capWarning,
     infoModal,
     findOpen,
     closeFind,
@@ -2025,7 +2007,6 @@ export default function App() {
         tabsEnabled={tabsEnabled}
         onSetTabsEnabled={setTabsEnabled}
       />
-      <CapWarningModal capWarning={capWarning} onDismiss={() => setCapWarnDismissed(true)} />
       <ConversationInfoModal
         open={visibleInfoModal !== null}
         meta={infoMeta}

@@ -482,43 +482,6 @@ body.sb-resizing .sb-pane {
   -webkit-app-region: no-drag; /* clicking the scrim dismisses; never drags the window */
   animation: sb-fade-in var(--dur-fast) var(--ease);
 }
-/* Center-TOP variant (the capacity modal): pin the card near the top instead of mid-screen;
-   padding-top clears the hidden-inset title bar / traffic lights. */
-.sb-modal-scrim.top {
-  align-items: flex-start;
-  padding-top: 72px;
-}
-/* Capacity modal (CapWarningModal): a compact center-top dialog reusing .sb-modal's card. The body
-   override is scoped under .sb-modal-cap so it beats the base .sb-modal-body padding regardless of
-   source order. Ink/graphite only — the cap is informational, not destructive (two-accent rule). */
-.sb-modal-cap {
-  width: 420px;
-}
-.sb-modal-cap .sb-cap-modal-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px 18px 18px;
-}
-.sb-cap-modal-text {
-  font-size: var(--text-sm);
-  color: var(--ink-soft);
-  line-height: 1.5;
-}
-.sb-cap-modal-btn {
-  align-self: flex-end;
-  padding: 6px 16px;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-  background: var(--paper-sunken);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  transition: all var(--dur-fast) var(--ease);
-}
-.sb-cap-modal-btn:hover {
-  background: var(--paper-hover);
-}
 .sb-modal {
   width: 440px;
   max-width: 100%;

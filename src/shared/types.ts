@@ -59,6 +59,19 @@ export interface TranscriptMessage {
 }
 
 /** Lightweight metadata for one conversation — what the sidebar list renders. */
+/**
+ * Coarse state of a conversation's latest turn. Named because both the liveness dot and the
+ * live-PTY eviction policy branch on it, and they must branch on the same set of values.
+ */
+export type TurnState = 'in_progress' | 'awaiting' | 'awaiting_input'
+
+/**
+ * What Claude reports about one of its own live sessions. Deliberately only the two values we act
+ * on: anything else Claude may write is read as "no claim" rather than guessed at, because guessing
+ * `busy` from an unrecognised value is how a session becomes unreclaimable for good.
+ */
+export type ClaudeSessionStatus = 'busy' | 'idle'
+
 export interface ConversationMeta {
   /** UUID; also the JSONL filename stem and the agent's resume token. */
   sessionId: string
@@ -114,7 +127,7 @@ export interface ConversationMeta {
    * ExitPlanMode). Undefined when there are no messages yet. Drives the live dot's
    * working/asking/awaiting/quiet split.
    */
-  turnState?: 'in_progress' | 'awaiting' | 'awaiting_input'
+  turnState?: TurnState
   /** ms epoch when the last turn ended (assistant end_turn / turn_duration), or null. */
   turnEndedAt?: number | null
   /**
@@ -254,6 +267,16 @@ export interface PtySession {
    * otherwise renders as an empty "New conversation" row while the user is working in it.
    */
   parkedJob: { shortId: string; name: string } | null
+  /**
+   * [Claude] What Claude says IT is doing, from its own live-session registry, or null when there is
+   * no usable record (no registry, a Codex terminal, an unrecognised value).
+   *
+   * The only first-party activity signal either agent publishes, and the only one that reports work
+   * the transcript does not: a subagent runs INSIDE the parent process, and the parent's own
+   * transcript can sit unwritten for the duration. Both consumers treat null as "no claim" and fall
+   * back to the transcript, so losing the registry costs this refinement and nothing else.
+   */
+  registryStatus: ClaudeSessionStatus | null
   exitCode?: number | null
 }
 
@@ -308,6 +331,8 @@ export const IPC = {
   ptyFlowPause: 'pty:flowPause',
   ptyFlowResume: 'pty:flowResume',
   ptySetMaxLive: 'pty:setMaxLive', // renderer -> main: update the live-PTY cap
+  ptyVisible: 'pty:visible', // renderer -> main: which terminals this window has on screen
+  ptyUsed: 'pty:used', // renderer -> main: a person actually typed/pasted into this terminal
   ptyData: 'pty:data', // push (ptyId, data)
   ptyExit: 'pty:exit', // push (ptyId, exitCode)
   ptyBound: 'pty:bound', // per-window push (ptyId, oldSessionId, newSessionId, kind, ownedHere, adoptionToken)
@@ -529,6 +554,10 @@ export interface SwitchboardApi {
   onActiveChanged(cb: (states: PtyState[]) => void): () => void
   /** Update the main-process live-PTY cap (LRU eviction threshold). Fire-and-forget. */
   setMaxLiveSessions(n: number): void
+  /** Report which terminals this window currently has on screen, so they are never reclaimed. */
+  reportVisiblePtys(ptyIds: string[]): void
+  /** Report that a person typed, pasted or dropped into this terminal (throttled by the caller). */
+  reportTerminalUsed(ptyId: string): void
   /** Which agent CLIs are launchable from the login shell. Probed once in main and cached. */
   listAgents(): Promise<AgentAvailability>
 

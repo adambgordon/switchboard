@@ -105,6 +105,62 @@ describe('resolveLiveState — non-in_progress states (startedAt is inert)', () 
   })
 })
 
+/**
+ * Claude's own busy/idle, which the dot uses ONLY to upgrade a dim row to breathing.
+ *
+ * Deliberately narrower than the live-session cap's use of the same fact: the cap reads busy as work
+ * in flight and refuses to stop the terminal, while the dot keeps showing a question or an unseen
+ * finished turn, because those are things for the user to read and "working" would bury them. So a
+ * row can legitimately show a solid unread dot while the cap declines to reclaim it.
+ *
+ * Every case pairs the busy result with the idle one on the SAME fixture — a rule expressed as a
+ * post-hoc upgrade is otherwise satisfied by an implementation that ignores the flag entirely.
+ */
+describe('resolveLiveState — the agent reporting itself busy', () => {
+  const finished = meta({ turnState: 'awaiting', turnEndedAt: AFTER, lastActivityAt: AFTER })
+
+  it('breathes for a live session with nothing in its transcript', () => {
+    // The case this exists for: work went into a subagent inside this session's process, so the
+    // parent has written nothing and the row read as an idle terminal.
+    expect(resolveLiveState(undefined, 0, false, false, SPAWN, null, true)).toBe('working')
+    expect(resolveLiveState(undefined, 0, false, false, SPAWN, null, false)).toBe('quiet')
+  })
+
+  it('breathes for a finished turn the user has already seen', () => {
+    // Seen, so nothing is being buried — and a subagent started after the visible turn ended is
+    // exactly when this happens.
+    expect(resolveLiveState(finished, AFTER, false, false, SPAWN, null, true)).toBe('working')
+    expect(resolveLiveState(finished, AFTER, false, false, SPAWN, null, false)).toBe('quiet')
+  })
+
+  it('does not bury an unseen finished turn', () => {
+    // The solid dot is the only signal that there is something to read. Busy must not outrank it.
+    expect(resolveLiveState(finished, 0, false, false, SPAWN, null, true)).toBe('awaiting')
+  })
+
+  it('does not bury a manual mark-unread', () => {
+    expect(resolveLiveState(finished, AFTER, false, true, SPAWN, null, true)).toBe('awaiting')
+  })
+
+  it('does not bury an unanswered question', () => {
+    const asked = meta({ turnState: 'awaiting_input', lastActivityAt: AFTER })
+    expect(resolveLiveState(asked, 0, false, false, SPAWN, null, true)).toBe('asking')
+  })
+
+  it('leaves a question the user is looking at quiet rather than breathing', () => {
+    // The question branch returns `quiet` once you are looking at the prompt. A session waiting on
+    // you must not start breathing just because the registry has not caught up — which is why the
+    // upgrade is gated on there being no outstanding question, not merely on the result.
+    const asked = meta({ turnState: 'awaiting_input', lastActivityAt: AFTER })
+    expect(resolveLiveState(asked, 0, true, false, SPAWN, null, true)).toBe('quiet')
+  })
+
+  it('leaves a turn already in flight breathing, without double-counting it', () => {
+    const working = meta({ turnState: 'in_progress', lastActivityAt: AFTER })
+    expect(resolveLiveState(working, 0, false, false, SPAWN, null, true)).toBe('working')
+  })
+})
+
 describe('resolveLiveState — runtime Codex input notifications', () => {
   const approvalAt = AFTER
   const codexWorking = meta({

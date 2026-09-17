@@ -30,6 +30,14 @@ export class NavigationCoordinator {
   private pending: PendingNavigation | null = null
   private nextRequest = 0
   private hiddenSessionIds: ReadonlySet<string> = new Set()
+  /**
+   * Ids that were once a legitimate destination and now name nothing: the placeholder of a new
+   * agent terminal that was stopped before it ever proved which conversation it held. Distinct from
+   * hidden sessions, which name a real conversation deliberately kept out of sight — but both are
+   * unreachable, so both are stepped over rather than deleted from history. Process-lifetime, like
+   * the hidden set; the population is one id per new terminal that never bound.
+   */
+  private readonly retiredSessionIds = new Set<string>()
 
   constructor(private readonly host: NavigationHost) {}
 
@@ -37,12 +45,31 @@ export class NavigationCoordinator {
     return this.history
   }
 
+  /** A stop on this id can no longer be shown, whatever the reason. */
+  private unreachable(sessionId: string): boolean {
+    return this.hiddenSessionIds.has(sessionId) || this.retiredSessionIds.has(sessionId)
+  }
+
+  private forget(matches: (sessionId: string) => boolean): void {
+    if (this.pending && matches(this.pending.command.sessionId)) this.interrupt()
+    for (const [windowId, visit] of this.windows) {
+      if (visit && matches(visit.sessionId)) this.windows.set(windowId, null)
+    }
+  }
+
   setHiddenSessions(ids: ReadonlySet<string>): void {
     this.hiddenSessionIds = ids
-    if (this.pending && ids.has(this.pending.command.sessionId)) this.interrupt()
-    for (const [windowId, visit] of this.windows) {
-      if (visit && ids.has(visit.sessionId)) this.windows.set(windowId, null)
-    }
+    this.forget((sessionId) => ids.has(sessionId))
+  }
+
+  /**
+   * A terminal was stopped without ever having been matched to a conversation, so its id is now a
+   * dead end. History keeps the stop — deleting entries would shift the cursor under the user — and
+   * Back/Forward step past it to the next reachable one.
+   */
+  retire(sessionId: string): void {
+    this.retiredSessionIds.add(sessionId)
+    this.forget((id) => id === sessionId)
   }
 
   private record(visit: NavigationVisit | null): void {
@@ -50,7 +77,7 @@ export class NavigationCoordinator {
   }
 
   report(windowId: number, visit: NavigationVisit | null, record: boolean, revision = 0): void {
-    if (visit && this.hiddenSessionIds.has(visit.sessionId)) return
+    if (visit && this.unreachable(visit.sessionId)) return
     const first = !this.windows.has(windowId)
     this.windows.set(windowId, visit)
     this.revisions.set(windowId, revision)
@@ -95,7 +122,7 @@ export class NavigationCoordinator {
       const next = historyReducer(state, { type: 'step', direction })
       if (next === state) return
       const visit = next.entries[next.cursor]
-      if (!this.hiddenSessionIds.has(visit.sessionId)) {
+      if (!this.unreachable(visit.sessionId)) {
         this.history = next
         this.start(requester, visit.sessionId, 'preview', visit.view, 'replay')
         return
@@ -115,7 +142,7 @@ export class NavigationCoordinator {
     view: NavigationVisit['view'] | null,
     kind: NavigationCommand['kind']
   ): void {
-    if (this.hiddenSessionIds.has(sessionId)) return
+    if (this.unreachable(sessionId)) return
     this.interrupt()
     const owner = this.host.ownerOf(sessionId)
     const target = owner != null && this.host.exists(owner) ? owner : requester
