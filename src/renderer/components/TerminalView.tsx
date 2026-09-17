@@ -413,8 +413,19 @@ export default function TerminalView({
         : null
     const onInput = term.onData((d) => window.api.sendInput(ptyId, d))
 
-    // `onKey` fires only from a real DOM keyboard event, unlike `onData` — see markUsed.
+    // `onKey` fires only from a real DOM keyboard event, unlike `onData` — see markUsed. It covers
+    // every key press including ones that insert nothing (Enter, arrows), but NOT text that arrives
+    // without a key: a paste, an IME commit, an emoji picker, a native insertText.
     const onRealKey = term.onKey(markUsed)
+    // Those all surface as an `input` on xterm's own textarea, and nothing else does — the
+    // automatic replies to terminal queries are generated in JS and never touch it, so this cannot
+    // reintroduce the boot-time false positive. Paste and composition keep their explicit reports
+    // below as well: whether a paste reaches the textarea at all depends on a third party not
+    // calling preventDefault, and this is not an area to rest correctness on that.
+    const onTextInput = (e: Event): void => {
+      if ((e as InputEvent).data || (e.target as HTMLTextAreaElement | null)?.value) markUsed()
+    }
+    term.textarea?.addEventListener('input', onTextInput)
 
     // Image input is agent-specific. Claude reads the clipboard after an empty bracketed paste;
     // Codex reserves the real Ctrl+V key and reads the clipboard from that key event.
@@ -440,6 +451,7 @@ export default function TerminalView({
       offExit()
       onInput.dispose()
       onRealKey.dispose()
+      term.textarea?.removeEventListener('input', onTextInput)
       followRefreshScroll?.dispose()
       detach()
       scrollbackReset?.dispose()

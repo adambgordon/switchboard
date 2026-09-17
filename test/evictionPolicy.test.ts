@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  RECENT_USE_GRACE_MS,
   UNATTRIBUTED_GRACE_MS,
   chooseEvictionTargets,
   type EvictionCandidate
@@ -157,6 +158,28 @@ describe('chooseEvictionTargets', () => {
     // otherwise a burst of new conversations becomes briefly unreclaimable.
     const freshEmpty = empty('fresh', NOW - 1)
     expect(choose([freshEmpty, doing('busy', NOW, 'working')], 2)).toEqual(['fresh'])
+  })
+
+  it('never takes a session the user touched moments ago, whatever the transcript says', () => {
+    // Submitting a turn does not update the index, so for a moment a session that has just been
+    // given work still reads as idle. Recency of use is the only fact that is current here.
+    const justSubmitted = idle('just-submitted', NOW - 1_000)
+    expect(choose([justSubmitted, doing('busy', NOW, 'working')], 2)).toEqual([])
+  })
+
+  it('releases a recently used session once its window closes', () => {
+    // Asserted from both sides of the boundary: a permanent protection and a long one cannot be
+    // told apart from a single sample.
+    const used = idle('aging', 0)
+    const busy = doing('busy', NOW, 'working')
+    expect(choose([used, busy], 2, RECENT_USE_GRACE_MS - 1)).toEqual([])
+    expect(choose([used, busy], 2, RECENT_USE_GRACE_MS)).toEqual(['aging'])
+  })
+
+  it('does not extend the recent-use window to never-used terminals', () => {
+    // An untouched terminal holds nothing however recently it was opened, so a burst of new
+    // conversations must not become briefly unreclaimable.
+    expect(choose([empty('fresh', NOW), doing('busy', NOW, 'working')], 2)).toEqual(['fresh'])
   })
 
   it('never takes a terminal that is on screen, whatever its tier or age', () => {

@@ -11,6 +11,20 @@ import type { TurnActivity } from '../../shared/turnActivity'
  */
 export const UNATTRIBUTED_GRACE_MS = 10 * 60_000
 
+/**
+ * How long ANY used terminal is protected after its last use, whatever its transcript says.
+ *
+ * `activity` comes from the conversation index, which lags reality: submitting a turn does not
+ * update the snapshot, so for a moment a session that has just been given work still reads as
+ * finished. Recency of use is the one fact that is current at the instant of the decision, and this
+ * window covers the gap — comfortably longer than the poll interval that closes it.
+ *
+ * Generalised deliberately. Special-casing "a turn was just submitted" would need a submission
+ * signal the manager does not have, whereas "someone touched this seconds ago, so do not act on a
+ * stale reading of it" is both sufficient and a sane LRU rule in its own right.
+ */
+export const RECENT_USE_GRACE_MS = 30_000
+
 /** One live PTY, reduced to the facts the eviction decision rests on. */
 export interface EvictionCandidate {
   ptyId: string
@@ -62,6 +76,10 @@ export interface EvictionCandidate {
 function tierOf(candidate: EvictionCandidate, now: number): number | null {
   if (candidate.onScreen) return null
   if (candidate.activity === 'working' || candidate.activity === 'asking') return null
+  // Applies to every tier, because `activity` may simply not have caught up with what the user did
+  // a moment ago. Gated on `used` — an untouched terminal holds nothing whenever it was opened, so
+  // extending this to one would briefly make a burst of new conversations unreclaimable.
+  if (candidate.used && now - candidate.lastInputAt < RECENT_USE_GRACE_MS) return null
   if (candidate.activity === 'unknown') {
     if (!candidate.used) return 0
     return now - candidate.lastInputAt < UNATTRIBUTED_GRACE_MS ? null : 2
