@@ -629,7 +629,7 @@ export default function SettingsModal({
                     Turn this off to show one conversation at a time.
                   </div>
                 </div>
-                <div className="sb-setting">
+                <div className="sb-setting" aria-disabled={!tabsEnabled}>
                   <div className="sb-setting-title">Tab layout</div>
                   <div
                     className="sb-seg"

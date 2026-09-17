@@ -139,9 +139,9 @@
 }
 
 /* The moving tab clone lives inside the fixed shell on <body>, so the strip's scroll container cannot
-   clip it and the whole stack travels anywhere in the window as one visual. Two class selectors keep
-   its drag surface stronger than the state classes copied from the source tab. */
-.sb-tab.sb-tab-dragging {
+   clip it. The shell scope keeps its surface stronger than the state classes copied from the tab. */
+.sb-tab-drag-shell .sb-tab.sb-tab-dragging {
+  --tab-close-surface: var(--tab-drag-surface, var(--paper-raised));
   border-radius: var(--r-sm);
   /* A real BORDER, not just a shadow. The clone travels over every surface in the window — the
      transcript, the terminal, another pane — and a soft shadow against a light surface leaves it
@@ -221,9 +221,7 @@ body.sb-window-drop-target .sb-tabstrip {
   --tab-close-surface: var(--paper-sunken);
   display: flex;
   align-items: center;
-  gap: 7px;
   height: var(--tab-h);
-  /* The right gutter holds either the live dot or its hover close control. */
   padding: 0 11px;
   /* Natural width, floored and capped. Never flex: a tab that shrinks to fit its row would make the
      same conversation a different width in each pane, and the floor keeps a three-character title
@@ -323,26 +321,11 @@ body.sb-window-drop-target .sb-tabstrip {
   min-width: 0;
 }
 
-/* Always reserved: stopping a session must not shrink its tab or move its neighbours. */
-.sb-tab-gutter {
-  width: 17px;
-  height: 17px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.sb-tab .sb-dot {
-  transition: opacity var(--dur-fast);
-}
-.sb-tab:hover .sb-dot {
-  opacity: 0;
-}
-/* The close button shares the reserved gutter with the live dot. */
+/* Both controls overlay one consistently truncated title. Neither reserves width nor moves the
+   ellipsis; their surface fades over the text underneath. */
+.sb-tab-gutter,
 .sb-tab-close {
   position: absolute;
-  /* Matches the tab's own padding, which puts the button centred over the dot's slot on a live tab —
-     any other offset and the ✕ would appear beside the dot it replaces rather than on top of it. */
   right: 11px;
   top: 50%;
   transform: translateY(-50%);
@@ -351,8 +334,36 @@ body.sb-window-drop-target .sb-tabstrip {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--r-sm);
   background-color: var(--tab-close-surface);
+}
+.sb-tab-gutter {
+  pointer-events: none;
+}
+.sb-tab-gutter::before,
+.sb-tab-close::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  right: 100%;
+  width: 26px;
+  background: linear-gradient(to right, transparent, var(--tab-close-surface));
+  pointer-events: none;
+}
+/* A live tab already has a fade beneath the dot: stacking another would darken the same text. */
+.sb-tab:has(.sb-tab-gutter) .sb-tab-close::before {
+  content: none;
+}
+.sb-tab .sb-dot {
+  transition: opacity var(--dur-fast);
+}
+.sb-tab:hover .sb-dot,
+.sb-tab:focus-within .sb-dot {
+  opacity: 0;
+}
+/* The close button shares the live dot's position. */
+.sb-tab-close {
+  border-radius: var(--r-sm);
   color: var(--ink-faint);
   opacity: 0;
   pointer-events: none;

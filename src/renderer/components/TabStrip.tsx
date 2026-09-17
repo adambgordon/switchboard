@@ -159,12 +159,11 @@ function Tab({
       onContextMenu={onContextMenu}
     >
       <span className="sb-tab-title truncate">{tab.title}</span>
-      {/* Reserve the dot/close slot even when stopped so liveness cannot resize or rewrap tabs. */}
-      <span className="sb-tab-gutter">
-        {tab.dot && (
+      {tab.dot && (
+        <span className="sb-tab-gutter">
           <span ref={dotRef} className={`sb-dot ${tab.dot}`} aria-label="live" role="img" />
-        )}
-      </span>
+        </span>
+      )}
       <button
         className="sb-tab-close"
         // The tooltip is generic while the accessible name is specific: the tip appears under the

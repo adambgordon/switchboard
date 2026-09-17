@@ -771,6 +771,16 @@ body.sb-resizing .sb-pane {
   font-weight: 600;
   color: var(--ink);
 }
+.sb-setting[aria-disabled='true'] > .sb-setting-title {
+  color: var(--ink-faint);
+}
+.sb-setting[aria-disabled='true'] > .sb-seg {
+  opacity: 0.45;
+}
+/* Dim the control as one unit, including its selected segment; keep the explanation legible. */
+.sb-setting[aria-disabled='true'] .sb-seg-btn:disabled {
+  opacity: 1;
+}
 .sb-setting-desc {
   font-size: var(--text-sm);
   line-height: 1.5;
