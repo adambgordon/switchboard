@@ -53,11 +53,29 @@ export function resolveLiveState(
   lookingNow: boolean,
   manualUnread: boolean,
   liveStartedAt: number | null,
-  runtimeInputRequestedAt: number | null = null
+  runtimeInputRequestedAt: number | null = null,
+  claudeBusy = false
 ): LiveState {
   // Carryover from a dead process → treat as a finished (aborted) turn.
   const turn = isStaleCarryover(meta, liveStartedAt) ? 'awaiting' : meta?.turnState
   const askedAt = currentInputRequestedAt(meta, runtimeInputRequestedAt)
+  // Claude's own `busy` UPGRADES A DIM DOT AND NOTHING ELSE — applied at the end, to the result,
+  // rather than as a branch of its own.
+  //
+  // It is ranked BELOW every state that has something for the user in it, which is where this
+  // deliberately differs from the live-session cap: the cap treats busy as work in flight and
+  // refuses to stop the terminal, while the dot keeps showing a question or an unseen finished turn,
+  // because those are things to read and "working" would bury them. The same fact, answering two
+  // different questions — a session can legitimately show a solid unread dot while the cap declines
+  // to reclaim it.
+  //
+  // Not additionally guarded on `askedAt`, deliberately: the question branch below returns without
+  // ever calling this, so a session waiting on you cannot be upgraded — a `askedAt == null` clause
+  // here would be unreachable, and an unreachable guard is indistinguishable from a working one.
+  // What keeps that true is the early return, so any refactor that folds the branches back together
+  // has to reinstate the check.
+  const upgrade = (state: LiveState): LiveState =>
+    claudeBusy && state === 'quiet' ? 'working' : state
   if (askedAt != null) {
     // The agent is blocked on your reply. A manual "mark unread"
     // forces the pulse back — the asking counterpart to the `awaiting` override below — even while
@@ -73,13 +91,15 @@ export function resolveLiveState(
   // `lookingNow` and the seen timestamp (the active states above keep their own animation).
   if (manualUnread) return 'awaiting'
   if (turn === 'awaiting') {
-    if (lookingNow) return 'quiet'
+    if (lookingNow) return upgrade('quiet')
     // For a demoted carryover, turnEndedAt is null, so this falls back to lastActivityAt (the
     // pre-resume activity) — the right "unread since" anchor.
     const endedAt = meta?.turnEndedAt ?? meta?.lastActivityAt ?? 0
-    return endedAt > lastSeenAt ? 'awaiting' : 'quiet'
+    return upgrade(endedAt > lastSeenAt ? 'awaiting' : 'quiet')
   }
   // No transcript turn-state yet (freshly spawned, nothing written): the session is live but
   // idle at its prompt. Quiet, NOT working — PTY output (incl. keystroke echo) is not a turn.
-  return 'quiet'
+  // Unless Claude says otherwise: this is the case where a subagent is running and the parent's
+  // transcript has nothing in it, which read as an idle terminal before the registry was consulted.
+  return upgrade('quiet')
 }
