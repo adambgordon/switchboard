@@ -20,8 +20,14 @@ const CODEX_OVERRIDES = [
 export function bootCommandFor(
   agent: AgentKind,
   origin: 'resume' | 'new',
-  sessionId: string
+  sessionId: string,
+  sessionFile?: string
 ): string {
+  if (agent === 'pi') {
+    // Pi 0.84.3 can assign an exact ID. Resume must fail if missing, never create a replacement.
+    const id = "'" + (origin === 'resume' ? sessionFile ?? sessionId : sessionId).replace(/'/g, "'\"'\"'") + "'"
+    return `PI_OFFLINE=1 pi ${origin === 'new' ? '--session-id' : '--session'} ${id}`
+  }
   if (agent === 'codex') {
     const overrides = CODEX_OVERRIDES.map((value) => `-c '${value}'`).join(' ')
     const command = `codex ${overrides}`
@@ -50,7 +56,8 @@ const CLEAR_LINE = '\x05\x15'
 export function bootPayloadFor(
   agent: AgentKind,
   origin: 'resume' | 'new',
-  sessionId: string
+  sessionId: string,
+  sessionFile?: string
 ): string {
-  return `${CLEAR_LINE}${bootCommandFor(agent, origin, sessionId)}\r`
+  return `${CLEAR_LINE}${bootCommandFor(agent, origin, sessionId, sessionFile)}\r`
 }

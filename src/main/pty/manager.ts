@@ -190,20 +190,21 @@ export class PtyManager extends EventEmitter {
     cwd: string,
     agent: AgentKind,
     title = 'Conversation',
-    beforeAnnounce?: (session: PtySession) => void
+    beforeAnnounce?: (session: PtySession) => void,
+    sessionFile?: string
   ): PtySession {
-    return this.spawn({ sessionId, cwd, title, origin: 'resume', agent, beforeAnnounce })
+    return this.spawn({ sessionId, cwd, title, origin: 'resume', agent, beforeAnnounce, sessionFile })
   }
 
   startNew(cwd: string, agent: AgentKind, beforeAnnounce?: (session: PtySession) => void): PtySession {
     if (agent === 'codex') return this.startNewCodex(cwd, beforeAnnounce)
-    // Claude gets a pre-assigned id and is live (and renamable) immediately.
+    // Claude and Pi get a pre-assigned id and are linked immediately.
     return this.spawn({
       sessionId: randomUUID(),
       cwd,
       title: 'New conversation',
       origin: 'new',
-      agent: 'claude',
+      agent,
       beforeAnnounce
     })
   }
@@ -539,6 +540,7 @@ export class PtyManager extends EventEmitter {
     agent: AgentKind
     provisional?: boolean
     beforeAnnounce?: (session: PtySession) => void
+    sessionFile?: string
   }): PtySession {
     // Don't double-spawn a session that's already live — just hand back the existing one.
     const existing = this.findBySession(o.sessionId)
@@ -598,7 +600,7 @@ export class PtyManager extends EventEmitter {
       // Clear any stray content on the shell's input line (a recalled-history line from an up-arrow,
       // or a keystroke typed in the brief window before boot) before typing the command, so nothing
       // fuses onto it; the trailing \r submits. See bootPayloadFor.
-      proc.write(bootPayloadFor(o.agent, o.origin, o.sessionId))
+      proc.write(bootPayloadFor(o.agent, o.origin, o.sessionId, o.sessionFile))
     }
     // Boot claude only once the shell is ready (first output) AND the renderer has sized the PTY
     // (first resize). Booting earlier starts claude's resume replay at the 80×30 spawn default; the

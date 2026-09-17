@@ -10,7 +10,8 @@ export type MessageRole = 'user' | 'assistant'
 
 /** Which coding agent produced a conversation. Drives the resume command, the transcript's
  *  assistant label, the row logo, and the agent-specific token breakdown. */
-export type AgentKind = 'claude' | 'codex'
+export const AGENT_KINDS = ['claude', 'codex', 'pi'] as const
+export type AgentKind = typeof AGENT_KINDS[number]
 
 export interface AgentInfo {
   /** Display name for chrome (empty state, menus). */
@@ -23,7 +24,8 @@ export interface AgentInfo {
  *  free of any asset/DOM import — both processes import it. */
 export const AGENTS: Record<AgentKind, AgentInfo> = {
   claude: { label: 'Claude Code', assistantLabel: 'Claude' },
-  codex: { label: 'Codex', assistantLabel: 'Codex' }
+  codex: { label: 'Codex', assistantLabel: 'Codex' },
+  pi: { label: 'Pi', assistantLabel: 'Pi' }
 }
 
 /** Which agents can actually be SPAWNED — i.e. their CLI is launchable from the login shell (the

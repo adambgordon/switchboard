@@ -17,6 +17,7 @@
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { watch, type FSWatcher } from 'chokidar'
+import { defaultPiRoot } from './piParser'
 import { defaultCodexRoot } from './codexParser'
 
 export interface SessionWatcherOptions {
@@ -24,6 +25,7 @@ export interface SessionWatcherOptions {
   projectsRoot?: string
   /** Codex sessions root to watch. Defaults to `~/.codex/sessions`. */
   codexRoot?: string
+  piRoot?: string
   /** Called (debounced) whenever a session file is added, changed, or removed. */
   onChange: () => void
   /** Debounce window in ms for coalescing bursts of fs events. Default 400. */
@@ -43,6 +45,7 @@ function defaultProjectsRoot(): string {
 export class SessionWatcher {
   private readonly claudeRoot: string
   private readonly codexRoot: string
+  private readonly piRoot: string
   private readonly onChange: () => void
   private readonly debounceMs: number
 
@@ -51,6 +54,7 @@ export class SessionWatcher {
 
   constructor(opts: SessionWatcherOptions) {
     this.claudeRoot = opts.projectsRoot ?? defaultProjectsRoot()
+    this.piRoot = opts.piRoot ?? defaultPiRoot()
     this.codexRoot = opts.codexRoot ?? defaultCodexRoot()
     this.onChange = opts.onChange
     this.debounceMs = opts.debounceMs ?? 400
@@ -63,7 +67,8 @@ export class SessionWatcher {
     // Watch both agents' roots in one watcher (chokidar accepts an array of globs).
     const globs = [
       path.join(this.claudeRoot, '**', '*.jsonl'),
-      path.join(this.codexRoot, '**', '*.jsonl')
+      path.join(this.codexRoot, '**', '*.jsonl'),
+      path.join(this.piRoot, '**', '*.jsonl')
     ]
     const watcher = watch(globs, {
       ignoreInitial: true,

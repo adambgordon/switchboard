@@ -26,7 +26,7 @@ function load(): DefaultAgentState {
     if (!raw) return DEFAULTS
     const o = JSON.parse(raw) as Partial<DefaultAgentState>
     return {
-      agent: o.agent === 'codex' ? 'codex' : 'claude',
+      agent: o.agent === 'codex' || o.agent === 'pi' ? o.agent : 'claude',
       enabled: o.enabled === true
     }
   } catch {

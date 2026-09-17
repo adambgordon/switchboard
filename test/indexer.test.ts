@@ -12,6 +12,8 @@ const TMP_BASE = tmpdir()
  *  also scans `~/.codex/sessions` by default, which would otherwise pull whatever Codex
  *  conversations happen to exist on the host into these assertions. */
 const NO_CODEX = path.join(TMP_BASE, 'switchboard-no-codex-DOES-NOT-EXIST')
+/** Keep local Pi sessions out of the Claude/Codex fixtures as well. */
+const NO_PI = path.join(TMP_BASE, `switchboard-no-pi-${randomUUID()}`)
 
 /** Serialize line-objects to JSONL text. */
 function jsonl(lines: unknown[]): string {
@@ -157,7 +159,7 @@ describe('indexConversations', () => {
   })
 
   it('groups conversations by exact cwd', async () => {
-    const { groups } = await indexConversations(root, NO_CODEX)
+    const { groups } = await indexConversations(root, NO_CODEX, undefined, NO_PI)
     const byCwd = new Map(groups.map((g) => [g.cwd, g]))
 
     expect(byCwd.has(CWD_A)).toBe(true)
@@ -167,7 +169,7 @@ describe('indexConversations', () => {
   })
 
   it('drops 0-message conversations', async () => {
-    const { groups } = await indexConversations(root, NO_CODEX)
+    const { groups } = await indexConversations(root, NO_CODEX, undefined, NO_PI)
     const a = groups.find((g) => g.cwd === CWD_A)!
     const ids = a.conversations.map((c) => c.sessionId)
     expect(ids).toContain(aOld)
@@ -176,20 +178,20 @@ describe('indexConversations', () => {
   })
 
   it('sorts conversations within a group by mtime desc', async () => {
-    const { groups } = await indexConversations(root, NO_CODEX)
+    const { groups } = await indexConversations(root, NO_CODEX, undefined, NO_PI)
     const a = groups.find((g) => g.cwd === CWD_A)!
     expect(a.conversations.map((c) => c.sessionId)).toEqual([aNew, aOld])
     expect(a.conversations[0].mtime).toBeGreaterThan(a.conversations[1].mtime)
   })
 
   it('sets label to the basename of the cwd', async () => {
-    const { groups } = await indexConversations(root, NO_CODEX)
+    const { groups } = await indexConversations(root, NO_CODEX, undefined, NO_PI)
     expect(groups.find((g) => g.cwd === CWD_A)!.label).toBe('project-one')
     expect(groups.find((g) => g.cwd === CWD_B)!.label).toBe('project-two')
   })
 
   it('sets latestMtime per group and sorts groups by latestMtime desc', async () => {
-    const { groups } = await indexConversations(root, NO_CODEX)
+    const { groups } = await indexConversations(root, NO_CODEX, undefined, NO_PI)
     const a = groups.find((g) => g.cwd === CWD_A)!
     const b = groups.find((g) => g.cwd === CWD_B)!
 
@@ -203,7 +205,7 @@ describe('indexConversations', () => {
   })
 
   it('contains the single B session', async () => {
-    const { groups } = await indexConversations(root, NO_CODEX)
+    const { groups } = await indexConversations(root, NO_CODEX, undefined, NO_PI)
     const b = groups.find((g) => g.cwd === CWD_B)!
     expect(b.conversations.map((c) => c.sessionId)).toEqual([bOnly])
   })
@@ -272,7 +274,7 @@ describe('indexConversations Claude session-kind filtering', () => {
   })
 
   it('keeps bg transcripts as independent rows and drops daemon internals', async () => {
-    const { groups } = await indexConversations(root, NO_CODEX)
+    const { groups } = await indexConversations(root, NO_CODEX, undefined, NO_PI)
     const a = groups.find((g) => g.cwd === CWD_A)
     expect(a).toBeDefined()
     const ids = a!.conversations.map((c) => c.sessionId)
@@ -290,16 +292,16 @@ describe('indexConversations Codex subagent filtering', () => {
       const guardian = await writeCodexRollout(codexRoot, CWD_A, 'guardian_review', 2000000)
       const structured = await writeCodexRollout(codexRoot, CWD_A, undefined, 3000000, { source: { subagent: {} } })
       const cache = new Map()
-      const first = await indexConversations(path.join(root, 'no-claude'), codexRoot, cache)
+      const first = await indexConversations(path.join(root, 'no-claude'), codexRoot, cache, NO_PI)
       expect(first.groups.flatMap((g) => g.conversations.map((c) => c.sessionId))).toEqual([parent])
       expect(first.hiddenSessionIds).toEqual([guardian, structured].sort())
       const cached = [...cache.values()].find((meta) => meta.sessionId === guardian)
       expect(cached?.codexSubagent).toBe(true)
-      const second = await indexConversations(path.join(root, 'no-claude'), codexRoot, cache)
+      const second = await indexConversations(path.join(root, 'no-claude'), codexRoot, cache, NO_PI)
       expect([...cache.values()].find((meta) => meta.sessionId === guardian)).toBe(cached)
       expect(second).toEqual(first)
       const next = await writeCodexRollout(codexRoot, CWD_A, 'guardian_review', 4000000)
-      const third = await indexConversations(path.join(root, 'no-claude'), codexRoot, cache)
+      const third = await indexConversations(path.join(root, 'no-claude'), codexRoot, cache, NO_PI)
       expect(third.groups).toEqual(first.groups)
       expect(third.hiddenSessionIds).toEqual([guardian, structured, next].sort())
     } finally {
@@ -314,7 +316,7 @@ describe('indexConversations Codex subagent filtering', () => {
       const parent = await writeCodexRollout(codexRoot, CWD_A, 'user', 1_000_000_000_000)
       await writeCodexRollout(codexRoot, CWD_A, 'subagent', 2_000_000_000_000)
 
-      const { groups } = await indexConversations(path.join(root, 'no-claude'), codexRoot)
+      const { groups } = await indexConversations(path.join(root, 'no-claude'), codexRoot, undefined, NO_PI)
 
       expect(groups).toHaveLength(1)
       expect(groups[0].conversations.map((conversation) => conversation.sessionId)).toEqual([parent])
@@ -327,7 +329,7 @@ describe('indexConversations Codex subagent filtering', () => {
 describe('indexConversations resilience', () => {
   it('returns [] for a non-existent root (does not throw)', async () => {
     const missing = path.join(TMP_BASE, `does-not-exist-${randomUUID()}`)
-    const { groups } = await indexConversations(missing, NO_CODEX)
+    const { groups } = await indexConversations(missing, NO_CODEX, undefined, NO_PI)
     expect(groups).toEqual([])
   })
 
@@ -336,7 +338,7 @@ describe('indexConversations resilience', () => {
     const fileRoot = path.join(dir, 'a-file')
     await writeFile(fileRoot, 'not a dir', 'utf8')
     try {
-      const { groups } = await indexConversations(fileRoot, NO_CODEX)
+      const { groups } = await indexConversations(fileRoot, NO_CODEX, undefined, NO_PI)
       expect(groups).toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -346,7 +348,7 @@ describe('indexConversations resilience', () => {
   it('returns [] for an empty projects root', async () => {
     const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-empty-'))
     try {
-      const { groups } = await indexConversations(dir, NO_CODEX)
+      const { groups } = await indexConversations(dir, NO_CODEX, undefined, NO_PI)
       expect(groups).toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -365,8 +367,8 @@ describe('indexConversations meta cache', () => {
         1_000_000_000_000
       )
       const cache = new Map()
-      const { groups: first } = await indexConversations(dir, NO_CODEX, cache)
-      const { groups: second } = await indexConversations(dir, NO_CODEX, cache)
+      const { groups: first } = await indexConversations(dir, NO_CODEX, cache, NO_PI)
+      const { groups: second } = await indexConversations(dir, NO_CODEX, cache, NO_PI)
       const a1 = first.find((g) => g.cwd === CWD_A)!.conversations[0]
       const a2 = second.find((g) => g.cwd === CWD_A)!.conversations[0]
       expect(a2).toBe(a1) // same object reference => served from cache, not re-parsed
@@ -385,7 +387,7 @@ describe('indexConversations meta cache', () => {
         1_000_000_000_000
       )
       const cache = new Map()
-      const a1 = (await indexConversations(dir, NO_CODEX, cache)).groups.find((g) => g.cwd === CWD_A)!
+      const a1 = (await indexConversations(dir, NO_CODEX, cache, NO_PI)).groups.find((g) => g.cwd === CWD_A)!
         .conversations[0]
       // Append a turn + advance mtime so both size and mtime move (a real append does both).
       await writeFile(
@@ -398,7 +400,7 @@ describe('indexConversations meta cache', () => {
         'utf8'
       )
       await utimes(r.file, 1_500_000, 1_500_000)
-      const a2 = (await indexConversations(dir, NO_CODEX, cache)).groups.find((g) => g.cwd === CWD_A)!
+      const a2 = (await indexConversations(dir, NO_CODEX, cache, NO_PI)).groups.find((g) => g.cwd === CWD_A)!
         .conversations[0]
       expect(a2).not.toBe(a1) // (mtime, size) changed => re-parsed, new object
       expect(a2.sessionId).toBe(a1.sessionId)
@@ -416,9 +418,9 @@ describe('indexConversations meta cache', () => {
         [msgLine('user', CWD_A, 'x'), msgLine('assistant', CWD_A, 'y')],
         1_000_000_000_000
       )
-      const a1 = (await indexConversations(dir, NO_CODEX)).groups.find((g) => g.cwd === CWD_A)!
+      const a1 = (await indexConversations(dir, NO_CODEX, undefined, NO_PI)).groups.find((g) => g.cwd === CWD_A)!
         .conversations[0]
-      const a2 = (await indexConversations(dir, NO_CODEX)).groups.find((g) => g.cwd === CWD_A)!
+      const a2 = (await indexConversations(dir, NO_CODEX, undefined, NO_PI)).groups.find((g) => g.cwd === CWD_A)!
         .conversations[0]
       expect(a2).not.toBe(a1) // fresh throwaway cache each call => new object
     } finally {
@@ -443,7 +445,7 @@ describe('indexConversations smoke (real ~/.claude/projects)', () => {
       return
     }
 
-    const { groups } = await indexConversations(realRoot, NO_CODEX)
+    const { groups } = await indexConversations(realRoot, NO_CODEX, undefined, NO_PI)
     expect(Array.isArray(groups)).toBe(true)
     for (const group of groups) {
       expect(typeof group.cwd).toBe('string')

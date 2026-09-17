@@ -14,6 +14,7 @@ import path from 'node:path'
 import type { ConversationGroup, ConversationIndexSnapshot, ConversationMeta } from '../../shared/types'
 import { extractMeta } from './parser'
 import { defaultCodexRoot, extractCodexMeta, listCodexRollouts } from './codexParser'
+import { defaultPiRoot, extractPiMeta, listPiSessions } from './piParser'
 import { readCodexThreads } from './codexThreadsDb'
 import { readCodexSessionNames, resolveCodexTitle } from './codexSessionIndex'
 
@@ -230,19 +231,24 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<{
 export async function indexConversations(
   projectsRoot?: string,
   codexRoot?: string,
-  cache?: MetaCache
+  cache?: MetaCache,
+  piRoot?: string
 ): Promise<ConversationIndexSnapshot> {
   const claudeRoot = projectsRoot ?? defaultProjectsRoot()
   const codexSessionsRoot = codexRoot ?? defaultCodexRoot()
   const fileCache = cache ?? new Map()
 
-  const [claudeMetas, codex] = await Promise.all([
+  const [claudeMetas, codex, piMetas] = await Promise.all([
     indexClaudeMetas(claudeRoot, fileCache),
-    indexCodexMetas(codexSessionsRoot, fileCache)
+    indexCodexMetas(codexSessionsRoot, fileCache),
+    listPiSessions(piRoot ?? defaultPiRoot()).then((files) =>
+      mapWithConcurrency(files, CONCURRENCY, (file) => extractWithCache(file, fileCache, extractPiMeta))
+    )
   ])
 
   const groups = new Map<string, ConversationMeta[]>()
-  for (const meta of [...claudeMetas, ...codex.metas]) {
+  for (const meta of [...claudeMetas, ...codex.metas, ...piMetas]) {
+    if (!meta || meta.messageCount === 0) continue
     const existing = groups.get(meta.cwd)
     if (existing) existing.push(meta)
     else groups.set(meta.cwd, [meta])

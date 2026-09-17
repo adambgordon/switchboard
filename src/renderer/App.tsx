@@ -16,6 +16,7 @@ import type {
   TabOpenMode,
   Transcript
 } from '@shared/types'
+import { AGENT_KINDS } from '@shared/types'
 import { makeTabDragPayload } from '@shared/tabDrag'
 import { visibleTabLayout } from '@shared/sessionVisibility'
 import { useSessions } from './lib/useSessions'
@@ -957,7 +958,7 @@ export default function App() {
   // RESOLVED (no choice to present) when a usable default is set, or when only one agent exists;
   // otherwise it's an open choice the menu must surface. Mirrors the directory axis (`resolvedDir`).
   const availableAgents = useMemo<AgentKind[]>(
-    () => (['claude', 'codex'] as AgentKind[]).filter((a) => agents[a]),
+    () => AGENT_KINDS.filter((a) => agents[a]),
     [agents]
   )
   const resolvedAgent = useMemo<AgentKind | null>(() => {

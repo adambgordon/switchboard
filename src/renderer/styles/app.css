@@ -219,15 +219,17 @@
   box-shadow: inset 0 0 0 1px var(--rule-strong);
 }
 /* Agent segment at the top of the New menu — the shared .sb-seg pill, stretched full-width with the
-   two agents splitting it evenly, each showing its grayscale logo + label. Not rendered at all when
+   agents sharing the space, each showing its grayscale logo + label. Not rendered at all when
    only one agent is launchable, so single-agent users get the unchanged directory menu. */
 .sb-newmenu-agents {
   display: flex;
   width: 100%;
   margin-bottom: 8px;
 }
-.sb-newmenu-agent {
-  flex: 1;
+.sb-newmenu-agents .sb-newmenu-agent {
+  padding: 5px 9px;
+  flex: 1 1 auto;
+  white-space: nowrap;
   justify-content: center;
 }
 .sb-newmenu-agent:disabled {
