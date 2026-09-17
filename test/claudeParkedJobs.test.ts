@@ -335,6 +335,27 @@ describe('ClaudeParkedJobMonitor', () => {
     expect(changes).toHaveLength(1)
   })
 
+  it('retracts the status when the registry is unreadable, while holding the marker', () => {
+    // The counterpart to the test above, and the pair IS the assertion: one fact is held across a
+    // read failure and the other is dropped, so neither rule can satisfy both. Holding the marker is
+    // right — "this session launched an agent" stays true whatever happens to the directory, and
+    // reporting it absent would replace a named row with an empty one. Holding the STATUS is not:
+    // `busy` resolves to `working`, which the live-session cap treats as an absolute veto, so a
+    // preserved `busy` protects a terminal for as long as the registry stays unreadable.
+    writeFileSync(join(root, '4242.json'), record({ status: 'busy' }))
+    const m = build()
+    m.register('pty-1', A)
+    settle(m)
+    expect(statusesOf('pty-1')).toEqual(['busy'])
+    expect(changes).toHaveLength(1)
+
+    rmSync(root, { recursive: true, force: true })
+    observeAgain(m)
+    expect(statusesOf('pty-1')).toEqual(['busy', null])
+    // ...and still exactly one marker report, i.e. no false clear of the label.
+    expect(changes).toHaveLength(1)
+  })
+
   it('skips one unreadable record without hiding a valid one', () => {
     writeFileSync(join(root, 'bad.json'), '{ not json')
     writeFileSync(join(root, '4242.json'), record())

@@ -195,15 +195,6 @@ export class ClaudeParkedJobMonitor {
   private readonly controllers = new Map<string, Controller>()
   private watcher: NodeFsWatcher | null = null
   private poll: ReturnType<typeof setInterval> | null = null
-  /**
-   * Set once by `dispose`, and checked by `refresh` — because re-arming made the watch a way back in.
-   *
-   * `refresh` is called from the watch callback, and now re-arms the watch, so an event already queued
-   * when the app tears down would open a FRESH watcher on a disposed monitor: a handle nothing owns,
-   * held past shutdown, and a `dispose()` that did not dispose. Clearing the controllers is not
-   * enough — that only stops the emitting, not the re-arming.
-   */
-  private disposed = false
 
   constructor(opts: ClaudeParkedJobMonitorOptions) {
     this.sessionsRoot = opts.sessionsRoot ?? join(homedir(), '.claude', 'sessions')
@@ -232,7 +223,8 @@ export class ClaudeParkedJobMonitor {
   }
 
   dispose(): void {
-    this.disposed = true
+    // Clearing the controllers is what stops `refresh` re-arming the watch, not just what stops the
+    // reporting — see the guard at the top of `refresh`.
     this.controllers.clear()
     this.stopWatching()
   }
@@ -283,10 +275,19 @@ export class ClaudeParkedJobMonitor {
   }
 
   private refresh(): void {
-    if (this.disposed) return
+    // Nothing to report and nothing to keep watching FOR — and this is also what keeps the watch from
+    // coming back from the dead. `refresh` is called from the watch callback and re-arms the watch, so
+    // an event still queued when the last PTY unregisters (or when the monitor is disposed) would
+    // otherwise open a fresh watcher that no controller needs, doing synchronous directory scans for
+    // nobody. One condition covers both exits because each empties `controllers`; two guards for one
+    // rule is how they drift apart.
+    if (this.controllers.size === 0) return
     this.armWatcher()
     const bySession = new Map<string, string>()
     const statusBySession = new Map<string, ClaudeSessionStatus>()
+    // Whether this pass could read the registry AT ALL, which the two facts below answer to
+    // differently — see the catch.
+    let readable = true
     try {
       for (const entry of readdirSync(this.sessionsRoot, { withFileTypes: true })) {
         if (!entry.isFile() || !entry.name.endsWith('.json')) continue
@@ -313,18 +314,36 @@ export class ClaudeParkedJobMonitor {
         }
       }
     } catch {
-      // The registry is absent entirely — hold current state rather than reporting every PTY as
-      // having no parked agent.
-      return
+      // The registry is absent entirely. The two facts diverge HERE, and the difference is the whole
+      // reason this is a flag rather than an early return: holding is right for one and unsafe for
+      // the other.
+      readable = false
     }
 
     const now = this.now()
+    // A registry that cannot be read cannot SUPPORT a claim about the present, so an unreadable pass
+    // retracts the status rather than preserving it. `busy` resolves to `working`, which the cap
+    // treats as an absolute veto — so a held `busy` is unbounded protection, reachable by nothing
+    // more exotic than the directory going away, and that is the one failure mode this policy exists
+    // to exclude. Retracting costs a working session its protection for a single pass (~150 ms, and
+    // only a spawn in that window could act on it), which is the safe direction to be wrong in.
+    //
+    // **The retraction is the EMPTY MAP, and the ordering is what delivers it.** A failed `readdir`
+    // throws before either map is filled, so the plain lookup below already yields null; running
+    // this loop BEFORE the return is the entire fix. Testing `readable` here as well was tried and
+    // removed — a mutation run showed it changed nothing, because there is no path that reaches this
+    // loop with an unreadable registry and a populated map. Do not "restore" it, and do not move
+    // this loop below the return.
     for (const [ptyId, controller] of this.controllers) {
       const status = statusBySession.get(controller.sessionId) ?? null
       if (controller.reportedStatus === status) continue
       controller.reportedStatus = status
       this.onStatus?.(ptyId, status)
     }
+    // The parked marker is a LABEL — "this session launched an agent", a fact about the past that
+    // stays true while the registry is unreadable — so it is still held rather than falsely cleared.
+    // Reporting it absent would replace a named row with an empty "New conversation" one.
+    if (!readable) return
     for (const [ptyId, controller] of this.controllers) {
       const shortId = bySession.get(controller.sessionId) ?? null
       if (shortId === null) {
