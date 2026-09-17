@@ -139,7 +139,7 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
       suppressRef.current = false
       return
     }
-    if (draft.trim() !== title.trim()) onRename(draft)
+    if (agent !== 'pi' && draft.trim() !== title.trim()) onRename(draft)
   }
   const onTitleKey = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') {
@@ -173,6 +173,8 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
             ref={inputRef}
             className="sb-info-title-input"
             value={draft}
+            readOnly={agent === 'pi'}
+            data-tip={agent === 'pi' ? 'Rename this session inside Pi.' : undefined}
             maxLength={120}
             spellCheck={false}
             autoCorrect="off"

@@ -49,6 +49,7 @@ import {
 import { transferPty } from './pty/transfer'
 import { indexConversations, type MetaCache } from './sessions/indexer'
 import { parseTranscript } from './sessions/parser'
+import { parsePiTranscript, resolvePiFile } from './sessions/piParser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
 import { appendCustomTitle } from './sessions/rename'
 import { renameCodexThread } from './sessions/codexRename'
@@ -496,14 +497,16 @@ async function transcriptSource(sessionId: string): Promise<TranscriptSource | n
   const claudePath = await resolveSessionFile(sessionId)
   if (claudePath) return { agent: 'claude', path: claudePath }
   const codexPath = await resolveCodexFile(sessionId)
-  return codexPath ? { agent: 'codex', path: codexPath } : null
+  if (codexPath) return { agent: 'codex', path: codexPath }
+  const piPath = await resolvePiFile(sessionId)
+  return piPath ? { agent: 'pi', path: piPath } : null
 }
 
 const transcriptLoader = new TranscriptLoader(
   transcriptSource,
   (source) => source.agent === 'claude'
     ? parseTranscript(source.path)
-    : parseCodexTranscript(source.path)
+    : source.agent === 'pi' ? parsePiTranscript(source.path) : parseCodexTranscript(source.path)
 )
 
 /**
@@ -519,10 +522,10 @@ let agentAvailabilityProbe: Promise<AgentAvailability> | null = null
 function probeAgents(): Promise<AgentAvailability> {
   const shell = process.env.SHELL || '/bin/zsh'
   return new Promise((resolve) => {
-    execFile(shell, ['-lic', 'command -v claude; command -v codex'], { timeout: 4000 }, (_err, stdout) => {
+    execFile(shell, ['-lic', 'command -v claude; command -v codex; command -v pi'], { timeout: 4000 }, (_err, stdout) => {
       const lines = (typeof stdout === 'string' ? stdout : '').split('\n').map((l) => l.trim())
       const has = (name: string): boolean => lines.some((l) => l === name || l.endsWith('/' + name))
-      resolve({ claude: has('claude'), codex: has('codex') })
+      resolve({ claude: has('claude'), codex: has('codex'), pi: has('pi') })
     })
   })
 }
@@ -741,6 +744,7 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.sessionsRename, async (_e, sessionId: string, title: string): Promise<boolean> => {
     await conversationIndex.get()
     if (hiddenSessionIds.has(sessionId)) return false
+    if (await resolvePiFile(sessionId)) return false // Rename inside Pi to preserve its live tree.
     const claudeFp = await resolveSessionFile(sessionId)
     try {
       if (hiddenSessionIds.has(sessionId)) return false
@@ -764,9 +768,11 @@ export function registerIpc(): void {
       await transferTerminal(existing.ptyId, e.sender.id, () => !hiddenSessionIds.has(sessionId))
       return forWindow([existing], e.sender.id)[0]
     }
+    const piFile = agent === 'pi' ? await resolvePiFile(sessionId) : undefined
+    if (agent === 'pi' && !piFile) throw new Error('Pi session no longer exists')
     const st = mgr!.resume(sessionId, cwd, agent, title, (spawned) => {
       ptyOwner.set(spawned.ptyId, e.sender.id)
-    })
+    }, piFile ?? undefined)
     return forWindow([st], e.sender.id)[0]
   })
   ipcMain.handle(IPC.ptyStartNew, (e, cwd: string, agent: AgentKind) => {

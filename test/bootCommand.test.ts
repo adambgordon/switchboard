@@ -42,7 +42,9 @@ describe('bootPayloadFor', () => {
     ['claude', 'new'],
     ['claude', 'resume'],
     ['codex', 'new'],
-    ['codex', 'resume']
+    ['codex', 'resume'],
+    ['pi', 'new'],
+    ['pi', 'resume']
   ] as const
 
   it('clears the line first and submits with CR, leaving the command untouched between', () => {
@@ -59,5 +61,21 @@ describe('bootPayloadFor', () => {
     // where a recalled history line prefixed the boot command and claude rejected the combination.
     // The leading Ctrl-U kills anything already on the line, so it can never prefix our command.
     expect(bootPayloadFor('claude', 'resume', ID)).toBe(`\x05\x15claude --resume ${ID}\r`)
+  })
+})
+
+describe('Pi boot commands', () => {
+  it('uses offline startup and an exact pre-assigned ID without changing provider defaults', () => {
+    expect(bootCommandFor('pi', 'new', ID)).toBe(`PI_OFFLINE=1 pi --session-id '${ID}'`)
+  })
+  it('resumes the resolved file instead of creating a session or opening a picker', () => {
+    expect(bootCommandFor('pi', 'resume', ID, '/tmp/pi sessions/session.jsonl')).toBe(
+      "PI_OFFLINE=1 pi --session '/tmp/pi sessions/session.jsonl'"
+    )
+  })
+  it('quotes shell metacharacters in a saved session path', () => {
+    expect(bootCommandFor('pi', 'resume', ID, "/tmp/user's $(touch nope).jsonl")).toBe(
+      "PI_OFFLINE=1 pi --session '/tmp/user'\"'\"'s $(touch nope).jsonl'"
+    )
   })
 })

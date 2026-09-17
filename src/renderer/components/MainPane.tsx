@@ -111,7 +111,7 @@ function EmptyState() {
       <span className="sb-empty-mark" ref={markRef} />
       <div className="sb-empty-head">
         <div className="sb-empty-title">A switchboard for your AI coding sessions</div>
-        <div className="sb-empty-tagline">Your Claude Code setup. Your Codex setup. One unified app.</div>
+        <div className="sb-empty-tagline">Claude Code, Codex, and Pi. Your setups in one app.</div>
       </div>
       <div className="sb-empty-body sb-empty-lead">
         Select any conversation to preview its transcript — instantly, without starting it.

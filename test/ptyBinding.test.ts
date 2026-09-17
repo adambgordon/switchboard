@@ -143,6 +143,15 @@ describe('PtyManager Codex identity probing', () => {
     mgr.killAll()
   })
 
+  it('starts Pi with its own linked identity and excludes it from Codex probes', async () => {
+    const session = mgr.startNew(CWD, 'pi')
+    expect(session.agent).toBe('pi')
+    expect(session.provisional).toBe(false)
+    expect(session.sessionId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(mgr.findBySession(session.sessionId)?.ptyId).toBe(session.ptyId)
+    expect(mgr.hasCodexToProbe()).toBe(false)
+  })
+
   it('assigns spawn ownership before announcing the active set', () => {
     events = []
     mgr.startNew(CWD, 'claude', () => events.push('owner'))

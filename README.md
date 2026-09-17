@@ -72,7 +72,7 @@ Then quit (⌘Q) (if already running) and reopen the app.
 ## Requirements
 
 - **macOS** on **Apple Silicon** — built and validated there; Intel is untested.
-- **At least one supported agent** on your `PATH` — **[Claude Code](https://claude.com/claude-code)** and/or **Codex** (OpenAI's `codex` CLI). Switchboard reads the sessions each agent writes and drives its CLI; it browses whatever's already on disk and launches whichever agents are installed. Both is the happy path, but either alone works.
+- **At least one supported agent** on your `PATH` — **[Claude Code](https://claude.com/claude-code)**, **Codex** (OpenAI's `codex` CLI), and/or **Pi** (`@earendil-works/pi-coding-agent` 0.84.3). Switchboard reads the sessions each agent writes and drives its CLI; it browses whatever's already on disk and launches whichever agents are installed. Any one agent works; install multiple agents to choose between them.
 - **Node.js 26** — see [`.nvmrc`](.nvmrc) (`nvm use` picks it up).
 - **Xcode Command Line Tools** — the embedded terminal (`node-pty`) compiles native code. Install with `xcode-select --install`.
 
@@ -205,3 +205,11 @@ A GUI Electron app inherits a minimal `PATH` (no `~/.local/bin`, no Homebrew), s
 - **Liveness is derived primarily from transcript turn-state**, not generic terminal output: the live dot reads working / waiting-on-you / finished-unread / finished-seen. Explicit Codex OSC notifications are the narrow exception, covering questions and approvals in Switchboard-owned terminals that are absent from the rollout. Claude permission prompts and a `claude` crash whose shell survives still cannot be distinguished from working state.
 - **LaTeX math** renders in the Formatted view for both agents (`\(…\)` / `$…$` inline, `\[…\]` / `$$…$$` display). Detection is deliberately conservative, and applies **per text block** (a message can hold several, and each is judged on its own): a block counts as math only if it contains a display equation whose delimiters are alone on their own lines, and a bare `$…$` counts only in a block that also wrote display math with `$$`. Code — fenced, indented, or inline — is excluded entirely, so a LaTeX sample stays a sample. That leaves `\[DEBUG\]`, `sed`/`jq` expressions, and `$PATH` alone, at the cost of occasionally showing real math as source, which is the intended trade.
 - The renderer bundle is ~2 MB (react-markdown + xterm.js); KaTeX is a separate chunk loaded only when a conversation actually contains math.
+
+### Pi
+
+Pi appears in the New conversation picker when `pi` is on your login shell's PATH, and can be selected as the default agent in Preferences. The integration targets Pi 0.84.3. Configure Pi separately using your environment's approved installation and model setup instructions; Switchboard uses Pi's existing provider/model defaults and shell environment, including token environment variables. It does not store credentials or override the model provider. Switchboard launches Pi with `PI_OFFLINE=1` to disable Pi's startup update checks and helper downloads; model requests still work normally.
+
+Saved sessions under `~/.pi/agent/sessions/` appear beside the other agents, with active-branch transcript previews, tool results, images, token usage, and resume into the exact session file. An inherited `PI_CODING_AGENT_DIR` changes the scanned agent directory. Sessions stored elsewhere or created with `--no-session` are not indexed. New sessions use Pi's `--session-id` support to keep their terminal and history linked. Use Switchboard's New action for a new conversation; in-terminal session switching is not tracked for Pi.
+
+Rename Pi sessions inside Pi; Switchboard reads its `session_info` names but keeps the title field read-only to avoid changing a running session's tree. Pi persists messages at turn boundaries, so the Formatted view and activity dot can lag live terminal output. Before changing model providers, follow your environment's session cleanup and data-handling instructions; resuming reuses saved conversation content.

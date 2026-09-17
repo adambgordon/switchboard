@@ -3,9 +3,12 @@ import { AGENTS, type AgentKind } from '@shared/types'
 import claudeLogo from '../assets/agents/claude.svg'
 import codexLogo from '../assets/agents/codex.svg'
 
+import piLogo from '../assets/agents/pi.svg'
+
 const LOGOS: Record<AgentKind, string> = {
   claude: claudeLogo,
-  codex: codexLogo
+  codex: codexLogo,
+  pi: piLogo
 }
 
 /**

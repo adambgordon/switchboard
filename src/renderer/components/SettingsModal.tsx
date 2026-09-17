@@ -2,7 +2,7 @@ import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Close, Folder, Info, Reset, Warning } from './icons'
 import { basename } from '../lib/format'
 import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
-import { AGENTS, type AgentKind } from '@shared/types'
+import { AGENT_KINDS, AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
 import type { Updates } from '../lib/useUpdates'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
@@ -184,7 +184,7 @@ const FAQ: Faq[] = [
       <>
         Everything is read from the session files your agents write. Claude Code sessions are
         stored under <code>~/.claude/projects/</code> and Codex sessions under{' '}
-        <code>~/.codex/sessions/</code>. Switchboard is a viewer — it never owns your conversations.
+        <code>~/.codex/sessions/</code>, plus Pi sessions under <code>~/.pi/agent/sessions/</code>. Switchboard is a viewer — it never owns your conversations.
       </>
     )
   }
@@ -302,10 +302,8 @@ export default function SettingsModal({
   const lockedAgentTip = !defaultAgentDisabled
     ? undefined
     : defaultAgentChoice === 'none'
-      ? 'No agents detected on your PATH — install Claude Code or Codex to set a default.'
-      : `Only ${AGENTS[defaultAgentChoice].label} is installed, so new conversations always use it. Install ${
-          AGENTS[defaultAgentChoice === 'claude' ? 'codex' : 'claude'].label
-        } to choose a default.`
+      ? 'No agents detected on your PATH — install Claude Code, Codex, or Pi to set a default.'
+      : `Only ${AGENTS[defaultAgentChoice].label} is installed, so new conversations always use it. Install another supported agent to choose a default.`
 
   // Move focus into the dialog when it opens — so it reads as modal and the focus ring isn't
   // stranded on the gear / footer button sitting behind the scrim.
@@ -532,7 +530,7 @@ export default function SettingsModal({
                       >
                         No default
                       </button>
-                      {(['claude', 'codex'] as AgentKind[]).map((a) => (
+                      {AGENT_KINDS.map((a) => (
                         <button
                           key={a}
                           type="button"
