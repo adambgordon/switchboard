@@ -195,6 +195,15 @@ export class ClaudeParkedJobMonitor {
   private readonly controllers = new Map<string, Controller>()
   private watcher: NodeFsWatcher | null = null
   private poll: ReturnType<typeof setInterval> | null = null
+  /**
+   * Set once by `dispose`, and checked by `refresh` — because re-arming made the watch a way back in.
+   *
+   * `refresh` is called from the watch callback, and now re-arms the watch, so an event already queued
+   * when the app tears down would open a FRESH watcher on a disposed monitor: a handle nothing owns,
+   * held past shutdown, and a `dispose()` that did not dispose. Clearing the controllers is not
+   * enough — that only stops the emitting, not the re-arming.
+   */
+  private disposed = false
 
   constructor(opts: ClaudeParkedJobMonitorOptions) {
     this.sessionsRoot = opts.sessionsRoot ?? join(homedir(), '.claude', 'sessions')
@@ -223,6 +232,7 @@ export class ClaudeParkedJobMonitor {
   }
 
   dispose(): void {
+    this.disposed = true
     this.controllers.clear()
     this.stopWatching()
   }
@@ -273,6 +283,7 @@ export class ClaudeParkedJobMonitor {
   }
 
   private refresh(): void {
+    if (this.disposed) return
     this.armWatcher()
     const bySession = new Map<string, string>()
     const statusBySession = new Map<string, ClaudeSessionStatus>()
