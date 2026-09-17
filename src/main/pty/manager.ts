@@ -4,11 +4,12 @@ import * as pty from 'node-pty'
 import {
   CONFIG,
   type AgentKind,
+  type ClaudeSessionStatus,
   type PtyBindKind,
   type PtySession,
   type PtyStatus
 } from '../../shared/types'
-import { resolveTurnActivity, type TurnSnapshot } from '../../shared/turnActivity'
+import { inputRequestedAt, resolveTurnActivity, type TurnSnapshot } from '../../shared/turnActivity'
 import { cleanAgentEnv } from './agentEnv'
 import { bootPayloadFor } from './bootCommand'
 import { chooseEvictionTargets } from './evictionPolicy'
@@ -105,6 +106,10 @@ interface Live {
   // [Claude] The background agent this session launched, once its registry marker is confirmed. Says
   // nothing about what the terminal is currently showing — see claudeParkedJobs.
   parkedJob: ParkedJob | null
+  // [Claude] What Claude says this session is doing, from its own registry; null for Codex (never
+  // registered) and whenever no live record backs a claim. The only signal that catches an in-process
+  // subagent whose parent writes no transcript — see claudeParkedJobs.
+  registryStatus: ClaudeSessionStatus | null
   booted: boolean
   // Claude boots (the `claude` command is typed) only once the shell is ready AND the renderer
   // has sized the PTY to the real terminal dimensions. Booting before the resize makes claude
@@ -172,7 +177,8 @@ export class PtyManager extends EventEmitter {
     this.parkedJobs = opts.claudeParkedJobs
       ? new ClaudeParkedJobMonitor({
           ...opts.claudeParkedJobs,
-          onChange: (ptyId, parked) => this.setParkedJob(ptyId, parked)
+          onChange: (ptyId, parked) => this.setParkedJob(ptyId, parked),
+          onStatus: (ptyId, status) => this.setRegistryStatus(ptyId, status)
         })
       : null
   }
@@ -181,6 +187,18 @@ export class PtyManager extends EventEmitter {
     const entry = this.live.get(ptyId)
     if (!entry) return
     entry.parkedJob = parked
+    this.emitActive()
+  }
+
+  /**
+   * Record Claude's own busy/idle for this terminal. The monitor fires only on a change, and this
+   * re-checks anyway: `emitActive` broadcasts to every window and re-renders every row, so an
+   * unchanged value must not reach it.
+   */
+  private setRegistryStatus(ptyId: string, status: ClaudeSessionStatus | null): void {
+    const entry = this.live.get(ptyId)
+    if (!entry || entry.registryStatus === status) return
+    entry.registryStatus = status
     this.emitActive()
   }
 
@@ -286,10 +304,20 @@ export class PtyManager extends EventEmitter {
    * and paste handlers rather than inferred from written bytes, because only the renderer can tell a
    * keystroke from the terminal answering a query on the program's behalf. Throttled there, so this
    * is a coarse "recently used" rather than a per-keystroke timestamp — which is all the cap needs.
+   *
+   * Also the answer to an outstanding runtime input request, which is why it clears one. A request
+   * detected from output has no completion event of its own: accepting one lets the transcript
+   * overtake it, but DECLINING leaves nothing behind, so the terminal would read as blocked on the
+   * user for as long as it lived — and `asking` is protection the cap never overrides. A person
+   * typing here is the response. The renderer's throttle means a keystroke inside an earlier
+   * report's window is swallowed and the clear waits for the next one; acceptable because a terminal
+   * holding a prompt is idle beforehand, so the window is normally already clear, and the cap bounds
+   * a stale request independently (see evictionPolicy).
    */
   markUsed(ptyId: string): void {
     const entry = this.live.get(ptyId)
     if (!entry) return
+    entry.inputRequestedAt = null
     entry.lastInputAt = Date.now()
     entry.usedByUser = true
   }
@@ -638,6 +666,7 @@ export class PtyManager extends EventEmitter {
       provisional: o.provisional ?? false,
       identityConfirmed: false,
       parkedJob: o.agent === 'claude' ? this.fakeParkedJob : null,
+      registryStatus: null,
       booted: false,
       shellReady: false,
       sized: false,
@@ -731,12 +760,18 @@ export class PtyManager extends EventEmitter {
         used: l.usedByUser,
         // Resolved through the SHARED rules, so the cap and the liveness dot cannot disagree about
         // whether a session is working. `startedAt` is what exposes a carryover turn; the runtime
-        // request is what exposes a question the transcript never recorded.
+        // request is what exposes a question the transcript never recorded; the registry status is
+        // what exposes a subagent running inside a session that has written nothing.
         activity: resolveTurnActivity(
           this.turnSnapshots.get(l.sessionId),
           l.startedAt,
-          l.inputRequestedAt
+          l.inputRequestedAt,
+          l.registryStatus === 'busy'
         ),
+        // The same resolution the activity above used, kept as a timestamp so the policy can bound
+        // it. Derived here rather than passed raw: a transcript-recorded question and one seen only
+        // in output both need bounding, and only this function knows which of them applies.
+        askedAt: inputRequestedAt(this.turnSnapshots.get(l.sessionId), l.inputRequestedAt),
         onScreen: this.visiblePtyIds.has(l.ptyId)
       })),
       this.maxLive,
@@ -759,6 +794,7 @@ export class PtyManager extends EventEmitter {
       origin: e.origin,
       provisional: e.provisional,
       parkedJob: e.parkedJob,
+      registryStatus: e.registryStatus,
       exitCode: e.exitCode
     }
   }

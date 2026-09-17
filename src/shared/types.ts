@@ -65,6 +65,13 @@ export interface TranscriptMessage {
  */
 export type TurnState = 'in_progress' | 'awaiting' | 'awaiting_input'
 
+/**
+ * What Claude reports about one of its own live sessions. Deliberately only the two values we act
+ * on: anything else Claude may write is read as "no claim" rather than guessed at, because guessing
+ * `busy` from an unrecognised value is how a session becomes unreclaimable for good.
+ */
+export type ClaudeSessionStatus = 'busy' | 'idle'
+
 export interface ConversationMeta {
   /** UUID; also the JSONL filename stem and the agent's resume token. */
   sessionId: string
@@ -260,6 +267,16 @@ export interface PtySession {
    * otherwise renders as an empty "New conversation" row while the user is working in it.
    */
   parkedJob: { shortId: string; name: string } | null
+  /**
+   * [Claude] What Claude says IT is doing, from its own live-session registry, or null when there is
+   * no usable record (no registry, a Codex terminal, an unrecognised value).
+   *
+   * The only first-party activity signal either agent publishes, and the only one that reports work
+   * the transcript does not: a subagent runs INSIDE the parent process, and the parent's own
+   * transcript can sit unwritten for the duration. Both consumers treat null as "no claim" and fall
+   * back to the transcript, so losing the registry costs this refinement and nothing else.
+   */
+  registryStatus: ClaudeSessionStatus | null
   exitCode?: number | null
 }
 

@@ -1,15 +1,21 @@
 import type { TurnActivity } from '../../shared/turnActivity'
 
 /**
- * How long a USED terminal with no attributable transcript stays protected after its last use.
+ * How long an unanswered input request keeps a terminal out of reach.
  *
- * It exists for one window: a first turn has been submitted, but the conversation it created is
- * not yet attributable to this terminal, so nothing can say the agent is working. Stopping it
- * there destroys live work. The protection is time-bounded rather than absolute because a
- * permanent one would be a way to exceed the cap without limit — the mistake this policy is
- * written to avoid. Generous against a window that normally closes in seconds.
+ * `asking` is the one protection with no natural end. A question the agent ANSWERS is superseded by
+ * later transcript activity, and one the user answers clears on their keystroke — but a question
+ * merely abandoned leaves both untouched, and the prompt sits on screen claiming the terminal
+ * forever. Every other veto here is self-limiting; this is the only one that needs a clock, because
+ * any rule that protects a live terminal indefinitely is a way to exceed the cap without limit.
+ *
+ * Long enough to walk away from a plan approval and come back to it. Note what lapsing does and does
+ * not mean: the terminal stops being untouchable and starts being RANKED, so an empty terminal or a
+ * finished conversation is still taken before it, and nothing is stopped at all until the user opens
+ * another conversation. The dot deliberately keeps pulsing past this — the prompt really is still
+ * there, and dimming the row would be a lie (see liveness).
  */
-export const UNATTRIBUTED_GRACE_MS = 10 * 60_000
+export const STALE_REQUEST_MS = 30 * 60_000
 
 /**
  * How long ANY used terminal is protected after its last use, whatever its transcript says.
@@ -47,6 +53,12 @@ export interface EvictionCandidate {
    * question (so the prompt would be discarded). Both corrections live in that one module.
    */
   activity: TurnActivity
+  /**
+   * When the outstanding input request was raised, or null when there is none. Carried ALONGSIDE
+   * `activity` rather than folded into it because `asking` is the one state that needs bounding, and
+   * the resolution that produces it cannot express "still waiting, but no longer sacred".
+   */
+  askedAt: number | null
   /** Showing in some window's pane right now, in any window. */
   onScreen: boolean
 }
@@ -60,10 +72,13 @@ export interface EvictionCandidate {
  * limit: whatever the rule is, a user can keep making terminals that satisfy it.
  *
  * The protected cases are protected because stopping them destroys something that exists nowhere
- * else: `working` is a turn mid-flight, `asking` is a question whose prompt lives only in that
- * terminal, and an on-screen terminal is one being looked at — a pane going blank reads as a
- * glitch even when nothing is lost. None can be sustained indefinitely across many terminals the
- * way an idle one can, which is what makes them safe to treat as absolute.
+ * else: `working` is a turn mid-flight — which now includes work only the agent itself reports, so a
+ * subagent running inside the session's process counts even while its transcript sits unwritten —
+ * `asking` is a question whose prompt lives only in that terminal, and an on-screen terminal is one
+ * being looked at, where a pane going blank reads as a glitch even when nothing is lost.
+ *
+ * Two of those three end by themselves: work finishes, and a pane stops being looked at. `asking`
+ * does not, so it is the one veto with a clock on it.
  *
  * The tiers rank by WHAT IS LOST, not by age:
  *
@@ -71,19 +86,29 @@ export interface EvictionCandidate {
  * 1. Idle. The transcript is on disk, so stopping it costs only the running process.
  * 2. Unattributable but used — possibly an unsent message, or a shell the agent exited to. Last
  *    resort, because this is the only tier whose content exists nowhere but in that terminal.
- *    Held out of reach entirely for {@link UNATTRIBUTED_GRACE_MS} after its last use.
  */
 function tierOf(candidate: EvictionCandidate, now: number): number | null {
   if (candidate.onScreen) return null
-  if (candidate.activity === 'working' || candidate.activity === 'asking') return null
+  if (candidate.activity === 'working') return null
+  // Bounded, unlike the rest: see STALE_REQUEST_MS. A lapsed request does not become a different
+  // activity — it just stops vetoing, and falls through to be ranked like the finished turn the
+  // transcript shows.
+  if (candidate.activity === 'asking') {
+    if (candidate.askedAt == null) return 1
+    if (now - candidate.askedAt < STALE_REQUEST_MS) return null
+  }
   // Applies to every tier, because `activity` may simply not have caught up with what the user did
   // a moment ago. Gated on `used` — an untouched terminal holds nothing whenever it was opened, so
   // extending this to one would briefly make a burst of new conversations unreclaimable.
   if (candidate.used && now - candidate.lastInputAt < RECENT_USE_GRACE_MS) return null
-  if (candidate.activity === 'unknown') {
-    if (!candidate.used) return 0
-    return now - candidate.lastInputAt < UNATTRIBUTED_GRACE_MS ? null : 2
-  }
+  // No grace beyond that 30 seconds, deliberately. A longer window was tried and removed: it was
+  // written for the seconds between submitting a first turn and its conversation becoming
+  // attributable, which the recency guard above already covers for every tier — while in practice it
+  // caught a terminal merely TYPED INTO and never submitted, a state that never resolves on its own,
+  // so a half-written line held a slot for as long as the user kept touching it. What protects a
+  // possible draft is its rank, not a timer: tier 2 goes after every empty terminal and every
+  // finished conversation, and is reached only when it is the last candidate left.
+  if (candidate.activity === 'unknown') return candidate.used ? 2 : 0
   return 1
 }
 

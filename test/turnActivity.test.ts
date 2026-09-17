@@ -74,4 +74,38 @@ describe('resolveTurnActivity', () => {
     // No spawn time means nothing to compare against, so the turn stands as written.
     expect(resolveTurnActivity(snap('in_progress', 1_000), null, null)).toBe('working')
   })
+
+  it('believes the agent over a transcript that says the turn finished', () => {
+    // A subagent runs INSIDE the parent session's process, and the parent may write nothing for its
+    // whole duration — so the transcript reads `awaiting` while real work is in flight. This is the
+    // only signal that catches it, and the only one where the agent describes itself.
+    expect(resolveTurnActivity(snap('awaiting', 5_000), 1_000, null, true)).toBe('working')
+  })
+
+  it('believes the agent over having no transcript at all', () => {
+    // Checked before the unknown gate: a session whose work went entirely into a subagent has
+    // nothing attributable to it, and `unknown` would rank it as an empty terminal.
+    expect(resolveTurnActivity(undefined, 1_000, null, true)).toBe('working')
+  })
+
+  it('does not let busy override an unanswered question', () => {
+    // Ranked deliberately below `asking`: a session blocked on the user is not working, whatever it
+    // reports, and treating it as working would discard the prompt. Both question sources asserted,
+    // since they reach `asking` by different paths.
+    expect(resolveTurnActivity(snap('awaiting_input', 5_000), 1_000, null, true)).toBe('asking')
+    expect(resolveTurnActivity(snap('awaiting', 5_000), 1_000, 6_000, true)).toBe('asking')
+  })
+
+  it('reports idle when the agent says idle, rather than treating the field as a mere hint', () => {
+    // The fixture differs from the busy cases in one argument, which is the whole claim: `false`
+    // must leave the transcript in charge instead of contributing anything of its own.
+    expect(resolveTurnActivity(snap('awaiting', 5_000), 1_000, null, false)).toBe('idle')
+    expect(resolveTurnActivity(undefined, 1_000, null, false)).toBe('unknown')
+  })
+
+  it('still demotes a carryover turn when the agent reports idle', () => {
+    // Guards the ordering: resolving busy BEFORE the carryover check would be invisible here, but
+    // resolving the carryover as working when the agent says idle would not.
+    expect(resolveTurnActivity(snap('in_progress', 1_000), 5_000, null, false)).toBe('idle')
+  })
 })

@@ -1,5 +1,20 @@
 /**
- * Which Switchboard-owned Claude terminals have launched a background agent.
+ * What Claude's own live-session registry says about Switchboard-owned Claude terminals: which have
+ * launched a background agent, and which are busy.
+ *
+ * The busy/idle half is the only first-party activity signal either agent publishes, and it reports
+ * something the transcript cannot. Anthropic documents that "subagents run in the same process as
+ * the parent session", so killing a terminal mid-subagent destroys that work — while the parent's
+ * own transcript may be written nowhere for the subagent's whole duration, leaving the session
+ * looking idle. The registry is written by the parent about itself, so it stays correct regardless.
+ *
+ * Note the two halves say almost opposite things, and only one is a reason to protect a terminal.
+ * BACKGROUND (Agent View) sessions run under a separate supervisor and survive their terminal
+ * closing — Anthropic: "Background sessions don't need any terminal open to keep working" — so the
+ * parked marker below is NOT evidence that anything would be lost. Which is just as well, given it
+ * never clears.
+ *
+ * The background-agent half:
  *
  * Claude records this on the session in its own session registry as `parkedJobId`. Read it for EXACTLY
  * what it says and nothing more:
@@ -30,11 +45,22 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync, readdirSync, watch as watchFile } from 'node:fs'
 import type { FSWatcher as NodeFsWatcher } from 'node:fs'
+import type { ClaudeSessionStatus } from '../../shared/types'
 import { readBgJobName } from '../sessions/claudeJobs'
 
 const SHORT_ID = /^[a-f0-9]{6,}$/i
 const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
-const REGISTRY_POLL_MS = 250
+/**
+ * Backstop interval for the registry read — NOT the path that makes it feel responsive.
+ *
+ * The directory watch delivers a change in ~12 ms (measured; macOS FSEvents coalesces at ~10 ms and
+ * that floor, not this interval, is the latency the user sees). This exists for when the watch is
+ * unavailable or has failed, so the signal degrades to slower rather than to absent. Every pass is
+ * SYNCHRONOUS on the main process's event loop — the same loop pumping terminal bytes — so it is
+ * kept well clear of the poll rates that would start competing with keystroke echo: one pass
+ * measured 0.1 ms against two records and projects to ~1 ms against twenty.
+ */
+const REGISTRY_POLL_MS = 150
 /**
  * How long a marker must have been observed continuously before it is reported.
  *
@@ -86,6 +112,38 @@ export function parkedJobFromRegistry(text: string): ParkedJobRecord | null {
   }
 }
 
+/**
+ * Read a live-session record's own account of what it is doing, or null when the record cannot
+ * support the claim.
+ *
+ * Separate from {@link parkedJobFromRegistry} and not a superset of it: that one requires a
+ * `parkedJobId`, which most records do not have, so the two accept different sets of records out of
+ * the same file. An unrecognised `status` is rejected rather than mapped to a default — treating an
+ * unknown value as `busy` would make a session unreclaimable for as long as its process lived.
+ */
+export function sessionStatusFromRegistry(text: string): SessionStatusRecord | null {
+  try {
+    const value = JSON.parse(text) as Record<string, unknown>
+    return value.kind === 'interactive' &&
+      typeof value.sessionId === 'string' &&
+      SESSION_ID.test(value.sessionId) &&
+      typeof value.pid === 'number' &&
+      Number.isSafeInteger(value.pid) &&
+      value.pid > 0 &&
+      (value.status === 'busy' || value.status === 'idle')
+      ? { sessionId: value.sessionId, pid: value.pid, status: value.status }
+      : null
+  } catch {
+    return null
+  }
+}
+
+export interface SessionStatusRecord {
+  sessionId: string
+  pid: number
+  status: ClaudeSessionStatus
+}
+
 export interface ClaudeParkedJobMonitorOptions {
   sessionsRoot?: string
   isProcessAlive?: (pid: number) => boolean
@@ -93,6 +151,15 @@ export interface ClaudeParkedJobMonitorOptions {
   /** Injectable clock — the confirmation window is the behavior, so tests must be able to drive it. */
   now?: () => number
   onChange: (ptyId: string, parked: ParkedJob | null) => void
+  /**
+   * Claude's own busy/idle for this PTY's session, or null once no usable record backs it.
+   *
+   * Reported with NO confirmation window, unlike the parked marker. That window exists to stop a row
+   * TITLE flashing while two slower paths race; this value has no such race and a 900 ms delay on it
+   * would be sixty times the latency of the watch that delivers it. Fires only on a CHANGE, because
+   * every pass otherwise rebroadcasts identical state and re-renders every row.
+   */
+  onStatus?: (ptyId: string, status: ClaudeSessionStatus | null) => void
 }
 
 interface Controller {
@@ -101,12 +168,22 @@ interface Controller {
   pendingShortId: string | null
   /** When `pendingShortId` was first observed; the marker is reported CONFIRM_AFTER_MS later. */
   pendingSince: number
+  /**
+   * Last status handed to `onStatus`, so a pass that changes nothing emits nothing. `undefined`
+   * means "never reported" and is distinct from `null` ("reported as having no claim"), or the first
+   * genuine absence would be swallowed.
+   */
+  reportedStatus: ClaudeSessionStatus | null | undefined
 }
 
 /**
- * Watches Claude's private session registry for the parked-agent marker on Switchboard-owned Claude
- * PTYs. Consumers see only a per-PTY parked-job value; registry records, pids, and confirmation
- * policy stay behind this boundary. Watching runs only while Claude PTYs exist.
+ * Watches Claude's private session registry on behalf of Switchboard-owned Claude PTYs, for two
+ * INDEPENDENT facts that happen to live in the same file: the parked-agent marker, and the session's
+ * own busy/idle. One directory watch, one poll, one read per file per pass; the two are parsed
+ * separately because a record can support either claim without supporting the other.
+ *
+ * Consumers see per-PTY values only — registry records, pids, liveness checks and the parked
+ * marker's confirmation policy stay behind this boundary. Watching runs only while Claude PTYs exist.
  */
 export class ClaudeParkedJobMonitor {
   private readonly sessionsRoot: string
@@ -114,6 +191,7 @@ export class ClaudeParkedJobMonitor {
   private readonly resolveJobName: (shortId: string) => string
   private readonly now: () => number
   private readonly onChange: (ptyId: string, parked: ParkedJob | null) => void
+  private readonly onStatus?: (ptyId: string, status: ClaudeSessionStatus | null) => void
   private readonly controllers = new Map<string, Controller>()
   private watcher: NodeFsWatcher | null = null
   private poll: ReturnType<typeof setInterval> | null = null
@@ -124,6 +202,7 @@ export class ClaudeParkedJobMonitor {
     this.resolveJobName = opts.resolveJobName ?? ((shortId) => readBgJobName(shortId))
     this.now = opts.now ?? (() => Date.now())
     this.onChange = opts.onChange
+    this.onStatus = opts.onStatus
   }
 
   register(ptyId: string, sessionId: string): void {
@@ -131,7 +210,8 @@ export class ClaudeParkedJobMonitor {
       sessionId,
       reported: null,
       pendingShortId: null,
-      pendingSince: 0
+      pendingSince: 0,
+      reportedStatus: undefined
     })
     this.startWatching()
     this.refresh()
@@ -149,6 +229,23 @@ export class ClaudeParkedJobMonitor {
 
   private startWatching(): void {
     if (this.poll) return
+    this.armWatcher()
+    this.poll = setInterval(() => this.refresh(), REGISTRY_POLL_MS)
+    this.poll.unref()
+  }
+
+  /**
+   * (Re)attach the directory watch, which is what makes this feel instant — the poll is only the
+   * backstop.
+   *
+   * Re-armed from `refresh` after a failure rather than abandoned. A watch can die for reasons that
+   * do not persist (the registry directory replaced, a descriptor limit hit in a burst), and dropping
+   * it permanently on the first error silently costs every later change its ~12 ms path and leaves
+   * the poll interval as the only latency anyone sees. Cheap to retry: the next pass is already
+   * scheduled, so this rides it rather than adding a timer.
+   */
+  private armWatcher(): void {
+    if (this.watcher) return
     try {
       this.watcher = watchFile(this.sessionsRoot, () => this.refresh())
       this.watcher.on('error', () => {
@@ -160,10 +257,8 @@ export class ClaudeParkedJobMonitor {
         this.watcher = null
       })
     } catch {
-      /* the registry directory may not exist yet; the poll below is the reliable path */
+      /* the registry directory may not exist yet; the poll is the reliable path until it does */
     }
-    this.poll = setInterval(() => this.refresh(), REGISTRY_POLL_MS)
-    this.poll.unref()
   }
 
   private stopWatching(): void {
@@ -178,18 +273,29 @@ export class ClaudeParkedJobMonitor {
   }
 
   private refresh(): void {
+    this.armWatcher()
     const bySession = new Map<string, string>()
+    const statusBySession = new Map<string, ClaudeSessionStatus>()
     try {
       for (const entry of readdirSync(this.sessionsRoot, { withFileTypes: true })) {
         if (!entry.isFile() || !entry.name.endsWith('.json')) continue
         try {
-          const record = parkedJobFromRegistry(
-            readFileSync(join(this.sessionsRoot, entry.name), 'utf8')
-          )
+          // ONE read per file for both facts. They are parsed separately because they accept
+          // different records, but re-reading the file for each would double the synchronous I/O
+          // this does on the main process's event loop every pass.
+          const text = readFileSync(join(this.sessionsRoot, entry.name), 'utf8')
+          const record = parkedJobFromRegistry(text)
           // Claude leaves the record behind when a session dies, so a resumed conversation would
           // otherwise inherit the dead process's marker.
           if (record && this.isProcessAlive(record.pid)) {
             bySession.set(record.sessionId, record.shortId)
+          }
+          // Gated on the same liveness check and for the same reason: a stale record's last status
+          // was written by a process that no longer exists, and a leftover `busy` would protect a
+          // terminal that is doing nothing at all.
+          const status = sessionStatusFromRegistry(text)
+          if (status && this.isProcessAlive(status.pid)) {
+            statusBySession.set(status.sessionId, status.status)
           }
         } catch {
           /* one unreadable record must not hide the rest */
@@ -202,6 +308,12 @@ export class ClaudeParkedJobMonitor {
     }
 
     const now = this.now()
+    for (const [ptyId, controller] of this.controllers) {
+      const status = statusBySession.get(controller.sessionId) ?? null
+      if (controller.reportedStatus === status) continue
+      controller.reportedStatus = status
+      this.onStatus?.(ptyId, status)
+    }
     for (const [ptyId, controller] of this.controllers) {
       const shortId = bySession.get(controller.sessionId) ?? null
       if (shortId === null) {

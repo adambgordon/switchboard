@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   RECENT_USE_GRACE_MS,
-  UNATTRIBUTED_GRACE_MS,
+  STALE_REQUEST_MS,
   chooseEvictionTargets,
   type EvictionCandidate
 } from '../src/main/pty/evictionPolicy'
@@ -34,6 +34,7 @@ describe('chooseEvictionTargets', () => {
     lastInputAt,
     used: true,
     activity: 'idle',
+    askedAt: null,
     onScreen: false
   })
   /** A terminal opened and never used, with nothing attributable to it. */
@@ -42,6 +43,7 @@ describe('chooseEvictionTargets', () => {
     lastInputAt: openedAt,
     used: false,
     activity: 'unknown',
+    askedAt: null,
     onScreen: false
   })
   /** Used, unattributable, and last touched long enough ago to be out of the grace window. */
@@ -50,13 +52,25 @@ describe('chooseEvictionTargets', () => {
     lastInputAt,
     used: true,
     activity: 'unknown',
+    askedAt: null,
     onScreen: false
   })
   const doing = (
     ptyId: string,
     lastInputAt: number,
-    activity: EvictionCandidate['activity']
-  ): EvictionCandidate => ({ ptyId, lastInputAt, used: true, activity, onScreen: false })
+    activity: EvictionCandidate['activity'],
+    now = NOW
+  ): EvictionCandidate => ({
+    ptyId,
+    lastInputAt,
+    used: true,
+    activity,
+    // Dated FRESH, not from `lastInputAt`, which these fixtures set to small numbers far behind
+    // `NOW` — dating the question there would make every `asking` fixture stale and quietly assert
+    // the opposite of what it reads as. Staleness and the undated case get their own tests.
+    askedAt: activity === 'asking' ? now - 1_000 : null,
+    onScreen: false
+  })
 
   const choose = (live: EvictionCandidate[], maxLive: number, now = NOW): string[] =>
     chooseEvictionTargets(live, maxLive, now)
@@ -137,27 +151,22 @@ describe('chooseEvictionTargets', () => {
     expect(choose(used, 2)).toEqual(['t100', 't200', 't300'])
   })
 
-  it('holds an unattributable used terminal out of reach during its grace window', () => {
-    // A first turn has been submitted but its conversation is not yet attributable, so nothing can
-    // report the agent as working. Stopping it there destroys live work.
-    const justUsed = unsent('just-submitted', NOW - 1_000)
-    expect(choose([justUsed, doing('busy', NOW, 'working')], 2)).toEqual([])
+  it('gives an unattributable used terminal no protection beyond the recent-use window', () => {
+    // A longer grace lived here and was REMOVED. It was written for the seconds between submitting
+    // a first turn and its conversation becoming attributable — which the recency guard below
+    // already covers for every activity — but in practice it caught a terminal merely typed into
+    // and never submitted, a state that never resolves, so a half-written line held a slot for as
+    // long as the user kept touching it. Past the recency window it is reclaimable; its rank, not a
+    // timer, is what keeps it safe.
+    const typedLongAgo = unsent('draft', NOW - RECENT_USE_GRACE_MS)
+    expect(choose([typedLongAgo, doing('busy', NOW, 'working')], 2)).toEqual(['draft'])
   })
 
-  it('releases it the moment the grace window closes, rather than protecting it for good', () => {
-    // Boundary asserted from both sides, since a permanent protection and a long one are
-    // indistinguishable from a single sample.
-    const used = unsent('aging', 0)
-    const busy = doing('busy', NOW, 'working')
-    expect(choose([used, busy], 2, UNATTRIBUTED_GRACE_MS - 1)).toEqual([])
-    expect(choose([used, busy], 2, UNATTRIBUTED_GRACE_MS)).toEqual(['aging'])
-  })
-
-  it('does not extend the grace window to never-used terminals', () => {
-    // An empty terminal has nothing to lose whenever it was opened, so the grace must not apply —
-    // otherwise a burst of new conversations becomes briefly unreclaimable.
-    const freshEmpty = empty('fresh', NOW - 1)
-    expect(choose([freshEmpty, doing('busy', NOW, 'working')], 2)).toEqual(['fresh'])
+  it('still takes a possible draft only as the last resort', () => {
+    // The replacement for that grace. Ordered so age argues the other way: the draft is the OLDEST
+    // candidate, so a rule that sorted by recency alone would take it first.
+    const live = [unsent('draft', 100), idle('convo', 500), empty('never-used', 900)]
+    expect(choose(live, 1)).toEqual(['never-used', 'convo', 'draft'])
   })
 
   it('never takes a session the user touched moments ago, whatever the transcript says', () => {
@@ -180,6 +189,47 @@ describe('chooseEvictionTargets', () => {
     // An untouched terminal holds nothing however recently it was opened, so a burst of new
     // conversations must not become briefly unreclaimable.
     expect(choose([empty('fresh', NOW), doing('busy', NOW, 'working')], 2)).toEqual(['fresh'])
+  })
+
+  it('releases an abandoned question instead of protecting it for good', () => {
+    // The bug this bound exists for: a Codex prompt is detected from output and cleared by nothing
+    // if the user DECLINES it — accepting lets the transcript overtake it, declining leaves no trace
+    // — so the terminal read as blocked on the user for as long as it lived. Asserted from both
+    // sides, because a permanent veto and a long one look identical from one sample.
+    const asked = { ...idle('asked', 100), activity: 'asking' as const, askedAt: 0 }
+    const busy = doing('busy', NOW, 'working')
+    expect(choose([asked, busy], 2, STALE_REQUEST_MS - 1)).toEqual([])
+    expect(choose([asked, busy], 2, STALE_REQUEST_MS)).toEqual(['asked'])
+  })
+
+  it('ranks a lapsed question like the finished turn it sits on, not like an empty terminal', () => {
+    // Lapsing removes the veto; it does not reclassify what the terminal holds. The transcript still
+    // shows a conversation, so an empty terminal goes first — and this is what a mutation collapsing
+    // the two would break.
+    const asked = { ...idle('asked', 100), activity: 'asking' as const, askedAt: 0 }
+    expect(choose([asked, empty('blank', 900)], 2, STALE_REQUEST_MS)).toEqual(['blank'])
+  })
+
+  it('does not protect a question it cannot date', () => {
+    // `asking` with no timestamp cannot be aged, so protecting it would be protecting it forever.
+    const undated = { ...idle('undated', 100), activity: 'asking' as const, askedAt: null }
+    expect(choose([undated, doing('busy', NOW, 'working')], 2)).toEqual(['undated'])
+  })
+
+  it('ranks an undated question like a conversation, not like an empty terminal', () => {
+    // Being unable to date a question says nothing about what the terminal HOLDS — there is still a
+    // transcript behind it. Without this, dropping the undated case to tier 0 would take it ahead of
+    // a genuinely empty terminal and no test would notice.
+    const undated = { ...idle('undated', 100), activity: 'asking' as const, askedAt: null }
+    expect(choose([undated, empty('blank', 900)], 2)).toEqual(['blank'])
+  })
+
+  it('protects a session Claude reports as working with nothing in its transcript', () => {
+    // A subagent runs INSIDE the parent's process, and the parent may write no transcript for its
+    // whole duration — so this arrives as `working` on a terminal that has nothing attributable to
+    // it. Same fixture as `empty` but for the activity, which is the distinction being asserted.
+    const subagent = { ...empty('subagent-host', 100), activity: 'working' as const }
+    expect(choose([subagent, idle('convo', 900)], 2)).toEqual(['convo'])
   })
 
   it('never takes a terminal that is on screen, whatever its tier or age', () => {

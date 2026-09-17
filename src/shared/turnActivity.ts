@@ -81,11 +81,19 @@ export type TurnActivity = 'working' | 'asking' | 'idle' | 'unknown'
 export function resolveTurnActivity(
   snapshot: TurnSnapshot | undefined,
   liveStartedAt: number | null,
-  runtimeInputRequestedAt: number | null
+  runtimeInputRequestedAt: number | null,
+  claudeBusy = false
 ): TurnActivity {
   // Checked FIRST, and before the unknown gate: a runtime question can arrive on a terminal whose
   // conversation is not yet attributable, and it outranks a completed turn by construction.
   if (inputRequestedAt(snapshot, runtimeInputRequestedAt) != null) return 'asking'
+  // Ranked below a question and above everything else. Claude's own account of itself beats the
+  // transcript whenever the two differ, because it reports work the transcript CANNOT: a subagent
+  // runs inside the parent process, and the parent may write nothing for its whole duration. It is
+  // deliberately not ranked above `asking` — a session blocked on the user is not working, whatever
+  // it says — and it is checked before the unknown gate so that a busy terminal with no attributable
+  // transcript reads as working rather than empty.
+  if (claudeBusy) return 'working'
   if (snapshot?.turnState === undefined) return 'unknown'
   if (snapshot.turnState === 'in_progress') {
     return isStaleTurnCarryover(snapshot, liveStartedAt) ? 'idle' : 'working'

@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * Cover for the WIRING of the live-session cap — the seam the pure `evictionPolicy` tests cannot
@@ -45,9 +48,18 @@ vi.mock('node-pty', () => ({
 }))
 
 import { PtyManager } from '../src/main/pty/manager'
+import { RECENT_USE_GRACE_MS } from '../src/main/pty/evictionPolicy'
 import type { TurnSnapshot } from '../src/shared/turnActivity'
 
 const CWD = '/repo'
+/**
+ * Session ids for the registry fixtures. Claude's records are keyed by a real session UUID and the
+ * parser rejects anything else — the short ids the rest of this suite uses look fine to the manager
+ * but are silently unmatchable here, which is exactly how these tests first passed for the wrong
+ * reason (every status arrived as null).
+ */
+const S1 = '6aa9d622-7904-479f-99c5-343458067a72'
+const S2 = '5364d27e-bc41-4d50-95a6-74e708ac6069'
 
 describe('PtyManager live-session cap', () => {
   let mgr: PtyManager
@@ -154,5 +166,138 @@ describe('PtyManager live-session cap', () => {
     ptys.feeds[0]?.('\x1b]9;Approval requested: run tests\x07')
     mgr.startNew(CWD, 'codex')
     expect(exits).toEqual([plain.ptyId])
+  })
+
+  it('stops protecting a question once the user has responded to it', () => {
+    // The bug: a request detected from output is cleared by nothing if the user DECLINES. Accepting
+    // lets the transcript overtake the timestamp; declining leaves no trace at all, so the terminal
+    // read as blocked on the user for the rest of its life — and `asking` is protection the cap
+    // never overrides. A person typing here IS the response.
+    //
+    // Driven through the real scanner and the real markUsed, because the clearing has to survive the
+    // path production takes: the notification is parsed out of genuine terminal output, and the clear
+    // arrives on the channel the renderer reports keystrokes over.
+    //
+    // Two things make this fixture awkward, and both are load-bearing. Answering also starts the
+    // 30-second recency guard, so the terminal is protected for a reason unrelated to the request
+    // and the clock has to be moved past it. And the OTHER terminal has to be taken out of the
+    // running, because both are idle afterwards and it is the least recently used of the two — so it
+    // would be chosen first whether or not the request was ever cleared, and the test would pass
+    // against the bug.
+    vi.useFakeTimers()
+    try {
+      const base = Date.now()
+      const declined = mgr.resume('s1', CWD, 'codex')
+      const other = mgr.resume('s2', CWD, 'codex')
+      indexed({
+        s1: { turnState: 'awaiting', lastActivityAt: declined.startedAt - 60_000 },
+        s2: { turnState: 'awaiting', lastActivityAt: other.startedAt - 60_000 }
+      })
+      ptys.feeds[0]?.('\x1b]9;Approval requested: run tests\x07')
+      mgr.markUsed(declined.ptyId)
+      mgr.setVisiblePtyIds(new Set([other.ptyId]))
+      vi.setSystemTime(base + RECENT_USE_GRACE_MS + 1)
+      mgr.startNew(CWD, 'codex')
+      // The request is still well inside STALE_REQUEST_MS, so nothing but the clear can explain
+      // this terminal being eligible at all.
+      expect(exits).toEqual([declined.ptyId])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+})
+
+/**
+ * The registry path, driven end to end: a real file on disk, the real monitor, the real manager.
+ *
+ * Nothing here is injected at the manager's boundary, because the part most likely to break is the
+ * chain itself — the monitor keys records by SESSION id and the cap reasons about PTYs, and a
+ * mismatch between the two would leave every session statusless while every unit test still passed.
+ */
+describe('PtyManager live-session cap — Claude reporting itself busy', () => {
+  let root: string
+  let mgr: PtyManager
+  let exits: string[]
+
+  beforeEach(() => {
+    ptys.spawns = 0
+    ptys.feeds = []
+    exits = []
+    root = mkdtempSync(join(tmpdir(), 'sb-cap-registry-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  /** One live-session record, as Claude writes them: named by pid, keyed by session id. */
+  const registryRecord = (pid: number, sessionId: string, status: string): void => {
+    writeFileSync(join(root, `${pid}.json`), JSON.stringify({ pid, sessionId, kind: 'interactive', status }))
+  }
+
+  const build = (): PtyManager => {
+    mgr = new PtyManager({
+      resolveBindings: async () => [],
+      // Every pid in the fixture is alive; process liveness is the monitor's own concern and is
+      // covered there, against a stub whose pids are not real processes.
+      claudeParkedJobs: { sessionsRoot: root, isProcessAlive: () => true }
+    })
+    mgr.on('exit', (ptyId: string) => exits.push(ptyId))
+    mgr.setMaxLive(2)
+    return mgr
+  }
+
+  it('protects a session Claude reports as working with nothing in its transcript', () => {
+    // A subagent runs inside the parent session's process, so killing the terminal destroys it —
+    // while the parent may write no transcript for the whole duration, leaving the session looking
+    // like an empty terminal. Claude's own registry is the only signal that catches this.
+    //
+    // Written BEFORE the spawn: registering a PTY triggers a read, which is how the status is in
+    // place by the time the next spawn consults the cap.
+    registryRecord(1000, S1, 'busy')
+    const m = build()
+    const host = m.resume(S1, CWD, 'claude')
+    const resting = m.resume(S2, CWD, 'claude')
+    // Deliberately NO index entry for S1: an attributed transcript would protect it for an
+    // unrelated reason and the fixture would prove nothing.
+    m.setTurnSnapshots(
+      new Map([[S2, { turnState: 'awaiting' as const, lastActivityAt: resting.startedAt - 60_000 }]])
+    )
+    m.startNew(CWD, 'claude')
+    expect(exits).toEqual([resting.ptyId])
+    expect(host.ptyId).not.toBe(resting.ptyId)
+  })
+
+  it('reclaims that same session once Claude reports it idle', () => {
+    // Identical fixture but for the one value, because "protected while busy" is otherwise satisfied
+    // by an implementation that protects an unattributable terminal unconditionally — which is the
+    // rule that was just removed from this policy.
+    registryRecord(1000, S1, 'idle')
+    const m = build()
+    const host = m.resume(S1, CWD, 'claude')
+    const resting = m.resume(S2, CWD, 'claude')
+    m.setTurnSnapshots(
+      new Map([[S2, { turnState: 'awaiting' as const, lastActivityAt: resting.startedAt - 60_000 }]])
+    )
+    m.startNew(CWD, 'claude')
+    // An untouched terminal with no transcript outranks a finished conversation, so `idle` must
+    // contribute nothing of its own for this to hold.
+    expect(exits).toEqual([host.ptyId])
+  })
+
+  it('does not attribute one session status to another terminal', () => {
+    // The mismatch this suite exists for: keying by PTY rather than by session would hand the second
+    // session's `busy` to whichever terminal happened to register first. The record names S2, and it
+    // is S1 — a finished conversation, so ordinarily the LAST thing taken — that must still go.
+    registryRecord(1000, S2, 'busy')
+    const m = build()
+    const first = m.resume(S1, CWD, 'claude')
+    m.resume(S2, CWD, 'claude')
+    m.setTurnSnapshots(
+      new Map([[S1, { turnState: 'awaiting' as const, lastActivityAt: first.startedAt - 60_000 }]])
+    )
+    m.startNew(CWD, 'claude')
+    expect(exits).toEqual([first.ptyId])
   })
 })
