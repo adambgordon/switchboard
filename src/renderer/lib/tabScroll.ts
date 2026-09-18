@@ -10,7 +10,7 @@ export interface TabRuleRect {
 export interface TabRuleGeometry {
   width: number
   height: number
-  rowHeight: number
+  rowBottoms: number[]
 }
 
 /** Size the shared rule layer from tabs alone, so its previous size can never hold overflow open. */
@@ -18,15 +18,14 @@ export function tabRuleGeometry(
   strip: TabRuleRect,
   tabs: readonly TabRuleRect[],
   scrollLeft: number,
-  scrollTop: number,
-  clientWidth: number,
-  clientHeight: number
+  scrollTop: number
 ): TabRuleGeometry {
-  if (tabs.length === 0) return { width: clientWidth, height: clientHeight, rowHeight: 0 }
+  const rowBottoms = [...new Set(tabs.map((tab) => tab.bottom - strip.top + scrollTop))]
   return {
-    width: Math.max(clientWidth, ...tabs.map((tab) => tab.right - strip.left + scrollLeft)),
-    height: Math.max(clientHeight, ...tabs.map((tab) => tab.bottom - strip.top + scrollTop)),
-    rowHeight: tabs[0].bottom - tabs[0].top
+    // clientWidth/clientHeight round to whole CSS pixels, leaving a visible sliver at page zoom.
+    width: Math.max(strip.right - strip.left, ...tabs.map((tab) => tab.right - strip.left + scrollLeft)),
+    height: Math.max(strip.bottom - strip.top, ...rowBottoms),
+    rowBottoms
   }
 }
 

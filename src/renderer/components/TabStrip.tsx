@@ -191,7 +191,7 @@ function Tab({
  * means destructive, and "this tab is selected" is neither. The only cobalt here is the shared
  * `.sb-dot`, which means what it means everywhere else.
  *
- * Tabs wrap by default, capped at `--tab-rows`, or scroll in one horizontal row. Either layout keeps
+ * Tabs wrap into as many rows as needed, or scroll in one horizontal row. Either layout keeps
  * the active tab in view when selected; horizontal edge fades show where more tabs remain.
  *
  * Deliberately NOT copied from the editors this borrows from: moving the active tab's row to the
@@ -289,7 +289,7 @@ export default function TabStrip({
       style={{ '--tab-edge': `${TAB_SCROLL_EDGE}px` } as CSSProperties}
     >
       <div
-        className={`sb-tabstrip${layout === 'scroll' ? ' horizontal' : ' sb-autoscroll'}`}
+        className={`sb-tabstrip${layout === 'scroll' ? ' horizontal' : ''}`}
         data-layout={layout}
         ref={stripRef}
         role="tablist"

@@ -21,6 +21,7 @@
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
+    "test:tabs-ui": "node scripts/tab-rendering/check-tab-rendering.cjs",
     "test:watch": "vitest",
     "rebuild": "node scripts/rebuild-native.mjs",
     "package": "electron-vite build && electron-builder --dir",

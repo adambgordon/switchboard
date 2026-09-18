@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, type RefObject } from 'react'
-import { attachAutoHide } from './useAutoHideScrollbar'
 import type { TabLayout } from './tabLayoutPreference'
 import { tabRuleGeometry, tabScrollEdges, tabWheelDelta } from './tabScroll'
 
@@ -31,23 +30,22 @@ export function useTabStripScroll(
           tab.getBoundingClientRect()
         ),
         el.scrollLeft,
-        el.scrollTop,
-        el.clientWidth,
-        el.clientHeight
+        el.scrollTop
       )
       rules.style.width = `${geometry.width}px`
       rules.style.height = `${geometry.height}px`
-      if (geometry.rowHeight > 0) {
-        rules.style.setProperty('--tab-rule-row-h', `${geometry.rowHeight}px`)
-      }
+      rules.replaceChildren(...geometry.rowBottoms.map((bottom) => {
+        const rule = document.createElement('span')
+        rule.className = 'sb-tab-rule'
+        rule.style.top = `${bottom}px`
+        return rule
+      }))
     }
 
     const updateEdges = (): void => {
       const { before, after } = tabScrollEdges(el.scrollLeft, el.clientWidth, el.scrollWidth)
       el.classList.toggle('has-tabs-before', layout === 'scroll' && before)
       el.classList.toggle('has-tabs-after', layout === 'scroll' && after)
-      // Chromium reserves a custom scrollbar lane even without overflow. Only wrapping uses it.
-      el.classList.toggle('is-overflowing', layout === 'wrap' && el.scrollHeight - el.clientHeight > 1)
     }
     const updateGeometry = (): void => {
       updateRules()
@@ -65,7 +63,6 @@ export function useTabStripScroll(
     updateGeometry()
     el.addEventListener('scroll', updateEdges, { passive: true })
     if (layout === 'scroll') el.addEventListener('wheel', onWheel, { passive: false })
-    const hideScrollbar = layout === 'wrap' ? attachAutoHide(el) : undefined
     const observer = new ResizeObserver(updateGeometry)
     observer.observe(el)
     // Font loading can change tab widths without changing the viewport's dimensions. Observe only
@@ -74,7 +71,6 @@ export function useTabStripScroll(
     return () => {
       el.removeEventListener('scroll', updateEdges)
       el.removeEventListener('wheel', onWheel)
-      hideScrollbar?.()
       observer.disconnect()
     }
   }, [ref, layout, geometryKey])

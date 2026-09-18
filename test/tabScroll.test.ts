@@ -7,20 +7,19 @@ import {
 } from '../src/renderer/lib/tabScroll'
 
 describe('tab rule geometry', () => {
-  it('covers the viewport and derives the row stride from rendered tabs', () => {
+  it('covers the viewport and places one divider at each actual row bottom', () => {
     expect(
       tabRuleGeometry(
         { left: 20, right: 420, top: 17, bottom: 113 },
         [
           { left: 20, right: 180, top: 17, bottom: 48.75 },
+          { left: 180, right: 330, top: 17, bottom: 48.75 },
           { left: 180, right: 330, top: 48.75, bottom: 80.5 }
         ],
         0,
-        0,
-        400,
-        96
+        0
       )
-    ).toEqual({ width: 400, height: 96, rowHeight: 31.75 })
+    ).toEqual({ width: 400, height: 96, rowBottoms: [31.75, 63.5] })
   })
 
   it('recovers full content dimensions from clipped rectangles and nonzero scroll offsets', () => {
@@ -32,24 +31,31 @@ describe('tab rule geometry', () => {
           { left: 379.75, right: 559.75, top: 80.5, bottom: 112.5 }
         ],
         140.25,
-        32.5,
-        393,
-        96
+        32.5
       )
-    ).toEqual({ width: 680, height: 128, rowHeight: 32 })
+    ).toEqual({ width: 680, height: 128, rowBottoms: [32, 128] })
   })
 
-  it('shrinks to the viewport when no tabs contribute content', () => {
+  it('preserves the fractional viewport edge instead of rounding it to client dimensions', () => {
     expect(
       tabRuleGeometry(
-        { left: 20, right: 420, top: 17, bottom: 113 },
+        { left: 20.25, right: 400.875, top: 4.25, bottom: 36.234375 },
+        [{ left: 20.25, right: 180, top: 4.25, bottom: 36.234375 }],
+        0,
+        0
+      )
+    ).toEqual({ width: 380.625, height: 31.984375, rowBottoms: [31.984375] })
+  })
+
+  it('clears the dividers when no tabs contribute content', () => {
+    expect(
+      tabRuleGeometry(
+        { left: 20, right: 420, top: 17, bottom: 17 },
         [],
         300,
-        64,
-        393,
-        96
+        64
       )
-    ).toEqual({ width: 393, height: 96, rowHeight: 0 })
+    ).toEqual({ width: 400, height: 0, rowBottoms: [] })
   })
 })
 

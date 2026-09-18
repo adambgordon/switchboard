@@ -145,8 +145,11 @@ Quality gates:
 ```bash
 npm run typecheck    # tsc over main (node) and renderer (web) projects
 npm test             # vitest — unit tests (parser, indexer, liveness, theme, rename, …)
+npm run test:tabs-ui  # native Electron tab rendering, zoom, and overflow regression
 SWITCHBOARD_SMOKE=1 node_modules/.bin/electron .   # headless boot check: node-pty spawns + renderer loads
 ```
+
+The tab rendering check mounts the real tab component with sample conversations, exercises native zoom commands in both themes, and compares horizontal and vertical border coverage. It requires a macOS graphical session and leaves screenshots and measurements in the printed temporary directory.
 
 > `npm run package` (which `npm run setup` wraps) rebuilds the `.app` from scratch. `npm run build` alone refreshes `out/` for `npm run dev` but does **not** update the packaged app.
 
