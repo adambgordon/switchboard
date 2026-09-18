@@ -1,5 +1,57 @@
 import { describe, expect, it } from 'vitest'
-import { tabEdgeScrollSpeed, tabScrollEdges, tabWheelDelta } from '../src/renderer/lib/tabScroll'
+import {
+  tabEdgeScrollSpeed,
+  tabRuleGeometry,
+  tabScrollEdges,
+  tabWheelDelta
+} from '../src/renderer/lib/tabScroll'
+
+describe('tab rule geometry', () => {
+  it('covers the viewport and derives the row stride from rendered tabs', () => {
+    expect(
+      tabRuleGeometry(
+        { left: 20, right: 420, top: 17, bottom: 113 },
+        [
+          { left: 20, right: 180, top: 17, bottom: 48.75 },
+          { left: 180, right: 330, top: 48.75, bottom: 80.5 }
+        ],
+        0,
+        0,
+        400,
+        96
+      )
+    ).toEqual({ width: 400, height: 96, rowHeight: 31.75 })
+  })
+
+  it('recovers full content dimensions from clipped rectangles and nonzero scroll offsets', () => {
+    expect(
+      tabRuleGeometry(
+        { left: 20, right: 420, top: 17, bottom: 113 },
+        [
+          { left: -120.25, right: 59.75, top: -15.5, bottom: 16.5 },
+          { left: 379.75, right: 559.75, top: 80.5, bottom: 112.5 }
+        ],
+        140.25,
+        32.5,
+        393,
+        96
+      )
+    ).toEqual({ width: 680, height: 128, rowHeight: 32 })
+  })
+
+  it('shrinks to the viewport when no tabs contribute content', () => {
+    expect(
+      tabRuleGeometry(
+        { left: 20, right: 420, top: 17, bottom: 113 },
+        [],
+        300,
+        64,
+        393,
+        96
+      )
+    ).toEqual({ width: 393, height: 96, rowHeight: 0 })
+  })
+})
 
 describe('tab scroll edges', () => {
   it('shows only the edges with hidden tabs', () => {

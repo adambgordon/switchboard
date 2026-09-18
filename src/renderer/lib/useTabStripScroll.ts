@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, type RefObject } from 'react'
 import { attachAutoHide } from './useAutoHideScrollbar'
 import type { TabLayout } from './tabLayoutPreference'
-import { tabScrollEdges, tabWheelDelta } from './tabScroll'
+import { tabRuleGeometry, tabScrollEdges, tabWheelDelta } from './tabScroll'
 
 function revealActive(el: HTMLElement): void {
   // A resize during a drag must not pull the strip back to the tab the user is moving away from.
@@ -22,6 +22,26 @@ export function useTabStripScroll(
     if (layout === 'scroll') el.scrollTop = 0
     else el.scrollLeft = 0
 
+    const updateRules = (): void => {
+      const rules = el.querySelector<HTMLElement>(':scope > .sb-tab-rules')
+      if (!rules) return
+      const geometry = tabRuleGeometry(
+        el.getBoundingClientRect(),
+        Array.from(el.querySelectorAll<HTMLElement>(':scope > .sb-tab')).map((tab) =>
+          tab.getBoundingClientRect()
+        ),
+        el.scrollLeft,
+        el.scrollTop,
+        el.clientWidth,
+        el.clientHeight
+      )
+      rules.style.width = `${geometry.width}px`
+      rules.style.height = `${geometry.height}px`
+      if (geometry.rowHeight > 0) {
+        rules.style.setProperty('--tab-rule-row-h', `${geometry.rowHeight}px`)
+      }
+    }
+
     const updateEdges = (): void => {
       const { before, after } = tabScrollEdges(el.scrollLeft, el.clientWidth, el.scrollWidth)
       el.classList.toggle('has-tabs-before', layout === 'scroll' && before)
@@ -30,6 +50,7 @@ export function useTabStripScroll(
       el.classList.toggle('is-overflowing', layout === 'wrap' && el.scrollHeight - el.clientHeight > 1)
     }
     const updateGeometry = (): void => {
+      updateRules()
       updateEdges()
       revealActive(el)
       updateEdges()
@@ -47,7 +68,8 @@ export function useTabStripScroll(
     const hideScrollbar = layout === 'wrap' ? attachAutoHide(el) : undefined
     const observer = new ResizeObserver(updateGeometry)
     observer.observe(el)
-    // Font loading can change tab widths without changing the viewport's dimensions.
+    // Font loading can change tab widths without changing the viewport's dimensions. Observe only
+    // tabs: the absolutely-positioned rule layer follows them and must never become its own input.
     el.querySelectorAll('.sb-tab').forEach((tab) => observer.observe(tab))
     return () => {
       el.removeEventListener('scroll', updateEdges)

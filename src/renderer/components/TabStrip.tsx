@@ -159,11 +159,11 @@ function Tab({
       onContextMenu={onContextMenu}
     >
       <span className="sb-tab-title truncate">{tab.title}</span>
-      {tab.dot && (
-        <span className="sb-tab-gutter">
+      <span className="sb-tab-gutter">
+        {tab.dot && (
           <span ref={dotRef} className={`sb-dot ${tab.dot}`} aria-label="live" role="img" />
-        </span>
-      )}
+        )}
+      </span>
       <button
         className="sb-tab-close"
         // The tooltip is generic while the accessible name is specific: the tip appears under the
@@ -326,6 +326,7 @@ export default function TabStrip({
             onContextMenu={(e) => void contextMenu(e, i)}
           />
         ))}
+        <div className="sb-tab-rules" aria-hidden="true" />
       </div>
     </div>
   )

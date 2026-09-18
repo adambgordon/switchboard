@@ -39,8 +39,7 @@
      still obviously chrome. */
   --tab-h: 32px;
   --tab-rows: 3;
-  /* Shared by the strip gradient and the tabs that redraw the rule beneath their own
-     opaque fill. One value keeps the line's apparent weight stable through split focus changes. */
+  /* One rule color keeps the line's apparent weight stable through split focus changes. */
   --tab-rule: var(--rule);
   display: flex;
   /* Wrapping is the default; the horizontal preference overrides only the overflow axis. */
@@ -50,28 +49,32 @@
   flex-shrink: 0;
   max-height: calc(var(--tab-h) * var(--tab-rows));
   background-color: var(--paper-sunken);
-  /* Row separators, drawn as a rule at the foot of every row band rather than as a border on each tab.
-     A border per tab cannot complete the line: the last row is usually ragged, so the line would stop
-     where the tabs stop and leave the remainder bare — and under a FULL row it would double up against
-     the strip's own bottom border. A repeating gradient spans the whole width regardless of how many
-     tabs sit in a row, and its final line lands exactly where the strip ends, so it serves as the
-     bottom border too (hence there is no `border-bottom` here).
-     `local` attachment is what keeps the lines pinned to the rows once the strip scrolls past its row
-     cap; the default would hold them still while the rows moved underneath. */
+  /* One child layer owns every horizontal rule. It paints above tab fills, so active/hovered tabs
+     cannot cover it, and extends through ragged empty space so the same pixels continue across a row. */
+  position: relative;
+}
+.sb-tab-rules {
+  --tab-rule-row-h: var(--tab-h);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   background-image: repeating-linear-gradient(
     to bottom,
     transparent 0,
-    transparent calc(var(--tab-h) - 1px),
-    var(--tab-rule) calc(var(--tab-h) - 1px),
-    var(--tab-rule) var(--tab-h)
+    transparent calc(var(--tab-rule-row-h) - 1px),
+    var(--tab-rule) calc(var(--tab-rule-row-h) - 1px),
+    var(--tab-rule) var(--tab-rule-row-h)
   );
-  background-attachment: local;
+  pointer-events: none;
+  z-index: 4;
+}
+.sb-tabstrip {
   /* Only the row cap can overflow, and only downward. There is deliberately NO always-reserved
      scrollbar gutter: the lane exists only once the rows actually overflow. */
   overflow-y: auto;
   overflow-x: hidden;
-  /* The insertion caret is positioned in the strip's own scrolled coordinates. */
-  position: relative;
 }
 /* A styled Chromium scrollbar reserves width even when `overflow-y:auto` has nothing to scroll.
    Collapse only that idle lane; once rows exceed the cap, `.is-overflowing` restores the shared
@@ -201,11 +204,10 @@ body.sb-dragging-tab * {
   border-radius: 1px;
   background: var(--ink);
   pointer-events: none;
-  z-index: 2;
+  z-index: 5;
 }
 /* The strip currently under the drag. Deliberately quiet: the caret says WHERE, this only says which
    strip is answering, which matters when there are two side by side. */
-/* background-COLOR, not the shorthand: the shorthand would drop the row-separator gradient. */
 .sb-tabstrip.sb-drop-target {
   background-color: var(--paper-hover);
 }
@@ -221,8 +223,9 @@ body.sb-window-drop-target .sb-tabstrip {
   --tab-close-surface: var(--paper-sunken);
   display: flex;
   align-items: center;
+  gap: 6px;
   height: var(--tab-h);
-  padding: 0 11px;
+  padding: 0 8px 0 11px;
   /* Natural width, floored and capped. Never flex: a tab that shrinks to fit its row would make the
      same conversation a different width in each pane, and the floor keeps a three-character title
      from producing a tab too small to aim at. */
@@ -282,19 +285,6 @@ body.sb-window-drop-target .sb-tabstrip {
   background: var(--paper-pane);
   color: var(--ink);
 }
-/* Tab fills cover the strip's row-separator gradient. Redraw that pixel above each tab so the
-   divider stays continuous through hover and selection changes. */
-.sb-tab::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: var(--tab-rule);
-  pointer-events: none;
-  z-index: 1;
-}
 /* Hidden dragged tabs take their right-hand dividers with them. Repaint the first visible follower's
    leading edge without adding border width, so every non-dragged tab stays exactly where it was. */
 .sb-tab.sb-tab-after-drag-gap::before {
@@ -321,38 +311,15 @@ body.sb-window-drop-target .sb-tabstrip {
   min-width: 0;
 }
 
-/* Both controls overlay one consistently truncated title. Neither reserves width nor moves the
-   ellipsis; their surface fades over the text underneath. */
-.sb-tab-gutter,
-.sb-tab-close {
-  position: absolute;
-  right: 11px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 17px;
+/* A compact, permanent slot keeps liveness from changing the title or tab width. */
+.sb-tab-gutter {
+  width: 10px;
   height: 17px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--tab-close-surface);
-}
-.sb-tab-gutter {
+  flex-shrink: 0;
   pointer-events: none;
-}
-.sb-tab-gutter::before,
-.sb-tab-close::before {
-  content: '';
-  position: absolute;
-  top: -8px;
-  bottom: -8px;
-  right: 100%;
-  width: 26px;
-  background: linear-gradient(to right, transparent, var(--tab-close-surface));
-  pointer-events: none;
-}
-/* A live tab already has a fade beneath the dot: stacking another would darken the same text. */
-.sb-tab:has(.sb-tab-gutter) .sb-tab-close::before {
-  content: none;
 }
 .sb-tab .sb-dot {
   transition: opacity var(--dur-fast);
@@ -363,7 +330,18 @@ body.sb-window-drop-target .sb-tabstrip {
 }
 /* The close button shares the live dot's position. */
 .sb-tab-close {
+  position: absolute;
+  /* Centre the 17px hit target over the 10px slot without shrinking the click target. */
+  right: 4.5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--r-sm);
+  background-color: var(--tab-close-surface);
   color: var(--ink-faint);
   opacity: 0;
   pointer-events: none;
