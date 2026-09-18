@@ -32,11 +32,11 @@ const wrappers: [string, () => CopyNode, string][] = [
 describe.each(wrappers)('%s selection boundaries', (_name, wrapper, marked) => {
   const document = (): CopyNode[] => [inline([copyText('L '), wrapper(), copyText(' R')])]
   it('omits outer syntax for an exact selection', () => expect(copy(document(), 2, 5)).toBe('abc'))
-  it('omits outer syntax when extending past only the left edge', () => expect(copy(document(), 0, 5)).toBe('L abc'))
-  it('omits outer syntax when extending past only the right edge', () => expect(copy(document(), 2, 7)).toBe('abc R'))
-  it('requires non-whitespace context on both sides', () => expect(copy(document(), 1, 6)).toBe(' abc '))
-  it('does not count left whitespace as context even with text on the right', () => expect(copy(document(), 1, 7)).toBe(' abc R'))
-  it('does not count right whitespace as context even with text on the left', () => expect(copy(document(), 0, 6)).toBe('L abc '))
+  it('retains syntax when extending past only the left edge', () => expect(copy(document(), 0, 5)).toBe(`L ${marked}`))
+  it('retains syntax when extending past only the right edge', () => expect(copy(document(), 2, 7)).toBe(`${marked} R`))
+  it('does not count whitespace alone on either side', () => expect(copy(document(), 1, 6)).toBe(' abc '))
+  it('accepts right context when only whitespace is selected on the left', () => expect(copy(document(), 1, 7)).toBe(` ${marked} R`))
+  it('accepts left context when only whitespace is selected on the right', () => expect(copy(document(), 0, 6)).toBe(`L ${marked} `))
   it('retains syntax with selected content on both sides', () => expect(copy(document(), 0, 7)).toBe(`L ${marked} R`))
   it('does not leave markers on a partial crossing', () => {
     expect(copy(document(), 3, 7)).toBe('bc R')
@@ -59,6 +59,8 @@ describe('nested and block selections', () => {
     for (const node of [{ kind: 'heading', level: 2, children: [copyText('abc')] },
       { kind: 'quote', children: [inline([copyText('abc')])] }] as CopyNode[]) {
       expect(copy([copyText('L'), node, copyText('R')], 1, 4)).toBe('abc')
+      expect(copy([copyText('L'), node], 0, 4)).toBe(node.kind === 'heading' ? 'L\n\n## abc' : 'L\n\n> abc')
+      expect(copy([node, copyText('R')], 0, 4)).toBe(node.kind === 'heading' ? '## abc\n\nR' : '> abc\n\nR')
       expect(copy([copyText('L'), node, copyText('R')], 0, 5)).toBe(node.kind === 'heading' ? 'L\n\n## abc\n\nR' : 'L\n\n> abc\n\nR')
     }
   })
@@ -66,6 +68,8 @@ describe('nested and block selections', () => {
     const nodes: CopyNode[] = [copyText('L'), { kind: 'code', value: 'abc', block: true, lang: 'sh' }, copyText('R')]
     expect(copy(nodes, 0, 3)).toBe('L\n\nab')
     expect(copy(nodes, 2, 5)).toBe('bc\n\nR')
+    expect(copy(nodes, 0, 4)).toBe('L\n\n```sh\nabc\n```')
+    expect(copy(nodes, 1, 5)).toBe('```sh\nabc\n```\n\nR')
     expect(copy(nodes, 0, 5)).toBe('L\n\n```sh\nabc\n```\n\nR')
   })
   it('preserves indentation, trailing whitespace and whitespace-only selections', () => {
@@ -113,12 +117,14 @@ describe('tables own their syntax', () => {
     { kind: 'row', children: ['A', 'B', 'C'].map(value => ({ kind: 'cell', children: [{ kind: 'strong', children: [copyText(value)] }] })) }
   ] })
   it('keeps eligible nested formatting in an exact tab-separated selection', () => {
-    expect(copy([table()], 0, 3)).toBe('A\t**B**\tC')
+    expect(copy([table()], 0, 3)).toBe('**A**\t**B**\t**C**')
     expect(copy([table()], 1, 2)).toBe('B')
     expect(copy([table()], 0, 3, 'plain')).toBe('A\tB\tC')
   })
-  it('emits pipes only for a surrounded table or complete-content action', () => {
+  it('emits pipes for a contextual table or complete-content action', () => {
     expect(copy([copyText('L'), table(), copyText('R')], 0, 5)).toBe('L\n\n| **A** | **B** | **C** |\n| :--- | --- | ---: |\n\nR')
+    expect(copy([copyText('L'), table()], 0, 4)).toBe('L\n\n| **A** | **B** | **C** |\n| :--- | --- | ---: |')
+    expect(copy([table(), copyText('R')], 0, 4)).toBe('| **A** | **B** | **C** |\n| :--- | --- | ---: |\n\nR')
     expect(complete([table()])).toBe('| **A** | **B** | **C** |\n| :--- | --- | ---: |')
   })
   it('preserves partial cells and ragged rows without padding', () => {

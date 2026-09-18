@@ -36,8 +36,8 @@ async function run() {
       for (const mode of ['markdown', 'plain']) {
         await call('copyMode', mode)
         for (const [label, from, to, expected] of [
-          ['exact', 2, 5, 'abc'], ['left', 0, 5, 'L abc'], ['right', 2, 7, 'abc R'],
-          ['spaces', 1, 6, ' abc '], ['left-space-only', 1, 7, ' abc R'], ['right-space-only', 0, 6, 'L abc '], ['both', 0, 7, mode === 'markdown' ? marked : 'L abc R'],
+          ['exact', 2, 5, 'abc'], ['left', 0, 5, mode === 'markdown' ? marked.slice(0, -2) : 'L abc'], ['right', 2, 7, mode === 'markdown' ? marked.slice(2) : 'abc R'],
+          ['spaces', 1, 6, ' abc '], ['left-space-only', 1, 7, mode === 'markdown' ? marked.slice(1) : ' abc R'], ['right-space-only', 0, 6, mode === 'markdown' ? marked.slice(0, -1) : 'L abc '], ['both', 0, 7, mode === 'markdown' ? marked : 'L abc R'],
           ['partial-left', 0, 4, 'L ab'], ['partial-right', 3, 7, 'bc R'], ['inside', 3, 4, 'b']
         ]) for (const reverse of [false, true]) {
           await expectRange(prefix + name + '/' + mode + '/' + label + '/' + reverse,
@@ -57,6 +57,8 @@ async function run() {
       await expectRange(prefix + 'fence/exact', ['.md-pre', 0], ['.md-pre', 9], '  abc\nxyz')
       await expectRange(prefix + 'fence/partial-right', ['.md-pre', 3], ['.md-p', 5, 1], 'bc\nxyz\n\nAfter')
       await expectRange(prefix + 'fence/partial-left', ['.md-p', 0], ['.md-pre', 4], 'Before\n\n  ab')
+      await expectRange(prefix + 'fence/left-only', ['.md-p', 0], ['.md-pre', 9], 'Before\n\n```sh\n  abc\nxyz\n```')
+      await expectRange(prefix + 'fence/right-only', ['.md-pre', 0], ['.md-p', 5, 1], '```sh\n  abc\nxyz\n```\n\nAfter')
       await expectRange(prefix + 'fence/both', ['.md-p', 0], ['.md-p', 5, 1], 'Before\n\n```sh\n  abc\nxyz\n```\n\nAfter')
     }
     await call('mountCopy', { source: 'L `😀 café` R', theme, agent })
@@ -82,10 +84,22 @@ async function run() {
     await expectRange(prefix + 'task-isolated', ['.md-li', 1], ['.md-li', 6], 'Alpha')
     await expectRange(prefix + 'task-partial', ['.md-li', 2], ['.md-li', 6, 1], 'lpha\n- [ ] Bravo')
     await call('mountCopy', { source: '| **A** | **B** | **C** |\n| --- | --- | --- |', theme, agent })
-    await expectContents(prefix + 'table/nested', 'table', 'A\t**B**\tC')
+    await expectContents(prefix + 'table/nested', 'table', '**A**\t**B**\t**C**')
     await expectContents(prefix + 'table/cell', 'th', 'B', 1)
     await call('copyMode', 'plain')
     await expectContents(prefix + 'table/plain', 'table', 'A\tB\tC')
+    await call('mountCopy', { source: '| Topic | Finding |\n| --- | --- |\n| Config | `RuntimeOptions` only (refreshable) |\n| Note | Install-time `size-limit` silently ignored |', theme, agent })
+    await expectContents(prefix + 'table/code-at-start', 'tbody tr:nth-child(1) td:nth-child(2)', '`RuntimeOptions` only (refreshable)')
+    await expectContents(prefix + 'table/code-in-middle', 'tbody tr:nth-child(2) td:nth-child(2)', 'Install-time `size-limit` silently ignored')
+    await expectContents(prefix + 'table/code-isolated', 'td code', 'RuntimeOptions')
+    await call('mountCopy', { source: 'Before\n\n| A | B |\n| --- | --- |\n| C | D |\n\nAfter', theme, agent })
+    await expectRange(prefix + 'table/left-only', ['.md-p', 0], ['td', 1, 1], 'Before\n\n| A | B |\n| --- | --- |\n| C | D |')
+    await expectRange(prefix + 'table/right-only', ['th', 0], ['.md-p', 5, 1], '| A | B |\n| --- | --- |\n| C | D |\n\nAfter')
+    await expectContents(prefix + 'table/exact-with-surroundings-unselected', 'table', 'A\tB\nC\tD')
+    await call('mountCopy', { source: 'Before\n\n## Heading\n\nAfter', theme, agent })
+    await expectContents(prefix + 'heading/exact', 'h2', 'Heading')
+    await expectRange(prefix + 'heading/left-only', ['.md-p', 0], ['h2', 7], 'Before\n\n## Heading')
+    await expectRange(prefix + 'heading/right-only', ['h2', 0], ['.md-p', 5, 1], '## Heading\n\nAfter')
     await call('mountCopy', { source: '| Left | Right |\n| --- | --- |\n| a\tb | say "hi" |', theme, agent })
     await expectContents(prefix + 'table/quoted', 'table', 'Left\tRight\n"a\tb"\t"say ""hi"""')
     await expectContents(prefix + 'table/single-literal', 'td', 'a\tb')

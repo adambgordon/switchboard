@@ -94,7 +94,7 @@ function prepare(nodes: CopyNode[], options: CopyOptions): Context {
 function retained(node: CopyNode, ctx: Context): boolean {
   const extent = ctx.extents.get(node)!
   return ctx.options.intent === 'complete' ||
-    (extent.full && ctx.first < extent.start && ctx.last >= extent.end)
+    (extent.full && (ctx.first < extent.start || ctx.last >= extent.end))
 }
 
 const escapeText = (text: string): string => text.replace(/[\\`*_[\]]/g, '\\$&')
