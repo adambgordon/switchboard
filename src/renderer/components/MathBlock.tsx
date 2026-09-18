@@ -6,9 +6,6 @@ import type { ReactNode } from 'react'
 // costs the stylesheet text and no font bytes.
 import 'katex/dist/katex.min.css'
 
-/** The offsets `rehypeSourceOffsets` stamps, forwarded so a formula stays a mapped copy unit. */
-type SrcAttrs = { 'data-s'?: number | string; 'data-e'?: number | string }
-
 /** Narrowed to the one call used, rather than `typeof import('katex')` — that type carries the
  *  UMD build's self-reference, which the ES module's default export does not have. */
 type KatexEngine = {
@@ -67,7 +64,7 @@ function useKatex(): KatexEngine | null {
  *
  * `output: 'html'` drops KaTeX's parallel MathML tree. That halves the node count, and it leaves
  * the formula with a SINGLE text representation — the default emits both, so `textContent` reads
- * the formula three times over, which would corrupt the copy pipeline's offset walk.
+ * the formula three times over, which would duplicate formula text in DOM readers.
  */
 function render(katex: KatexEngine | null, tex: string, displayMode: boolean): string | null {
   if (!katex) return null
@@ -90,10 +87,8 @@ const html = (markup: string): { __html: string } => ({ __html: markup })
  * first in the DOM — so anything that reads the subtree's text gets the formula scrambled
  * (`\frac{a+b}{c+d}` reads as `c+da+b`). The Formatted view's plain-text copy does exactly that.
  *
- * So the glyphs carry `data-md-skip` (the existing marker for "on screen, but not source", already
- * used by the fenced-code language caption) and the LaTeX rides alongside in a hidden span. The copy
- * walk then collects the LaTeX and never descends into the layout — no new mechanism, and the
- * markdown path is unaffected because it maps through source offsets either way.
+ * The copy adapter reads the hidden LaTeX as one atomic formula and never walks the glyph layout.
+ * Find-in-conversation does the reverse: glyphs are searchable and the hidden source is skipped.
  */
 function Rendered({ markup, tex }: { markup: string; tex: string }): ReactNode {
   return (
@@ -105,37 +100,30 @@ function Rendered({ markup, tex }: { markup: string; tex: string }): ReactNode {
 }
 
 /** Inline math — sits in the text flow, so it must not introduce a line box of its own. */
-export function MathInline({ tex, ...src }: { tex: string } & SrcAttrs): ReactNode {
+export function MathInline({ tex }: { tex: string }): ReactNode {
   const katex = useKatex()
   const markup = useMemo(() => render(katex, tex, false), [katex, tex])
   if (markup === null) {
     return (
-      <code className="md-math-src" {...src}>
+      <code className="md-math-src">
         {tex}
       </code>
     )
   }
   return (
-    <span className="md-math" {...src}>
+    <span className="md-math">
       <Rendered markup={markup} tex={tex} />
     </span>
   )
 }
 
-/**
- * Display math — its own centered block.
- *
- * Rendered as a `<div>`, not a `<pre>`: the copy pipeline treats a `<pre>` as a fenced unit with
- * its own widening rule, whereas a formula should behave like the inline-image chip — a bounded
- * annotated node whose rendered text never matches its source, so a selection touching it yields
- * the whole original `\[…\]`.
- */
-export function MathDisplay({ tex, ...src }: { tex: string } & SrcAttrs): ReactNode {
+/** Display math stays semantically distinct from a fenced code block. */
+export function MathDisplay({ tex }: { tex: string }): ReactNode {
   const katex = useKatex()
   const markup = useMemo(() => render(katex, tex, true), [katex, tex])
   if (markup === null) {
     return (
-      <div className="md-math-display is-src sb-autoscroll" {...src}>
+      <div className="md-math-display is-src sb-autoscroll">
         <pre className="md-math-src-block">{tex}</pre>
       </div>
     )
@@ -143,7 +131,7 @@ export function MathDisplay({ tex, ...src }: { tex: string } & SrcAttrs): ReactN
   // sb-autoscroll: a formula wider than the pane scrolls sideways, and that bar hides at rest like
   // every other one. Marked by the delegated listener in TranscriptView.
   return (
-    <div className="md-math-display sb-autoscroll" {...src}>
+    <div className="md-math-display sb-autoscroll">
       <Rendered markup={markup} tex={tex} />
     </div>
   )

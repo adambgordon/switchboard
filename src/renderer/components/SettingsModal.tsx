@@ -511,8 +511,8 @@ export default function SettingsModal({
                       </button>
                     </div>
                     <div className="sb-setting-desc">
-                      Copies text from the Formatted view to the clipboard in markdown (preserves
-                      styling such as bold, headers, links, code). Turn this off to copy as plain text.
+                      Preserves Markdown formatting inside broader selections. Exact component selections
+                      copy their content; copy buttons preserve complete formatting. Turn this off for plain text.
                     </div>
                   </div>
                 </div>

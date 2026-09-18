@@ -3,9 +3,8 @@ import type { Transcript } from '@shared/types'
 import CopyButton from './CopyButton'
 import MessageBlock from './MessageBlock'
 import { Arrow } from './icons'
-import { conversationMarkdown } from '../lib/clipboard'
-import { assembleCopy } from '../lib/mdCopy'
-import { collectSections } from '../lib/mdCopyDom'
+import { conversationText } from '../lib/clipboard'
+import { copySelection } from '../lib/mdCopyDom'
 import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
 import { attachAutoHideWithin } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
@@ -14,10 +13,6 @@ const NOOP = (): void => {}
 
 /** A "You" (human) section — the divider separates these from the agent sections. */
 const isHumanItem = (item: TranscriptItem): boolean => item.kind === 'section' && !item.isAssistant
-
-/* Speaker attribution deliberately ISN'T carried here — `collectSections` reads it off each
- * `article.message`'s own `data-speaker` / `data-sidechain`, which is what lets a tool unit (no block
- * key of its own) be attributed too. So the map only ever needs a block's markdown source. */
 
 interface TranscriptViewProps {
   transcript: Transcript | null
@@ -42,8 +37,7 @@ interface TranscriptViewProps {
   searchActiveIndex?: number
   /** Reports the live match count back up for the n/total readout. */
   onSearchCount?: (n: number) => void
-  /** When true (the default), ⌘C over a selection copies the underlying Markdown source instead of the
-   *  rendered plain text. Off restores the browser's native copy. Preferences → Application. */
+  /** Preserve eligible Markdown formatting in selections. Preferences → Application; default on. */
   markdownCopy?: boolean
 }
 
@@ -136,10 +130,7 @@ export default function TranscriptView({
   // ref is handed to MessageBlock so its copy BUTTONS read the preference at click time rather than
   // taking it as a prop — a prop would invalidate every memoized block and re-mount up to WINDOW
   // sections of ReactMarkdown each time the toggle flips.
-  const copyCtxRef = useRef<{ enabled: boolean; sources: Map<string, string> }>({
-    enabled: true,
-    sources: new Map()
-  })
+  const copyCtxRef = useRef({ enabled: true })
   // Cache writes belong to the transcript represented by the committed DOM. During a cache-cold load
   // there is no rendered session, so the loading container must not inherit the previous session's key.
   const renderedSessionRef = useRef<string | null>(null)
@@ -294,33 +285,21 @@ export default function TranscriptView({
     rememberPosition(el)
   }, [measureEdges, rememberPosition])
 
-  /**
-   * ⌘C over a transcript selection. In markdown mode it puts the underlying source on the clipboard —
-   * what the copy buttons give you, scoped to whatever is highlighted. Electron's Edit-menu Copy runs
-   * `webContents.copy()`, which dispatches an ordinary DOM `copy` event here, so overriding it is just
-   * setData + preventDefault.
-   *
-   * PLAIN mode is still handled here rather than deferring to the browser, because the native copy has
-   * a defect of its own: `Range.toString()` ignores `user-select: none`, so a drag across a code block
-   * drags the language caption ("TYPESCRIPT") in with it. Building plain text from the same traversal
-   * excludes that, so the toggle changes the FORMAT and never which text you get.
-   *
-   * Bails WITHOUT preventDefault only when there's genuinely nothing to offer — no selection, or one
-   * covering only content the collector skips (a collapsed tool run). The native copy then proceeds
-   * untouched, so ⌘C is never a no-op.
-   */
+  // Native Copy and ⌘C both dispatch this event. Both formats use the same semantic selection.
   const handleCopy = useCallback((e: ClipboardEvent): void => {
-    const { enabled, sources } = copyCtxRef.current
+    const { enabled } = copyCtxRef.current
     const root = scrollElRef.current
     if (!root) return
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
+    if (!range.intersectsNode(root)) return
     const mode = enabled ? 'markdown' : 'plain'
-    const sections = collectSections(sel.getRangeAt(0), root, (key) => sources.get(key), mode)
-    const text = assembleCopy(sections, false, !enabled)
+    const text = copySelection(range, root, mode)
+    // The range belongs to this transcript. Native copy could reintroduce hidden content or chrome.
+    e.preventDefault()
     if (!text) return
     e.clipboardData?.setData('text/plain', text)
-    e.preventDefault()
   }, [])
 
   // Callback ref: attach/detach the scroll listener + the auto-hiding scrollbar as the container
@@ -486,25 +465,7 @@ export default function TranscriptView({
     [transcript]
   )
 
-  // Markdown source per rendered text block, keyed exactly as MessageBlock keys them
-  // (`${message.uuid}:${blockIndex}` over the SAME prose-filtered blocks it maps over — the tool_use
-  // blocks were already peeled off into runs by buildRenderItems, so the indices line up).
-  const blockSources = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const item of items) {
-      if (item.kind !== 'section') continue
-      for (const part of item.items) {
-        if (part.kind !== 'turn') continue
-        for (const m of part.messages) {
-          m.blocks.forEach((b, bi) => {
-            if (b.kind === 'text') map.set(`${m.uuid}:${bi}`, b.text)
-          })
-        }
-      }
-    }
-    return map
-  }, [items])
-  copyCtxRef.current = { enabled: markdownCopy, sources: blockSources }
+  copyCtxRef.current.enabled = markdownCopy
 
   const total = items.length
   const searching = searchQuery.trim().length > 0
@@ -659,7 +620,7 @@ export default function TranscriptView({
                     className="transcript-copy"
                     tip="Copy entire conversation"
                     getText={() =>
-                      conversationMarkdown(
+                      conversationText(
                         transcript.messages,
                         transcript.agent,
                         markdownCopy ? 'markdown' : 'plain'

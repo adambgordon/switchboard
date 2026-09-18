@@ -9,11 +9,10 @@
  *
  * 1. THE REWRITE IS LENGTH-PRESERVING. Every substitution is two characters for two
  *    (`\(`→`$$`, `\)`→`$$`, `\[`→`$$`, `\]`→`$$`), so a source offset computed against the
- *    rewritten text indexes the ORIGINAL text identically. That is what lets the copy
- *    pipeline keep slicing the untouched source — a formula copies back as the `\(P_i\)` the
- *    agent actually wrote, and every offset after a formula stays correct. A rewrite of
- *    unequal length would silently shift them and corrupt markdown copy for the rest of
- *    the block. Any change here MUST preserve length.
+ *    rewritten text indexes the ORIGINAL text identically. The complete table-copy button
+ *    uses those offsets to preserve the original source. Unequal-length substitutions would
+ *    shift every later table boundary. Selection-copy reads semantic content independently.
+ *    Any change here MUST preserve length.
  *
  * 2. MATH IS OPT-IN PER BLOCK, VIA A DISPLAY BLOCK. These delimiters are not reliable math
  *    markers in coding-agent prose, because they all mean something else far more often:

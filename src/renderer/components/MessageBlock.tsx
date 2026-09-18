@@ -22,9 +22,8 @@ import plaintext from 'highlight.js/lib/languages/plaintext'
 import type { TranscriptBlock } from '@shared/types'
 import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/messageGroups'
 import { clockTime, fullDateTime } from '../lib/format'
-import { rowsToMarkdownTable, rowsToPlainText } from '../lib/clipboard'
-import { assembleCopy } from '../lib/mdCopy'
-import { collectSections, isInlineCode, rangeOver, tableRows } from '../lib/mdCopyDom'
+import { rowsToMarkdownTable, rowsToPlainText, turnText } from '../lib/clipboard'
+import { isInlineCode, tableRows } from '../lib/mdCopyDom'
 import { langLabelFromClassName } from '../lib/codeLang'
 import { normalizeMath } from '../lib/mathDelimiters'
 import { MathDisplay, MathInline } from './MathBlock'
@@ -52,30 +51,20 @@ interface HastNode {
   tagName?: string
   properties?: Record<string, unknown>
   children?: HastNode[]
-  position?: { start?: { offset?: number }; end?: { offset?: number } }
 }
 
-/**
- * Stamp every rendered element with `data-s` / `data-e` — the offsets of the markdown it came from,
- * inside this block's source. This is what lets a text SELECTION be mapped back to markdown (see
- * `lib/mdCopy.ts`); `sliceSource` below already used the same `node.position` offsets to give the table
- * copy button its exact source, so this generalizes a mechanism the view was relying on already.
- *
- * Descent stops at `<pre>`: rehype-highlight fills a fence with one token `<span>` per lexeme, and
- * annotating those would multiply the node count on the render path for nothing — the `<pre>`'s own
- * span maps to the fence body on its own (its rendered text occurs exactly once inside its source).
- */
-function rehypeSourceOffsets() {
+/** Preserve the original language identifier through the code-block wrapper. */
+function rehypeCopyMetadata() {
   return (tree: HastNode): void => {
     const visit = (node: HastNode): void => {
       for (const child of node.children ?? []) {
         if (child.type !== 'element') continue
-        const s = child.position?.start?.offset
-        const e = child.position?.end?.offset
-        if (typeof s === 'number' && typeof e === 'number') {
-          child.properties = { ...child.properties, 'data-s': s, 'data-e': e }
+        if (child.tagName === 'pre') {
+          const code = child.children?.find(node => node.tagName === 'code')
+          const lang = classNamesOf(code).find(name => name.startsWith('language-'))?.slice(9)
+          child.properties = { ...child.properties, 'data-copy-lang': lang }
+          continue
         }
-        if (child.tagName === 'pre') continue
         visit(child)
       }
     }
@@ -86,7 +75,7 @@ function rehypeSourceOffsets() {
 // Annotated so the literal is read as a plugin tuple (PluggableList), not a nested array.
 const rehypePlugins: ComponentPropsWithoutRef<typeof ReactMarkdown>['rehypePlugins'] = [
   [rehypeHighlight, { languages: HLJS_LANGUAGES }],
-  rehypeSourceOffsets
+  rehypeCopyMetadata
 ]
 
 /* Remark plugin sets — three, chosen per block by `normalizeMath` (see lib/mathDelimiters.ts).
@@ -124,21 +113,19 @@ function displayMathTex(node: unknown): string | null {
   const kids = (node as HastNode | undefined)?.children ?? []
   const code = kids.find((child) => child.type === 'element' && child.tagName === 'code')
   if (!code || !classNamesOf(code).includes(MATH_DISPLAY)) return null
-  return texOf(code)
+  return texOf(code).replace(/\n$/, '')
 }
 
-/** The source-offset pair the plugin above stamps, as it arrives in a component's props. Declared so
- *  the two wrapper components (CodeBlock / TableBlock) can forward it onto the element they render. */
-type SrcAttrs = { 'data-s'?: number | string; 'data-e'?: number | string }
+type CodeAttrs = { 'data-copy-lang'?: string }
 
 /** TranscriptView's stable copy context — `enabled` is the Copy-as-markdown preference, read at click
  *  time by the copy buttons so the toggle never touches the render path. */
-export type CopyCtxRef = MutableRefObject<{ enabled: boolean; sources: Map<string, string> }>
+export type CopyCtxRef = MutableRefObject<{ enabled: boolean }>
 
 /**
  * Merge our `md-*` class with whatever hast supplied, instead of letting the spread below overwrite it.
  *
- * The overrides forward `...rest` so the offset attributes reach the DOM, but `rest` carries EVERY hast
+ * The overrides forward `...rest`, which carries EVERY hast
  * property — including `className`, and it lands after ours. remark-gfm sets `contains-task-list` on a
  * task list's `<ul>` and `task-list-item` on each `<li>`, and footnotes get `sr-only` / `data-footnote-backref`,
  * so an unmerged spread silently strips `md-ul` / `md-li` / `md-h2` / `md-a` from exactly the content
@@ -161,31 +148,27 @@ function codeLang(children: ReactNode): string | null {
  * A languaged fence also gets a quiet caps caption in the top-left gutter (`.md-lang`); it lives
  * OUTSIDE the <pre> so it never lands in the copied text, and `.has-lang` opens the gutter so it
  * clears line 1. */
-function CodeBlock({ children, ...src }: { children?: ReactNode } & SrcAttrs): ReactNode {
+function CodeBlock({ children, ...attrs }: { children?: ReactNode } & CodeAttrs): ReactNode {
   const ref = useRef<HTMLPreElement>(null)
   const lang = codeLang(children)
   return (
     <div className={lang ? 'md-pre-wrap has-lang' : 'md-pre-wrap'} data-lang={lang ?? undefined}>
       {lang ? (
-        // data-md-skip: the caption is chrome with no markdown behind it. It renders INSIDE the block
-        // but sits outside the annotated <pre>, so counting its text would shift every source offset
-        // after it — see the exclusion note in lib/mdCopyDom.ts.
+        // The caption is interface text, not part of the copied code.
         <span className="md-lang label-caps" aria-hidden="true" data-md-skip="">
           {lang}
         </span>
       ) : null}
       {/* sb-autoscroll: the sideways bar hides at rest and reveals while scrolling, the same as every
           other scroll surface. Marked by the delegated listener in TranscriptView. */}
-      <pre className="md-pre sb-autoscroll" ref={ref} {...src}>
+      <pre className="md-pre sb-autoscroll" ref={ref} {...attrs}>
         {children}
       </pre>
-      {/* The rendered <code> carries a trailing newline that isn't part of the code, so strip it —
-          otherwise every code copy arrives with a blank line stuck on the end. (The selection path
-          gets this for free: assembleCopy trims each part.) */}
+      {/* Remove only the renderer-added newline; trailing blank lines in the payload are content. */}
       <CopyButton
         className="copy-block"
         tip="Copy code"
-        getText={() => (ref.current?.textContent ?? '').replace(/\n+$/, '')}
+        getText={() => (ref.current?.textContent ?? '').replace(/\n$/, '')}
       />
     </div>
   )
@@ -194,8 +177,7 @@ function CodeBlock({ children, ...src }: { children?: ReactNode } & SrcAttrs): R
 function TableBlock({
   children,
   sourceMarkdown,
-  copyCtxRef,
-  ...src
+  copyCtxRef
 }: {
   children?: ReactNode
   /** The table's exact markdown source (sliced via the hast node's position). Preferred over the DOM
@@ -203,7 +185,7 @@ function TableBlock({
   sourceMarkdown?: string
   /** Read at click time — with "Copy as markdown" off, emit tab-separated cells, not a pipe table. */
   copyCtxRef: CopyCtxRef
-} & SrcAttrs): ReactNode {
+}): ReactNode {
   const ref = useRef<HTMLTableElement>(null)
   const getText = (): string =>
     copyCtxRef.current.enabled
@@ -212,7 +194,7 @@ function TableBlock({
   return (
     <div className="md-table-outer">
       <div className="md-table-wrap sb-autoscroll">
-        <table className="md-table" ref={ref} {...src}>
+        <table className="md-table" ref={ref}>
           {children}
         </table>
       </div>
@@ -226,12 +208,7 @@ function TableBlock({
  * the look lives entirely in transcript.css. Links never navigate;
  * they hand off to the OS browser via window.api.openExternal.
  *
- * Every override destructures `node` OUT (react-markdown passes the hast
- * node as a prop; spreading it onto a DOM element makes React warn) and
- * spreads the `...rest`, which is what carries rehypeSourceOffsets'
- * `data-s` / `data-e` through to the DOM. An override that destructures
- * only `{ children }` silently DROPS those attributes — and with them,
- * that element's contribution to a markdown copy.
+ * Overrides remove the hast node and forward semantic properties used by rendering and copying.
  * ------------------------------------------------------------------ */
 const markdownComponents: Components = {
   p: ({ node, className, children, ...rest }) => (
@@ -245,6 +222,7 @@ const markdownComponents: Components = {
     <a
       className={cx('md-a', className)}
       href={href}
+      data-copy-title={title}
       data-tip={href}
       data-tip-wide
       data-tip-compact
@@ -270,12 +248,10 @@ const markdownComponents: Components = {
   // Merge the incoming className: rehype-highlight sets `hljs language-xxx` on fenced <code> plus the
   // token <span class="hljs-*"> children — clobbering className with a bare "md-code" would drop the
   // highlight hooks. The highlighted spans arrive as `children`, so rendering them as-is preserves them.
-  // Inline math arrives as a `language-math math-inline` <code> carrying its own source offsets
-  // (rehypeSourceOffsets can stamp it because remark-math preserves the node's position), so the
-  // offsets forward straight onto the rendered formula and it stays one mapped copy unit.
+  // Inline math remains a distinct semantic unit even while its engine is loading.
   code: ({ node, className, children, ...rest }) => {
     if (classNamesOf(node).includes(MATH_INLINE)) {
-      return <MathInline tex={texOf(node)} {...(rest as SrcAttrs)} />
+      return <MathInline tex={texOf(node)} />
     }
     return (
       <code
@@ -297,12 +273,10 @@ const markdownComponents: Components = {
       </code>
     )
   },
-  // Display math is a <pre> wrapping a math <code>. The offsets live on the <pre> — descent stops
-  // there — so this is the only place that can forward them, and it renders MathDisplay itself
-  // rather than delegating to the <code> override (which would never see them).
+  // Display math and fenced code have separate rendering and copy semantics.
   pre: ({ node, children, ...rest }) => {
     const tex = displayMathTex(node)
-    if (tex !== null) return <MathDisplay tex={tex} {...(rest as SrcAttrs)} />
+    if (tex !== null) return <MathDisplay tex={tex} />
     return <CodeBlock {...rest}>{children}</CodeBlock>
   },
   ul: ({ node, className, children, ...rest }) => (
@@ -355,8 +329,7 @@ const markdownComponents: Components = {
       {children}
     </blockquote>
   ),
-  // `style` carries the GFM column alignment (`text-align:…`) and always has — it is NOT part of the
-  // property spread, so alignment behaves exactly as it did before the offsets were added.
+  // Keep GFM column alignment explicit; the copy adapter reads it from the rendered cells.
   th: ({ node, className, children, style, ...rest }) => (
     <th className={cx('md-th', className)} style={style} {...rest}>
       {children}
@@ -378,20 +351,13 @@ const markdownComponents: Components = {
       {children}
     </em>
   ),
-  // An inline image's chip text ("🖼 alt") never matches its `![alt](url)` source, so it can't map
-  // character-exactly — but keeping it ANNOTATED still pays: it becomes a bounded child, so the plain
-  // text either side of it maps exactly instead of the whole paragraph widening.
-  // Only the offsets are forwarded here: the element rendered is a <span>, and the property bag holds
-  // an image's `src` / `title`, which are meaningless (and invalid) on one.
-  img: ({ node, alt, ...rest }) => {
-    const offsets = rest as SrcAttrs
-    return (
-      <span className="block-chip" data-s={offsets['data-s']} data-e={offsets['data-e']}>
-        <span aria-hidden="true">🖼</span>
-        <span>{alt && alt.trim() ? alt : 'image'}</span>
-      </span>
-    )
-  }
+  // The image renders as a label; preserve its destination without fetching the image.
+  img: ({ alt, src, title }) => (
+    <span className="block-chip md-image" data-copy-url={src} data-copy-title={title}>
+      <span aria-hidden="true" data-md-skip="">🖼</span>
+      <span data-copy-label="">{alt && alt.trim() ? alt : 'image'}</span>
+    </span>
+  )
 }
 
 /** Slice an element's exact markdown source from the original `text` via its hast node position.
@@ -430,11 +396,7 @@ function MarkdownBlock({
     // reads it when clicked instead.
     [text, copyCtxRef]
   )
-  /* Math delimiters are normalized onto the form remark-math understands. The rewrite is
-   * LENGTH-PRESERVING, which is what makes this a one-line change instead of a rework: every
-   * source offset the parse produces still indexes `text`, so `sliceSource` above, the copy
-   * pipeline, and the 0..length span below all keep using the ORIGINAL source — and a copied
-   * formula comes back as the `\(…\)` the agent wrote, not the rewritten form. */
+  // Length preservation lets the table button slice the original source after math normalization.
   const math = useMemo(() => normalizeMath(text), [text])
   const remarkPlugins = !math.hasMath
     ? remarkPlain
@@ -442,11 +404,8 @@ function MarkdownBlock({
       ? remarkMathWithSingleDollar
       : remarkMathOnlyDoubleDollar
 
-  // The wrapper is the copy handler's unit of work: `data-block-key` identifies which text block's
-  // source to slice, and the 0..length span makes it the root of the same annotated tree its children
-  // form — so one uniform walk describes the whole block (see lib/mdCopyDom.ts).
   return (
-    <div className="md" data-block-key={blockKey} data-s={0} data-e={text.length}>
+    <div className="md" data-block-key={blockKey}>
       <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
         {math.text}
       </ReactMarkdown>
@@ -524,9 +483,9 @@ function ToolResultBlock({ text, isError }: { text: string; isError: boolean }):
 
 function ImageBlock({ alt }: { alt: string }): ReactNode {
   return (
-    <span className="block-chip">
-      <span aria-hidden="true">🖼</span>
-      <span>{alt && alt.trim() ? alt : 'image'}</span>
+    <span className="block-chip transcript-image">
+      <span aria-hidden="true" data-md-skip="">🖼</span>
+      <span data-copy-label="">{alt && alt.trim() ? alt : 'image'}</span>
     </span>
   )
 }
@@ -610,7 +569,6 @@ function ToolRun({ item }: { item: ToolRunItem }): ReactNode {
 
 function renderBlock(block: TranscriptBlock, key: string, copyCtxRef: CopyCtxRef): ReactNode {
   if (block.kind === 'text') {
-    // `key` is `${message.uuid}:${blockIndex}` — reused as the copy handler's lookup into the source map.
     return <MarkdownBlock key={key} blockKey={key} text={block.text} copyCtxRef={copyCtxRef} />
   }
   if (block.kind === 'image') return <ImageBlock key={key} alt={block.alt} />
@@ -636,7 +594,6 @@ function MessageBlock({
    *  when clicked, so toggling Preferences doesn't re-render every mounted block. */
   copyCtxRef: CopyCtxRef
 }): ReactNode {
-  const bodyRef = useRef<HTMLDivElement>(null)
   if (item.kind === 'interrupt') {
     return (
       <div className="message message-interrupt">
@@ -650,30 +607,9 @@ function MessageBlock({
   const ts = item.timestamp
   const time = clockTime(ts)
   const proseMessages = item.items.flatMap((it) => (it.kind === 'turn' ? it.messages : []))
-  const hasProse = proseMessages.some((m) => m.blocks.some((b) => b.kind === 'text'))
+  const hasCopyContent = proseMessages.some((m) => m.blocks.some((b) => b.kind === 'text' || b.kind === 'image'))
 
-  /**
-   * Copy-turn runs the SAME collector the ⌘C handler does, over a range covering this section's body —
-   * so the button and a hand-drag across the same content cannot disagree. That matters now that tool
-   * I/O is conditional on a run being expanded: a separate message-walking implementation would have no
-   * way to see the DOM's disclosure state.
-   */
-  const turnText = (): string => {
-    const body = bodyRef.current
-    if (!body) return ''
-    const sources = new Map<string, string>()
-    for (const part of item.items) {
-      if (part.kind !== 'turn') continue
-      for (const msg of part.messages) {
-        msg.blocks.forEach((b, bi) => {
-          if (b.kind === 'text') sources.set(`${msg.uuid}:${bi}`, b.text)
-        })
-      }
-    }
-    const markdown = copyCtxRef.current.enabled
-    const mode = markdown ? 'markdown' : 'plain'
-    return assembleCopy(collectSections(rangeOver(body), body, (k) => sources.get(k), mode), false, !markdown)
-  }
+  const turnCopy = (): string => turnText(proseMessages, copyCtxRef.current.enabled ? 'markdown' : 'plain')
 
   return (
     <article className={classes} data-speaker={item.label} data-sidechain={item.isSidechain ? '' : undefined}>
@@ -687,14 +623,14 @@ function MessageBlock({
           <span className="role-name">{item.label}</span>
         </span>
         {item.isSidechain ? <span className="sidechain-tag label-caps">Sub-agent</span> : null}
-        {hasProse ? <CopyButton className="copy-turn" tip="Copy turn" getText={turnText} /> : null}
+        {hasCopyContent ? <CopyButton className="copy-turn" tip="Copy turn" getText={turnCopy} /> : null}
         {time ? (
           <span className="message-time" data-tip={fullDateTime(ts)}>
             {time}
           </span>
         ) : null}
       </header>
-      <div className="message-body" ref={bodyRef}>
+      <div className="message-body">
         {item.items.map((it) =>
           it.kind === 'turn' ? (
             <div className="prose-beat" key={it.key}>

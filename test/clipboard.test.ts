@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  conversationMarkdown,
+  conversationText,
   markdownToPlainText,
   rowsToMarkdownTable,
   rowsToPlainText,
-  turnMarkdown
+  turnText
 } from '../src/renderer/lib/clipboard'
 import type { TranscriptBlock, TranscriptMessage } from '../src/shared/types'
 
@@ -18,8 +18,8 @@ describe('rowsToPlainText', () => {
     ).toBe('Name\tSize\nfoo\t12')
   })
 
-  it('flattens newlines inside a cell so a row stays one line', () => {
-    expect(rowsToPlainText([['a\nb', 'c']])).toBe('a b\tc')
+  it('quotes embedded newlines without changing cell content', () => {
+    expect(rowsToPlainText([['a\nb', 'c']])).toBe('"a\nb"\tc')
   })
 
   it('preserves the ragged row shape of a selection across table rows', () => {
@@ -52,12 +52,31 @@ describe('markdownToPlainText', () => {
     expect(markdownToPlainText('- [x] done\n- [ ] todo')).toBe('- [x] done\n- [ ] todo')
   })
 
+  it('keeps nested task-list indentation attached to its parent', () => {
+    expect(markdownToPlainText('- [x] outer\n  - child\n- end')).toBe('- [x] outer\n  - child\n- end')
+  })
+
   it('renders a GFM table as tab-separated rows rather than leaking pipes', () => {
     expect(markdownToPlainText('| A | B |\n| --- | --- |\n| 1 | 2 |')).toBe('A\tB\n1\t2')
   })
 
   it('keeps inline code content', () => {
     expect(markdownToPlainText('call `foo()` now')).toBe('call foo() now')
+  })
+})
+
+
+describe('whole plain copy structure', () => {
+  it('keeps indentation and payload blank lines', () => {
+    expect(markdownToPlainText('```text\n  one\n\ttwo\n\n```')).toBe('  one\n\ttwo\n')
+  })
+  it('copies gated math as LaTeX while leaving shell sigils alone', () => {
+    expect(markdownToPlainText('Use $PATH.')).toBe('Use $PATH.')
+    expect(markdownToPlainText('L \\(x^2\\) R\n\n\\[\ny^2\n\\]')).toBe('L x^2 R\n\ny^2')
+  })
+  it('keeps image labels and reads footnotes in rendered order', () => {
+    expect(markdownToPlainText('![diagram](https://example.org/image.png)')).toBe('diagram')
+    expect(markdownToPlainText('Before[^a].\n\n[^a]: Note body\n\nAfter.')).toBe('Before1.\n\nAfter.\n\n1. Note body')
   })
 })
 
@@ -88,7 +107,7 @@ describe('rowsToMarkdownTable', () => {
   })
 })
 
-describe('turnMarkdown', () => {
+describe('turnText', () => {
   const msg = (blocks: TranscriptBlock[]): TranscriptMessage => ({
     uuid: 'u',
     role: 'assistant',
@@ -98,7 +117,7 @@ describe('turnMarkdown', () => {
   })
 
   it('returns text blocks verbatim (markdown preserved) and skips non-text blocks', () => {
-    const out = turnMarkdown([
+    const out = turnText([
       msg([
         { kind: 'text', text: '# Title\n\n**bold**, `code`, and:\n- a\n- b' },
         { kind: 'tool_use', id: 't1', name: 'Bash', input: { cmd: 'ls' } },
@@ -109,17 +128,17 @@ describe('turnMarkdown', () => {
   })
 
   it('joins text across messages in a group with a blank line', () => {
-    const out = turnMarkdown([msg([{ kind: 'text', text: 'one' }]), msg([{ kind: 'text', text: 'two' }])])
+    const out = turnText([msg([{ kind: 'text', text: 'one' }]), msg([{ kind: 'text', text: 'two' }])])
     expect(out).toBe('one\n\ntwo')
   })
 
   it('returns empty string when a turn has no text blocks', () => {
-    expect(turnMarkdown([msg([{ kind: 'tool_use', id: 't', name: 'X', input: null }])])).toBe('')
+    expect(turnText([msg([{ kind: 'tool_use', id: 't', name: 'X', input: null }])])).toBe('')
   })
 })
 
-describe('conversationMarkdown', () => {
-  it('copies role-labeled prose while excluding tool calls, results, and images', () => {
+describe('conversationText', () => {
+  it('copies role-labeled prose while excluding tool calls and results', () => {
     const messages: TranscriptMessage[] = [
       {
         uuid: 'u1',
@@ -159,11 +178,13 @@ describe('conversationMarkdown', () => {
       }
     ]
 
-    expect(conversationMarkdown(messages, 'codex')).toBe(
+    expect(conversationText(messages, 'codex')).toBe(
       [
         '**You:**',
         '',
         '## Request',
+        '',
+        'screenshot',
         '',
         '---',
         '',
@@ -187,7 +208,7 @@ describe('conversationMarkdown', () => {
       }
     ]
 
-    expect(conversationMarkdown(messages, 'claude')).toBe(
+    expect(conversationText(messages, 'claude')).toBe(
       '**Claude (Sub-agent):**\n\nDelegated finding'
     )
   })
@@ -211,7 +232,7 @@ describe('conversationMarkdown', () => {
       }
     ]
 
-    expect(conversationMarkdown(messages, 'claude')).toBe('')
+    expect(conversationText(messages, 'claude')).toBe('')
   })
 
   it('keeps list numbering and task state in a plain conversation export', () => {
@@ -225,7 +246,7 @@ describe('conversationMarkdown', () => {
       }
     ]
 
-    expect(conversationMarkdown(messages, 'claude', 'plain')).toBe(
+    expect(conversationText(messages, 'claude', 'plain')).toBe(
       'Claude:\n\n3. third\n4. fourth\n\n- [x] done\n- [ ] todo'
     )
   })
