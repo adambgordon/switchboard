@@ -1,6 +1,7 @@
 const { app, BrowserWindow } = require('electron')
 const { join } = require('node:path')
 const { writeFileSync } = require('node:fs')
+const checkCopyFidelity = require('./copy-fidelity.cjs')
 const output = process.argv[2]
 app.setPath('userData', join(output, 'profile'))
 const results = [], failures = []
@@ -83,7 +84,7 @@ async function run() {
       await expectContents(prefix + 'inline-list-spacing/plain/' + source, '.md', plain)
     }
     const literal = 'a*b*c _d_ `e` [f](g) \\h'
-    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\](g) \\\\h'
+    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\]\\(g\\) \\\\h'
     for (const [kind, first, second] of [
       ['unordered', '- ', '- '], ['ordered', '3. ', '4. '], ['task', '- [x] ', '- [ ] ']
     ]) {
@@ -344,6 +345,7 @@ async function run() {
     await call('expandResult'); await settle()
     await expectContents(prefix + 'expanded-result', '.tool-result-text', full)
     check(prefix + 'result-button-full', await call('copyButton', 'Copy result'), full)
+    await checkCopyFidelity({ js, call, check, theme, agent })
   }
   const messages = Array.from({ length: 80 }, (_, i) => message('m' + i, [text('message ' + i)], i % 2 ? 'assistant' : 'user', i % 2 ? undefined : 'human'))
   await call('mountCopy', { messages })

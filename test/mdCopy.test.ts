@@ -114,7 +114,7 @@ describe('list structure', () => {
 
 describe('literal punctuation in list copies', () => {
   const literal = 'a*b*c _d_ `e` [f](g) \\h'
-  const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\](g) \\\\h'
+  const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\]\\(g\\) \\\\h'
   const list = (start: number | null, checked?: boolean): CopyNode => ({ kind: 'list', start, children: [
     { kind: 'item', checked, children: [copyText(literal)] },
     { kind: 'item', checked, children: [copyText('second')] }

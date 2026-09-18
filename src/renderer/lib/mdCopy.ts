@@ -99,7 +99,10 @@ function retained(node: CopyNode, ctx: Context): boolean {
     (extent.full && (ctx.first < extent.start || ctx.last >= extent.end))
 }
 
-const escapeText = (text: string): string => text.replace(/[\\`*_[\]]/g, '\\$&')
+const escapeText = (text: string): string => text.replace(/[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/g, '\\$&')
+// Table splitting happens before inline parsing; an odd backslash run already protects a pipe.
+const escapeTablePipes = (text: string): string => text.replace(/(\\*)\|/g,
+  (pipe, slashes: string) => slashes.length % 2 ? pipe : slashes + '\\|')
 const escapeDestination = (url: string): string => '<' + url.replace(/\\/g, '\\\\').replace(/>/g, '\\>').replace(/\n/g, '%0A') + '>'
 const linkTitle = (title?: string): string => title ? ' "' + title.replace(/[\\"]/g, '\\$&').replace(/\n/g, ' ') + '"' : ''
 
@@ -126,85 +129,89 @@ export function rowsToText(rows: string[][]): string {
   return rows.map(row => row.map(field).join('\t')).join('\n')
 }
 
-type InlineStyle = 'strong' | 'em' | 'strike'
-type InlineFragment =
-  | { kind: 'literal'; text: string }
-  | { kind: 'style'; style: InlineStyle; children: InlineFragment[] }
+const STYLE = { em: 1, strong: 2, strike: 4 } as const
+interface InlineRun { text: string; styles: number }
 
-/** Eligibility belongs to the original selection, before equivalent spans are combined. */
-function inlineFragments(nodes: CopyNode[], ctx: Context, escaped: boolean): InlineFragment[] {
-  const fragments: InlineFragment[] = []
-  for (const node of nodes) {
-    if (!ctx.extents.get(node)!.active) continue
-    if (node.kind === 'strong' || node.kind === 'em' || node.kind === 'strike') {
-      const marked = ctx.options.mode === 'markdown' && retained(node, ctx)
-      const children = inlineFragments(node.children, ctx, escaped || marked)
-      if (marked) fragments.push({ kind: 'style', style: node.kind, children })
-      else for (const child of children) fragments.push(child)
-    } else if (node.kind === 'inline') {
-      for (const child of inlineFragments(node.children, ctx, escaped)) fragments.push(child)
-    } else {
-      const text = render(node, ctx, escaped)
-      if (text !== '') fragments.push({ kind: 'literal', text })
+/** Eligibility belongs to the original selection, before equivalent style runs are grouped. */
+function inlineRuns(nodes: CopyNode[], ctx: Context, escaped: boolean): InlineRun[] {
+  const runs: InlineRun[] = []
+  const visit = (children: CopyNode[], styles: number, escape: boolean): void => {
+    for (const node of children) {
+      if (!ctx.extents.get(node)!.active) continue
+      if (node.kind === 'strong' || node.kind === 'em' || node.kind === 'strike') {
+        const marked = ctx.options.mode === 'markdown' && retained(node, ctx)
+        visit(node.children, styles | (marked ? STYLE[node.kind] : 0), escape || marked)
+      } else if (node.kind === 'inline') {
+        visit(node.children, styles, escape)
+      } else {
+        const text = render(node, ctx, escape)
+        if (!text) continue
+        const previous = runs[runs.length - 1]
+        if (previous?.styles === styles) previous.text += text
+        else runs.push({ text, styles })
+      }
     }
   }
-  return fragments
+  visit(nodes, 0, escaped)
+  return runs
 }
 
-function normalizeInline(fragments: InlineFragment[], inherited: ReadonlySet<InlineStyle>): InlineFragment[] {
-  const out: InlineFragment[] = []
-  const append = (fragment: InlineFragment): void => {
-    if (fragment.kind === 'style' && inherited.has(fragment.style)) {
-      fragment.children.forEach(append)
-      return
+function serializeInline(runs: InlineRun[], from = 0, to = runs.length, inherited = 0): string {
+  const parts: string[] = []
+  for (let index = from; index < to;) {
+    const styles = runs[index].styles & ~inherited
+    if (!styles) { parts.push(runs[index++].text); continue }
+    let style = 0, end = index
+    // Keep shared attention open across run boundaries instead of fusing closing/opening stars.
+    for (const candidate of [STYLE.em, STYLE.strong]) {
+      let limit = index
+      while (limit < to && (runs[limit].styles & ~inherited & candidate)) limit++
+      if (limit > end) { style = candidate; end = limit }
     }
-    const previous = out[out.length - 1]
-    if (fragment.kind === 'style' && previous?.kind === 'style' && fragment.style === previous.style) {
-      for (const child of fragment.children) previous.children.push(child)
-    } else out.push(fragment)
-  }
-  fragments.forEach(append)
-  for (const fragment of out) {
-    if (fragment.kind === 'style') {
-      fragment.children = normalizeInline(fragment.children, new Set([...inherited, fragment.style]))
+    if (!style) {
+      // Strike stays innermost: lifting it around attention changes its delimiter flanking.
+      style = STYLE.strike
+      end = index + 1
+      while (end < to && (runs[end].styles & ~inherited) === STYLE.strike) end++
     }
+    const marker = style === STYLE.em ? '*' : style === STYLE.strong ? '**' : '~~'
+    parts.push(marker, serializeInline(runs, index, end, inherited | style), marker)
+    index = end
   }
-  return out
+  return parts.join('')
 }
 
-function serializeInline(fragments: InlineFragment[]): string {
-  return fragments.map(fragment => {
-    if (fragment.kind === 'literal') return fragment.text
-    const marker = fragment.style === 'strong' ? '**' : fragment.style === 'em' ? '*' : '~~'
-    return marker + serializeInline(fragment.children) + marker
-  }).join('')
+function renderInline(nodes: CopyNode[], ctx: Context, escaped = false): string {
+  return serializeInline(inlineRuns(nodes, ctx, escaped))
 }
-
-function joinRendered(nodes: CopyNode[], ctx: Context, separator: string, escaped = false): string {
-  if (separator === '') return serializeInline(normalizeInline(inlineFragments(nodes, ctx, escaped), new Set()))
-  return nodes.map(node => render(node, ctx, escaped)).filter(part => part !== '').join(separator)
+/** Separate copy units retain a paragraph boundary even when their payload is inline. */
+function renderBlocks(nodes: CopyNode[], ctx: Context): string {
+  return nodes.map(node => render(node, ctx)).filter(part => part !== '').join('\n\n')
 }
-function itemBody(node: CopyNode & Children, ctx: Context, escaped: boolean): string {
+function renderFlow(nodes: CopyNode[], ctx: Context, escaped = false, listItem = false): string {
   let out = ''
   let previous: CopyNode | undefined
   let inline: CopyNode[] = []
   const append = (value: string, child: CopyNode): void => {
     if (!value) return
     if (previous && (isCopyBlock(previous) || isCopyBlock(child))) {
-      out += child.kind === 'list' || previous.kind === 'list' ? '\n' : '\n\n'
+      out += listItem && (child.kind === 'list' || previous.kind === 'list') ? '\n' : '\n\n'
     }
     out += value
     previous = child
   }
   const flush = (): void => {
     if (!inline.length) return
-    append(joinRendered(inline, ctx, '', escaped), inline[inline.length - 1])
+    append(renderInline(inline, ctx, escaped), inline[inline.length - 1])
     inline = []
   }
-  for (const child of node.children) {
+  for (const child of nodes) {
+    if (!ctx.extents.get(child)!.active) continue
     if (isCopyBlock(child)) {
+      const value = render(child, ctx, escaped)
+      if (!value) continue
       flush()
-      append(render(child, ctx, escaped), child)
+      append(value, child)
     } else inline.push(child)
   }
   flush()
@@ -221,7 +228,7 @@ function renderList(node: CopyNode & { kind: 'list' }, ctx: Context, escaped: bo
     if (child.kind !== 'item' || !ctx.extents.get(child)!.active) return
     const extent = ctx.extents.get(child)!
     const marked = extent.full && (touched >= 2 || retained(child, ctx))
-    const body = itemBody(child, ctx, escaped || marked)
+    const body = renderFlow(child.children, ctx, escaped || marked, true)
     if (!marked) { parts.push(body); return }
     const bullet = node.start === null ? '- ' : `${node.start + index}. `
     const task = child.checked === undefined ? '' : `[${child.checked ? 'x' : ' '}] `
@@ -238,7 +245,7 @@ function renderTable(node: CopyNode & { kind: 'table' }, ctx: Context): string {
   ).filter(row => row.length > 0)
   if (!markdown) return rowsToText(rows)
   if (!rows.length) return ''
-  const line = (row: string[]): string => '| ' + row.map(value => value.replace(/\|/g, '\\|').replace(/\n/g, '<br>')).join(' | ') + ' |'
+  const line = (row: string[]): string => '| ' + row.map(value => escapeTablePipes(value).replace(/\n/g, '<br>')).join(' | ') + ' |'
   const separator = rows[0].map((_, i) => node.align[i] === 'center' ? ':---:' : node.align[i] === 'left' ? ':---' : node.align[i] === 'right' ? '---:' : '---')
   return [line(rows[0]), line(separator), ...rows.slice(1).map(line)].join('\n')
 }
@@ -251,19 +258,19 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
   switch (node.kind) {
     case 'text': return markdown && escaped ? escapeText(extent.selected) : extent.selected
     case 'inline': case 'paragraph': case 'cell': case 'row':
-      return joinRendered(node.children, ctx, '', escaped)
-    case 'flow': return joinRendered(node.children, ctx, '\n\n', escaped)
-    case 'strong': case 'em': case 'strike': return joinRendered([node], ctx, '', escaped)
+      return renderInline(node.children, ctx, escaped)
+    case 'flow': return renderFlow(node.children, ctx, escaped)
+    case 'strong': case 'em': case 'strike': return renderInline([node], ctx, escaped)
     case 'heading': {
-      const body = joinRendered(node.children, ctx, '', escaped || marked)
+      const body = renderInline(node.children, ctx, escaped || marked)
       return marked ? '#'.repeat(node.level) + ' ' + body : body
     }
     case 'quote': {
-      const body = joinRendered(node.children, ctx, '\n\n', escaped || marked)
+      const body = renderFlow(node.children, ctx, escaped || marked)
       return marked ? body.split('\n').map(line => line ? '> ' + line : '>').join('\n') : body
     }
     case 'link': {
-      const body = joinRendered(node.children, ctx, '', escaped || marked)
+      const body = renderInline(node.children, ctx, escaped || marked)
       return marked ? `[${body}](${escapeDestination(node.url)}${linkTitle(node.title)})` : body
     }
     case 'code': return marked ? node.block ? fence(extent.selected, node.lang) : inlineCode(extent.selected) : extent.selected
@@ -271,7 +278,7 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
     case 'image': return marked && node.url ? `![${escapeText(extent.selected)}](${escapeDestination(node.url)}${linkTitle(node.title)})` : extent.selected
     case 'tool': return retained(node, ctx) ? `${node.label}:\n\n${markdown ? fence(extent.selected, node.lang) : extent.selected}` : extent.selected
     case 'list': return renderList(node, ctx, escaped)
-    case 'item': return itemBody(node, ctx, escaped)
+    case 'item': return renderFlow(node.children, ctx, escaped, true)
     case 'table': return renderTable(node, ctx)
     case 'break': return marked ? '  \n' : extent.selected
     case 'rule': return retained(node, ctx) ? '---' : ''
@@ -280,7 +287,7 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
 
 export function serializeCopy(nodes: CopyNode[], options: CopyOptions): string {
   const ctx = prepare(nodes, options)
-  return joinRendered(nodes, ctx, '\n\n')
+  return renderBlocks(nodes, ctx)
 }
 export function joinCopySections(
   sections: { label: string; isSidechain: boolean; body: string }[],
@@ -297,6 +304,6 @@ export function joinCopySections(
 export function assembleCopy(sections: CopySection[], options: CopyOptions): string {
   const ctx = prepare(sections.flatMap(section => section.nodes), options)
   return joinCopySections(sections.map(section => ({
-    ...section, body: joinRendered(section.nodes, ctx, '\n\n')
+    ...section, body: renderBlocks(section.nodes, ctx)
   })), options.mode, options.alwaysLabel)
 }

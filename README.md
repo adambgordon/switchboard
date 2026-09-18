@@ -146,7 +146,7 @@ Quality gates:
 npm run typecheck    # tsc over main (node) and renderer (web) projects
 npm test             # vitest — unit tests (parser, indexer, liveness, theme, rename, …)
 npm run test:tabs-ui  # native Electron tab rendering, zoom, drag, and overflow regression
-npm run test:copy-ui  # transcript copy events, Markdown round-trips, pointer selection, and clipping
+npm run test:copy-ui  # transcript copy events, Markdown fidelity, pointer selection, and clipping
 SWITCHBOARD_SMOKE=1 node_modules/.bin/electron .   # headless boot check: node-pty spawns + renderer loads
 ```
 
