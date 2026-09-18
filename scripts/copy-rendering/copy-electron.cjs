@@ -21,6 +21,29 @@ async function expectContents(name, selector, expected, index = 0) {
   const result = await call('copyContents', selector, index)
   check(name, result.text, expected)
 }
+async function dragAcross(selector) {
+  await js(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center' })`)
+  await settle()
+  const rect = await js(`(() => {
+    window.getSelection().removeAllRanges();
+    return document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON();
+  })()`)
+  const mouse = (type, x) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+    type, x, y: rect.top + rect.height / 2, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1
+  })
+  await mouse('mouseMoved', rect.left + 0.5)
+  await mouse('mousePressed', rect.left + 0.5)
+  for (let step = 1; step <= 4; step++) await mouse('mouseMoved', rect.left + 0.5 + (rect.width - 1) * step / 4)
+  await mouse('mouseReleased', rect.right - 0.5)
+  return js('window.getSelection().toString()')
+}
+async function expectUnselectable(prefix, selectors) {
+  for (const selector of selectors) {
+    const styles = await js(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(el => getComputedStyle(el).userSelect)`)
+    check(prefix + '/present/' + selector, styles.length > 0, true)
+    check(prefix + '/unselectable/' + selector, styles.every(value => value === 'none'), true)
+  }
+}
 const message = (uuid, blocks, role = 'assistant', userKind) => ({ uuid, blocks, role, userKind, timestamp: null, isSidechain: false })
 const text = value => ({ kind: 'text', text: value })
 
@@ -58,6 +81,64 @@ async function run() {
       await expectContents(prefix + 'inline-list-spacing/md/' + source, '.md', md)
       await call('copyMode', 'plain')
       await expectContents(prefix + 'inline-list-spacing/plain/' + source, '.md', plain)
+    }
+    const literal = 'a*b*c _d_ `e` [f](g) \\h'
+    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\](g) \\\\h'
+    for (const [kind, first, second] of [
+      ['unordered', '- ', '- '], ['ordered', '3. ', '4. '], ['task', '- [x] ', '- [ ] ']
+    ]) {
+      const source = first + escaped + '\n' + second + 'second'
+      for (const mode of ['markdown', 'plain']) {
+        await call('mountCopy', { source, theme, agent, mode })
+        const copied = (await call('copyContents', '.md')).text
+        check(prefix + 'list-escape/' + kind + '/' + mode, copied,
+          first + (mode === 'markdown' ? escaped : literal) + '\n' + second + 'second')
+        // Text-node offsets in a task item include the renderer's space after its checkbox.
+        const offset = kind === 'task' ? 1 : 0
+        await expectRange(prefix + 'list-exact/' + kind + '/' + mode,
+          ['.md-li', offset], ['.md-li', offset + literal.length], literal)
+        await expectRange(prefix + 'list-fragment/' + kind + '/' + mode,
+          ['.md-li', offset + 1], ['.md-li', offset + literal.length], literal.slice(1))
+        await expectRange(prefix + 'list-partial-crossing/' + kind + '/' + mode,
+          ['.md-li', offset + 1], ['.md-li', offset + 6, 1], literal.slice(1) + '\n' + second + 'second')
+        if (mode === 'markdown') {
+          await call('mountCopy', { source: copied, theme, agent })
+          await expectRange(prefix + 'list-roundtrip/' + kind,
+            ['.md-li', offset], ['.md-li', offset + literal.length], literal)
+          check(prefix + 'list-roundtrip-styles/' + kind,
+            await js("document.querySelectorAll('.md-li em, .md-li strong, .md-li code, .md-li a').length"), 0)
+        }
+      }
+    }
+    for (const mode of ['markdown', 'plain']) {
+      const source = 'L\n\n> - outer\n>   - ' + escaped + '\n>   - second\n\nR'
+      await call('mountCopy', { source, theme, agent, mode })
+      const copied = (await call('copyContents', '.md')).text
+      check(prefix + 'nested-quote-escape/' + mode, copied, mode === 'markdown' ? source
+        : 'L\n\n- outer\n  - ' + literal + '\n  - second\n\nR')
+      if (mode === 'markdown') {
+        await call('mountCopy', { source: copied, theme, agent })
+        await expectContents(prefix + 'nested-quote-roundtrip', '.md-ul .md-li .md-ul .md-li', literal)
+        check(prefix + 'nested-quote-roundtrip-styles',
+          await js("document.querySelectorAll('.md-li em, .md-li strong, .md-li code, .md-li a').length"), 0)
+      }
+    }
+    for (const mode of ['markdown', 'plain']) {
+      await call('mountCopy', { source: 'Before\n\n---\n\nAfter', theme, agent, mode })
+      for (const [label, start, end, expected] of [
+        ['both', ['.md-p'], ['.md-p', 1], 'Before\n\n---\n\nAfter'],
+        ['left', ['.md-p'], ['.md-hr'], 'Before\n\n---'],
+        ['right', ['.md-hr'], ['.md-p', 1], '---\n\nAfter'],
+        ['isolated', ['.md-hr'], ['.md-hr'], '']
+      ]) for (const reverse of [false, true]) {
+        const result = await call('copyNodes', start, end, reverse)
+        check(prefix + 'divider/' + mode + '/' + label + '/' + reverse, result.text, expected)
+        check(prefix + 'divider-handled/' + mode + '/' + label + '/' + reverse, result.prevented, true)
+        if (label === 'isolated') check(prefix + 'divider-empty-clipboard/' + mode + '/' + reverse, result.types.length, 0)
+      }
+      check(prefix + 'divider-turn/' + mode, await call('copyButton', 'Copy turn'), 'Before\n\n---\n\nAfter')
+      await call('mountCopy', { source: '---', theme, agent, mode })
+      check(prefix + 'divider-only-turn/' + mode, await call('copyButton', 'Copy turn'), '---')
     }
     await call('mountCopy', { source: '- **a** **b**', theme, agent })
     for (const mode of ['markdown', 'plain']) {
@@ -176,8 +257,18 @@ async function run() {
     await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](<https://example.org/image.png>) R')
     await call('mountCopy', { blocks: [text('L'), { kind: 'image', alt: 'uploaded image' }, text('R')], theme, agent })
     await expectContents(prefix + 'uploaded-image', '.transcript-content', 'L\n\nuploaded image\n\nR')
+    await expectUnselectable(prefix + 'chrome', ['.block-chip > [data-md-skip]'])
     await call('mountCopy', { source: 'Before[^a].\n\n[^a]: Note body\n\nAfter.', theme, agent })
     await expectRange(prefix + 'footnote-order', ['.md > p', 0, 1], ['[data-footnotes] p', 4], 'After.\n\nNote')
+    await expectUnselectable(prefix + 'chrome', ['.message-meta .role-label', '.transcript-foot-label', '[data-footnote-backref]'])
+    await js('document.fonts.ready')
+    // Sweep the text and return link together: dragging only a link can trigger native link drag.
+    check(prefix + 'footnote-body-selectable', (await dragAcross('[data-footnotes] p')).includes('Note body'), true)
+    check(prefix + 'backlink-not-in-body-selection', await js("window.getSelection().toString().includes('↩')"), false)
+    const backlink = await call('copyContents', '[data-footnote-backref]')
+    check(prefix + 'backlink-empty', backlink.text, '')
+    check(prefix + 'backlink-handled', backlink.prevented, true)
+    check(prefix + 'backlink-clipboard-unchanged', backlink.types.length, 0)
     await call('mountCopy', { source: 'L \\(\\frac{a}{b}\\) R\n\n\\[\nx^2\n\\]', theme, agent })
     await settle()
     await js('new Promise(resolve => setTimeout(resolve, 50))')
@@ -185,9 +276,15 @@ async function run() {
     await expectRange(prefix + 'math-glyph', ['.md-math [data-md-skip]', 0], ['.md-math [data-md-skip]', 1], '\\frac{a}{b}')
     await expectContents(prefix + 'math-block', '.md-math-display', 'x^2')
     await expectContents(prefix + 'math-surrounded', '.md-p', 'L $\\frac{a}{b}$ R')
+    await call('mountCopy', { source: 'L \\(x+y\\) R\n\n\\[\nx^2\n\\]', theme, agent })
+    await settle()
+    check(prefix + 'math-glyph-selectable', await js("getComputedStyle(document.querySelector('.md-math [data-md-skip]')).userSelect"), 'text')
+    check(prefix + 'math-pointer-selection', (await dragAcross('.md-math .katex-html')).length > 0, true)
+    check(prefix + 'math-pointer-copy', (await call('copyCurrent')).text, 'x+y')
 
 
     await call('mountCopy', { source: '## Title\n\n`abc`\n\n```sh\n  code\n\n```\n\n| A | B |\n| --- | --- |\n| a\tb | say "hi" |', theme, agent })
+    await expectUnselectable(prefix + 'chrome', ['.md-lang'])
     for (const mode of ['markdown', 'plain']) {
       await call('copyMode', mode)
       check(prefix + 'code-button/' + mode, await call('copyButton', 'Copy code'), '  code\n')
@@ -219,6 +316,7 @@ async function run() {
     await call('mountCopy', { messages, theme, agent })
     await expectContents(prefix + 'tools-closed', '.transcript-content', 'Before\n\nAfter')
     await call('openTools'); await settle()
+    await expectUnselectable(prefix + 'chrome', ['.tool-head'])
     await expectContents(prefix + 'tool-exact', '.tool-result-text', 'abc')
     check(prefix + 'turn-excludes-tools', await call('copyButton', 'Copy turn'), 'Before\n\nAfter')
     check(prefix + 'conversation-excludes-tools', await call('copyButton', 'Copy entire conversation'), `**${agent === 'claude' ? 'Claude' : 'Codex'}:**\n\nBefore\n\nAfter`)
@@ -263,6 +361,7 @@ app.whenReady().then(async () => {
   win = new BrowserWindow({ show: false, width: 1000, height: 850, webPreferences: { contextIsolation: false } })
   try {
     await win.loadFile(join(output, 'dist/index.html'))
+    win.webContents.debugger.attach('1.3')
     await run()
   } catch (error) { failures.push({ name: 'fixture-error', error: String(error), stack: error.stack }) }
   writeFileSync(join(output, 'results.json'), JSON.stringify({ results, failures }, null, 2))

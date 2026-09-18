@@ -11,8 +11,12 @@ import '@renderer/styles/tabs.css'
 window.auditErrors = []
 window.addEventListener('error', event => window.auditErrors.push(event.message))
 window.addEventListener('unhandledrejection', event => window.auditErrors.push(String(event.reason)))
-window.api = new Proxy({}, { get: (_, key) => key === 'tabDragDrop' ? () => Promise.resolve('cancelled') : () => {} })
-const titles = ['Arithmetic sketch', 'Review examples in depth', 'Slider mechanics', 'Evaluate powers', 'Square root example', 'Review system thoroughly', 'Working set bytes in processor memory statistics', 'Calculate square root']
+window.dragCalls = []
+window.api = new Proxy({}, { get: (_, key) => () => {
+  if (key === 'tabDragCancel' || key === 'tabDragDrop') window.dragCalls.push(key)
+  return key === 'tabDragDrop' ? Promise.resolve('cancelled') : undefined
+} })
+const titles = ['Arithmetic sketch', 'Review examples in depth', 'Slider mechanics', 'Evaluate powers', 'Square root example', 'Review system thoroughly', 'Planning a moonlit picnic for seventeen imaginary penguins', 'Calculate square root']
 const makeTabs = count => Array.from({ length: count }, (_, i) => ({
   sessionId: String(i), title: titles[i % titles.length], subtitle: null, preview: false, dot: null, unlinked: false
 }))
@@ -32,8 +36,8 @@ function Fixture() {
   const shared = {
     layout, canSplitRight: () => true, canMoveToOtherPane: false, onCloseOthers: noAction,
     onPromote: noAction, onShowInfo: noAction, onSplitRight: noAction, onMoveToOtherPane: noAction,
-    onOpenInNewWindow: noAction, onMoveTab: noAction, onTabLeftWindow: noAction,
-    selectedIds: new Set(), onMoveTabGroup: noAction, onResolveTargets: (_, id) => [id],
+    onOpenInNewWindow: noAction, onMoveTab: () => window.dragCalls.push('move'), onTabLeftWindow: noAction,
+    selectedIds: new Set(), onMoveTabGroup: () => window.dragCalls.push('moveGroup'), onResolveTargets: (_, id) => [id],
     onToggleSelect: noAction, onExtendSelect: noAction
   }
   return <div id="fixture" style={{ margin: 16, border: '1px solid var(--rule)', background: 'var(--paper-pane)' }}>

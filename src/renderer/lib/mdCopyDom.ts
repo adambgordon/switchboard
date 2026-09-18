@@ -17,7 +17,7 @@ function texts(el: Element, includeSkipped = false): Text[] {
   visit(el)
   return out
 }
-const visibleText = (el: Element): string => texts(el).map(node => node.data).join('')
+const copyableText = (el: Element): string => texts(el).map(node => node.data).join('')
 
 export const isInlineCode = (el: Element): boolean =>
   el.classList.contains('md-code') && el.closest('pre') === null
@@ -80,7 +80,7 @@ function displayedLength(pre: Element, length: number): number {
     if (visible(mid)) lo = mid + 1
     else hi = mid
   }
-  const full = visibleText(pre)
+  const full = copyableText(pre)
   if (lo > 0 && /[\uD800-\uDBFF]/.test(full[lo - 1]) && /[\uDC00-\uDFFF]/.test(full[lo] ?? '')) lo -= 1
   return lo
 }
@@ -151,18 +151,18 @@ function readTable(el: HTMLTableElement, reader: Reader): CopyNode {
 function readElement(el: Element, reader: Reader): CopyNode | null {
   if (skipped(el)) return null
   if (el.matches('.md-math, .md-math-display, .md-math-src')) {
-    const value = el.querySelector('.md-math-tex')?.textContent ?? visibleText(el)
+    const value = el.querySelector('.md-math-tex')?.textContent ?? copyableText(el)
     return selectLeaf({ kind: 'math', value, display: el.classList.contains('md-math-display') }, el, reader, value.length, true)
   }
   if (el.matches('.md-image, .transcript-image')) {
     const label = el.querySelector('[data-copy-label]') ?? el
-    const value = visibleText(label)
+    const value = copyableText(label)
     return selectLeaf({ kind: 'image', value, url: el.getAttribute('data-copy-url') ?? undefined,
       title: el.getAttribute('data-copy-title') ?? undefined }, label, reader, value.length)
   }
   if (el.tagName === 'PRE' || isInlineCode(el)) {
     const block = el.tagName === 'PRE'
-    const value = block ? visibleText(el).replace(/\n$/, '') : visibleText(el)
+    const value = block ? copyableText(el).replace(/\n$/, '') : copyableText(el)
     const lang = el.getAttribute('data-copy-lang') ?? undefined
     return selectLeaf({ kind: 'code', value, block, lang }, el, reader, value.length)
   }
@@ -217,7 +217,7 @@ export function collectSelection(range: Range, root: Element): { sections: CopyS
       if (!(run instanceof HTMLDetailsElement) || !run.open) continue
       const pre = el.querySelector('pre.tool-json, pre.tool-result-text')
       if (!pre) continue
-      const full = visibleText(pre)
+      const full = copyableText(pre)
       const value = full.slice(0, displayedLength(pre, full.length))
       node = selectLeaf({ kind: 'tool', value, label: el.querySelector('.tool-name')?.textContent ?? 'Tool',
         lang: pre.classList.contains('tool-json') ? 'json' : undefined }, pre, reader, value.length)

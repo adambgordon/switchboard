@@ -41,6 +41,7 @@ import {
 const DRAG_THRESHOLD = 4
 
 export interface TabReorderOpts {
+  /** Changing layout cancels the active drag through effect cleanup. */
   layout: TabLayout
   /** Which pane this strip belongs to. */
   paneIndex: number

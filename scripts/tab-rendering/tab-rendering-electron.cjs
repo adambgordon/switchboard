@@ -124,7 +124,7 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ width: 850, height: 850, show: false, webPreferences: { backgroundThrottling: false } })
     const menu = Menu.buildFromTemplate([{ label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }] }])
     Menu.setApplicationMenu(menu)
-    await win.loadFile(join(output, 'index.html'))
+    await win.loadFile(join(output, 'dist/index.html'))
     win.webContents.debugger.attach('1.3')
     const [resetZoom, zoomIn] = menu.items[0].submenu.items
     const reset = async () => { resetZoom.click({}, win, win.webContents); await settle() }
@@ -133,6 +133,12 @@ app.whenReady().then(async () => {
       win.setContentSize(850, 850)
       await configure({ theme, count: 8, layout: 'wrap', activeIndex: 6 })
       await reset()
+      const longTitle = await js(`(() => {
+        const tab = document.querySelectorAll('.sb-tab')[6], title = tab.querySelector('.sb-tab-title');
+        return { width: tab.getBoundingClientRect().width, textWidth: title.scrollWidth, visibleWidth: title.clientWidth };
+      })()`)
+      check(Math.abs(longTitle.width - 210) < 0.1, theme + ': long title must reach the 210px tab cap')
+      check(longTitle.textWidth > longTitle.visibleWidth, theme + ': long title must exercise truncation')
       for (let step = 0; step <= 8; step++) {
         if (step) await zoom()
         assert(Math.abs(win.webContents.getZoomFactor() - 1.2 ** (step / 2)) < 1e-8, 'native menu zoom factor')

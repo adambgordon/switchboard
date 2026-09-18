@@ -214,14 +214,14 @@ export function isCopyBlock(node: CopyNode): boolean {
   return ['paragraph', 'flow', 'heading', 'quote', 'list', 'item', 'table', 'rule', 'tool'].includes(node.kind) ||
     (node.kind === 'code' && node.block) || (node.kind === 'math' && node.display)
 }
-function renderList(node: CopyNode & { kind: 'list' }, ctx: Context): string {
+function renderList(node: CopyNode & { kind: 'list' }, ctx: Context, escaped: boolean): string {
   const touched = node.children.filter(child => ctx.extents.get(child)!.meaningful).length
   const parts: string[] = []
   node.children.forEach((child, index) => {
     if (child.kind !== 'item' || !ctx.extents.get(child)!.active) return
     const extent = ctx.extents.get(child)!
     const marked = extent.full && (touched >= 2 || retained(child, ctx))
-    const body = itemBody(child, ctx, false)
+    const body = itemBody(child, ctx, escaped || marked)
     if (!marked) { parts.push(body); return }
     const bullet = node.start === null ? '- ' : `${node.start + index}. `
     const task = child.checked === undefined ? '' : `[${child.checked ? 'x' : ' '}] `
@@ -270,7 +270,7 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
     case 'math': return marked ? node.display ? `$$\n${extent.selected}\n$$` : `$${extent.selected}$` : extent.selected
     case 'image': return marked && node.url ? `![${escapeText(extent.selected)}](${escapeDestination(node.url)}${linkTitle(node.title)})` : extent.selected
     case 'tool': return retained(node, ctx) ? `${node.label}:\n\n${markdown ? fence(extent.selected, node.lang) : extent.selected}` : extent.selected
-    case 'list': return renderList(node, ctx)
+    case 'list': return renderList(node, ctx, escaped)
     case 'item': return itemBody(node, ctx, escaped)
     case 'table': return renderTable(node, ctx)
     case 'break': return marked ? '  \n' : extent.selected

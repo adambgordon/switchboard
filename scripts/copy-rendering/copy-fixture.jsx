@@ -79,6 +79,17 @@ window.copyRange = (start, end, reverse = false) => {
   range.setEnd(...point(...end))
   return dispatch(range, reverse)
 }
+window.copyNodes = (start, end = start, reverse = false) => {
+  const range = document.createRange()
+  range.setStartBefore(element(...start))
+  range.setEndAfter(element(...end))
+  return dispatch(range, reverse)
+}
+window.copyCurrent = () => {
+  const selection = window.getSelection()
+  return selection.rangeCount ? dispatch(selection.getRangeAt(0).cloneRange(), false)
+    : { text: '', prevented: false, types: [] }
+}
 window.copyContents = (selector, index = 0) => {
   const range = document.createRange()
   range.selectNodeContents(element(selector, index))

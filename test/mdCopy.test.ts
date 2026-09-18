@@ -112,6 +112,56 @@ describe('list structure', () => {
   })
 })
 
+describe('literal punctuation in list copies', () => {
+  const literal = 'a*b*c _d_ `e` [f](g) \\h'
+  const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\](g) \\\\h'
+  const list = (start: number | null, checked?: boolean): CopyNode => ({ kind: 'list', start, children: [
+    { kind: 'item', checked, children: [copyText(literal)] },
+    { kind: 'item', checked, children: [copyText('second')] }
+  ] })
+  it.each([
+    ['unordered', null, undefined, '- ', '- '],
+    ['ordered', 3, undefined, '3. ', '4. '],
+    ['task', null, true, '- [x] ', '- [x] ']
+  ] as const)('escapes retained %s items only in Markdown', (_label, start, checked, first, second) => {
+    const nodes = [list(start, checked)]
+    expect(copy(nodes, 0, literal.length + 6)).toBe(first + escaped + '\n' + second + 'second')
+    expect(copy(nodes, 0, literal.length + 6, 'plain')).toBe(first + literal + '\n' + second + 'second')
+    expect(complete(nodes)).toBe(first + escaped + '\n' + second + 'second')
+  })
+  it.each(['markdown', 'plain'] as const)('leaves isolated and partial items literal in %s', mode => {
+    const nodes = [list(null)]
+    expect(copy(nodes, 0, literal.length, mode)).toBe(literal)
+    expect(copy(nodes, 1, literal.length, mode)).toBe(literal.slice(1))
+    expect(copy(nodes, 1, literal.length + 6, mode)).toBe(literal.slice(1) + '\n- second')
+  })
+  it('escapes nested list bodies inside a retained quote', () => {
+    const nested: CopyNode = { kind: 'list', start: null, children: [
+      { kind: 'item', children: [copyText('outer'), list(null)] }
+    ] }
+    const nodes: CopyNode[] = [copyText('L'), { kind: 'quote', children: [nested] }, copyText('R')]
+    expect(complete(nodes)).toBe('L\n\n> - outer\n>   - ' + escaped + '\n>   - second\n\nR')
+    expect(complete(nodes, 'plain')).toBe('L\n\n- outer\n  - ' + literal + '\n  - second\n\nR')
+  })
+})
+
+describe.each(['markdown', 'plain'] as const)('thematic breaks in %s copies', mode => {
+  const rule: CopyNode = { kind: 'rule' }
+  const nodes = [copyText('Before'), rule, copyText('After')]
+  function withRule(from: number, to: number): string {
+    const selection = selected(nodes, from, to)
+    // A divider has no text offsets; its DOM range coverage supplies this entry.
+    selection.set(rule, { from: 0, to: 0 })
+    return serializeCopy(nodes, { mode, intent: 'selection', selection })
+  }
+  it('retains a divider with context on both sides', () => expect(withRule(0, 11)).toBe('Before\n\n---\n\nAfter'))
+  it('retains a divider with only left context', () => expect(withRule(0, 6)).toBe('Before\n\n---'))
+  it('retains a divider with only right context', () => expect(withRule(6, 11)).toBe('---\n\nAfter'))
+  it('omits an isolated selected divider', () => expect(withRule(6, 6)).toBe(''))
+  it('does not invent coverage of an unselected divider', () => expect(copy(nodes, 0, 6, mode)).toBe('Before'))
+  it('retains a divider for a complete-content action', () => expect(complete([rule], mode)).toBe('---'))
+})
+
 describe('tables own their syntax', () => {
   const table = (): CopyNode => ({ kind: 'table', align: ['left', null, 'right'], children: [
     { kind: 'row', children: ['A', 'B', 'C'].map(value => ({ kind: 'cell', children: [{ kind: 'strong', children: [copyText(value)] }] })) }

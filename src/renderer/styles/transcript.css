@@ -47,7 +47,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 .interrupt-note,
 .tool-pending,
 .show-more,
-.transcript-foot-label {
+.transcript-foot-label,
+.md [data-footnote-backref] {
   user-select: none;
 }
 
