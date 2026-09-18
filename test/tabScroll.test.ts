@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   tabEdgeScrollSpeed,
+  tabDragScrollRequest,
+  tabDragScrollFeedback,
+  type TabEdgeMotion,
+  type TabScrollRequest,
   tabRuleGeometry,
   tabScrollEdges,
   tabWheelDelta
@@ -122,5 +126,46 @@ describe('drag edge scrolling', () => {
     expect(tabEdgeScrollSpeed(110, 100, 120)).toBe(0)
     expect(tabEdgeScrollSpeed(105, 100, 120)).toBe(-240)
     expect(tabEdgeScrollSpeed(115, 100, 120)).toBe(240)
+  })
+})
+
+
+describe('drag scroll motion', () => {
+  it('stops at rounded endpoints with one pixel of tolerance', () => {
+    expect(tabDragScrollRequest(null, 'strip', 480, 16, 2132.92285, 2133)).toBeNull()
+    expect(tabDragScrollRequest(null, 'strip', -480, 16, 0.5, 2133)).toBeNull()
+    expect(tabDragScrollRequest(null, 'strip', 480, 16, 2131.9, 2133)?.delta).toBeCloseTo(7.68)
+    expect(tabDragScrollRequest(null, 'strip', 0, 16, 100, 500)).toBeNull()
+  })
+  it('discards residual movement on direction changes and new targets', () => {
+    const previous: TabEdgeMotion<string> = { target: 'strip', direction: 1, remainder: 0.4 }
+    expect(tabDragScrollRequest(previous, 'strip', 480, 16, 100, 500)?.delta).toBeCloseTo(8.08)
+    expect(tabDragScrollRequest(previous, 'strip', -480, 16, 100, 500)?.delta).toBeCloseTo(-7.68)
+    expect(tabDragScrollRequest(previous, 'other-strip', 480, 16, 100, 500)?.delta).toBeCloseTo(7.68)
+    expect(tabDragScrollRequest(null, 'strip', 480, 16, 100, 500)?.delta).toBeCloseTo(7.68)
+  })
+  it('discards movement clamped by the browser instead of storing a backlog', () => {
+    expect(tabDragScrollFeedback({ target: 'strip', direction: 1, delta: 12 }, 100, 100, 0.5)).toBeNull()
+    expect(tabDragScrollFeedback({ target: 'strip', direction: 1, delta: 12 }, 100, 106, 0.5)).toBeNull()
+    expect(tabDragScrollFeedback({ target: 'strip', direction: -1, delta: -12 }, 100, 94, 0.5)).toBeNull()
+    expect(tabDragScrollFeedback({ target: 'strip', direction: 1, delta: 0 }, 100, 100, 0.5)).toEqual({ target: 'strip', direction: 1, remainder: 0 })
+  })
+  it('accumulates slow subpixel movement until the browser can apply it', () => {
+    let state: TabEdgeMotion<string> | null = null
+    let position = 100
+    for (let i = 0; i < 20; i++) {
+      const request: TabScrollRequest<string> = tabDragScrollRequest(state, 'strip', 3, 16, position, 500)!
+      const next = Math.floor((position + request.delta) * 2) / 2
+      state = tabDragScrollFeedback(request, position, next, 0.5)
+      expect(state).not.toBeNull()
+      expect(Math.abs(state!.remainder)).toBeLessThan(0.5)
+      position = next
+    }
+    expect(position).toBe(100.5)
+    expect(state!.remainder).toBeCloseTo(0.46)
+  })
+  it('bounds delayed frames and tolerates a zero-duration first frame', () => {
+    expect(tabDragScrollRequest(null, 'strip', 480, 1000, 100, 500)?.delta).toBeCloseTo(15.36)
+    expect(tabDragScrollRequest(null, 'strip', 480, -1, 100, 500)?.delta).toBe(0)
   })
 })

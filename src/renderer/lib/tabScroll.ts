@@ -1,4 +1,5 @@
 export const TAB_SCROLL_EDGE = 28
+const SCROLL_EDGE_TOLERANCE = 1
 
 export interface TabRuleRect {
   left: number
@@ -31,7 +32,10 @@ export function tabRuleGeometry(
 
 export function tabScrollEdges(scroll: number, viewport: number, content: number) {
   const max = Math.max(0, content - viewport)
-  return { before: max > 1 && scroll > 1, after: scroll < max - 1 }
+  return {
+    before: max > SCROLL_EDGE_TOLERANCE && scroll > SCROLL_EDGE_TOLERANCE,
+    after: scroll < max - SCROLL_EDGE_TOLERANCE
+  }
 }
 
 interface ScrollWheel {
@@ -56,4 +60,33 @@ export function tabEdgeScrollSpeed(x: number, left: number, right: number): numb
   if (x < left + edge) return -480 * (left + edge - x) / edge
   if (x > right - edge) return 480 * (x - right + edge) / edge
   return 0
+}
+
+export interface TabEdgeMotion<Target = unknown> {
+  target: Target
+  direction: -1 | 1
+  remainder: number
+}
+export interface TabScrollRequest<Target> {
+  target: Target
+  direction: -1 | 1
+  delta: number
+}
+
+export function tabDragScrollRequest<Target>(
+  previous: TabEdgeMotion<Target> | null, target: Target, speed: number, elapsed: number, scroll: number, maxScroll: number
+): TabScrollRequest<Target> | null {
+  if (!speed || (speed < 0 ? scroll <= SCROLL_EDGE_TOLERANCE : scroll >= maxScroll - SCROLL_EDGE_TOLERANCE)) return null
+  const direction = speed < 0 ? -1 : 1
+  const remainder = previous && previous.target === target && previous.direction === direction ? previous.remainder : 0
+  return { target, direction, delta: remainder + speed * Math.max(0, Math.min(elapsed, 32)) / 1000 }
+}
+
+/** Rounding can defer less than one physical pixel; larger lost movement means the browser clamped. */
+export function tabDragScrollFeedback<Target>(
+  request: TabScrollRequest<Target>, before: number, after: number, pixel: number
+): TabEdgeMotion<Target> | null {
+  const remainder = request.delta - (after - before)
+  if (Math.abs(remainder) >= pixel) return null
+  return { target: request.target, direction: request.direction, remainder }
 }

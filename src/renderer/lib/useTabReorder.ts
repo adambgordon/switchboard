@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { makeTabDragPayload } from '@shared/tabDrag'
 import type { TabLayout } from './tabLayoutPreference'
-import { tabEdgeScrollSpeed } from './tabScroll'
+import { tabEdgeScrollSpeed, tabDragScrollRequest, tabDragScrollFeedback, type TabEdgeMotion } from './tabScroll'
 import {
   groupDragFollowerIndices,
   groupDragIndices,
@@ -99,7 +99,7 @@ export function useTabReorder(
     let moveFrame: number | null = null
     let edgeFrame: number | null = null
     let edgeTime = 0
-    let edgeRemainder = 0
+    let edgeMotion: TabEdgeMotion<HTMLElement> | null = null
     let latestX = 0
     let latestY = 0
     let suppressClick = false
@@ -210,37 +210,55 @@ export function useTabReorder(
       drawCaret(el, rects, tabCaretIndex(origin, rects.length, sourceSkippedIndices, origin))
     }
 
+    const stopEdgeScroll = (): void => {
+      if (edgeFrame != null) cancelAnimationFrame(edgeFrame)
+      edgeFrame = null
+      edgeMotion = null
+    }
+
     const scrollAtEdge = (time: number): void => {
       edgeFrame = null
-      if (!dragging || !overStrip || overStrip.dataset.layout !== 'scroll') return
-      const box = overStrip.getBoundingClientRect()
-      if (!pointInRect(box, latestX, latestY)) return
-      const speed = tabEdgeScrollSpeed(latestX, box.left, box.right)
-      const before = overStrip.scrollLeft
-      const maxScroll = overStrip.scrollWidth - overStrip.clientWidth
-      if (!speed || (speed < 0 ? before <= 0 : before >= maxScroll)) return
-      // Bound a delayed frame so returning from an inactive window cannot jump the whole strip.
-      const delta = edgeRemainder + speed * Math.min(time - edgeTime, 32) / 1000
-      overStrip.scrollLeft += delta
-      // Keep subpixel movement across frames; a slow edge drag may round to zero on one frame.
-      edgeRemainder = delta - (overStrip.scrollLeft - before)
+      const strip = overStrip
+      if (!dragging || !strip || strip.dataset.layout !== 'scroll') {
+        stopEdgeScroll()
+        return
+      }
+      const box = strip.getBoundingClientRect()
+      if (!pointInRect(box, latestX, latestY)) {
+        stopEdgeScroll()
+        return
+      }
+      const before = strip.scrollLeft
+      const request = tabDragScrollRequest(
+        edgeMotion, strip, tabEdgeScrollSpeed(latestX, box.left, box.right), time - edgeTime,
+        before, strip.scrollWidth - strip.clientWidth
+      )
+      if (!request) {
+        stopEdgeScroll()
+        return
+      }
+      strip.scrollLeft += request.delta
+      edgeMotion = tabDragScrollFeedback(request, before, strip.scrollLeft, 1 / window.devicePixelRatio)
       edgeTime = time
-      if (overStrip.scrollLeft !== before) updateTarget(latestX, latestY)
+      if (strip.scrollLeft !== before) updateTarget(latestX, latestY)
+      if (!edgeMotion) {
+        stopEdgeScroll()
+        return
+      }
       edgeFrame = requestAnimationFrame(scrollAtEdge)
     }
 
     const startEdgeScroll = (): void => {
       if (edgeFrame != null) return
       edgeTime = performance.now()
-      edgeRemainder = 0
+      edgeMotion = null
       edgeFrame = requestAnimationFrame(scrollAtEdge)
     }
 
     const finish = (): void => {
       if (moveFrame != null) cancelAnimationFrame(moveFrame)
       moveFrame = null
-      if (edgeFrame != null) cancelAnimationFrame(edgeFrame)
-      edgeFrame = null
+      stopEdgeScroll()
       clone?.remove()
       clone = null
       dropCaret()

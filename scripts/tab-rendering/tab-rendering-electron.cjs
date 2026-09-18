@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, nativeImage } = require('electron')
 const assert = require('node:assert/strict')
 const { writeFileSync } = require('node:fs')
 const { join } = require('node:path')
+const checkDragScrolling = require('./drag-regression.cjs')
 
 const output = process.argv[2]
 app.setPath('userData', join(output, 'profile'))
@@ -118,7 +119,7 @@ async function capture(label) {
 }
 
 app.whenReady().then(async () => {
-  const deadline = setTimeout(() => { console.error('Tab renderer check timed out'); app.exit(1) }, 60000)
+  const deadline = setTimeout(() => { console.error('Tab renderer check timed out'); app.exit(1) }, 120000)
   try {
     win = new BrowserWindow({ width: 850, height: 850, show: false, webPreferences: { backgroundThrottling: false } })
     const menu = Menu.buildFromTemplate([{ label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }] }])
@@ -160,9 +161,12 @@ app.whenReady().then(async () => {
         await capture(`${theme}-resize-${width}-${results.length}`)
       }
     }
+    const drag = await checkDragScrolling(win)
+    failures.push(...drag.failures)
+    writeFileSync(join(output, 'drag-results.json'), JSON.stringify(drag, null, 2))
     writeFileSync(join(output, 'results.json'), JSON.stringify({ results, failures }, null, 2))
     if (failures.length) console.error('Tab renderer failures:\n' + [...new Set(failures)].join('\n'))
-    else console.log('PASS actual tab rendering across both themes, native zoom steps, resizing, closing, and layout changes')
+    else console.log('PASS actual tab rendering across both themes, native zoom steps, resizing, closing, layout changes, and drag scrolling')
   } catch (error) {
     failures.push(error.message)
     console.error(error.stack)

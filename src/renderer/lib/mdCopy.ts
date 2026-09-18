@@ -57,10 +57,12 @@ function prepare(nodes: CopyNode[], options: CopyOptions): Context {
     const window = options.selection?.get(node)
     if ('children' in node) {
       const children = node.children.map(visit)
+      const active = options.intent === 'complete' || window !== undefined || children.some(c => c.active)
       const extent = {
         start, end: cursor, selected: '',
-        active: options.intent === 'complete' || window !== undefined || children.some(c => c.active),
-        full: children.every(c => c.full),
+        active,
+        // Empty cells still occupy columns; text completeness alone cannot prove their coverage.
+        full: (node.kind !== 'cell' || active) && children.every(c => c.full),
         meaningful: children.some(c => c.meaningful)
       }
       ctx.extents.set(node, extent)
@@ -124,25 +126,92 @@ export function rowsToText(rows: string[][]): string {
   return rows.map(row => row.map(field).join('\t')).join('\n')
 }
 
+type InlineStyle = 'strong' | 'em' | 'strike'
+type InlineFragment =
+  | { kind: 'literal'; text: string }
+  | { kind: 'style'; style: InlineStyle; children: InlineFragment[] }
+
+/** Eligibility belongs to the original selection, before equivalent spans are combined. */
+function inlineFragments(nodes: CopyNode[], ctx: Context, escaped: boolean): InlineFragment[] {
+  const fragments: InlineFragment[] = []
+  for (const node of nodes) {
+    if (!ctx.extents.get(node)!.active) continue
+    if (node.kind === 'strong' || node.kind === 'em' || node.kind === 'strike') {
+      const marked = ctx.options.mode === 'markdown' && retained(node, ctx)
+      const children = inlineFragments(node.children, ctx, escaped || marked)
+      if (marked) fragments.push({ kind: 'style', style: node.kind, children })
+      else for (const child of children) fragments.push(child)
+    } else if (node.kind === 'inline') {
+      for (const child of inlineFragments(node.children, ctx, escaped)) fragments.push(child)
+    } else {
+      const text = render(node, ctx, escaped)
+      if (text !== '') fragments.push({ kind: 'literal', text })
+    }
+  }
+  return fragments
+}
+
+function normalizeInline(fragments: InlineFragment[], inherited: ReadonlySet<InlineStyle>): InlineFragment[] {
+  const out: InlineFragment[] = []
+  const append = (fragment: InlineFragment): void => {
+    if (fragment.kind === 'style' && inherited.has(fragment.style)) {
+      fragment.children.forEach(append)
+      return
+    }
+    const previous = out[out.length - 1]
+    if (fragment.kind === 'style' && previous?.kind === 'style' && fragment.style === previous.style) {
+      for (const child of fragment.children) previous.children.push(child)
+    } else out.push(fragment)
+  }
+  fragments.forEach(append)
+  for (const fragment of out) {
+    if (fragment.kind === 'style') {
+      fragment.children = normalizeInline(fragment.children, new Set([...inherited, fragment.style]))
+    }
+  }
+  return out
+}
+
+function serializeInline(fragments: InlineFragment[]): string {
+  return fragments.map(fragment => {
+    if (fragment.kind === 'literal') return fragment.text
+    const marker = fragment.style === 'strong' ? '**' : fragment.style === 'em' ? '*' : '~~'
+    return marker + serializeInline(fragment.children) + marker
+  }).join('')
+}
+
 function joinRendered(nodes: CopyNode[], ctx: Context, separator: string, escaped = false): string {
+  if (separator === '') return serializeInline(normalizeInline(inlineFragments(nodes, ctx, escaped), new Set()))
   return nodes.map(node => render(node, ctx, escaped)).filter(part => part !== '').join(separator)
 }
 function itemBody(node: CopyNode & Children, ctx: Context, escaped: boolean): string {
   let out = ''
   let previous: CopyNode | undefined
-  for (const child of node.children) {
-    const value = render(child, ctx, escaped)
-    if (!value) continue
-    if (previous && (isBlock(previous) || isBlock(child))) {
+  let inline: CopyNode[] = []
+  const append = (value: string, child: CopyNode): void => {
+    if (!value) return
+    if (previous && (isCopyBlock(previous) || isCopyBlock(child))) {
       out += child.kind === 'list' || previous.kind === 'list' ? '\n' : '\n\n'
     }
     out += value
     previous = child
   }
+  const flush = (): void => {
+    if (!inline.length) return
+    append(joinRendered(inline, ctx, '', escaped), inline[inline.length - 1])
+    inline = []
+  }
+  for (const child of node.children) {
+    if (isCopyBlock(child)) {
+      flush()
+      append(render(child, ctx, escaped), child)
+    } else inline.push(child)
+  }
+  flush()
   return out
 }
-function isBlock(node: CopyNode): boolean {
-  return ['paragraph', 'flow', 'heading', 'quote', 'list', 'table', 'rule', 'tool'].includes(node.kind) ||
+export function isCopyBlock(node: CopyNode): boolean {
+  return ['paragraph', 'flow', 'heading', 'quote', 'list', 'item', 'table', 'rule', 'tool'].includes(node.kind) ||
     (node.kind === 'code' && node.block) || (node.kind === 'math' && node.display)
 }
 function renderList(node: CopyNode & { kind: 'list' }, ctx: Context): string {
@@ -184,11 +253,7 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
     case 'inline': case 'paragraph': case 'cell': case 'row':
       return joinRendered(node.children, ctx, '', escaped)
     case 'flow': return joinRendered(node.children, ctx, '\n\n', escaped)
-    case 'strong': case 'em': case 'strike': {
-      const body = joinRendered(node.children, ctx, '', escaped || marked)
-      const marker = node.kind === 'strong' ? '**' : node.kind === 'em' ? '*' : '~~'
-      return marked ? marker + body + marker : body
-    }
+    case 'strong': case 'em': case 'strike': return joinRendered([node], ctx, '', escaped)
     case 'heading': {
       const body = joinRendered(node.children, ctx, '', escaped || marked)
       return marked ? '#'.repeat(node.level) + ' ' + body : body

@@ -1,5 +1,5 @@
 import {
-  assembleCopy, copyText, serializeCopy,
+  assembleCopy, copyText, isCopyBlock, serializeCopy,
   type Alignment, type CopyMode, type CopyNode, type CopySection, type CopySelection, type CopyWindow
 } from './mdCopy'
 
@@ -118,7 +118,6 @@ function children(el: Element, reader: Reader, flow = false): CopyNode[] {
   const out: CopyNode[] = []
   for (const child of Array.from(el.childNodes)) {
     if (child.nodeType === Node.TEXT_NODE) {
-      if (flow && !(child.nodeValue ?? '').trim()) continue
       const node = readText(child as Text, reader)
       if (node) out.push(node)
     } else if (child.nodeType === Node.ELEMENT_NODE) {
@@ -126,7 +125,14 @@ function children(el: Element, reader: Reader, flow = false): CopyNode[] {
       if (node) out.push(node)
     }
   }
-  return out
+  if (!flow) return out
+  return out.filter((node, index) => {
+    if (node.kind !== 'text' || node.value.trim() || !node.value.includes('\n')) return true
+    const before = out[index - 1]
+    const after = out[index + 1]
+    // Tight items contain real inline gaps; only block layout supplies disposable newlines.
+    return before !== undefined && after !== undefined && !isCopyBlock(before) && !isCopyBlock(after)
+  })
 }
 function readTable(el: HTMLTableElement, reader: Reader): CopyNode {
   const rows: CopyNode[] = Array.from(el.rows).map(row => ({

@@ -168,3 +168,42 @@ describe('attribution and special content', () => {
     expect(fence('```', 'text')).toBe('````text\n```\n````')
   })
 })
+
+describe('inline serialization and table coverage', () => {
+  it.each(['strong', 'em', 'strike'] as const)('coalesces adjacent retained %s spans after eligibility', kind => {
+    const nodes: CopyNode[] = [inline([
+      { kind, children: [copyText('aa')] }, { kind, children: [copyText('bb')] }
+    ])]
+    const marker = kind === 'strong' ? '**' : kind === 'em' ? '*' : '~~'
+    expect(copy(nodes, 0, 4)).toBe(marker + 'aabb' + marker)
+    expect(copy(nodes, 0, 2)).toBe('aa')
+    expect(copy(nodes, 1, 3)).toBe('ab')
+    expect(copy(nodes, 1, 4)).toBe('a' + marker + 'bb' + marker)
+  })
+  it('normalizes nested spans after their outer spans combine', () => {
+    const nodes: CopyNode[] = [inline(['a', 'b'].map(value => ({ kind: 'strong', children: [
+      { kind: 'em', children: [copyText(value)] }
+    ] })))]
+    expect(copy(nodes, 0, 2)).toBe('***ab***')
+  })
+  it('keeps selected spaces between retained runs', () => {
+    const nodes: CopyNode[] = [inline([
+      { kind: 'strong', children: [copyText('a')] }, copyText(' '), { kind: 'strong', children: [copyText('b')] }
+    ])]
+    expect(copy(nodes, 0, 3)).toBe('**a** **b**')
+    expect(copy(nodes, 1, 2)).toBe(' ')
+  })
+  it('requires coverage of an empty boundary cell before emitting table syntax', () => {
+    const empty: CopyNode = { kind: 'cell', children: [] }
+    const table: CopyNode = { kind: 'table', align: [], children: [
+      { kind: 'row', children: [empty, { kind: 'cell', children: [copyText('B')] }] },
+      { kind: 'row', children: [{ kind: 'cell', children: [copyText('C')] }, { kind: 'cell', children: [copyText('D')] }] }
+    ] }
+    const nodes = [table, copyText('After')]
+    expect(copy(nodes, 0, 8)).toBe('B\nC\tD\n\nAfter')
+    const selection = selected(nodes, 0, 8)
+    selection.set(empty, { from: 0, to: 0 })
+    expect(serializeCopy(nodes, { mode: 'markdown', intent: 'selection', selection })).toBe('|  | B |\n| --- | --- |\n| C | D |\n\nAfter')
+    expect(complete([table])).toBe('|  | B |\n| --- | --- |\n| C | D |')
+  })
+})

@@ -21,18 +21,28 @@ function Fixture() {
   const [tabs, setTabs] = useState(makeTabs(8))
   const [layout, setLayout] = useState('wrap')
   const [active, setActive] = useState(6)
-  window.configure = ({ count, layout: next, activeIndex, theme }) => {
+  const [secondary, setSecondary] = useState(false)
+  window.configure = ({ count, layout: next, activeIndex, theme, secondary: second }) => {
     if (count !== undefined) setTabs(makeTabs(count))
     if (next) setLayout(next)
     if (activeIndex !== undefined) setActive(activeIndex)
     if (theme) document.documentElement.dataset.theme = theme
+    if (second !== undefined) setSecondary(second)
+  }
+  const shared = {
+    layout, canSplitRight: () => true, canMoveToOtherPane: false, onCloseOthers: noAction,
+    onPromote: noAction, onShowInfo: noAction, onSplitRight: noAction, onMoveToOtherPane: noAction,
+    onOpenInNewWindow: noAction, onMoveTab: noAction, onTabLeftWindow: noAction,
+    selectedIds: new Set(), onMoveTabGroup: noAction, onResolveTargets: (_, id) => [id],
+    onToggleSelect: noAction, onExtendSelect: noAction
   }
   return <div id="fixture" style={{ margin: 16, border: '1px solid var(--rule)', background: 'var(--paper-pane)' }}>
-    <TabStrip tabs={tabs} layout={layout} paneIndex={0} activeIndex={active} focused canSplitRight={() => true} canMoveToOtherPane={false}
-      onActivate={(_, index) => setActive(index)} onClose={(_, index) => setTabs(current => current.filter((_, i) => i !== index))}
-      onCloseOthers={noAction} onPromote={noAction} onShowInfo={noAction} onSplitRight={noAction} onMoveToOtherPane={noAction}
-      onOpenInNewWindow={noAction} onMoveTab={noAction} onTabLeftWindow={noAction} selectedIds={new Set()} onMoveTabGroup={noAction}
-      onResolveTargets={(_, id) => [id]} onToggleSelect={noAction} onExtendSelect={noAction} />
+    <TabStrip {...shared} tabs={tabs} paneIndex={0} activeIndex={active} focused
+      onActivate={(_, index) => setActive(index)} onClose={(_, index) => setTabs(current => current.filter((_, i) => i !== index))} />
+    {secondary ? <div style={{ marginTop: 16 }}>
+      <TabStrip {...shared} tabs={makeTabs(16).map(tab => ({ ...tab, sessionId: 'target-' + tab.sessionId }))}
+        paneIndex={1} activeIndex={0} focused={false} onActivate={noAction} onClose={noAction} />
+    </div> : null}
     <div style={{ height: 48 }} />
   </div>
 }

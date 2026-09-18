@@ -45,6 +45,68 @@ async function run() {
         }
       }
     }
+    for (const [source, md, plain] of [
+      ['- **a** **b**', '**a** **b**', 'a b'],
+      ['- `a` `b`', '`a` `b`', 'a b'],
+      ['- [a](https://example.org) **b**', '[a](<https://example.org>) **b**', 'a b'],
+      ['- **a**\n  **b**', '**a**\n**b**', 'a\nb'],
+      ['- [x] **a** **b**', '**a** **b**', 'a b'],
+      ['- **a** **b**\n  - child\n- end', '- **a** **b**\n  - child\n- end', '- a b\n  - child\n- end'],
+      ['- **a** **b**\n\n  next\n\n- end', '- **a** **b**\n  \n  next\n- end', '- a b\n  \n  next\n- end']
+    ]) {
+      await call('mountCopy', { source, theme, agent })
+      await expectContents(prefix + 'inline-list-spacing/md/' + source, '.md', md)
+      await call('copyMode', 'plain')
+      await expectContents(prefix + 'inline-list-spacing/plain/' + source, '.md', plain)
+    }
+    await call('mountCopy', { source: '- **a** **b**', theme, agent })
+    for (const mode of ['markdown', 'plain']) {
+      await call('copyMode', mode)
+      await expectRange(prefix + 'list-space-only/' + mode, ['.md-li', 1], ['.md-li', 2], ' ')
+      await expectRange(prefix + 'list-partial/' + mode, ['.md-li', 1], ['.md-li', 3], ' b')
+    }
+    for (const [source, expected, strong, em, strike = ''] of [
+      ['**a**__b__', 'ab', 'ab', ''], ['*a*_b_', 'ab', '', 'ab'],
+      ['**_a_**__*b*__', 'ab', 'ab', 'ab'], ['**a***b*', 'ab', 'a', 'b'],
+      ['**a** __b__', 'a b', 'ab', ''],
+      ['L **a __b__ c** R', 'L a b c R', 'a b c', ''],
+      ['*~~a~~*_~~b~~_', 'ab', '', 'ab', 'ab']
+    ]) {
+      await call('mountCopy', { source, theme, agent })
+      const copied = (await call('copyContents', '.md')).text
+      await call('mountCopy', { source: copied, theme, agent })
+      const rendered = await js(`(() => {
+        const md = document.querySelector('.md'), walker = document.createTreeWalker(md, NodeFilter.SHOW_TEXT);
+        const out = { text: '', strong: '', em: '', strike: '' };
+        while (walker.nextNode()) { const text = walker.currentNode; out.text += text.data;
+          if (text.parentElement.closest('strong')) out.strong += text.data;
+          if (text.parentElement.closest('em')) out.em += text.data;
+          if (text.parentElement.closest('del')) out.strike += text.data;
+        }
+        return out;
+      })()`)
+      check(prefix + 'roundtrip-text/' + source, rendered.text, expected)
+      check(prefix + 'roundtrip-bold/' + source, rendered.strong, strong)
+      check(prefix + 'roundtrip-italic/' + source, rendered.em, em)
+      check(prefix + 'roundtrip-strike/' + source, rendered.strike, strike)
+    }
+    await call('mountCopy', { source: '**aa**__bb__', theme, agent })
+    await expectRange(prefix + 'adjacent-partial-both', ['.md-p', 1], ['.md-p', 3], 'ab')
+    await expectRange(prefix + 'adjacent-partial-first', ['.md-p', 1], ['.md-p', 4], 'a**bb**')
+    for (const reverse of [false, true]) {
+      await call('mountCopy', { source: '| | B |\n| --- | --- |\n| C | D |\n\nAfter', theme, agent })
+      const copied = await call('copyRange', ['th', 0, 1], ['.md-p', 5], reverse)
+      check(prefix + 'empty-header-boundary/' + reverse, copied.text, 'B\nC\tD\n\nAfter')
+      await call('mountCopy', { source: copied.text, theme, agent })
+      check(prefix + 'empty-header-retains-D/' + reverse,
+        await js("document.querySelector('.md').textContent.includes('D')"), true)
+    }
+    await call('mountCopy', { source: '| | B |\n| --- | --- |\n| C | D |\n\nAfter', theme, agent })
+    await expectContents(prefix + 'empty-header-covered', '.md', '|  | B |\n| --- | --- |\n| C | D |\n\nAfter')
+    check(prefix + 'empty-header-button', await call('copyButton', 'Copy table'), '| | B |\n| --- | --- |\n| C | D |')
+    await call('mountCopy', { source: 'Before\n\n| A | B |\n| --- | --- |\n| C | |', theme, agent })
+    await expectRange(prefix + 'empty-trailing-boundary', ['.md-p', 0], ['td', 1], 'Before\n\nA\tB\nC')
+    await expectContents(prefix + 'empty-trailing-covered', '.md', 'Before\n\n| A | B |\n| --- | --- |\n| C |  |')
     for (const source of ['`abc`', '**`abc`**', '## `abc`', '- `abc`']) {
       await call('mountCopy', { source, theme, agent })
       await expectContents(prefix + 'code-only/' + source, '.md-code', 'abc')
