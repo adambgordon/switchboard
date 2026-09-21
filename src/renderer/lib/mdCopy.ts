@@ -105,7 +105,7 @@ function retained(node: CopyNode, ctx: Context): boolean {
 const escapeTablePipes = (text: string): string => text.replace(/(\\*)\|/g,
   (pipe, slashes: string) => slashes.length % 2 ? pipe : slashes + '\\|')
 // Ampersands must stay literal in metadata; otherwise Markdown decodes entity-looking values.
-const escapeDestination = (url: string): string => '<' + url.replace(/[\\<>&]/g, '\\$&').replace(/\n/g, '%0A') + '>'
+const escapeDestination = (url: string): string => '<' + url.replace(/[\\<>&]/g, '\\$&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '>'
 // Escape literal ampersands before introducing references for title line endings.
 const linkTitle = (title?: string): string => title ? ' "' + title.replace(/[\\"&]/g, '\\$&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '"' : ''
 
@@ -161,11 +161,11 @@ function inlineRuns(nodes: CopyNode[], ctx: Context, inherited = 0): InlineRun[]
             : [{ kind: 'text', value: extent.selected }]
           break
         case 'code':
-          tokens = [{ kind: marked ? 'atom' : 'text', value: marked
+          tokens = [{ kind: marked ? node.block ? 'atom' : 'code' : 'text', value: marked
             ? node.block ? fence(extent.selected, node.lang) : inlineCode(extent.selected) : extent.selected }]
           break
         case 'math':
-          tokens = [{ kind: marked ? 'atom' : 'text', value: marked
+          tokens = [{ kind: marked ? node.display ? 'atom' : 'math' : 'text', value: marked
             ? node.display ? `$$\n${extent.selected}\n$$` : `$${extent.selected}$` : extent.selected }]
           break
         case 'break': tokens = [{ kind: 'break', marked }]; break

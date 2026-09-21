@@ -3,7 +3,7 @@ import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { copyText, serializeCopy, type CopyNode } from '../src/renderer/lib/mdCopy'
+import { copyText, serializeCopy, type CopyNode, type CopySelection } from '../src/renderer/lib/mdCopy'
 import { markdownCopyNodes } from '../src/renderer/lib/mdCopyAst'
 
 interface ParsedNode { type: string; value?: string; url?: string; title?: string | null; children?: ParsedNode[] }
@@ -190,6 +190,27 @@ describe('emitted delimiter context', () => {
 })
 
 describe('consecutive retained hard breaks', () => {
+  it.each([1, 2, 3])('keeps %i trailing selected breaks as literal newlines', count => {
+    for (const body of ['**AlphaBREAKSBravo**', '*AlphaBREAKSBravo*', '[AlphaBREAKSBravo](https://example.org)',
+      '- AlphaBREAKSBravo', '> AlphaBREAKSBravo']) {
+      const source = body.replace('BREAKS', '\\\n'.repeat(count).replace(/\n/g, body.startsWith('- ') ? '\n  ' : body.startsWith('> ') ? '\n> ' : '\n'))
+      const nodes = markdownCopyNodes(source), selection: CopySelection = new Map()
+      const visit = (node: CopyNode): void => {
+        if (node.kind === 'text' && node.value === 'Alpha') selection.set(node, { from: 0, to: 5 })
+        if (node.kind === 'break') selection.set(node, { from: 0, to: 1 })
+        if ('children' in node) node.children.forEach(visit)
+      }
+      nodes.forEach(visit)
+      expect(types(parse(source)).filter(type => type === 'break')).toHaveLength(count)
+      for (const mode of ['markdown', 'plain'] as const) {
+        const copied = serializeCopy(nodes, { mode, intent: 'selection', selection })
+        expect(copied).toBe('Alpha' + '\n'.repeat(count))
+        // Markdown discards terminal empty lines; the clipboard still retains every selected LF.
+        expect(characters(parse(copied))).toEqual(Array.from('Alpha', text => ({ text, styles: 0 })))
+        expect(types(parse(copied)).filter(type => type === 'break')).toHaveLength(0)
+      }
+    }
+  })
   it.each([1, 2, 3])('preserves %i breaks inside styles, links and lists', count => {
     const breaks = '\\\n'.repeat(count)
     for (const source of ['L **Alpha' + breaks + 'Bravo** R', 'L *Alpha' + breaks + 'Bravo* R',
@@ -209,7 +230,57 @@ describe('consecutive retained hard breaks', () => {
   })
 })
 
+describe('adjacent retained code and math', () => {
+  it.each(['code', 'math'] as const)('preserves separate %s atoms under equivalent styles', kind => {
+    for (const styles of [1, 2, 3, 5, 6, 7]) for (const count of [2, 3, 4]) {
+      const atom = (value: string) => kind === 'code' ? '`' + value + '`' : '$' + value + '$'
+      const bodies = Array.from({ length: count }, (_, index) => {
+        let body = atom(String.fromCharCode(97 + index))
+        if (styles & 4) body = '~~' + body + '~~'
+        const marker = index % 2 ? '_' : '*'
+        if (styles & 2) body = marker.repeat(2) + body + marker.repeat(2)
+        if (styles & 1) body = marker + body + marker
+        return body
+      })
+      const source = 'L ' + bodies.join('') + ' R' + (kind === 'math' ? '\n\n$$\nx\n$$' : '')
+      const before = parse(source).children![0]
+      const nodes = markdownCopyNodes(source).slice(0, 1)
+      const expected = Array.from({ length: count }, (_, index) => String.fromCharCode(97 + index))
+      const type = kind === 'code' ? 'inlineCode' : 'inlineMath'
+      expect(values(before, type), source).toEqual(expected)
+      for (const intent of ['complete', 'selection'] as const) {
+        const selection: CopySelection = new Map()
+        const visit = (node: CopyNode): void => {
+          if ('value' in node) selection.set(node, { from: 0, to: node.value.length })
+          if ('children' in node) node.children.forEach(visit)
+        }
+        nodes.forEach(visit)
+        const copied = serializeCopy(nodes, { mode: 'markdown', intent, selection })
+        expect(values(parse(copied), type), copied).toEqual(expected)
+        expect(characters(parse(copied)), copied).toEqual(characters(before))
+      }
+    }
+  })
+  it('keeps payload backticks intact when separating padded code spans', () => {
+    const source = 'L *`` a` ``*_`` `b ``_ R'
+    const copied = complete(markdownCopyNodes(source))
+    expect(values(parse(source), 'inlineCode')).toEqual(['a`', '`b'])
+    expect(values(parse(copied), 'inlineCode')).toEqual(['a`', '`b'])
+    expect(characters(parse(copied))).toEqual(characters(parse(source)))
+  })
+})
+
 describe('empty destinations and title line endings', () => {
+  it.each(['link', 'image'] as const)('preserves decoded %s destination line endings', kind => {
+    for (const [encoded, ending] of [['&#10;', '\n'], ['&#13;', '\r'], ['&#13;&#10;', '\r\n']]) {
+      const source = 'L ' + (kind === 'image' ? '!' : '') + '[label](<a' + encoded + 'b\\&copy;\\&#10;> "title") R'
+      const expected = [{ type: kind, url: 'a' + ending + 'b&copy;&#10;', title: 'title' }]
+      expect(metadata(parse(source))).toEqual(expected)
+      const copied = complete(markdownCopyNodes(source))
+      expect(copied).not.toMatch(/[\r\n]/)
+      expect(metadata(parse(copied))).toEqual(expected)
+    }
+  })
   it('retains an empty image destination and its title', () => {
     const source = 'L ![label](<> "title") R'
     expect(metadata(parse(source))).toEqual([{ type: 'image', url: '', title: 'title' }])

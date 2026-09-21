@@ -34,6 +34,63 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
     'L **`_a*`** R', 'L *`a\\b`* R',
     '&#120;**`_a*`**&#121;', '&#120;*[a](https://example.org)*&#121;'
   ]) await roundtrip('delimiter-context/' + source, source, false, true)
+  const atoms = () => js(`Array.from(document.querySelectorAll('.md-p .md-code,.md-p .md-math,.md-p .md-math-src'), el => ({
+    kind: el.matches('.md-code') ? 'code' : 'math', value: (el.querySelector('.md-math-tex') ?? el).textContent,
+    styles: (el.closest('em') ? 1 : 0) | (el.closest('strong') ? 2 : 0) | (el.closest('del') ? 4 : 0)
+  }))`)
+  for (const kind of ['code', 'math']) for (const styles of [1, 2, 3, 5, 6, 7]) for (const count of [2, 3, 4]) {
+    const values = Array.from({ length: count }, (_, index) => String.fromCharCode(97 + index))
+    const body = values.map((value, index) => {
+      let part = kind === 'code' ? '`' + value + '`' : '$' + value + '$'
+      if (styles & 4) part = '~~' + part + '~~'
+      const marker = index % 2 ? '_' : '*'
+      if (styles & 2) part = marker.repeat(2) + part + marker.repeat(2)
+      if (styles & 1) part = marker + part + marker
+      return part
+    }).join('')
+    const gate = kind === 'math' ? '\n\n$$\nx\n$$' : ''
+    const source = 'L ' + body + ' R' + gate
+    const expected = JSON.stringify(values.map(value => ({ kind, value, styles })))
+    for (const reverse of [false, true]) {
+      const label = prefix + 'adjacent-atoms/' + kind + '/' + styles + '/' + count + '/' + reverse
+      await call('mountCopy', { source, theme, agent })
+      await settle()
+      check(label + '/fixture', JSON.stringify(await atoms()), expected)
+      const copied = (await call('copyNodes', ['.md-p'], ['.md-p'], reverse)).text
+      check(label + '/exact', (await call('copyContents', kind === 'code' ? '.md-code' : '.md-math,.md-math-src')).text, 'a')
+      await call('mountCopy', { source: copied + gate, theme, agent })
+      await settle()
+      check(label + '/roundtrip', JSON.stringify(await atoms()), expected)
+      await call('copyMode', 'plain')
+      check(label + '/text', (await call('copyContents', '.md-p')).text, 'L ' + values.join('') + ' R')
+    }
+  }
+  for (const source of ['L *`a` $b$ `c`* R\n\n$$\nx\n$$', 'L *`` a` ``*_`` `b ``_ R']) {
+    await call('mountCopy', { source, theme, agent })
+    await settle()
+    const before = JSON.stringify(await atoms())
+    const copied = (await call('copyContents', '.md')).text
+    await call('mountCopy', { source: copied, theme, agent })
+    await settle()
+    check(prefix + 'atom-payloads/' + source, JSON.stringify(await atoms()), before)
+  }
+  for (const count of [1, 2, 3]) for (const [body, selector] of [
+    ['**AlphaBREAKSBravo**', '.md-strong'], ['*AlphaBREAKSBravo*', '.md-em'],
+    ['[AlphaBREAKSBravo](https://example.org)', '.md a'], ['- AlphaBREAKSBravo', '.md-li'],
+    ['> AlphaBREAKSBravo', '.md blockquote .md-p']
+  ]) for (const mode of ['markdown', 'plain']) for (const reverse of [false, true]) {
+    const breaks = '\\\n'.repeat(count).replace(/\n/g, body.startsWith('- ') ? '\n  ' : body.startsWith('> ') ? '\n> ' : '\n')
+    const source = body.replace('BREAKS', breaks)
+    const label = prefix + 'trailing-breaks/' + count + '/' + selector + '/' + mode + '/' + reverse
+    await call('mountCopy', { source, theme, agent, mode })
+    check(label + '/fixture', await js("document.querySelectorAll('.md br').length"), count)
+    const copied = (await call('copyRange', [selector, 0], [selector, 5 + count], reverse)).text
+    check(label + '/bytes', copied, 'Alpha' + '\n'.repeat(count))
+    await call('mountCopy', { source: copied, theme, agent })
+    check(label + '/rendered', await js("document.querySelector('.md').textContent"), 'Alpha')
+    check(label + '/no-generated-breaks', await js("document.querySelectorAll('.md br').length"), 0)
+  }
+  await roundtrip('enclosed-final-break', 'L [Alpha\\\n\\\n](https://example.org) R')
   for (const count of [1, 2, 3]) {
     const breaks = '\\\n'.repeat(count)
     for (const source of ['L **Alpha' + breaks + 'Bravo** R', 'L *Alpha' + breaks + 'Bravo* R',
@@ -114,7 +171,7 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
             'Alpha' + newline + 'Bravo')
           for (const [name, from, to, expected] of [
             ['crossing', 3, 8, 'ha' + newline + 'Br'], ['before', 0, 5, 'Alpha'], ['after', 6, 11, 'Bravo'],
-            ['through-left', 0, 6, 'Alpha' + newline], ['through-right', 5, 11, newline + 'Bravo'], ['only-break', 5, 6, '\n']
+            ['through-left', 0, 6, 'Alpha\n'], ['through-right', 5, 11, newline + 'Bravo'], ['only-break', 5, 6, '\n']
           ]) check(label + '/' + name + '/' + reverse,
             (await call('copyRange', [selector, from], [selector, to], reverse)).text, expected)
           check(label + '/renderer-newline-only/' + reverse,
@@ -135,9 +192,11 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
     kind: el.matches('a') ? 'link' : 'image',
     url: el.getAttribute(el.matches('a') ? 'href' : 'data-copy-url'), title: el.getAttribute('data-copy-title')
   }))`)
-  for (const kind of ['link', 'image']) for (const [destination, title] of [
+  for (const kind of ['link', 'image']) for (const [destination, title, normalized] of [
     ['', 'title'],
     ['', ''],
+    ['a&#10;b', 'line ending', 'a%0Ab'], ['a&#13;b', 'line ending', 'a%0Db'],
+    ['a&#13;&#10;b', 'line ending', 'a%0D%0Ab'], ['a&#10;b\\&copy;\\&#10;', 'literal references', 'a%0Ab&copy;&#10;'],
     ['https://example.org', 'line\nbreak \\&copy; \\&#10;'],
     ['https://example.org', 'line\rbreak'],
     ['https://example.org', 'line\r\nbreak'],
@@ -151,6 +210,8 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
       await call('mountCopy', { source, theme, agent })
       const before = await metadata()
       check(prefix + 'metadata-fixture/' + kind + '/' + destination + '/' + reverse, before.length, 1)
+      if (normalized !== undefined) check(prefix + 'metadata-normalized/' + kind + '/' + destination + '/' + reverse,
+        before[0].url, normalized)
       const copied = (await call('copyNodes', ['.md'], ['.md'], reverse)).text
       check(prefix + 'metadata-exact/' + kind + '/' + reverse,
         (await call('copyContents', kind === 'image' ? '.md-image' : '.md a')).text, 'label')

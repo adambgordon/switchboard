@@ -1,7 +1,7 @@
 /** Inline output stays typed until escaping and delimiter boundaries have been resolved. */
 export const INLINE_STYLE = { em: 1, strong: 2, strike: 4 } as const
 export type InlineToken =
-  | { kind: 'text' | 'atom'; value: string }
+  | { kind: 'text' | 'atom' | 'code' | 'math'; value: string }
   | { kind: 'break'; marked: boolean }
   | { kind: 'marker'; value: string; open: boolean }
 export interface InlineRun { styles: number; tokens: InlineToken[] }
@@ -47,7 +47,17 @@ function wrapStyle(body: InlineToken[], marker: string): InlineToken[] {
 export function planInline(runs: InlineRun[], inherited = 0, from = 0, to = runs.length): InlineToken[] {
   const out: InlineToken[] = []
   for (let index = from; index < to;) {
-    if (!(runs[index].styles & ~inherited)) { append(out, runs[index++].tokens); continue }
+    if (!(runs[index].styles & ~inherited)) {
+      for (const token of runs[index++].tokens) {
+        if ((token.kind === 'code' || token.kind === 'math') && out[out.length - 1]?.kind === token.kind) {
+          // Touching delimiters merge atoms. A redundant retained style separates them without text.
+          const marker = inherited & INLINE_STYLE.em ? '_' : inherited & INLINE_STYLE.strong ? '__' : ''
+          if (!marker) throw new Error('Unrepresentable adjacent Markdown atoms')
+          append(out, wrapStyle([token], marker))
+        } else out.push(token)
+      }
+      continue
+    }
     let style = 0, end = index
     for (const candidate of [INLINE_STYLE.em, INLINE_STYLE.strong]) {
       let limit = index
@@ -67,7 +77,7 @@ export function planInline(runs: InlineRun[], inherited = 0, from = 0, to = runs
 }
 
 export const hasInlineMarkup = (tokens: InlineToken[]): boolean =>
-  tokens.some(token => token.kind === 'marker' || token.kind === 'atom' || (token.kind === 'break' && token.marked))
+  tokens.some(token => token.kind !== 'text' && (token.kind !== 'break' || token.marked))
 
 interface Chunk { kind: 'text' | 'atom' | 'marker'; value: string; open?: boolean }
 interface Boundary { before: number; after: number; opens: boolean; closes: boolean }
@@ -89,9 +99,18 @@ function encodeEdge(chunk: Chunk, end: boolean): void {
 
 export function emitInline(tokens: InlineToken[], protectLiterals: boolean): string {
   const chunks: Chunk[] = []
-  for (const token of tokens) {
-    if (token.kind === 'break') chunks.push({ kind: 'atom', value: token.marked ? '\\\n' : '\n' })
-    else if (token.value) chunks.push({ ...token, value: token.kind === 'text' && protectLiterals
+  // A Markdown hard break needs following inline content. Terminal newlines stay literal.
+  let tail = tokens.length
+  while (tail > 0) {
+    const token = tokens[tail - 1]
+    if (token.kind !== 'break' && !(token.kind === 'text' && !/\S/.test(token.value))) break
+    tail--
+  }
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index]
+    if (token.kind === 'break') chunks.push({ kind: 'atom', value: token.marked && index < tail ? '\\\n' : '\n' })
+    else if (token.value) chunks.push({ ...token, kind: token.kind === 'code' || token.kind === 'math' ? 'atom' : token.kind,
+      value: token.kind === 'text' && protectLiterals
       ? token.value.replace(/[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/g, '\\$&') : token.value })
   }
   const boundaries: Boundary[] = []
@@ -115,11 +134,16 @@ export function emitInline(tokens: InlineToken[], protectLiterals: boolean): str
     index = end
   }
   const pending = boundaries.map((_, index) => index)
+  const repaired = new Map<number, number>()
   const encode = (index: number, end: boolean): void => {
+    const side = end ? 2 : 1
+    const previous = repaired.get(index) ?? 0
+    if (previous & side) throw new Error('Repeated Markdown boundary repair')
     encodeEdge(chunks[index], end)
+    repaired.set(index, previous | side)
     for (const affected of touching.get(index) ?? []) pending.push(affected)
   }
-  // An edge becomes punctuation after one encoding. Rechecking its neighbours is therefore bounded.
+  // Each chunk edge can be repaired once; only a successful repair queues neighbouring boundaries.
   for (let cursor = 0; cursor < pending.length; cursor++) {
     const boundary = boundaries[pending[cursor]]
     const before = boundaryClass(chunks[boundary.before]?.value ?? '', true)
