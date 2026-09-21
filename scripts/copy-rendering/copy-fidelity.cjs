@@ -11,9 +11,10 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
     }
     return { chars, blocks: [...md.querySelectorAll('h1,h2,blockquote,ul,ol,li')].map(el => el.tagName) };
   })()`)
-  async function roundtrip(name, source, normalizeWhitespace = false) {
+  async function roundtrip(name, source, normalizeWhitespace = false, requireStyle = false) {
     await call('mountCopy', { source, theme, agent })
     const before = await snapshot(normalizeWhitespace)
+    if (requireStyle) check(prefix + name + '/styled-source', before.chars.some(char => char.styles !== 0), true)
     const copied = (await call('copyContents', '.md')).text
     await call('mountCopy', { source: copied, theme, agent })
     check(prefix + name, JSON.stringify(await snapshot(normalizeWhitespace)), JSON.stringify(before))
@@ -26,6 +27,39 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
   for (const source of ['L ~~a *b*~~ R', 'L ~~*a* b~~ R', 'L ~~a **b** c~~ R', 'L ~~a\u00a0_b_~~ R']) {
     await roundtrip('strike-boundary/' + source, source, true)
   }
+  for (const source of [
+    'x*_a*y', 'x**~a**', 'L *a*\\*b R', 'L ~~a~~\\~b R', 'L \\*b*a* R', 'L *a*__.__ R',
+    'x*a*__.__ R', 'L __.__*a*y', 'α*_a*y', '𝔸*_a*y', '🐈*_a*y', 'x*a_**b*𝔸',
+    'L [x*_a*y](https://example.org) R', 'L **[x*_a*y](https://example.org)** R',
+    'L **`_a*`** R', 'L *`a\\b`* R',
+    '&#120;**`_a*`**&#121;', '&#120;*[a](https://example.org)*&#121;'
+  ]) await roundtrip('delimiter-context/' + source, source, false, true)
+  for (const count of [1, 2, 3]) {
+    const breaks = '\\\n'.repeat(count)
+    for (const source of ['L **Alpha' + breaks + 'Bravo** R', 'L *Alpha' + breaks + 'Bravo* R',
+      'L [Alpha' + breaks + 'Bravo](https://example.org) R', '- Alpha' + breaks.replace(/\n/g, '\n  ') + 'Bravo\n- second']) {
+      await call('mountCopy', { source, theme, agent })
+      check(prefix + 'consecutive-fixture/' + count + '/' + source, await js("document.querySelectorAll('.md br').length"), count)
+      await roundtrip('consecutive-breaks/' + count + '/' + source, source)
+      check(prefix + 'consecutive-count/' + count + '/' + source, await js("document.querySelectorAll('.md br').length"), count)
+    }
+  }
+  await call('mountCopy', { source: 'L **Alpha\\\n\\\nBravo** R', theme, agent })
+  for (const mode of ['markdown', 'plain']) {
+    await call('copyMode', mode)
+    for (const reverse of [false, true]) {
+      check(prefix + 'consecutive-partial/' + mode + '/' + reverse,
+        (await call('copyRange', ['.md-strong', 3], ['.md-strong', 9], reverse)).text,
+        mode === 'markdown' ? 'ha\\\n\\\nBr' : 'ha\n\nBr')
+      check(prefix + 'consecutive-only/' + mode + '/' + reverse,
+        (await call('copyRange', ['.md-strong', 5], ['.md-strong', 7], reverse)).text, '\n\n')
+    }
+  }
+  await call('mountCopy', { source: '| \\*prefix | *a* | tail\\* |\n| --- | --- | --- |', theme, agent })
+  const tsv = (await call('copyContents', 'table')).text
+  check(prefix + 'tsv-mixed-protection', tsv, '\\*prefix\t*a*\ttail\\*')
+  await call('mountCopy', { source: tsv, theme, agent })
+  check(prefix + 'tsv-mixed-styles', await js("Array.from(document.querySelectorAll('.md em'), el => el.textContent).join('')"), 'a')
   await call('mountCopy', { source: 'L **_aa_***_bb_* R', theme, agent })
   check(prefix + 'nested-exact', (await call('copyContents', '.md-strong')).text, 'aa')
   for (const reverse of [false, true]) {
@@ -57,9 +91,9 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
     }
   }
   for (const [source, selector, markdown] of [
-    ['L **Alpha  \nBravo** R', '.md-strong', 'L **Alpha  \nBravo** R'],
-    ['L *Alpha  \nBravo* R', '.md-em', 'L *Alpha  \nBravo* R'],
-    ['L [Alpha  \nBravo](https://example.org) R', '.md a', 'L [Alpha  \nBravo](<https://example.org>) R']
+    ['L **Alpha  \nBravo** R', '.md-strong', 'L **Alpha\\\nBravo** R'],
+    ['L *Alpha  \nBravo* R', '.md-em', 'L *Alpha\\\nBravo* R'],
+    ['L [Alpha  \nBravo](https://example.org) R', '.md a', 'L [Alpha\\\nBravo](<https://example.org>) R']
   ]) {
     await roundtrip('hard-break-roundtrip/' + selector, source)
     for (const mode of ['markdown', 'plain']) for (const joined of [false, true]) {
@@ -72,7 +106,7 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
       })()`)
       try {
         const label = prefix + 'hard-break/' + selector + '/' + mode + '/' + joined
-        const newline = mode === 'markdown' ? '  \n' : '\n'
+        const newline = mode === 'markdown' ? '\\\n' : '\n'
         for (const reverse of [false, true]) {
           check(label + '/full/' + reverse, (await call('copyNodes', ['.md-p'], ['.md-p'], reverse)).text,
             mode === 'markdown' ? markdown : 'L Alpha\nBravo R')
@@ -102,6 +136,11 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
     url: el.getAttribute(el.matches('a') ? 'href' : 'data-copy-url'), title: el.getAttribute('data-copy-title')
   }))`)
   for (const kind of ['link', 'image']) for (const [destination, title] of [
+    ['', 'title'],
+    ['', ''],
+    ['https://example.org', 'line\nbreak \\&copy; \\&#10;'],
+    ['https://example.org', 'line\rbreak'],
+    ['https://example.org', 'line\r\nbreak'],
     [String.raw`https://example.org/\&copy;`, String.raw`a\&copy;`],
     [String.raw`https://example.org/a\<b\>c`, 'angle < title >'],
     [String.raw`https://example.org/a\\b`, String.raw`say \"hi\" \\ ok`],

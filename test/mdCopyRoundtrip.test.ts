@@ -13,7 +13,8 @@ const complete = (nodes: CopyNode[], mode: 'markdown' | 'plain' = 'markdown'): s
   serializeCopy(nodes, { mode, intent: 'complete' })
 function characters(node: ParsedNode, styles = 0): { text: string; styles: number }[] {
   const inherited = styles | (node.type === 'emphasis' ? 1 : node.type === 'strong' ? 2 : node.type === 'delete' ? 4 : 0)
-  if (node.type === 'text') return Array.from(node.value ?? '', text => ({ text, styles: inherited }))
+  if (node.type === 'break') return [{ text: '\n', styles: inherited }]
+  if (node.type === 'text' || node.type === 'inlineCode' || node.type === 'inlineMath') return Array.from(node.value ?? '', text => ({ text, styles: inherited }))
   return (node.children ?? []).flatMap(child => characters(child, inherited))
 }
 function types(node: ParsedNode): string[] {
@@ -117,6 +118,114 @@ describe.each(['link', 'image'] as const)('%s metadata escaping', kind => {
     const copied = complete(markdownCopyNodes(source))
     expect(metadata(parse(copied))).toEqual(expected)
     expect(complete(markdownCopyNodes(source), 'plain')).toBe('L label R')
+  })
+})
+
+describe('emitted delimiter context', () => {
+  const semantic = (source: string) => characters(parse(source)).map(char =>
+    /\s/.test(char.text) ? { ...char, styles: 0 } : char)
+  it.each([
+    'x*_a*y', 'x**~a**', 'L *a*\\*b R', 'L ~~a~~\\~b R', 'L \\*b*a* R', 'L *a*__.__ R',
+    'x*a*__.__ R', 'L __.__*a*y', 'α*_a*y', '𝔸*_a*y', '🐈*_a*y', 'x*a_**b*𝔸',
+    'L [x*_a*y](https://example.org) R', 'L **[x*_a*y](https://example.org)** R',
+    'L **`_a*`** R', 'L *`a\\b`* R',
+    '&#120;**`_a*`**&#121;', '&#120;*[a](https://example.org)*&#121;'
+  ])('preserves text and eligible styles for %s', source => {
+    const before = semantic(source)
+    expect(before.some(char => char.styles !== 0)).toBe(true)
+    const copied = complete(markdownCopyNodes(source))
+    expect(semantic(copied)).toEqual(before)
+    expect(metadata(parse(copied))).toEqual(metadata(parse(source)))
+  })
+  it('propagates a repair back across a previously checked boundary', () => {
+    expect(complete(markdownCopyNodes('x*a*__.__ R'))).toBe('&#120;*&#97;***\\.** R')
+  })
+  it('checks punctuation-bearing content in varied surrounding contexts', () => {
+    let styledCases = 0, bareCases = 0, blockCases = 0
+    for (const marker of ['*', '_', '**', '__', '~~']) for (const body of ['_a', '~a', '.', 'a.', 'a_', 'a~', 'a*b', 'a\\b', 'a', 'a b']) {
+      for (const [left, right] of [['L ', ' R'], ['x', 'y'], ['', ''], ['.', '!'], ['α', 'β'], ['𝔸', '𝔹'], ['🐈', '🐕']]) {
+        const source = left + marker + body + marker + right
+        // A run of tildes at column zero can be a fence, not an inline delimiter example.
+        if (parse(source).children?.[0]?.type !== 'paragraph') { blockCases++; continue }
+        const before = semantic(source), copied = complete(markdownCopyNodes(source))
+        if (before.some(char => char.styles)) {
+          expect(semantic(copied), source + ' -> ' + copied).toEqual(before)
+          styledCases++
+        } else {
+          // Literal-only passages deliberately keep visible bytes, even when a destination parses them.
+          expect(copied).toBe(before.map(char => char.text).join(''))
+          bareCases++
+        }
+      }
+    }
+    expect(styledCases).toBeGreaterThan(150)
+    expect(bareCases).toBeGreaterThan(0)
+    expect(styledCases + bareCases + blockCases).toBe(350)
+  })
+  it('escapes literal text consistently only in a mixed passage', () => {
+    const source = 'Before (v2.1): **bold** after!'
+    expect(complete(markdownCopyNodes(source))).toBe('Before \\(v2\\.1\\)\\: **bold** after\\!')
+    expect(complete(markdownCopyNodes(source), 'plain')).toBe('Before (v2.1): bold after!')
+    const literal = copyText('*literal* (v2.1)')
+    expect(serializeCopy([paragraph([literal])], { mode: 'markdown', intent: 'selection',
+      selection: new Map([[literal, { from: 0, to: 16 }]]) })).toBe('*literal* (v2.1)')
+  })
+  it('protects literal markers in neighbouring TSV cells', () => {
+    const table: CopyNode = { kind: 'table', align: [], children: [
+      { kind: 'row', children: [{ kind: 'cell', children: [copyText('*prefix')] },
+        { kind: 'cell', children: [styled('a', 1)] }, { kind: 'cell', children: [copyText('tail*')] }] }
+    ] }
+    const selection = new Map()
+    for (const cell of 'children' in table.children[0] ? table.children[0].children : []) {
+      if ('children' in cell) for (const node of cell.children) {
+        const leaf = 'children' in node ? node.children[0] : node
+        selection.set(leaf, { from: 0, to: 'value' in leaf ? leaf.value.length : 0 })
+      }
+    }
+    const copied = serializeCopy([table], { mode: 'markdown', intent: 'selection', selection })
+    expect(copied).toBe('\\*prefix\t*a*\ttail\\*')
+    expect(semantic(copied).filter(char => char.styles)).toEqual([{ text: 'a', styles: 1 }])
+    expect(serializeCopy([table], { mode: 'plain', intent: 'selection', selection })).toBe('*prefix\ta\ttail*')
+  })
+})
+
+describe('consecutive retained hard breaks', () => {
+  it.each([1, 2, 3])('preserves %i breaks inside styles, links and lists', count => {
+    const breaks = '\\\n'.repeat(count)
+    for (const source of ['L **Alpha' + breaks + 'Bravo** R', 'L *Alpha' + breaks + 'Bravo* R',
+      'L [Alpha' + breaks + 'Bravo](https://example.org) R', '- Alpha' + breaks.replace(/\n/g, '\n  ') + 'Bravo\n- second']) {
+      const copied = complete(markdownCopyNodes(source))
+      expect(types(parse(source)).filter(type => type === 'break')).toHaveLength(count)
+      expect(types(parse(copied)).filter(type => type === 'break')).toHaveLength(count)
+      expect(characters(parse(copied))).toEqual(characters(parse(source)))
+      expect(metadata(parse(copied))).toEqual(metadata(parse(source)))
+    }
+  })
+  it('does not let a literal backslash absorb a generated hard break', () => {
+    const source = String.raw`L \\` + '  \nBravo'
+    const copied = complete(markdownCopyNodes(source))
+    expect(types(parse(copied)).filter(type => type === 'break')).toHaveLength(1)
+    expect(characters(parse(copied))).toEqual(characters(parse(source)))
+  })
+})
+
+describe('empty destinations and title line endings', () => {
+  it('retains an empty image destination and its title', () => {
+    const source = 'L ![label](<> "title") R'
+    expect(metadata(parse(source))).toEqual([{ type: 'image', url: '', title: 'title' }])
+    expect(complete(markdownCopyNodes(source))).toBe(source)
+    expect(complete([paragraph([copyText('L '), { kind: 'image', value: 'uploaded' }, copyText(' R')])])).toBe('L uploaded R')
+  })
+  it.each(['link', 'image'])('preserves %s title line endings and literal character references', kind => {
+    for (const ending of ['\n', '\r', '\r\n']) {
+      const title = 'line' + ending + 'break &copy; &#10;'
+      const source = 'L ' + (kind === 'image' ? '!' : '') + '[label](<> "line' + ending + 'break \\&copy; \\&#10;") R'
+      const expected = [{ type: kind, url: '', title }]
+      expect(metadata(parse(source))).toEqual(expected)
+      const copied = complete(markdownCopyNodes(source))
+      expect(copied).not.toMatch(/[\r\n]/)
+      expect(metadata(parse(copied))).toEqual(expected)
+    }
   })
 })
 

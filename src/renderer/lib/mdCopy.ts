@@ -1,3 +1,5 @@
+import { INLINE_STYLE, emitInline, hasInlineMarkup, planInline, type InlineRun, type InlineToken } from './mdCopyInline'
+
 /** Semantic copy rules shared by the DOM selection and whole-document adapters. */
 export type CopyMode = 'markdown' | 'plain'
 export type CopyIntent = 'selection' | 'complete'
@@ -99,12 +101,13 @@ function retained(node: CopyNode, ctx: Context): boolean {
     (extent.full && (ctx.first < extent.start || ctx.last >= extent.end))
 }
 
-const escapeText = (text: string): string => text.replace(/[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/g, '\\$&')
 // Table splitting happens before inline parsing; an odd backslash run already protects a pipe.
 const escapeTablePipes = (text: string): string => text.replace(/(\\*)\|/g,
   (pipe, slashes: string) => slashes.length % 2 ? pipe : slashes + '\\|')
+// Ampersands must stay literal in metadata; otherwise Markdown decodes entity-looking values.
 const escapeDestination = (url: string): string => '<' + url.replace(/[\\<>&]/g, '\\$&').replace(/\n/g, '%0A') + '>'
-const linkTitle = (title?: string): string => title ? ' "' + title.replace(/[\\"&]/g, '\\$&').replace(/\n/g, ' ') + '"' : ''
+// Escape literal ampersands before introducing references for title line endings.
+const linkTitle = (title?: string): string => title ? ' "' + title.replace(/[\\"&]/g, '\\$&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '"' : ''
 
 function longestBackticks(value: string): number {
   return (value.match(/`+/g) ?? []).reduce((longest, run) => Math.max(longest, run.length), 0)
@@ -129,66 +132,55 @@ export function rowsToText(rows: string[][]): string {
   return rows.map(row => row.map(field).join('\t')).join('\n')
 }
 
-const STYLE = { em: 1, strong: 2, strike: 4 } as const
-interface InlineRun { text: string; styles: number }
-
 /** Eligibility belongs to the original selection, before equivalent style runs are grouped. */
-function inlineRuns(nodes: CopyNode[], ctx: Context, escaped: boolean): InlineRun[] {
+function inlineRuns(nodes: CopyNode[], ctx: Context, inherited = 0): InlineRun[] {
   const runs: InlineRun[] = []
-  const visit = (children: CopyNode[], styles: number, escape: boolean): void => {
+  const visit = (children: CopyNode[], styles: number): void => {
     for (const node of children) {
-      if (!ctx.extents.get(node)!.active) continue
+      const extent = ctx.extents.get(node)!
+      if (!extent.active) continue
+      const marked = ctx.options.mode === 'markdown' && retained(node, ctx)
       if (node.kind === 'strong' || node.kind === 'em' || node.kind === 'strike') {
-        const marked = ctx.options.mode === 'markdown' && retained(node, ctx)
-        visit(node.children, styles | (marked ? STYLE[node.kind] : 0), escape || marked)
-      } else if (node.kind === 'inline') {
-        visit(node.children, styles, escape)
-      } else {
-        const text = render(node, ctx, escape)
-        if (!text) continue
-        const previous = runs[runs.length - 1]
-        if (previous?.styles === styles) previous.text += text
-        else runs.push({ text, styles })
+        visit(node.children, styles | (marked ? INLINE_STYLE[node.kind] : 0))
+        continue
       }
+      if (node.kind === 'inline') { visit(node.children, styles); continue }
+      let tokens: InlineToken[]
+      switch (node.kind) {
+        case 'text': tokens = extent.selected ? [{ kind: 'text', value: extent.selected }] : []; break
+        case 'link': {
+          const label = planInline(inlineRuns(node.children, ctx, styles), styles)
+          tokens = marked ? [{ kind: 'atom', value: '[' }, ...label,
+            { kind: 'atom', value: `](${escapeDestination(node.url)}${linkTitle(node.title)})` }] : label
+          break
+        }
+        case 'image':
+          tokens = marked && node.url !== undefined ? [{ kind: 'atom', value: '![' },
+            { kind: 'text', value: extent.selected },
+            { kind: 'atom', value: `](${escapeDestination(node.url)}${linkTitle(node.title)})` }]
+            : [{ kind: 'text', value: extent.selected }]
+          break
+        case 'code':
+          tokens = [{ kind: marked ? 'atom' : 'text', value: marked
+            ? node.block ? fence(extent.selected, node.lang) : inlineCode(extent.selected) : extent.selected }]
+          break
+        case 'math':
+          tokens = [{ kind: marked ? 'atom' : 'text', value: marked
+            ? node.display ? `$$\n${extent.selected}\n$$` : `$${extent.selected}$` : extent.selected }]
+          break
+        case 'break': tokens = [{ kind: 'break', marked }]; break
+        default: tokens = [{ kind: 'atom', value: render(node, ctx) }]
+      }
+      tokens = tokens.filter(token => token.kind === 'break' || token.value !== '')
+      if (tokens.length) runs.push({ styles, tokens })
     }
   }
-  visit(nodes, 0, escaped)
+  visit(nodes, inherited)
   return runs
 }
-
-function serializeInline(runs: InlineRun[], from = 0, to = runs.length, inherited = 0): string {
-  const parts: string[] = []
-  for (let index = from; index < to;) {
-    const styles = runs[index].styles & ~inherited
-    if (!styles) { parts.push(runs[index++].text); continue }
-    let style = 0, end = index
-    // Keep shared attention open across run boundaries instead of fusing closing/opening stars.
-    for (const candidate of [STYLE.em, STYLE.strong]) {
-      let limit = index
-      while (limit < to && (runs[limit].styles & ~inherited & candidate)) limit++
-      if (limit > end) { style = candidate; end = limit }
-    }
-    if (!style) {
-      // Strike stays innermost: lifting it around attention changes its delimiter flanking.
-      style = STYLE.strike
-      end = index + 1
-      while (end < to && (runs[end].styles & ~inherited) === STYLE.strike) end++
-    }
-    const marker = style === STYLE.em ? '*' : style === STYLE.strong ? '**' : '~~'
-    const body = serializeInline(runs, index, end, inherited | style)
-    // Whitespace at a delimiter edge prevents it from opening/closing. Keep the bytes outside.
-    const leading = body.match(/^\s*/)![0]
-    const rest = body.slice(leading.length)
-    const content = rest.trimEnd()
-    const trailing = rest.slice(content.length)
-    parts.push(leading, content ? marker + content + marker : '', trailing)
-    index = end
-  }
-  return parts.join('')
-}
-
 function renderInline(nodes: CopyNode[], ctx: Context, escaped = false): string {
-  return serializeInline(inlineRuns(nodes, ctx, escaped))
+  const tokens = planInline(inlineRuns(nodes, ctx))
+  return emitInline(tokens, ctx.options.mode === 'markdown' && (escaped || hasInlineMarkup(tokens)))
 }
 /** Separate copy units retain a paragraph boundary even when their payload is inline. */
 function renderBlocks(nodes: CopyNode[], ctx: Context): string {
@@ -245,10 +237,12 @@ function renderList(node: CopyNode & { kind: 'list' }, ctx: Context, escaped: bo
 }
 function renderTable(node: CopyNode & { kind: 'table' }, ctx: Context): string {
   const markdown = ctx.options.mode === 'markdown' && retained(node, ctx)
-  const rows = node.children.filter(row => ctx.extents.get(row)!.active).map(row =>
+  const plans = node.children.filter(row => ctx.extents.get(row)!.active).map(row =>
     'children' in row ? row.children.filter(cell => ctx.extents.get(cell)!.active)
-      .map(cell => render(cell, ctx, markdown)) : []
+      .map(cell => planInline(inlineRuns('children' in cell ? cell.children : [cell], ctx))) : []
   ).filter(row => row.length > 0)
+  const protect = ctx.options.mode === 'markdown' && (markdown || plans.some(row => row.some(hasInlineMarkup)))
+  const rows = plans.map(row => row.map(tokens => emitInline(tokens, protect)))
   if (!markdown) return rowsToText(rows)
   if (!rows.length) return ''
   const line = (row: string[]): string => '| ' + row.map(value => escapeTablePipes(value).replace(/\n/g, '<br>')).join(' | ') + ' |'
@@ -262,7 +256,7 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
   const markdown = ctx.options.mode === 'markdown'
   const marked = markdown && retained(node, ctx)
   switch (node.kind) {
-    case 'text': return markdown && escaped ? escapeText(extent.selected) : extent.selected
+    case 'text': return renderInline([node], ctx, escaped)
     case 'inline': case 'paragraph': case 'cell': case 'row':
       return renderInline(node.children, ctx, escaped)
     case 'flow': return renderFlow(node.children, ctx, escaped)
@@ -275,18 +269,13 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
       const body = renderFlow(node.children, ctx, escaped || marked)
       return marked ? body.split('\n').map(line => line ? '> ' + line : '>').join('\n') : body
     }
-    case 'link': {
-      const body = renderInline(node.children, ctx, escaped || marked)
-      return marked ? `[${body}](${escapeDestination(node.url)}${linkTitle(node.title)})` : body
-    }
-    case 'code': return marked ? node.block ? fence(extent.selected, node.lang) : inlineCode(extent.selected) : extent.selected
-    case 'math': return marked ? node.display ? `$$\n${extent.selected}\n$$` : `$${extent.selected}$` : extent.selected
-    case 'image': return marked && node.url ? `![${escapeText(extent.selected)}](${escapeDestination(node.url)}${linkTitle(node.title)})` : extent.selected
+    case 'link': case 'image': case 'break': return renderInline([node], ctx, escaped)
+    case 'code': return node.block ? marked ? fence(extent.selected, node.lang) : extent.selected : renderInline([node], ctx, escaped)
+    case 'math': return node.display ? marked ? `$$\n${extent.selected}\n$$` : extent.selected : renderInline([node], ctx, escaped)
     case 'tool': return retained(node, ctx) ? `${node.label}:\n\n${markdown ? fence(extent.selected, node.lang) : extent.selected}` : extent.selected
     case 'list': return renderList(node, ctx, escaped)
     case 'item': return renderFlow(node.children, ctx, escaped, true)
     case 'table': return renderTable(node, ctx)
-    case 'break': return marked ? '  \n' : extent.selected
     case 'rule': return retained(node, ctx) ? '---' : ''
   }
 }
