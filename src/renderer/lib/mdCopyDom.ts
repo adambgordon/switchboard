@@ -125,6 +125,15 @@ function children(el: Element, reader: Reader, flow = false): CopyNode[] {
       if (node) out.push(node)
     }
   }
+  // The text newline immediately following <br> is a renderer contribution of that break.
+  for (let i = 1; i < out.length; i++) {
+    const node = out[i]
+    if (out[i - 1].kind !== 'break' || node.kind !== 'text' || !node.value.startsWith('\n')) continue
+    const window = reader.selection.get(node)
+    if (window && window.from === 0 && window.to > 0) reader.selection.set(out[i - 1], { from: 0, to: 1 })
+    node.value = node.value.slice(1)
+    if (window) reader.selection.set(node, { from: Math.max(0, window.from - 1), to: Math.max(0, window.to - 1) })
+  }
   if (!flow) return out
   return out.filter((node, index) => {
     if (node.kind !== 'text' || node.value.trim() || !node.value.includes('\n')) return true
@@ -175,17 +184,6 @@ function readElement(el: Element, reader: Reader): CopyNode | null {
   const tag = el.tagName
   const flow = ['DIV', 'BLOCKQUOTE', 'UL', 'OL', 'LI', 'SECTION'].includes(tag)
   const kids = children(el, reader, flow)
-  // The text newline immediately following <br> is a renderer contribution of that break.
-  if (tag === 'P' || tag === 'LI') {
-    for (let i = 1; i < kids.length; i++) {
-      const node = kids[i]
-      if (kids[i - 1].kind !== 'break' || node.kind !== 'text' || !node.value.startsWith('\n')) continue
-      const window = reader.selection.get(node)
-      if (window && window.from === 0 && window.to > 0) reader.selection.set(kids[i - 1], { from: 0, to: 1 })
-      node.value = node.value.slice(1)
-      if (window) reader.selection.set(node, { from: Math.max(0, window.from - 1), to: Math.max(0, window.to - 1) })
-    }
-  }
   if (/^H[1-6]$/.test(tag)) return { kind: 'heading', level: Number(tag[1]), children: kids }
   if (tag === 'A') {
     if (el.hasAttribute('data-footnote-ref')) return { kind: 'inline', children: kids }

@@ -6,7 +6,7 @@ import remarkMath from 'remark-math'
 import { copyText, serializeCopy, type CopyNode } from '../src/renderer/lib/mdCopy'
 import { markdownCopyNodes } from '../src/renderer/lib/mdCopyAst'
 
-interface ParsedNode { type: string; value?: string; children?: ParsedNode[] }
+interface ParsedNode { type: string; value?: string; url?: string; title?: string | null; children?: ParsedNode[] }
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
 const parse = (source: string): ParsedNode => parser.parse(source) as ParsedNode
 const complete = (nodes: CopyNode[], mode: 'markdown' | 'plain' = 'markdown'): string =>
@@ -49,6 +49,74 @@ describe('retained inline formatting round-trips', () => {
     expect(characters(parse(copied))).toEqual(characters(parse(source)))
     expect(values(parse(copied), 'inlineCode')).toEqual(values(parse(source), 'inlineCode'))
     expect(types(parse(copied)).filter(type => type === 'link')).toEqual(types(parse(source)).filter(type => type === 'link'))
+  })
+})
+
+describe('style-boundary whitespace', () => {
+  const contentStyles = (source: string) => characters(parse(source)).map(char =>
+    /\s/.test(char.text) ? { ...char, styles: 0 } : char)
+  it.each([
+    ['L ~~a *b*~~ R', 'L ~~a~~ *~~b~~* R'],
+    ['L ~~*a* b~~ R', 'L *~~a~~* ~~b~~ R'],
+    ['L ~~a **b** c~~ R', 'L ~~a~~ **~~b~~** ~~c~~ R'],
+    ['L ~~a\u00a0_b_~~ R', 'L ~~a~~\u00a0*~~b~~* R']
+  ])('keeps nested strike content intact in %s', (source, expected) => {
+    expect((characters(parse(source)).find(char => char.text === 'a')?.styles ?? 0) & 4).toBe(4)
+    expect((characters(parse(source)).find(char => char.text === 'b')?.styles ?? 0) & 4).toBe(4)
+    const copied = complete(markdownCopyNodes(source))
+    expect(copied).toBe(expected)
+    expect(contentStyles(copied)).toEqual(contentStyles(source))
+    expect(complete(markdownCopyNodes(source), 'plain')).toBe(characters(parse(source)).map(char => char.text).join(''))
+  })
+  it('preserves characters and non-whitespace styles across 500 source-derived boundaries', () => {
+    const markers = ['*', '_', '**', '__', '~~']
+    let checked = 0
+    for (const outer of markers) for (const inner of markers) for (const gap of [' ', '. ', '! ', '\u00a0', '\n']) {
+      for (const body of ['a' + gap + inner + 'b' + inner, inner + 'a' + inner + gap + 'b',
+        'a' + gap + inner + 'b' + inner + gap + 'c', inner + 'a' + inner + gap + inner + 'b' + inner]) {
+        const source = 'L ' + outer + body + outer + ' R'
+        const copied = complete(markdownCopyNodes(source))
+        expect(contentStyles(copied), source + ' -> ' + copied).toEqual(contentStyles(source))
+        checked++
+      }
+    }
+    expect(checked).toBe(500)
+  })
+  it.each(['L ~~a b~~ R', 'L **alpha *beta* gamma** R', 'L *a b* R'])('retains internal space styling in %s', source => {
+    expect(characters(parse(complete(markdownCopyNodes(source))))).toEqual(characters(parse(source)))
+  })
+  it('keeps whitespace-only bodies without empty formatting markers', () => {
+    expect(complete([paragraph([styled(' \t\u00a0\n ', 7), copyText('x')])])).toBe(' \t\u00a0\n x')
+  })
+  it('leaves padding inside code and math payloads alone', () => {
+    const nodes: CopyNode[] = [paragraph([{ kind: 'strong', children: [
+      { kind: 'code', value: ' a ', block: false }, copyText(' '), { kind: 'math', value: ' b ', display: false }
+    ] }])]
+    const copied = complete(nodes)
+    // Math parsing strips delimiter padding; the emitted atomic payload must stay byte-for-byte.
+    expect(copied).toBe('**`  a  ` $ b $**')
+    expect(values(parse(copied), 'inlineCode')).toEqual([' a '])
+  })
+})
+
+function metadata(node: ParsedNode): { type: string; url: string; title: string | null }[] {
+  return node.type === 'link' || node.type === 'image'
+    ? [{ type: node.type, url: node.url!, title: node.title ?? null }]
+    : (node.children ?? []).flatMap(metadata)
+}
+describe.each(['link', 'image'] as const)('%s metadata escaping', kind => {
+  it.each([
+    [String.raw`https://example.org/\&copy;`, String.raw`a\&copy;`, 'https://example.org/&copy;', 'a&copy;'],
+    [String.raw`https://example.org/a\<b\>c`, 'angle < title >', 'https://example.org/a<b>c', 'angle < title >'],
+    [String.raw`https://example.org/a\\b`, String.raw`say \"hi\" \\ ok`, 'https://example.org/a\\b', 'say "hi" \\ ok'],
+    [String.raw`https://example.org/?a=1\&b=2\&#65;`, String.raw`number \&#65;`, 'https://example.org/?a=1&b=2&#65;', 'number &#65;']
+  ])('preserves the decoded destination and title for %s', (destination, title, url, decodedTitle) => {
+    const source = 'L ' + (kind === 'image' ? '!' : '') + '[label](<' + destination + '> "' + title + '") R'
+    const expected = [{ type: kind, url, title: decodedTitle }]
+    expect(metadata(parse(source))).toEqual(expected)
+    const copied = complete(markdownCopyNodes(source))
+    expect(metadata(parse(copied))).toEqual(expected)
+    expect(complete(markdownCopyNodes(source), 'plain')).toBe('L label R')
   })
 })
 

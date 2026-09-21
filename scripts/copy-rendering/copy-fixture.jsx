@@ -79,6 +79,14 @@ window.copyRange = (start, end, reverse = false) => {
   range.setEnd(...point(...end))
   return dispatch(range, reverse)
 }
+window.copyBreakTail = (selector, from, to, reverse = false) => {
+  const text = element(selector).querySelector('br').nextSibling
+  if (!text || text.nodeType !== Node.TEXT_NODE) throw new Error('Missing renderer newline after break')
+  const range = document.createRange()
+  range.setStart(text, from)
+  range.setEnd(text, to)
+  return dispatch(range, reverse)
+}
 window.copyNodes = (start, end = start, reverse = false) => {
   const range = document.createRange()
   range.setStartBefore(element(...start))

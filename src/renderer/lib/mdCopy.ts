@@ -103,8 +103,8 @@ const escapeText = (text: string): string => text.replace(/[\x21-\x2f\x3a-\x40\x
 // Table splitting happens before inline parsing; an odd backslash run already protects a pipe.
 const escapeTablePipes = (text: string): string => text.replace(/(\\*)\|/g,
   (pipe, slashes: string) => slashes.length % 2 ? pipe : slashes + '\\|')
-const escapeDestination = (url: string): string => '<' + url.replace(/\\/g, '\\\\').replace(/>/g, '\\>').replace(/\n/g, '%0A') + '>'
-const linkTitle = (title?: string): string => title ? ' "' + title.replace(/[\\"]/g, '\\$&').replace(/\n/g, ' ') + '"' : ''
+const escapeDestination = (url: string): string => '<' + url.replace(/[\\<>&]/g, '\\$&').replace(/\n/g, '%0A') + '>'
+const linkTitle = (title?: string): string => title ? ' "' + title.replace(/[\\"&]/g, '\\$&').replace(/\n/g, ' ') + '"' : ''
 
 function longestBackticks(value: string): number {
   return (value.match(/`+/g) ?? []).reduce((longest, run) => Math.max(longest, run.length), 0)
@@ -175,7 +175,13 @@ function serializeInline(runs: InlineRun[], from = 0, to = runs.length, inherite
       while (end < to && (runs[end].styles & ~inherited) === STYLE.strike) end++
     }
     const marker = style === STYLE.em ? '*' : style === STYLE.strong ? '**' : '~~'
-    parts.push(marker, serializeInline(runs, index, end, inherited | style), marker)
+    const body = serializeInline(runs, index, end, inherited | style)
+    // Whitespace at a delimiter edge prevents it from opening/closing. Keep the bytes outside.
+    const leading = body.match(/^\s*/)![0]
+    const rest = body.slice(leading.length)
+    const content = rest.trimEnd()
+    const trailing = rest.slice(content.length)
+    parts.push(leading, content ? marker + content + marker : '', trailing)
     index = end
   }
   return parts.join('')

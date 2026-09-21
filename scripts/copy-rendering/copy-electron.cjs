@@ -360,12 +360,14 @@ async function run() {
   check('renderer-errors', JSON.stringify((await call('copyStats')).errors), '[]')
 }
 app.whenReady().then(async () => {
-  win = new BrowserWindow({ show: false, width: 1000, height: 850, webPreferences: { contextIsolation: false } })
+  const deadline = setTimeout(() => { console.error('Copy renderer check timed out'); app.exit(1) }, 120000)
+  win = new BrowserWindow({ show: false, width: 1000, height: 850, webPreferences: { contextIsolation: false, backgroundThrottling: false } })
   try {
     await win.loadFile(join(output, 'dist/index.html'))
     win.webContents.debugger.attach('1.3')
     await run()
   } catch (error) { failures.push({ name: 'fixture-error', error: String(error), stack: error.stack }) }
+  clearTimeout(deadline)
   writeFileSync(join(output, 'results.json'), JSON.stringify({ results, failures }, null, 2))
   for (const failure of failures) console.error(JSON.stringify(failure))
   console.log(`Copy renderer: ${results.length} checks, ${failures.length} failures`)
