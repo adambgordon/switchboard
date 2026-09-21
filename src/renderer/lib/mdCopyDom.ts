@@ -2,6 +2,7 @@ import {
   assembleCopy, copyText, isCopyBlock, serializeCopy,
   type Alignment, type CopyMode, type CopyNode, type CopySection, type CopySelection, type CopyWindow
 } from './mdCopy'
+import { copyWithFallback, type CopyResult } from './copyFallback'
 
 function skipped(el: Element): boolean {
   return el.hasAttribute('data-md-skip') || el.tagName === 'BUTTON' || el.tagName === 'INPUT' ||
@@ -231,9 +232,9 @@ export function collectSelection(range: Range, root: Element): { sections: CopyS
   }
   return { sections, selection: reader.selection }
 }
-export function copySelection(range: Range, root: Element, mode: CopyMode): string {
+export function copySelection(range: Range, root: Element, mode: CopyMode): CopyResult {
   const { sections, selection } = collectSelection(range, root)
-  return assembleCopy(sections, { mode, intent: 'selection', selection })
+  return copyWithFallback(mode, attempt => assembleCopy(sections, { mode: attempt, intent: 'selection', selection }))
 }
 export function tableRows(table: HTMLTableElement | null): string[][] {
   if (!table) return []

@@ -38,6 +38,49 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
     kind: el.matches('.md-code') ? 'code' : 'math', value: (el.querySelector('.md-math-tex') ?? el).textContent,
     styles: (el.closest('em') ? 1 : 0) | (el.closest('strong') ? 2 : 0) | (el.closest('del') ? 4 : 0)
   }))`)
+  for (const kind of ['code', 'math']) for (const extraStyle of [false, true]) {
+    const first = kind === 'code' ? '`a`' : '$\\frac{a}{b}$', second = kind === 'code' ? '`b`' : '$c$'
+    const source = 'L *x' + first + '*_' + second + (extraStyle ? '**z**' : '') + 'y_ R' + (kind === 'math' ? '\n\n$$\nx\n$$' : '')
+    const selector = kind === 'code' ? '.md-p .md-code' : '.md-p .md-math,.md-p .md-math-src'
+    await call('mountCopy', { source, theme, agent })
+    await settle()
+    check(prefix + 'fallback-fixture/' + kind + '/' + extraStyle, (await atoms()).length, 2)
+    for (const mode of ['markdown', 'plain']) for (const reverse of [false, true]) {
+      await call('copyMode', mode)
+      const label = prefix + 'partial-wrapper-fallback/' + kind + '/' + extraStyle + '/' + mode + '/' + reverse
+      const result = await call('copyNodes', [selector, 0], extraStyle ? ['.md-strong'] : [selector, 1], reverse)
+      check(label + '/text', result.text, (kind === 'code' ? 'ab' : '\\frac{a}{b}c') + (extraStyle ? 'z' : ''))
+      check(label + '/handled', result.prevented, true)
+      check(label + '/single-collection', result.collections, 1)
+      check(label + '/types', JSON.stringify(result.types), '["text/plain"]')
+      check(label + '/diagnostics', JSON.stringify(result.diagnostics), JSON.stringify(mode === 'markdown'
+        ? [{ level: 'warn', args: ['Selection copied as plain text', { stage: 'serialization', mode }] }] : []))
+    }
+  }
+  for (const mode of ['markdown', 'plain']) for (const fault of ['collection', 'clipboard-write']) {
+    await call('mountCopy', { source: '**text**', theme, agent, mode })
+    await call('copyFault', fault)
+    const result = await call('copyContents', '.md')
+    const label = prefix + 'contained-copy-failure/' + mode + '/' + fault
+    check(label + '/handled', result.prevented, true)
+    check(label + '/text', result.text, '')
+    check(label + '/types', JSON.stringify(result.types), '[]')
+    check(label + '/single-collection', result.collections, 1)
+    check(label + '/diagnostics', JSON.stringify(result.diagnostics), JSON.stringify([
+      { level: 'error', args: ['Selection copy failed', { stage: fault, mode }] }
+    ]))
+  }
+  await call('mountCopy', { source: 'text', theme, agent })
+  const collapsed = await call('copyRange', ['.md-p', 0], ['.md-p', 0])
+  check(prefix + 'copy-collapsed/handled', collapsed.prevented, false)
+  check(prefix + 'copy-collapsed/collections', collapsed.collections, 0)
+  await js("(() => { const outside = document.createElement('p'); outside.id = 'copy-outside'; outside.textContent = 'outside'; document.body.append(outside) })()")
+  try {
+    const outside = await call('copyContents', '#copy-outside')
+    check(prefix + 'copy-outside/handled', outside.prevented, false)
+    check(prefix + 'copy-outside/collections', outside.collections, 0)
+    check(prefix + 'copy-outside/diagnostics', JSON.stringify(outside.diagnostics), '[]')
+  } finally { await js("document.getElementById('copy-outside').remove()") }
   for (const kind of ['code', 'math']) for (const styles of [1, 2, 3, 5, 6, 7]) for (const count of [2, 3, 4]) {
     const values = Array.from({ length: count }, (_, index) => String.fromCharCode(97 + index))
     const body = values.map((value, index) => {

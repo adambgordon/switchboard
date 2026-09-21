@@ -24,7 +24,8 @@ Object.defineProperty(navigator, 'clipboard', { value: { writeText: value => {
 } } })
 const root = createRoot(document.getElementById('root'))
 const scrollStateRef = { current: new Map() }
-let serial = 0, transcript, markdown = true, width = 760
+let serial = 0, transcript, markdown = true, width = 760, copyFault = null
+window.copyFault = stage => { copyFault = stage }
 const render = () => flushSync(() => root.render(
   <div style={{ width, height: 700, display: 'flex', background: 'var(--paper-pane)' }}>
     <TranscriptView transcript={transcript} loading={false} messageCount={transcript.messages.length}
@@ -69,9 +70,29 @@ function dispatch(range, reverse) {
   selection.addRange(range)
   if (reverse) selection.setBaseAndExtent(range.endContainer, range.endOffset, range.startContainer, range.startOffset)
   const data = new DataTransfer()
+  if (copyFault === 'clipboard-write') data.setData = () => { throw new Error('private clipboard content') }
   const event = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: data })
-  element('.transcript-scroll').dispatchEvent(event)
-  return { text: data.getData('text/plain'), prevented: event.defaultPrevented, types: Array.from(data.types) }
+  const scroll = element('.transcript-scroll'), query = scroll.querySelectorAll
+  const ownQuery = Object.getOwnPropertyDescriptor(scroll, 'querySelectorAll')
+  let collections = 0
+  scroll.querySelectorAll = function (...args) {
+    collections++
+    if (copyFault === 'collection') throw new Error('private selection content')
+    return query.apply(this, args)
+  }
+  const diagnostics = [], warn = console.warn, error = console.error
+  console.warn = (...args) => diagnostics.push({ level: 'warn', args })
+  console.error = (...args) => diagnostics.push({ level: 'error', args })
+  try {
+    scroll.dispatchEvent(event)
+  } finally {
+    if (ownQuery) Object.defineProperty(scroll, 'querySelectorAll', ownQuery)
+    else delete scroll.querySelectorAll
+    console.warn = warn
+    console.error = error
+    copyFault = null
+  }
+  return { text: data.getData('text/plain'), prevented: event.defaultPrevented, types: Array.from(data.types), collections, diagnostics }
 }
 window.copyRange = (start, end, reverse = false) => {
   const range = document.createRange()

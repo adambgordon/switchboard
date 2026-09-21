@@ -294,12 +294,25 @@ export default function TranscriptView({
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return
     const range = sel.getRangeAt(0)
     if (!range.intersectsNode(root)) return
-    const mode = enabled ? 'markdown' : 'plain'
-    const text = copySelection(range, root, mode)
     // The range belongs to this transcript. Native copy could reintroduce hidden content or chrome.
     e.preventDefault()
-    if (!text) return
-    e.clipboardData?.setData('text/plain', text)
+    const mode = enabled ? 'markdown' : 'plain'
+    let stage = 'collection'
+    try {
+      const result = copySelection(range, root, mode)
+      if (result.outcome === 'failed') {
+        console.error('Selection copy failed', { stage: 'serialization', mode })
+        return
+      }
+      stage = 'clipboard-write'
+      if (result.text) e.clipboardData?.setData('text/plain', result.text)
+      if (result.outcome === 'plain-fallback') {
+        console.warn('Selection copied as plain text', { stage: 'serialization', mode })
+      }
+    } catch {
+      // Exceptions can contain selected content; diagnostics deliberately record only the stage and mode.
+      console.error('Selection copy failed', { stage, mode })
+    }
   }, [])
 
   // Callback ref: attach/detach the scroll listener + the auto-hiding scrollbar as the container
