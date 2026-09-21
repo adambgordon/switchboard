@@ -4,6 +4,7 @@ import { basename } from '../lib/format'
 import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
 import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
+import type { TabLayout } from '../lib/tabLayoutPreference'
 import type { Updates } from '../lib/useUpdates'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import AgentLogo from './AgentLogo'
@@ -103,7 +104,7 @@ function groupsFor(tabsEnabled: boolean): Group[] {
       items: [
         { keys: ['⌘N'], desc: 'New conversation' },
         { keys: ['⌘F'], desc: 'Search' },
-        { keys: ['⌘J'], desc: 'Toggle Formatted / Terminal (live conversation)' },
+        { keys: ['⌘J'], desc: 'Toggle Formatted / Terminal, resuming if needed' },
         { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
         { keys: ['⌥-click'], desc: 'Mark conversation unread' },
         // Double-click is the only click gesture tabs add. The ⌘/⇧ variants were removed: they came
@@ -254,6 +255,8 @@ interface Props {
   /** The single switch governing tabs, the vertical split, and detached windows. */
   tabsEnabled: boolean
   onSetTabsEnabled: (value: boolean) => void
+  tabLayout: TabLayout
+  onSetTabLayout: (value: TabLayout) => void
   /** Toggle the Markdown-copy behavior (an On / Off segmented control, like Theme). */
   onSetMarkdownCopy: (value: boolean) => void
 }
@@ -291,6 +294,8 @@ export default function SettingsModal({
   markdownCopy,
   tabsEnabled,
   onSetTabsEnabled,
+  tabLayout,
+  onSetTabLayout,
   onSetMarkdownCopy
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -506,8 +511,8 @@ export default function SettingsModal({
                       </button>
                     </div>
                     <div className="sb-setting-desc">
-                      Copies text from the Formatted view to the clipboard in markdown (preserves
-                      styling such as bold, headers, links, code). Turn this off to copy as plain text.
+                      Preserves Markdown formatting inside broader selections. Exact component selections
+                      copy their content; copy buttons preserve complete formatting. Turn this off for plain text.
                     </div>
                   </div>
                 </div>
@@ -622,6 +627,34 @@ export default function SettingsModal({
                     panes, and open conversations in their own windows. Clicking a conversation
                     previews it in a replaceable tab; double-clicking or resuming it keeps that tab.
                     Turn this off to show one conversation at a time.
+                  </div>
+                </div>
+                <div className="sb-setting" aria-disabled={!tabsEnabled}>
+                  <div className="sb-setting-title">Tab layout</div>
+                  <div
+                    className="sb-seg"
+                    role="radiogroup"
+                    aria-label="Tab layout"
+                    aria-disabled={!tabsEnabled}
+                    aria-describedby="tab-layout-description"
+                  >
+                    {(['wrap', 'scroll'] as const).map((layout) => (
+                      <button
+                        key={layout}
+                        type="button"
+                        role="radio"
+                        aria-checked={tabLayout === layout}
+                        disabled={!tabsEnabled}
+                        className={`sb-seg-btn${tabLayout === layout ? ' active' : ''}`}
+                        onClick={() => onSetTabLayout(layout)}
+                      >
+                        {layout === 'wrap' ? 'Wrap' : 'Scroll'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="sb-setting-desc" id="tab-layout-description">
+                    Wrap tabs onto multiple rows, or scroll horizontally in a single row.
+                    {!tabsEnabled && ' Enable Tabs and split view to change this setting.'}
                   </div>
                 </div>
               </div>

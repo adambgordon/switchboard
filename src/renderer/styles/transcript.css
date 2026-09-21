@@ -47,7 +47,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 .interrupt-note,
 .tool-pending,
 .show-more,
-.transcript-foot-label {
+.transcript-foot-label,
+.md [data-footnote-backref] {
   user-select: none;
 }
 
@@ -1240,4 +1241,9 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 }
 .transcript-jump-arrow-down {
   transform: rotate(180deg);
+}
+
+/* Decorative image glyphs are excluded from copy, so do not offer a text highlight for them. */
+.block-chip > [data-md-skip] {
+  user-select: none;
 }

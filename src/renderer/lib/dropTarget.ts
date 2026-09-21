@@ -20,6 +20,20 @@ export interface TabRect {
   right: number
 }
 
+/** Convert viewport rectangles to the scroller's content coordinates on both axes. */
+export function tabCaretPosition(
+  tab: TabRect,
+  strip: TabRect,
+  atEnd: boolean,
+  scrollLeft: number,
+  scrollTop: number
+) {
+  return {
+    x: (atEnd ? tab.right : tab.left) - strip.left + scrollLeft,
+    y: tab.top - strip.top + scrollTop
+  }
+}
+
 /**
  * Insertion index for a pointer at (x, y) over `rects`, in reading order.
  *

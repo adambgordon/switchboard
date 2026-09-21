@@ -2,18 +2,8 @@ import { useCallback, useState } from 'react'
 import { useStorageSync } from './useStorageSync'
 
 /**
- * The "copy Formatted-view selections as Markdown" preference, persisted in localStorage.
- *
- * On (the default), ⌘C over a transcript selection puts the underlying markdown source on the clipboard
- * instead of the rendered plain text — the same thing the copy buttons give you, scoped to whatever is
- * highlighted. Off yields plain text.
- *
- * Off does NOT hand back to the browser's native copy: `TranscriptView.handleCopy` builds the plain text
- * itself, because `Range.toString()` ignores `user-select: none` and would drag a code block's language
- * caption in with it. The toggle changes the FORMAT, never which text you get.
- *
- * Owned once in App — both TranscriptView and the Preferences UI read it, and a second useState(load)
- * copy would desync from this one's writes. Mirrors useNewConvoDefault / useMaxLiveSessions.
+ * Shared, persisted format preference. Selection-copy decides which nested formatting survives;
+ * whole-content actions preserve complete formatting. Both modes exclude renderer chrome.
  */
 const KEY = 'switchboard.markdownCopy'
 

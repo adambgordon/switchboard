@@ -44,7 +44,7 @@ export interface TurnItem {
   isAssistant: boolean
   isSidechain: boolean
   /** The coalesced messages, each with blocks filtered to PROSE only (text / image) — the tool_use
-   *  blocks have been peeled off into runs. Kept as messages so turnMarkdown + timestamps still work. */
+   *  blocks have been peeled off into runs. Kept as messages so turnText + timestamps still work. */
   messages: TranscriptMessage[]
   timestamp: string | null
 }

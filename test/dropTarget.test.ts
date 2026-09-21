@@ -5,6 +5,7 @@ import {
   groupDragIndices,
   isGroupOriginDrop,
   tabCaretIndex,
+  tabCaretPosition,
   tabDropIndex,
   type TabRect
 } from '../src/renderer/lib/dropTarget'
@@ -28,6 +29,32 @@ function row(top: number, count: number, w = 100, h = 32): TabRect[] {
     right: (i + 1) * w
   }))
 }
+
+describe('scrolled tab geometry', () => {
+  const strip = { left: 250, right: 650, top: 70, bottom: 102 }
+  const tabs = [
+    { left: 90, right: 190, top: 70, bottom: 102 },
+    { left: 190, right: 360, top: 70, bottom: 102 },
+    { left: 360, right: 470, top: 70, bottom: 102 },
+    { left: 470, right: 680, top: 70, bottom: 102 },
+    { left: 680, right: 830, top: 70, bottom: 102 }
+  ]
+
+  it('counts offscreen and unequal-width tabs while excluding a scattered carried group', () => {
+    expect(tabDropIndex(tabs, 580, 86, [0, 2])).toBe(2)
+    expect(tabCaretIndex(2, tabs.length, [0, 2])).toBe(4)
+  })
+
+  it('places leading and trailing carets in content coordinates', () => {
+    expect(tabCaretPosition(tabs[3], strip, false, 160, 0)).toEqual({ x: 380, y: 0 })
+    expect(tabCaretPosition(tabs[4], strip, true, 160, 0)).toEqual({ x: 740, y: 0 })
+  })
+
+  it('also retains the wrapped strip’s vertical scroll offset', () => {
+    const tab = { left: 320, right: 470, top: 102, bottom: 134 }
+    expect(tabCaretPosition(tab, strip, false, 0, 64)).toEqual({ x: 70, y: 96 })
+  })
+})
 
 describe('tabDropIndex — a single row', () => {
   const tabs = row(0, 3) // [0..100] [100..200] [200..300], y 0..32

@@ -2,59 +2,86 @@
    red means destructive, so "this tab is selected" gets neither. The one cobalt here is the shared
    `.sb-dot`, which means exactly what it means everywhere else. */
 
+.sb-tabstrip-frame {
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
+}
+/* Viewport-fixed fades, like the rail's bottom fade. Leave the bottom rule visible beneath them. */
+.sb-tabstrip-frame.horizontal::before,
+.sb-tabstrip-frame.horizontal::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 1px;
+  width: var(--tab-edge);
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.sb-tabstrip-frame.horizontal::before {
+  left: 0;
+  background: linear-gradient(to right, var(--paper-sunken), transparent);
+}
+.sb-tabstrip-frame.horizontal::after {
+  right: 0;
+  background: linear-gradient(to left, var(--paper-sunken), transparent);
+}
+.sb-tabstrip-frame:has(> .has-tabs-before)::before,
+.sb-tabstrip-frame:has(> .has-tabs-after)::after {
+  opacity: 1;
+}
+
 .sb-tabstrip {
-  /* Height of one tab row, and the most rows the strip may grow to before it scrolls. The cap is what
-     keeps a pane full of tabs from eating the content it exists to label — at three rows a strip is
-     still obviously chrome. */
+  /* Wrapping grows to fit every row; the horizontal preference holds one row instead. */
   --tab-h: 32px;
-  --tab-rows: 3;
-  /* Shared by the strip gradient and the tabs that redraw the rule beneath their own
-     opaque fill. One value keeps the line's apparent weight stable through split focus changes. */
+  /* One rule color keeps the line's apparent weight stable through split focus changes. */
   --tab-rule: var(--rule);
   display: flex;
-  /* Tabs WRAP rather than scrolling sideways: sideways overflow hides the tab you want behind an edge,
-     in a direction you cannot see, which defeats the point of having tabs at all. */
+  /* Wrapping is the default; the horizontal preference overrides only the overflow axis. */
   flex-wrap: wrap;
   align-items: stretch;
   align-content: flex-start;
   flex-shrink: 0;
-  max-height: calc(var(--tab-h) * var(--tab-rows));
   background-color: var(--paper-sunken);
-  /* Row separators, drawn as a rule at the foot of every row band rather than as a border on each tab.
-     A border per tab cannot complete the line: the last row is usually ragged, so the line would stop
-     where the tabs stop and leave the remainder bare — and under a FULL row it would double up against
-     the strip's own bottom border. A repeating gradient spans the whole width regardless of how many
-     tabs sit in a row, and its final line lands exactly where the strip ends, so it serves as the
-     bottom border too (hence there is no `border-bottom` here).
-     `local` attachment is what keeps the lines pinned to the rows once the strip scrolls past its row
-     cap; the default would hold them still while the rows moved underneath. */
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--tab-h) - 1px),
-    var(--tab-rule) calc(var(--tab-h) - 1px),
-    var(--tab-rule) var(--tab-h)
-  );
-  background-attachment: local;
-  /* Only the row cap can overflow, and only downward. There is deliberately NO always-reserved
-     scrollbar gutter: the lane exists only once the rows actually overflow. */
-  overflow-y: auto;
-  overflow-x: hidden;
-  /* The insertion caret is positioned in the strip's own scrolled coordinates. */
+  /* One child layer owns every horizontal rule. It paints above tab fills, so active/hovered tabs
+     cannot cover it, and extends through ragged empty space so the same pixels continue across a row. */
   position: relative;
+  overflow: hidden;
+  scrollbar-width: none;
 }
-/* A styled Chromium scrollbar reserves width even when `overflow-y:auto` has nothing to scroll.
-   Collapse only that idle lane; once rows exceed the cap, `.is-overflowing` restores the shared
-   `--bar-thin` width and the strip keeps a stable layout for the whole scrolling episode. */
-.sb-tabstrip:not(.is-overflowing)::-webkit-scrollbar {
+.sb-tab-rules {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+}
+.sb-tab-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  /* Native borders snap their weight like the vertical tab dividers. A 1px gradient band instead
+     alternates between physical-pixel thicknesses when its row endpoints land at fractional pixels. */
+  border-bottom: 1px solid var(--tab-rule);
+  transform: translateY(-100%);
+}
+
+.sb-tabstrip.horizontal {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-padding-inline: var(--tab-edge);
+  overscroll-behavior-x: contain;
+}
+.sb-tabstrip::-webkit-scrollbar {
   width: 0;
-}
-/* A custom Chromium scrollbar consumes an inline lane even without `scrollbar-gutter`. The shared
-   transparent track otherwise exposes the white pane behind the strip, reading as stray whitespace
-   until the thumb appears. Keep the lane on the strip's own chrome surface. */
-.sb-tabstrip::-webkit-scrollbar-track,
-.sb-tabstrip::-webkit-scrollbar-track-piece {
-  background-color: var(--paper-sunken);
+  height: 0;
+  display: none;
 }
 
 /* ---- dragging a tab ---- */
@@ -95,9 +122,9 @@
 }
 
 /* The moving tab clone lives inside the fixed shell on <body>, so the strip's scroll container cannot
-   clip it and the whole stack travels anywhere in the window as one visual. Two class selectors keep
-   its drag surface stronger than the state classes copied from the source tab. */
-.sb-tab.sb-tab-dragging {
+   clip it. The shell scope keeps its surface stronger than the state classes copied from the tab. */
+.sb-tab-drag-shell .sb-tab.sb-tab-dragging {
+  --tab-close-surface: var(--tab-drag-surface, var(--paper-raised));
   border-radius: var(--r-sm);
   /* A real BORDER, not just a shadow. The clone travels over every surface in the window — the
      transcript, the terminal, another pane — and a soft shadow against a light surface leaves it
@@ -157,11 +184,10 @@ body.sb-dragging-tab * {
   border-radius: 1px;
   background: var(--ink);
   pointer-events: none;
-  z-index: 2;
+  z-index: 5;
 }
 /* The strip currently under the drag. Deliberately quiet: the caret says WHERE, this only says which
    strip is answering, which matters when there are two side by side. */
-/* background-COLOR, not the shorthand: the shorthand would drop the row-separator gradient. */
 .sb-tabstrip.sb-drop-target {
   background-color: var(--paper-hover);
 }
@@ -177,11 +203,9 @@ body.sb-window-drop-target .sb-tabstrip {
   --tab-close-surface: var(--paper-sunken);
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   height: var(--tab-h);
-  /* Symmetric, now that the close button overlays the title instead of reserving a slot: the text sits
-     the same distance from both edges, and the ✕ borrows that space on hover rather than owning it. */
-  padding: 0 11px;
+  padding: 0 8px 0 11px;
   /* Natural width, floored and capped. Never flex: a tab that shrinks to fit its row would make the
      same conversation a different width in each pane, and the floor keeps a three-character title
      from producing a tab too small to aim at. */
@@ -241,20 +265,6 @@ body.sb-window-drop-target .sb-tabstrip {
   background: var(--paper-pane);
   color: var(--ink);
 }
-/* Tab fills and the close control's title fade can cover the strip's row-separator gradient. Keep
-   that pixel above every tab, including through hover and the close control's fade-out. This must be
-   the tab's LAST painted child, not a parent inset shadow, so the title fade cannot cover it. */
-.sb-tab::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: var(--tab-rule);
-  pointer-events: none;
-  z-index: 1;
-}
 /* Hidden dragged tabs take their right-hand dividers with them. Repaint the first visible follower's
    leading edge without adding border width, so every non-dragged tab stays exactly where it was. */
 .sb-tab.sb-tab-after-drag-gap::before {
@@ -281,29 +291,28 @@ body.sb-window-drop-target .sb-tabstrip {
   min-width: 0;
 }
 
-/* The live dot's slot — present only when there IS a dot, so a not-live tab spends no width on it. */
+/* A compact, permanent slot keeps liveness from changing the title or tab width. */
 .sb-tab-gutter {
-  width: 17px;
+  width: 10px;
   height: 17px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  pointer-events: none;
 }
 .sb-tab .sb-dot {
   transition: opacity var(--dur-fast);
 }
-.sb-tab:hover .sb-dot {
+.sb-tab:hover .sb-dot,
+.sb-tab:focus-within .sb-dot {
   opacity: 0;
 }
-/* Anchored to the TAB's right edge rather than living inside the dot's slot. On a live tab it lands
-   exactly over that slot (the dot fades out beneath it); on a not-live tab it overlays the title's
-   tail, which costs nothing at rest and is where the ellipsis already is. */
+/* The close button shares the live dot's position. */
 .sb-tab-close {
   position: absolute;
-  /* Matches the tab's own padding, which puts the button centred over the dot's slot on a live tab —
-     any other offset and the ✕ would appear beside the dot it replaces rather than on top of it. */
-  right: 11px;
+  /* Centre the 17px hit target over the 10px slot without shrinking the click target. */
+  right: 4.5px;
   top: 50%;
   transform: translateY(-50%);
   width: 17px;
@@ -317,22 +326,6 @@ body.sb-window-drop-target .sb-tabstrip {
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-fast);
-}
-/* A not-live tab has no reserved gutter, so the close button borrows the title's tail. Fade the text
-   into the button's solid surface instead of cutting it off at a hard vertical edge. This child fades
-   in with the button's own opacity, keeping the spatial and temporal transitions together. */
-.sb-tab-close::before {
-  content: '';
-  position: absolute;
-  top: -8px;
-  bottom: -8px;
-  right: 100%;
-  width: 26px;
-  background: linear-gradient(to right, transparent, var(--tab-close-surface));
-  pointer-events: none;
-}
-.sb-tab:has(.sb-tab-gutter) .sb-tab-close::before {
-  content: none;
 }
 .sb-tab:hover .sb-tab-close,
 .sb-tab:focus-within .sb-tab-close {
