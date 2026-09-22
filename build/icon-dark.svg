@@ -11,7 +11,9 @@
         fill="#1f1f1f" stroke="#3a3a3a" stroke-width="3" filter="url(#cardShadow)"/>
 
   <!-- the one accent: electric cobalt = live, echoing .sb-brand-mark. brightened to the dark-theme
-       live token (#3b6cf0); the halo is that cobalt at 0.24 (the wash the working dot breathes behind). -->
-  <circle cx="512" cy="512" r="250" fill="#3b6cf0" fill-opacity="0.24"/>
+       live token (#3b6cf0); the halo is that cobalt at 0.35, tracking the dark dot-halo token so
+       the icon and the working dot carry the same wash. Re-render icon-dark.png when this moves.
+       (No double hyphen anywhere in here: XML comments forbid it and the render fails outright.) -->
+  <circle cx="512" cy="512" r="250" fill="#3b6cf0" fill-opacity="0.35"/>
   <circle cx="512" cy="512" r="150" fill="#3b6cf0"/>
 </svg>

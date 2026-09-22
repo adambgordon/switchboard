@@ -319,7 +319,8 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--live);
+  /* --dot, not --live: this one mark is user-recolorable, and it follows --live until it is. */
+  background: var(--dot);
   display: inline-block;
   flex-shrink: 0;
 }
@@ -333,13 +334,13 @@
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: var(--live);
-  opacity: 0.22;
+  background: var(--dot);
+  opacity: var(--dot-halo);
   transform: scale(1.7);
 }
-/* finished, not yet seen: a steady filled cobalt dot (same as the .sb-dot base; explicit for clarity) */
+/* finished, not yet seen: a steady filled dot (same as the .sb-dot base; explicit for clarity) */
 .sb-dot.awaiting {
-  background: var(--live);
+  background: var(--dot);
 }
 /* Nothing unread: either a finished turn the user has seen, or a new unlinked terminal with no
    messages yet. The unlinked state remains distinct in behavior and the Live tally, but shares the
@@ -347,15 +348,15 @@
 .sb-dot.quiet,
 .sb-dot.unlinked {
   background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--live);
+  box-shadow: inset 0 0 0 1.5px var(--dot);
 }
-/* "asking": blocked on the user's reply (AskUserQuestion / ExitPlanMode). A cobalt ripple —
+/* "asking": blocked on the user's reply (AskUserQuestion / ExitPlanMode). A ripple —
    one pebble-in-a-puddle pulse throwing two concentric rings — reads as "needs you" while
-   staying alive-cobalt: it's the MOTION that sets it apart from breathing `working`, solid
+   keeping the liveness color: it's the MOTION that sets it apart from breathing `working`, solid
    `awaiting`, and hollow `quiet`. The dot stays solid and swells with the pulse; ::before and
    ::after are the two rings. */
 .sb-dot.asking {
-  background: var(--live);
+  background: var(--dot);
   animation: sb-ripple-core 1.4s ease-out infinite;
 }
 .sb-dot.asking::before,
@@ -366,7 +367,7 @@
   border-radius: 50%;
   background: none;
   opacity: 0; /* hidden until its ring fires; the animation then drives opacity */
-  box-shadow: 0 0 0 1.5px var(--live);
+  box-shadow: 0 0 0 1.5px var(--dot);
   pointer-events: none;
   animation: sb-ripple 1.4s infinite;
 }
@@ -1113,6 +1114,49 @@ body.sb-resizing .sb-pane {
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+/* Liveness dot color (Beta Features). The samples are the real .sb-dot, painted from --dot like
+   every other one, so they show the color as it will be drawn rather than as it was picked — the
+   two differ whenever a pick has to move to stay legible. */
+.sb-dotcolor-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  align-self: flex-start;
+  margin: var(--s2) 0;
+}
+.sb-dotcolor-input {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* The native control paints its own inset chrome; strip it so the color fills the whole swatch. */
+.sb-dotcolor-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.sb-dotcolor-input::-webkit-color-swatch {
+  border: none;
+  border-radius: calc(var(--r-sm) - 1px);
+}
+.sb-dotcolor-hex {
+  min-width: 7ch;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.sb-dotcolor-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: var(--s1);
+}
 .sb-slider {
   -webkit-appearance: none;
   appearance: none;
@@ -1212,11 +1256,13 @@ body.sb-resizing .sb-pane {
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--ink-soft);
 }
+/* --dot, like the liveness dot: this is the same affordance in a menu, and design.md requires the
+   two read the same, so a recolored liveness dot has to bring this one with it. */
 .sb-ctxmenu-item:hover .sb-menu-dot.filled {
-  background: var(--live);
+  background: var(--dot);
 }
 .sb-ctxmenu-item:hover .sb-menu-dot.hollow {
-  box-shadow: inset 0 0 0 1.5px var(--live);
+  box-shadow: inset 0 0 0 1.5px var(--dot);
 }
 .sb-ctxmenu-item:hover {
   background: var(--paper-hover);

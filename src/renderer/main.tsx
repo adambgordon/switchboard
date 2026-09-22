@@ -25,13 +25,25 @@ import './styles/terminal.css'
 
 import App from './App'
 import { resolveTheme } from './lib/theme'
-import { applyTheme, readThemeMode, systemPrefersDark } from './lib/themeDom'
+import {
+  applyDotColor,
+  applyTheme,
+  readDotColor,
+  readThemeMode,
+  systemPrefersDark
+} from './lib/themeDom'
 
 // Resolve + apply the persisted theme to <html data-theme> BEFORE first render. The window is
 // hidden until ready-to-show (first paint), so applying it here means the first painted frame is
 // already in the right theme — no light flash on a dark-mode launch. useTheme re-applies on later
 // mode / OS changes. (An inline <head> script would be marginally earlier, but the CSP blocks one.)
-applyTheme(resolveTheme(readThemeMode(), systemPrefersDark()))
+const bootTheme = resolveTheme(readThemeMode(), systemPrefersDark())
+applyTheme(bootTheme)
+
+// Same reasoning for a custom liveness-dot color, and applied from the same place rather than an
+// effect: the render below waits on font warming, so anything deferred to React would paint the
+// shipped cobalt first. App re-applies on later changes of color or theme.
+applyDotColor(readDotColor(), bootTheme)
 
 // Warm the bundled font faces before first paint. @fontsource ships each weight
 // separately with `font-display: swap`; a bold run can paint in a fallback face

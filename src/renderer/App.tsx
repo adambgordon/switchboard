@@ -70,6 +70,8 @@ import { useTranscript } from './lib/useTranscript'
 import { useAppNavigation } from './lib/useAppNavigation'
 import type { ConversationView, NavigationCommand } from '@shared/navigation'
 import { useTheme } from './lib/useTheme'
+import { useDotColor } from './lib/useDotColor'
+import { applyDotColor } from './lib/themeDom'
 import { useDarkIcon } from './lib/useDarkIcon'
 import { useUpdates } from './lib/useUpdates'
 import { searchConversations } from './lib/fuzzy'
@@ -182,6 +184,18 @@ export default function App() {
     reset: resetMaxLive
   } = useMaxLiveSessions()
   const { mode: themeMode, resolved: themeResolved, setMode: setThemeMode, toggle: toggleTheme } = useTheme()
+  const { color: dotColor, setColor: setDotColor } = useDotColor()
+  // The dot color is placed relative to the surface it sits on, so a theme flip re-derives it just
+  // as a new choice does. main.tsx does the first apply, before render; this owns every one after.
+  useEffect(() => {
+    applyDotColor(dotColor, themeResolved)
+  }, [dotColor, themeResolved])
+  // Stable identity: Preferences restores the stored color from an effect keyed on this, which a
+  // new function each render would turn into a re-apply on every render.
+  const previewDotColor = useCallback(
+    (hex: string | null) => applyDotColor(hex, themeResolved),
+    [themeResolved]
+  )
   const darkIcon = useDarkIcon()
   const updates = useUpdates()
   const focused = useWindowFocus()
@@ -2017,6 +2031,9 @@ export default function App() {
         onSetTabsEnabled={setTabsEnabled}
         tabLayout={tabLayout}
         onSetTabLayout={setTabLayout}
+        dotColor={dotColor}
+        onSetDotColor={setDotColor}
+        onPreviewDotColor={previewDotColor}
       />
       <ConversationInfoModal
         open={visibleInfoModal !== null}
