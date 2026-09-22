@@ -232,7 +232,8 @@
   animation: sb-fade-up var(--dur-slow) var(--ease);
 }
 /* the brand mark: the app icon distilled — a cobalt core inside a --live-glow halo
-   (cobalt at 0.22, the same wash the working dot breathes behind), scaled up for the
+   (cobalt at 0.22 light, 0.30 dark — its own token, NOT the dot's --dot-halo, which is
+   recolorable and tuned separately), scaled up for the
    hero. The halo is a 0-blur box-shadow, so it doesn't take layout width; margin-bottom
    makes up the gap it eats into the flex column. Mirrors .sb-brand-mark in app.css. */
 .sb-empty-mark {

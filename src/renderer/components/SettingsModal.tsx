@@ -1,5 +1,6 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Close, Folder, Info, Reset, Warning } from './icons'
+import { DOT_COLOR_COMMIT_MS, DOT_COLOR_PLACEHOLDER, shouldCommit } from '../lib/dotColor'
 import { basename } from '../lib/format'
 import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
 import { AGENTS, type AgentKind } from '@shared/types'
@@ -257,6 +258,12 @@ interface Props {
   onSetTabsEnabled: (value: boolean) => void
   tabLayout: TabLayout
   onSetTabLayout: (value: TabLayout) => void
+  /** The chosen liveness-dot color, or null while the shipped cobalt is in use. */
+  dotColor: string | null
+  /** Persist a chosen color; null clears it. The Reset control is disabled when already null. */
+  onSetDotColor: (hex: string | null) => void
+  /** Paint a color without persisting it, so the picker previews while it is being dragged. */
+  onPreviewDotColor: (hex: string | null) => void
   /** Toggle the Markdown-copy behavior (an On / Off segmented control, like Theme). */
   onSetMarkdownCopy: (value: boolean) => void
 }
@@ -296,6 +303,9 @@ export default function SettingsModal({
   onSetTabsEnabled,
   tabLayout,
   onSetTabLayout,
+  dotColor,
+  onSetDotColor,
+  onPreviewDotColor,
   onSetMarkdownCopy
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -317,6 +327,60 @@ export default function SettingsModal({
   useEffect(() => {
     if (page) panelRef.current?.focus()
   }, [page])
+
+  // The color picker emits a change per pointer tick and offers no OK button, so there is no
+  // "done" event to store on: React's onChange IS the input event, and the native change event
+  // never reaches React at all. Painting is therefore immediate and storing is coalesced — the
+  // dot recolors on every tick through CSS, while disk and the other windows hear once, after
+  // DOT_COLOR_COMMIT_MS of quiet.
+  // `draft` is the ONE representation of an edit in flight: what the picker shows and what will
+  // be stored are the same value, so ending the edit is a single assignment. Holding the render
+  // value and the commit value separately means clearing one and forgetting the other, and then
+  // the picker keeps showing a choice that is no longer anyone's.
+  const [draft, setDraft] = useState<string | null>(null)
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Read at fire time rather than closed over at arm time, so the timer sees the latest of each
+  // and a commit landing mid-drag cannot compare against a stale value.
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const storedRef = useRef(dotColor)
+  storedRef.current = dotColor
+
+  const flushDotColor = useCallback(() => {
+    if (commitTimer.current) clearTimeout(commitTimer.current)
+    commitTimer.current = null
+    const pending = draftRef.current
+    setDraft(null)
+    if (shouldCommit(pending, storedRef.current)) onSetDotColor(pending)
+  }, [onSetDotColor])
+
+  const pickDotColor = useCallback(
+    (hex: string) => {
+      setDraft(hex)
+      onPreviewDotColor(hex)
+      if (commitTimer.current) clearTimeout(commitTimer.current)
+      commitTimer.current = setTimeout(flushDotColor, DOT_COLOR_COMMIT_MS)
+    },
+    [flushDotColor, onPreviewDotColor]
+  )
+
+  const resetDotColor = useCallback(() => {
+    // Drop anything in flight first: a pick still waiting out its timer would otherwise land
+    // after the reset and undo it.
+    if (commitTimer.current) clearTimeout(commitTimer.current)
+    commitTimer.current = null
+    setDraft(null)
+    // Clearing the paint explicitly, because when nothing was stored yet the App effect that
+    // normally does it sees no change to react to.
+    onPreviewDotColor(null)
+    onSetDotColor(null)
+  }, [onPreviewDotColor, onSetDotColor])
+
+  // Leaving the page stores what is waiting rather than discarding it — the picker applied it on
+  // screen, so dropping it would silently undo a choice the user watched take effect.
+  useEffect(() => {
+    if (page !== 'beta') flushDotColor()
+  }, [page, flushDotColor])
 
   if (!page) return null
 
@@ -655,6 +719,39 @@ export default function SettingsModal({
                   <div className="sb-setting-desc" id="tab-layout-description">
                     Wrap tabs onto multiple rows, or scroll horizontally in a single row.
                     {!tabsEnabled && ' Enable Tabs and split view to change this setting.'}
+                  </div>
+                </div>
+                <div className="sb-setting">
+                  <div className="sb-setting-title">Liveness dot color</div>
+                  <div className="sb-dotcolor-control">
+                    <input
+                      type="color"
+                      className="sb-dotcolor-input"
+                      aria-label="Liveness dot color"
+                      value={draft ?? dotColor ?? DOT_COLOR_PLACEHOLDER}
+                      onChange={(e) => pickDotColor(e.currentTarget.value)}
+                    />
+                    <span className="sb-dotcolor-hex">{draft ?? dotColor ?? 'Default'}</span>
+                    {/* The shipped dot markup, so the sample shows the color as it will actually
+                        be drawn rather than as it was picked. */}
+                    <span className="sb-dotcolor-dots" aria-hidden="true">
+                      <span className="sb-dot awaiting" />
+                      <span className="sb-dot quiet" />
+                    </span>
+                    <button
+                      type="button"
+                      className="sb-slider-reset"
+                      onClick={resetDotColor}
+                      disabled={dotColor === null && draft === null}
+                      data-tip="Reset to default (cobalt)"
+                      aria-label="Reset to default (cobalt)"
+                    >
+                      <Reset size={14} />
+                    </button>
+                  </div>
+                  <div className="sb-setting-desc">
+                    Recolors the liveness dot in every state; other cobalt marks are unchanged.
+                    Adjusted as needed to stay legible in both themes — the samples show the result.
                   </div>
                 </div>
               </div>

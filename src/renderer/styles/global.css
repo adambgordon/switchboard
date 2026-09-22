@@ -299,9 +299,9 @@ input::placeholder {
   .sb-empty-mark {
     transform: none;
   }
-  /* asking: motion off — freeze as a static detached cobalt ring (a stilled ripple) so it
+  /* asking: motion off — freeze as a static detached ring (a stilled ripple) so it
      stays distinct from solid `awaiting` and hollow `quiet` without animating. */
   .sb-dot.asking {
-    box-shadow: 0 0 0 1.5px var(--paper), 0 0 0 3px var(--live);
+    box-shadow: 0 0 0 1.5px var(--paper), 0 0 0 3px var(--dot);
   }
 }

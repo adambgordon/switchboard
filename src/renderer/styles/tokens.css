@@ -38,6 +38,16 @@
   --live-wash: #eef3fe; /* faintest wash */
   --live-glow: rgba(31, 90, 230, 0.22);
 
+  /* The liveness dot alone, which Preferences -> Beta Features can recolor. Through --live rather
+     than a copy of its value, so it tracks the accent per theme and needs no dark-scope twin; a
+     chosen color is set inline on <html>, which outranks this, and clearing it lands back here
+     exactly. Recoloring --live instead would take the card ring, tally and Resume with it. */
+  --dot: var(--live);
+  /* Opacity of the breathing dot's halo. Theme-aware for the reason --shadow-sel-hover is: the
+     same alpha does not carry the same strength across the light/dark gap. Measured as the
+     perceptual lightness gap between the composited halo and the live card under it. */
+  --dot-halo: 0.22;
+
   /* ---- accent 2: warm red = negative / destructive (End, Stop, errors) ---- */
   --danger: #d8392c;
   --danger-ink: #b32a1d; /* text-on-paper variant for contrast */
@@ -195,6 +205,14 @@
   --live-soft: #20304f; /* tinted fill */
   --live-wash: #18202f; /* faintest wash */
   --live-glow: rgba(59, 108, 240, 0.3);
+
+  /* 0.22 over a near-black card lands at 58% of the strength it has over a white one, which is
+     what makes the breathing halo read as faint in dark. Parity with light is 0.38; this sits
+     just below it, at 91%. The measurement sets the range and the eye picks inside it — a halo is a
+     soft aura rather than an edge, so equal lightness gaps do not read as equal presence.
+     Raising the alpha rather than lightening the color keeps the halo the dot's own hue, which
+     matters once the dot is user-chosen: mixing toward white pulls a green halo to gray. */
+  --dot-halo: 0.35;
 
   /* ---- accent 2: warm red = negative / destructive ---- */
   --danger: #ef5a4d;

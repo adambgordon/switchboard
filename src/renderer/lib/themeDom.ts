@@ -4,6 +4,7 @@
  * node-typecheckable for the test suite; everything here touches DOM/web globals and is
  * renderer-only. Used by main.tsx (pre-render bootstrap) and useTheme.
  */
+import { DOT_COLOR_KEY, clampDotColor, parseDotColor } from './dotColor'
 import { THEME_KEY, type ResolvedTheme, type ThemeMode } from './theme'
 
 /** Read the persisted mode, tolerating an absent or garbage value (→ 'system'). */
@@ -37,4 +38,35 @@ export function applyTheme(resolved: ResolvedTheme): void {
   } catch {
     /* getComputedStyle / window.api not ready — the bg sync is best-effort cosmetics */
   }
+}
+
+/** Read the persisted dot color, tolerating an absent or garbage value (→ no custom color). */
+export function readDotColor(): string | null {
+  try {
+    return parseDotColor(localStorage.getItem(DOT_COLOR_KEY))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Apply a custom liveness-dot color, or clear back to the shipped one.
+ *
+ * Writes `--dot` inline on <html>, which outranks every selector-matched rule — and leaves
+ * `--live` alone, which is what keeps every other cobalt mark where it is.
+ *
+ * Clearing REMOVES the property. `initial` would not work: on a custom property that makes it
+ * guaranteed-invalid, so `var(--dot)` falls back to unset — a transparent dot — rather than to
+ * the shipped cobalt.
+ *
+ * Takes the resolved theme because the color is placed relative to the surface the dot sits on,
+ * so callers must re-apply on a theme flip as well as on a change of color.
+ */
+export function applyDotColor(color: string | null, resolved: ResolvedTheme): void {
+  const root = document.documentElement
+  if (!color) {
+    root.style.removeProperty('--dot')
+    return
+  }
+  root.style.setProperty('--dot', clampDotColor(color, resolved))
 }
