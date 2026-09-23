@@ -229,7 +229,10 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<{
 }
 
 /** Resolve a batch of cwds to their projects in one call (see {@link ProjectRoots.resolveAll}). */
-export type ProjectRootsResolver = (cwds: readonly string[]) => ReadonlyMap<string, ProjectRoot>
+export type ProjectRootsResolver = (
+  cwds: readonly string[],
+  missing: ReadonlySet<string>
+) => ReadonlyMap<string, ProjectRoot>
 
 export interface IndexOptions {
   /**
@@ -271,7 +274,7 @@ export async function indexConversations(
   const claudeRoot = projectsRoot ?? defaultProjectsRoot()
   const codexSessionsRoot = codexRoot ?? defaultCodexRoot()
   const fileCache = cache ?? new Map()
-  const resolveRoots = options.resolveRoots ?? ((cwds) => new ProjectRoots().resolveAll(cwds))
+  const resolveRoots = options.resolveRoots ?? ((cwds, missing) => new ProjectRoots().resolveAll(cwds, missing))
 
   const [claudeMetas, codex] = await Promise.all([
     indexClaudeMetas(claudeRoot, fileCache),
@@ -286,8 +289,8 @@ export async function indexConversations(
   }
 
   const cwds = [...groups.keys()]
-  const roots = resolveRoots(cwds)
   const existing = await existingCwds(cwds)
+  const roots = resolveRoots(cwds, new Set(cwds.filter((c) => !existing.has(c))))
 
   const result: ConversationGroup[] = []
   for (const [cwd, conversations] of groups) {

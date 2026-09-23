@@ -374,9 +374,15 @@ describe('indexConversations project roots and existence', () => {
       }
 
       const roots = new ProjectRoots({ home: path.join(base, 'home') })
+      let told: string[] = []
       const { groups } = await indexConversations(root, NO_CODEX, undefined, {
-        resolveRoots: (cwds) => roots.resolveAll(cwds)
+        resolveRoots: (cwds, missing) => {
+          told = [...missing]
+          return roots.resolveAll(cwds, missing)
+        }
       })
+      // The resolver is told which cwds are gone, so it never walks them synchronously.
+      expect(told).toEqual([gone])
       const byCwd = new Map(groups.map((g) => [g.cwd, g]))
       const pick = (cwd: string) => {
         const g = byCwd.get(cwd)!
@@ -404,7 +410,7 @@ describe('indexConversations project roots and existence', () => {
       await writeFile(path.join(cwd, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 'wt')}\n`)
       await writeSession(root, '-wt', [msgLine('user', cwd, 'hello')], 1_000_000_000_000)
       const roots = new ProjectRoots({ home: path.join(base, 'home') })
-      const resolveRoots = (cwds: readonly string[]) => roots.resolveAll(cwds)
+      const resolveRoots = (cwds: readonly string[], missing: ReadonlySet<string>) => roots.resolveAll(cwds, missing)
       const cache = new Map()
       const first = await indexConversations(root, NO_CODEX, cache, { resolveRoots })
       expect(first.groups[0].exists).toBe(true)

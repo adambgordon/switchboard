@@ -155,6 +155,8 @@ export interface ProjectRootsOptions {
  */
 export class ProjectRoots {
   private readonly memo = new Map<string, ProjectRoot>()
+  /** Resolutions that differ from the persisted file and have not been written yet. */
+  private readonly pending = new Map<string, ProjectRoot>()
   private persisted: Map<string, ProjectRoot>
   private readonly dir: string | null
   private readonly home: string
@@ -175,8 +177,13 @@ export class ProjectRoots {
   /**
    * Resolve a batch of cwds, writing the persisted cache at most once for the whole batch — an
    * index pass resolves every group together, and the first pass of a launch can be all fresh.
+   *
+   * `missing` names cwds the caller already knows are gone (the indexer checks existence
+   * asynchronously every pass). They skip the synchronous walk and go straight to the cache: a
+   * vanished path would only fail it, and a path on an unresponsive volume would block the main
+   * process in it, once per pass, for as long as the path is listed.
    */
-  resolveAll(cwds: Iterable<string>): Map<string, ProjectRoot> {
+  resolveAll(cwds: Iterable<string>, missing: ReadonlySet<string> = new Set()): Map<string, ProjectRoot> {
     const out = new Map<string, ProjectRoot>()
     let changed = false
     for (const cwd of cwds) {
@@ -186,13 +193,14 @@ export class ProjectRoots {
         out.set(cwd, memoized)
         continue
       }
-      const fresh = resolveProjectRoot(cwd, this.home, this.fs)
+      const fresh = missing.has(cwd) ? null : resolveProjectRoot(cwd, this.home, this.fs)
       if (fresh) {
         this.memo.set(cwd, fresh)
         out.set(cwd, fresh)
         const prior = this.persisted.get(cwd)
         if (!prior || prior.root !== fresh.root || prior.worktree !== fresh.worktree) {
           this.persisted.set(cwd, fresh)
+          this.pending.set(cwd, fresh)
           changed = true
         }
         continue
@@ -209,14 +217,16 @@ export class ProjectRoots {
    * Persist the cache. Best-effort — losing it only costs the folding of since-deleted worktrees.
    *
    * Several app processes can share one userData directory, each holding the file as it was when
-   * that process started. So the write folds this launch's fresh resolutions into what is on disk
-   * NOW rather than replacing it with this process's snapshot, which would drop every entry another
-   * process added since. It goes through a rename so a reader never sees a half-written file.
+   * that process started. So the write folds only the entries THIS process has changed and not yet
+   * written into what is on disk NOW. Replacing the file with this process's snapshot would drop
+   * every entry another process added since; folding in its whole memo would revert entries another
+   * process has since resolved afresh. Unwritten changes stay pending until a write succeeds. The
+   * write goes through a rename so a reader never sees a half-written file.
    */
   private save(): void {
     if (!this.dir) return
     const merged = loadPersisted(this.dir)
-    for (const [cwd, entry] of this.memo) merged.set(cwd, entry)
+    for (const [cwd, entry] of this.pending) merged.set(cwd, entry)
     const obj: Record<string, ProjectRoot> = {}
     for (const [cwd, entry] of merged) obj[cwd] = entry
     const file = path.join(this.dir, FILE)
@@ -225,6 +235,7 @@ export class ProjectRoots {
       writeFileSync(temp, JSON.stringify(obj))
       renameSync(temp, file)
       this.persisted = merged
+      this.pending.clear()
     } catch {
       /* a lost cache only costs deleted worktrees their folding; not worth surfacing */
     }

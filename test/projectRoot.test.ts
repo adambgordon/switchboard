@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ProjectRoots, resolveProjectRoot } from '../src/main/sessions/projectRoot'
+import { nodeRootFs, ProjectRoots, resolveProjectRoot } from '../src/main/sessions/projectRoot'
 
 // Every tree is written by hand — `.git` directories and `gitdir:` files — rather than by running git,
 // so each case pins exactly the on-disk shape it is about. Paths are realpath'd up front because the
@@ -215,6 +215,45 @@ describe('ProjectRoots', () => {
     })
     rmSync(wtA, { recursive: true })
     expect(new ProjectRoots({ dir: data, home }).resolve(wtA)).toEqual({ root: r, worktree: true })
+  })
+
+  it('does not revert an entry another process has since re-resolved', () => {
+    // This process learned x under the old repository. The worktree is then re-pointed and a fresh
+    // process records x under the new one. This process saving an UNRELATED entry must not put its
+    // stale view of x back.
+    const data = dir('data')
+    const oldRepo = repo('old')
+    const newRepo = repo('new')
+    const x = dir('work', 'x')
+    gitFile(x, path.join(oldRepo, '.git', 'worktrees', 'x'))
+    const stale = new ProjectRoots({ dir: data, home })
+    stale.resolve(x)
+    gitFile(x, path.join(newRepo, '.git', 'worktrees', 'x'))
+    new ProjectRoots({ dir: data, home }).resolve(x)
+    stale.resolve(dir('work', 'y'))
+    expect(cacheFile(data)[x]).toEqual({ root: newRepo, worktree: true })
+  })
+
+  it('keeps a change that failed to write and writes it with the next one', () => {
+    const data = path.join(base, 'data-later')
+    const roots = new ProjectRoots({ dir: data, home })
+    const a = repo('a')
+    roots.resolve(a)
+    mkdirSync(data)
+    const b = repo('b')
+    roots.resolve(b)
+    expect(Object.keys(cacheFile(data)).sort()).toEqual([a, b].sort())
+  })
+
+  it('skips the walk for a cwd the caller knows is missing and answers from the cache', () => {
+    const data = dir('data')
+    const { repo: r, wt } = worktreeOf()
+    new ProjectRoots({ dir: data, home }).resolve(wt)
+    let walks = 0
+    const counting = { ...nodeRootFs, realpath: (p: string) => (walks++, nodeRootFs.realpath(p)) }
+    const roots = new ProjectRoots({ dir: data, home, fs: counting })
+    expect(roots.resolveAll([wt], new Set([wt])).get(wt)).toEqual({ root: r, worktree: true })
+    expect(walks).toBe(0)
   })
 
   it('tolerates a corrupt cache file', () => {

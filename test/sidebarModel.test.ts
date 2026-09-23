@@ -103,6 +103,18 @@ describe('seeds', () => {
     expect(conversationSeed(conv('a', T))).toBe(T)
   })
 
+  it('prefer the first message to the file birthtime when both exist', () => {
+    // A row whose birthtime is older than its first message, beside a row that started in between:
+    // reading birthtime first would put the two in the wrong order.
+    const model = buildSidebar(
+      input({
+        mode: 'all',
+        groups: [group('/w/repo', [conv('a', T, { birthtimeMs: T - 1000 }), conv('between', T - 500)])]
+      })
+    )
+    expect(visibleRows(model).map((r) => r.sessionId)).toEqual(['a', 'between'])
+  })
+
   it('fall back to the file birthtime, never to mtime, while it exists', () => {
     expect(conversationSeed(conv('a', null, { birthtimeMs: T - 5, mtime: T + 1 }))).toBe(T - 5)
     expect(conversationSeed(conv('a', null, { birthtimeMs: 0, mtime: T + 1 }))).toBe(T + 1)

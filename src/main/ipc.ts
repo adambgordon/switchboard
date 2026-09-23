@@ -465,7 +465,8 @@ function broadcast(channel: string, ...args: unknown[]): void {
 
 const conversationIndex = new LatestTask(
   async () => {
-    const resolveRoots = (cwds: readonly string[]) => getProjectRoots().resolveAll(cwds)
+    const resolveRoots = (cwds: readonly string[], missing: ReadonlySet<string>) =>
+      getProjectRoots().resolveAll(cwds, missing)
     const snapshot = await indexConversations(PROJECTS_ROOT, undefined, metaCache, { resolveRoots })
     return retainHiddenSessions(snapshot, hiddenSessionIds)
   },
