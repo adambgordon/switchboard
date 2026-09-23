@@ -84,6 +84,21 @@ describe('resolveProjectRoot', () => {
     expect(resolveProjectRoot(wt, home)).toEqual({ root: bare, worktree: true })
   })
 
+  it('never touches the repository a worktree points at', () => {
+    // The repository may live on another volume; resolution reads only the cwd's own ancestry.
+    const r = repo('repo')
+    const wt = dir('work', 'wt')
+    gitFile(wt, path.join(r, '.git', 'worktrees', 'wt'))
+    const touched: string[] = []
+    const spying = {
+      realpath: (p: string) => (touched.push(p), nodeRootFs.realpath(p)),
+      kind: (p: string) => (touched.push(p), nodeRootFs.kind(p)),
+      readFile: (p: string) => (touched.push(p), nodeRootFs.readFile(p))
+    }
+    expect(resolveProjectRoot(wt, home, spying)).toEqual({ root: r, worktree: true })
+    expect(touched.filter((p) => p === r || p.startsWith(r + path.sep))).toEqual([])
+  })
+
   it('treats a submodule as its own project, not as a worktree', () => {
     repo('super')
     dir('super', '.git', 'modules', 'sub')

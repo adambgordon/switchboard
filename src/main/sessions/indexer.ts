@@ -251,49 +251,70 @@ export type ExistenceProbe = (cwds: readonly string[]) => Promise<Set<string>>
 export const EXISTENCE_DEADLINE_MS = 200
 
 /**
- * Whether each distinct cwd exists right now — one check apiece, in parallel. Deliberately not
- * memoized like the project root: a directory deleted mid-launch must drop out of the
- * new-conversation chooser on the next pass, not the next launch.
+ * Existence checks allowed unsettled at once. Node runs asynchronous filesystem calls on a small
+ * shared thread pool (four threads by default), and a check against an unresponsive volume holds its
+ * thread until the volume answers — cancelling the wait does not cancel the call. Capping the checks
+ * leaves the rest of the pool for the transcript reads the app actually needs.
+ */
+export const EXISTENCE_MAX_INFLIGHT = 2
+
+/**
+ * Whether each distinct cwd exists right now — checked every pass, deliberately not memoized like the
+ * project root: a directory deleted mid-launch must drop out of the new-conversation chooser on the
+ * next pass, not the next launch.
  *
- * Bounded, because existence is optional metadata and must never withhold the index: a historical
- * cwd on an unresponsive volume can leave its check pending indefinitely, and waiting on it would
- * keep every conversation from publishing. A check unsettled at the deadline counts as missing for
- * that pass — which also keeps the resolver from walking the path synchronously. A check still in
- * flight is reused by later passes rather than issued again, so a hung one cannot accumulate.
+ * Bounded three ways, because existence is optional metadata and a historical cwd on an unresponsive
+ * volume can leave its check pending indefinitely:
+ * - a pass waits at most `deadlineMs`, so no check can withhold the index;
+ * - at most `maxInflight` checks are unsettled at once, so hung ones cannot starve the thread pool;
+ * - a cwd whose check is still pending is not checked or subscribed to again, so a hung check costs
+ *   one call and one handler however many passes it outlives.
+ * A cwd with no answer this pass reads as its last known answer, or missing if it never had one. That
+ * is safe for the resolver: a cwd once seen to exist was resolved then, and the memo answers it
+ * without touching the filesystem.
  */
 export function existenceProbe(
   isDirectory: (cwd: string) => Promise<boolean>,
-  deadlineMs = EXISTENCE_DEADLINE_MS
+  deadlineMs = EXISTENCE_DEADLINE_MS,
+  maxInflight = EXISTENCE_MAX_INFLIGHT
 ): ExistenceProbe {
-  const inflight = new Map<string, Promise<boolean>>()
-  const check = (cwd: string): Promise<boolean> => {
-    let p = inflight.get(cwd)
-    if (!p) {
-      p = isDirectory(cwd)
-        .catch(() => false)
-        .finally(() => inflight.delete(cwd))
-      inflight.set(cwd, p)
-    }
-    return p
-  }
-  return async (cwds) => {
-    const found = new Set<string>()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const deadline = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, deadlineMs)
+  const pending = new Set<string>()
+  const lastKnown = new Map<string, boolean>()
+  let inflight = 0
+  return (cwds) =>
+    new Promise<Set<string>>((resolve) => {
+      const queue = [...new Set(cwds)].filter((cwd) => !pending.has(cwd))
+      let running = 0
+      let done = false
+      const finish = (): void => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        resolve(new Set(cwds.filter((cwd) => lastKnown.get(cwd) === true)))
+      }
+      const pump = (): void => {
+        while (!done && inflight < maxInflight && queue.length > 0) {
+          const cwd = queue.shift()!
+          inflight++
+          running++
+          pending.add(cwd)
+          isDirectory(cwd)
+            .catch(() => false)
+            .then((exists) => {
+              lastKnown.set(cwd, exists)
+              inflight--
+              running--
+              pending.delete(cwd)
+              pump()
+            })
+        }
+        // Nothing of ours outstanding: either every check answered, or the remaining slots are held by
+        // checks from earlier passes, which this pass must not wait on.
+        if (running === 0) finish()
+      }
+      const timer = setTimeout(finish, deadlineMs)
+      pump()
     })
-    const all = Promise.all(
-      cwds.map((cwd) =>
-        check(cwd).then((exists) => {
-          if (exists) found.add(cwd)
-        })
-      )
-    )
-    await Promise.race([all, deadline])
-    clearTimeout(timer)
-    // A copy, so a check settling after the deadline cannot change a snapshot already published.
-    return new Set(found)
-  }
 }
 
 const defaultExistence = existenceProbe(async (cwd) => (await stat(cwd)).isDirectory())

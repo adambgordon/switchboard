@@ -79,8 +79,11 @@ function resolveGitFile(fs: RootFs, dir: string, gitFile: string): ProjectRoot {
   // A normal repository keeps its common dir at `<repo>/.git`, so the project is the directory
   // around it; a bare repository IS its common dir (e.g. `proj.git`), which has no work tree of its
   // own to point at.
-  const root = path.basename(common) === '.git' ? path.dirname(common) : common
-  return { root: tryRealpath(fs, root) ?? root, worktree: true }
+  // Deliberately not canonicalized: `root` can live on another volume than the worktree, and this
+  // runs synchronously on the main process, so resolution never touches a path outside the cwd's own
+  // ancestry — one that stopped responding would freeze the app. The cost is a split folder if the
+  // recorded gitdir goes through a symlink the main checkout's own path does not.
+  return { root: path.basename(common) === '.git' ? path.dirname(common) : common, worktree: true }
 }
 
 /**

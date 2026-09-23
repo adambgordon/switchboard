@@ -489,6 +489,34 @@ describe('existenceProbe', () => {
     expect(calls).toEqual(['/hung', '/ok', '/ok'])
   })
 
+  it('never has more checks unsettled than its cap, across passes', async () => {
+    const calls: string[] = []
+    const probe = existenceProbe(async (cwd) => {
+      calls.push(cwd)
+      return never
+    }, 10, 2)
+    for (let i = 0; i < 5; i++) await probe(['/h1', '/h2', '/h3', '/h4'])
+    // Two hung checks hold both slots for good; the other cwds are never checked while they do.
+    expect(calls).toEqual(['/h1', '/h2'])
+  })
+
+  it('does not wait again on a check still pending from an earlier pass', async () => {
+    // Joining a hung check each pass would cost every later pass the full deadline (and a handler).
+    const probe = existenceProbe(async (cwd) => (cwd === '/hung' ? never : true), 300)
+    await probe(['/hung', '/ok'])
+    const started = Date.now()
+    expect(await probe(['/hung', '/ok'])).toEqual(new Set(['/ok']))
+    expect(Date.now() - started).toBeLessThan(150)
+  })
+
+  it('reports a cwd with no answer this pass by its last known answer', async () => {
+    let calls = 0
+    const probe = existenceProbe(async () => (++calls === 1 ? true : never), 10)
+    expect(await probe(['/was-here'])).toEqual(new Set(['/was-here']))
+    expect(await probe(['/was-here'])).toEqual(new Set(['/was-here']))
+    expect(calls).toBe(2)
+  })
+
   it('treats a failed check as missing', async () => {
     const probe = existenceProbe(async (cwd) => {
       if (cwd === '/err') throw new Error('EIO')
