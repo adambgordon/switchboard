@@ -1,6 +1,6 @@
 # Switchboard — Gotchas
 
-> Subsystem traps that have bitten before — read before touching the terminal, the menu, fonts, or the build. Lifted from the repo `CLAUDE.md` to keep it lean (see the **Deep reference** index there); these rules are normative.
+> Subsystem traps that have bitten before — read before touching the terminal, the menu, fonts, or the build. Lifted from the repo `AGENTS.md` to keep it lean (see the **Deep reference** index there); these rules are normative.
 
 - **node-pty rebuild:** use `npm run rebuild` (= `node scripts/rebuild-native.mjs`). The `@electron/rebuild` CLI crashes under Node 26 (yargs/ESM), so we call its programmatic API directly.
 - **⌘R refreshes the terminal — it does NOT reload (the app installs a custom menu).**

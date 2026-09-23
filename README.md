@@ -96,7 +96,7 @@ Then quit (⌘Q) (if already running) and reopen the app.
 - **Defaults for New** — set a default directory and/or a default agent in Preferences so **New** (`⌘N`) skips the picker(s) and starts there with that agent.
 - **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences → Appearance, where you can also pick a light or dark **dock icon** independent of the theme.
 
-_For the design rationale and implementation invariants, see [`CLAUDE.md`](CLAUDE.md)._
+_For the design rationale and implementation invariants, see [`AGENTS.md`](AGENTS.md)._
 
 ## Keyboard
 

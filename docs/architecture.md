@@ -1,6 +1,6 @@
 # Switchboard — Architecture pointers
 
-> Module map and how the pieces fit — read before touching `src/main/**` or renderer internals. Lifted from the repo `CLAUDE.md` (see its **Deep reference** index).
+> Module map and how the pieces fit — read before touching `src/main/**` or renderer internals. Lifted from the repo `AGENTS.md` (see its **Deep reference** index).
 
 ## Feature → files
 
