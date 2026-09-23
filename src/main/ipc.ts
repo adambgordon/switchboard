@@ -48,6 +48,7 @@ import {
 } from './tabOwnership'
 import { transferPty } from './pty/transfer'
 import { indexConversations, type MetaCache } from './sessions/indexer'
+import { ProjectRoots } from './sessions/projectRoot'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
 import { appendCustomTitle } from './sessions/rename'
@@ -429,6 +430,14 @@ function emitActive(): void {
  *  re-parses only the transcript(s) actually changing rather than re-reading the whole index each
  *  pass (387 MB+ of transcripts on a busy machine). See indexer's MetaCache / extractWithCache. */
 const metaCache: MetaCache = new Map()
+/** The one project-root resolver, shared by the index and the PTY manager so a conversation's row
+ *  and its live terminal always agree on its project. Created on first use rather than at import:
+ *  the userData path depends on the app name, which is set after this module loads. */
+let projectRoots: ProjectRoots | null = null
+function getProjectRoots(): ProjectRoots {
+  projectRoots ??= new ProjectRoots({ dir: app.getPath('userData') })
+  return projectRoots
+}
 /** Signature of the last broadcast group tree, so reindexAndBroadcast can skip pushing an identical
  *  snapshot — the poll's 2.5s idle tail, Codex's flat (lazy-flush) periods, and the watcher's
  *  post-write re-fire after a rename all otherwise re-broadcast unchanged data. */
@@ -455,7 +464,11 @@ function broadcast(channel: string, ...args: unknown[]): void {
 }
 
 const conversationIndex = new LatestTask(
-  async () => retainHiddenSessions(await indexConversations(PROJECTS_ROOT, undefined, metaCache), hiddenSessionIds),
+  async () => {
+    const resolveRoots = (cwds: readonly string[]) => getProjectRoots().resolveAll(cwds)
+    const snapshot = await indexConversations(PROJECTS_ROOT, undefined, metaCache, { resolveRoots })
+    return retainHiddenSessions(snapshot, hiddenSessionIds)
+  },
   (snapshot) => {
     const { groups } = snapshot
     if (snapshot.hiddenSessionIds.length !== hiddenSessionIds.size) {
@@ -711,7 +724,8 @@ export function popTabContextMenu(
 
 export function registerIpc(): void {
   mgr = new PtyManager({
-    claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') }
+    claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') },
+    resolveProjectRoot: (cwd) => getProjectRoots().resolve(cwd).root
   })
   mgr.on('data', (ptyId: string, data: string) =>
     sendToWindow(ptyOwner.get(ptyId) ?? null, IPC.ptyData, ptyId, data)

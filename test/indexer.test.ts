@@ -1,9 +1,11 @@
-import { access, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { indexConversations } from '../src/main/sessions/indexer'
+import { ProjectRoots } from '../src/main/sessions/projectRoot'
+import { listCodexRollouts } from '../src/main/sessions/codexParser'
 
 /** Base for test temp dirs. */
 const TMP_BASE = tmpdir()
@@ -349,6 +351,112 @@ describe('indexConversations Codex subagent filtering', () => {
       expect(groups[0].conversations.map((conversation) => conversation.sessionId)).toEqual([parent])
     } finally {
       await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('indexConversations project roots and existence', () => {
+  it('tags each group with its project, whether it is a worktree, and whether its cwd exists', async () => {
+    const base = await realpath(await mkdtemp(path.join(TMP_BASE, 'indexer-roots-')))
+    const root = path.join(base, 'claude')
+    try {
+      const repo = path.join(base, 'repo')
+      const sub = path.join(repo, 'src')
+      const wt = path.join(base, 'work', 'wt')
+      const gone = path.join(base, 'deleted')
+      await mkdir(path.join(repo, '.git'), { recursive: true })
+      await mkdir(sub, { recursive: true })
+      await mkdir(wt, { recursive: true })
+      await writeFile(path.join(wt, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 'wt')}\n`)
+      let t = 1_000_000_000_000
+      for (const cwd of [repo, sub, wt, gone]) {
+        await writeSession(root, cwd.replace(/[/.]/g, '-'), [msgLine('user', cwd, 'hello')], (t += 1000))
+      }
+
+      const roots = new ProjectRoots({ home: path.join(base, 'home') })
+      const { groups } = await indexConversations(root, NO_CODEX, undefined, {
+        resolveRoots: (cwds) => roots.resolveAll(cwds)
+      })
+      const byCwd = new Map(groups.map((g) => [g.cwd, g]))
+      const pick = (cwd: string) => {
+        const g = byCwd.get(cwd)!
+        return { root: g.root, worktree: g.worktree, exists: g.exists }
+      }
+      // Grouping stays by exact cwd: the repo, its subdirectory and its worktree remain three groups.
+      expect(groups).toHaveLength(4)
+      expect(pick(repo)).toEqual({ root: repo, worktree: false, exists: true })
+      expect(pick(sub)).toEqual({ root: repo, worktree: false, exists: true })
+      expect(pick(wt)).toEqual({ root: repo, worktree: true, exists: true })
+      expect(pick(gone)).toEqual({ root: gone, worktree: false, exists: false })
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  it('reports existence fresh on every pass', async () => {
+    const base = await realpath(await mkdtemp(path.join(TMP_BASE, 'indexer-exists-')))
+    const root = path.join(base, 'claude')
+    try {
+      const repo = path.join(base, 'repo')
+      const cwd = path.join(base, 'wt')
+      await mkdir(path.join(repo, '.git'), { recursive: true })
+      await mkdir(cwd)
+      await writeFile(path.join(cwd, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 'wt')}\n`)
+      await writeSession(root, '-wt', [msgLine('user', cwd, 'hello')], 1_000_000_000_000)
+      const roots = new ProjectRoots({ home: path.join(base, 'home') })
+      const resolveRoots = (cwds: readonly string[]) => roots.resolveAll(cwds)
+      const cache = new Map()
+      const first = await indexConversations(root, NO_CODEX, cache, { resolveRoots })
+      expect(first.groups[0].exists).toBe(true)
+      await rm(cwd, { recursive: true })
+      const second = await indexConversations(root, NO_CODEX, cache, { resolveRoots })
+      expect(second.groups[0].exists).toBe(false)
+      // The project was resolved while the worktree existed; it must not revert to the bare cwd.
+      expect(second.groups[0].root).toBe(repo)
+      expect(second.groups[0].worktree).toBe(true)
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to the cwd itself for a path that never existed', async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-never-'))
+    try {
+      await writeSession(dir, '-home-user-project-one', [msgLine('user', CWD_A, 'hello')], 1_000_000_000_000)
+      const { groups } = await indexConversations(dir, NO_CODEX)
+      expect(groups.map((g) => ({ root: g.root, worktree: g.worktree, exists: g.exists }))).toEqual([
+        { root: CWD_A, worktree: false, exists: false }
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("records each session file's creation time, for both agents", async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-birth-'))
+    const codexRoot = path.join(dir, 'sessions')
+    try {
+      // An mtime in the FUTURE, so birth time cannot coincide with it: moving mtime earlier than
+      // creation drags the reported birth time back with it on some filesystems.
+      const later = Date.now() + 365 * 86_400_000
+      const claude = await writeSession(dir, '-home-user-project-one', [msgLine('user', CWD_A, 'hi')], later)
+      const codexId = await writeCodexRollout(codexRoot, CWD_B, 'user', later)
+      const { groups } = await indexConversations(dir, codexRoot)
+      const metas = groups.flatMap((g) => g.conversations)
+      const codexFile = (await listCodexRollouts(codexRoot)).find((f) => f.includes(codexId))!
+      const files = new Map([
+        [claude.id, claude.file],
+        [codexId, codexFile]
+      ])
+      expect(metas.map((m) => m.sessionId).sort()).toEqual([...files.keys()].sort())
+      for (const meta of metas) {
+        const { birthtimeMs } = await stat(files.get(meta.sessionId)!)
+        expect(meta.birthtimeMs).not.toBe(meta.mtime)
+        // A filesystem that does not report creation time yields 0, which must stay absent.
+        expect(meta.birthtimeMs).toBe(birthtimeMs > 0 ? birthtimeMs : undefined)
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
     }
   })
 })

@@ -64,6 +64,8 @@ interface Live {
   sessionId: string
   agent: AgentKind
   cwd: string
+  /** Resolved once at spawn: the terminal's shell can `cd` anywhere, but the row it backs cannot move. */
+  projectRoot: string
   title: string
   origin: 'resume' | 'new'
   proc: pty.IPty
@@ -158,11 +160,19 @@ export class PtyManager extends EventEmitter {
    * cannot be produced on demand, leaving a row nobody can review before it ships. Inert unless set.
    */
   private readonly fakeParkedJob: ParkedJob | null
+  /** Maps a cwd to its project (see projectRoot.ts). Must be synchronous: spawn announces its session
+   *  before returning, and that first broadcast already carries `projectRoot`. */
+  private readonly resolveProjectRoot: (cwd: string) => string
 
   constructor(
-    opts: { resolveBindings?: CodexBindingResolver; claudeParkedJobs?: ParkedJobOptions } = {}
+    opts: {
+      resolveBindings?: CodexBindingResolver
+      claudeParkedJobs?: ParkedJobOptions
+      resolveProjectRoot?: (cwd: string) => string
+    } = {}
   ) {
     super()
+    this.resolveProjectRoot = opts.resolveProjectRoot ?? ((cwd) => cwd)
     this.fakeParkedJob =
       process.env.SWITCHBOARD_FAKE_PARKED === '1'
         ? { shortId: 'fa4e0000', name: 'Example background agent (fake)' }
@@ -662,6 +672,7 @@ export class PtyManager extends EventEmitter {
       sessionId: o.sessionId,
       agent: o.agent,
       cwd: o.cwd,
+      projectRoot: this.resolveProjectRoot(o.cwd),
       title: o.title,
       origin: o.origin,
       proc,
@@ -797,6 +808,7 @@ export class PtyManager extends EventEmitter {
       sessionId: e.sessionId,
       agent: e.agent,
       cwd: e.cwd,
+      projectRoot: e.projectRoot,
       title: e.title,
       status: e.status,
       lastActivity: e.lastActivity,

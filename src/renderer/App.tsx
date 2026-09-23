@@ -22,6 +22,7 @@ import { useSessions } from './lib/useSessions'
 import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
 import { useLiveOrder } from './lib/useLiveOrder'
+import { synthMeta } from './lib/sidebarModel'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
 import { viewToggleAction } from './lib/viewToggle'
@@ -99,31 +100,6 @@ import TerminalDeck from './components/TerminalDeck'
 
 /** Recent section: rows shown in 'recent' mode before toggling to 'all'. */
 const RECENT_CAP = 30
-
-/** Display-only meta for a live session the index hasn't caught yet (no preview until its JSONL is written). */
-function synthMeta(p: PtyState): ConversationMeta {
-  return {
-    sessionId: p.sessionId,
-    agent: p.agent,
-    cwd: p.cwd,
-    title: p.title,
-    preview: '',
-    gitBranch: null,
-    mtime: p.lastActivity,
-    messageCount: 0,
-    version: null,
-    sizeBytes: 0,
-    model: null,
-    outputTokens: 0,
-    inputTokens: 0,
-    inputBaseTokens: 0,
-    cacheWriteTokens: 0,
-    cacheReadTokens: 0,
-    contextTokens: 0,
-    firstActivityAt: null,
-    provisional: true
-  }
-}
 
 export default function App() {
   const { groups, hiddenSessionIds, loading } = useSessions()
@@ -488,7 +464,9 @@ export default function App() {
       const ev = { oldId, newId, kind }
       latestBinds.set(ptyId, ev)
       const act = bindActions(ev, selectedIdRef.current, ownedHere)
-      if (act.retargetLiveOrder) retargetLiveOrder(oldId, newId)
+      // The Live section orders terminals, not conversations, so its slot follows the terminal on
+      // both kinds; `act.retargetRowOrder` governs conversation positions only.
+      retargetLiveOrder(oldId, newId)
       const apply = (): void => {
         if (act.view !== 'none' && findPriorTerminalIdsRef.current.delete(oldId)) {
           findPriorTerminalIdsRef.current.add(newId)

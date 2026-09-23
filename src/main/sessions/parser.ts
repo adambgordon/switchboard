@@ -565,11 +565,13 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
   let text: string
   let mtime: number
   let sizeBytes: number
+  let birthtimeMs: number
   try {
     const [content, stats] = await Promise.all([readFile(filePath, 'utf8'), stat(filePath)])
     text = content
     mtime = stats.mtimeMs
     sizeBytes = stats.size
+    birthtimeMs = stats.birthtimeMs
   } catch {
     return null
   }
@@ -730,6 +732,8 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     cacheReadTokens,
     contextTokens,
     firstActivityAt,
+    // A filesystem that does not track creation reports 0; absent reads unambiguously as unknown.
+    ...(birthtimeMs > 0 ? { birthtimeMs } : {}),
     turnState,
     turnEndedAt,
     lastActivityAt,

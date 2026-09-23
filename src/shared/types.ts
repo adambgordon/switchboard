@@ -120,6 +120,12 @@ export interface ConversationMeta {
   /** ms epoch of the first user/assistant message (for the elapsed-duration span). Null when none. */
   firstActivityAt: number | null
   /**
+   * ms epoch the session file was created, or undefined/0 when the filesystem does not report it.
+   * A conversation's position in the rail is derived from its start, so the start must never move:
+   * this stands in for `firstActivityAt` when that is null, because `mtime` advances on every write.
+   */
+  birthtimeMs?: number
+  /**
    * Coarse state of the latest turn, derived from the transcript tail (main chain only):
    * 'awaiting' = the last assistant turn ended (awaiting the user); 'in_progress' = a turn
    * is mid-flight (a dangling tool_use, or a trailing user / tool_result); 'awaiting_input' =
@@ -186,6 +192,15 @@ export interface ConversationIndexSnapshot {
 export interface ConversationGroup {
   /** Absolute cwd; the grouping key. */
   cwd: string
+  /**
+   * The project this cwd belongs to: the nearest enclosing git work tree, with a linked worktree
+   * folded into its main repository, or the cwd itself outside any repository. See `projectRoot.ts`.
+   */
+  root: string
+  /** True when `root` was reached through a linked worktree's `gitdir`, so `cwd` is not the repo. */
+  worktree: boolean
+  /** Whether `cwd` still exists on disk. A conversation outlives its directory. */
+  exists: boolean
   /** Display label (typically the basename, with full path available on hover). */
   label: string
   conversations: ConversationMeta[]
@@ -242,6 +257,8 @@ export interface PtySession {
   /** Which agent this PTY is running (drives the boot command). */
   agent: AgentKind
   cwd: string
+  /** The project `cwd` belongs to, resolved at spawn — see `ConversationGroup.root`. */
+  projectRoot: string
   title: string
   status: PtyStatus
   /** ms epoch of last output byte. */

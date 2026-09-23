@@ -12,9 +12,9 @@ import { activeTabId, locateTab, type PaneLayout } from './paneModel'
  * regression to it looks exactly like working code. Pure, DOM-free, and mutation-checked instead.
  *
  * The split is CONVERSATION-owned state (persisted seen/unread, and EARLIER history stops — belongs
- * to the id) versus TERMINAL-owned state (the selection, the CURRENT history stop, the surface it
- * shows, the Live slot — describes the terminal, follows it). Two summaries to avoid, both too
- * strong: "a correction migrates nothing" (it migrates nothing *durable*) and "history never moves"
+ * to the id, and so does a rail position) versus TERMINAL-owned state (the selection, the CURRENT
+ * history stop, the surface it shows — describes the terminal, follows it). Two summaries to avoid,
+ * both too strong: "a correction migrates nothing" (it migrates nothing *durable*) and "history never moves"
  * (the current stop must move with the selection, or Back/Forward drift — see the main navigation coordinator).
  *
  * See `PtyBindKind` for why the two cases are opposites and why the kind is told rather than
@@ -51,11 +51,11 @@ export interface BindActions {
   /** `move` transfers the remembered Formatted/Terminal surface and drops the old entry; `copy`
    *  carries it across while leaving the old conversation's own entry intact. */
   view: 'move' | 'copy' | 'none'
-  /** Keep the Live row in its manual slot. The row's order key is its sessionId, so without this the
-   *  order sync sees the old id vanish and the new one arrive, and treats the SAME terminal as newly
-   *  live — yanking it to the top of Live and discarding a drag position. Applies to both kinds: on
-   *  an initial bind the row is usually already at the top, but not if it was dragged first. */
-  retargetLiveOrder: boolean
+  /** Hand the placeholder's rail position to the real id (`absorbBind`). Rows are ordered by rank
+   *  keyed on sessionId, so without this the row would jump from the terminal's rank to the real
+   *  conversation's own seed. NEVER on a correction: both ids are durable conversations with positions
+   *  of their own, and moving one onto the other destroys whichever was overwritten. */
+  retargetRowOrder: boolean
   /** Re-request focus so the terminal stays hot across the id change. */
   focus: boolean
   /** Tabs are session-keyed too, so a bind has to reach them or a tab keeps naming an id that no
@@ -71,7 +71,7 @@ export interface BindActions {
 const INERT: BindActions = {
   rekeySeen: false,
   view: 'none',
-  retargetLiveOrder: false,
+  retargetRowOrder: false,
   focus: false,
   tabs: 'none',
   tabSelection: 'none'
@@ -95,7 +95,7 @@ export function bindActions(
     return {
       rekeySeen: true,
       view: 'move',
-      retargetLiveOrder: true,
+      retargetRowOrder: true,
       // Rekeying is global because the placeholder is disappearing, but a terminal that bound in
       // an unfocused pane must not take the keyboard from the pane the user moved to meanwhile.
       focus: selected,
@@ -103,13 +103,13 @@ export function bindActions(
       tabSelection: 'rekey'
     }
   }
-  // A correction. Both ids name durable conversations: the old one drops back to Recent with its
-  // own history and read state, and the new one may already carry its own. Nothing durable moves.
+  // A correction. Both ids name durable conversations: the old one keeps its own row, history and
+  // read state, and the new one may already carry its own. Nothing durable moves.
   const followsTerminal = terminalOwnedHere && selected
   return {
     rekeySeen: false,
     view: followsTerminal ? 'copy' : 'none',
-    retargetLiveOrder: true,
+    retargetRowOrder: false,
     focus: followsTerminal,
     tabs: followsTerminal ? 'retarget' : 'none',
     tabSelection: followsTerminal ? 'retarget' : 'none'

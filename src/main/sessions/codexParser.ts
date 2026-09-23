@@ -502,15 +502,19 @@ export async function extractCodexMeta(filePath: string): Promise<ConversationMe
   let text: string
   let mtime: number
   let sizeBytes: number
+  let birthtimeMs: number
   try {
     const [content, stats] = await Promise.all([readFile(filePath, 'utf8'), stat(filePath)])
     text = content
     mtime = stats.mtimeMs
     sizeBytes = stats.size
+    birthtimeMs = stats.birthtimeMs
   } catch {
     return null
   }
-  return extractCodexMetaFromText(text, sessionId, mtime, sizeBytes)
+  const meta = extractCodexMetaFromText(text, sessionId, mtime, sizeBytes)
+  // A filesystem that does not track creation reports 0; absent reads unambiguously as unknown.
+  return meta && birthtimeMs > 0 ? { ...meta, birthtimeMs } : meta
 }
 
 /** Recursively list rollout `*.jsonl` files under the (date-nested) Codex sessions root. */

@@ -14,6 +14,7 @@ function pty(over: Partial<PtyState> = {}): PtyState {
     sessionId: 'a',
     agent: 'claude',
     cwd: '/repo',
+    projectRoot: '/repo',
     title: 'Conversation',
     status: 'idle',
     lastActivity: 20,

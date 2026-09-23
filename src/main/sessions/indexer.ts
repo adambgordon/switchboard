@@ -2,7 +2,9 @@
  * Build the sidebar's grouped conversation index by scanning every session file from BOTH agents —
  * Claude Code (`~/.claude/projects`) and Codex (`~/.codex/sessions`) — and grouping the parsed
  * metadata by the absolute cwd each session ran in. Grouping by cwd unifies the agents: a repo's
- * Claude and Codex conversations land in the same group.
+ * Claude and Codex conversations land in the same group. Each group also carries the project its cwd
+ * belongs to (`root` / `worktree`, see projectRoot.ts) so the rail can fold a repository's
+ * subdirectories and worktrees together, and whether the cwd still exists (`exists`).
  *
  * Pure Node — no Electron, no DOM. Resilient: a single unreadable file or
  * directory must never crash the whole index.
@@ -16,6 +18,7 @@ import { extractMeta } from './parser'
 import { defaultCodexRoot, extractCodexMeta, listCodexRollouts } from './codexParser'
 import { readCodexThreads } from './codexThreadsDb'
 import { readCodexSessionNames, resolveCodexTitle } from './codexSessionIndex'
+import { ProjectRoots, type ProjectRoot } from './projectRoot'
 
 /** Default projects root: `~/.claude/projects`. */
 function defaultProjectsRoot(): string {
@@ -225,6 +228,35 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<{
   return { metas: out, hiddenSessionIds }
 }
 
+/** Resolve a batch of cwds to their projects in one call (see {@link ProjectRoots.resolveAll}). */
+export type ProjectRootsResolver = (cwds: readonly string[]) => ReadonlyMap<string, ProjectRoot>
+
+export interface IndexOptions {
+  /**
+   * Project-root resolver. The caller owns it so its memo and persisted cache span re-index passes;
+   * omit for a one-shot index (a fresh, unpersisted resolver, i.e. no reuse).
+   */
+  resolveRoots?: ProjectRootsResolver
+}
+
+/**
+ * Whether each distinct cwd exists right now — one `stat` apiece, in parallel. Deliberately not
+ * memoized like the project root: a directory deleted mid-launch must drop out of the
+ * new-conversation chooser on the next pass, not the next launch.
+ */
+async function existingCwds(cwds: readonly string[]): Promise<Set<string>> {
+  const found = await Promise.all(
+    cwds.map(async (cwd) => {
+      try {
+        return (await stat(cwd)).isDirectory()
+      } catch {
+        return false
+      }
+    })
+  )
+  return new Set(cwds.filter((_, i) => found[i]))
+}
+
 /**
  * Scan both agents' roots and return conversations grouped by exact cwd. Groups are sorted by
  * `latestMtime` desc; conversations within each group are sorted by `mtime` desc. Conversations with
@@ -233,11 +265,13 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<{
 export async function indexConversations(
   projectsRoot?: string,
   codexRoot?: string,
-  cache?: MetaCache
+  cache?: MetaCache,
+  options: IndexOptions = {}
 ): Promise<ConversationIndexSnapshot> {
   const claudeRoot = projectsRoot ?? defaultProjectsRoot()
   const codexSessionsRoot = codexRoot ?? defaultCodexRoot()
   const fileCache = cache ?? new Map()
+  const resolveRoots = options.resolveRoots ?? ((cwds) => new ProjectRoots().resolveAll(cwds))
 
   const [claudeMetas, codex] = await Promise.all([
     indexClaudeMetas(claudeRoot, fileCache),
@@ -251,11 +285,24 @@ export async function indexConversations(
     else groups.set(meta.cwd, [meta])
   }
 
+  const cwds = [...groups.keys()]
+  const roots = resolveRoots(cwds)
+  const existing = await existingCwds(cwds)
+
   const result: ConversationGroup[] = []
   for (const [cwd, conversations] of groups) {
     conversations.sort((a, b) => b.mtime - a.mtime)
     const latestMtime = conversations.reduce((max, c) => (c.mtime > max ? c.mtime : max), 0)
-    result.push({ cwd, label: labelForCwd(cwd), conversations, latestMtime })
+    const { root, worktree } = roots.get(cwd) ?? { root: cwd, worktree: false }
+    result.push({
+      cwd,
+      root,
+      worktree,
+      exists: existing.has(cwd),
+      label: labelForCwd(cwd),
+      conversations,
+      latestMtime
+    })
   }
 
   result.sort((a, b) => b.latestMtime - a.latestMtime)
