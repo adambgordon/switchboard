@@ -244,8 +244,18 @@ export interface IndexOptions {
   existing?: ExistenceProbe
 }
 
-/** Resolve the subset of `cwds` that exist as directories. */
-export type ExistenceProbe = (cwds: readonly string[]) => Promise<Set<string>>
+/**
+ * Which of `cwds` exist as directories. `exists` is the best answer available — this pass's, else
+ * the last one — and is what the rail and chooser show. `verified` holds only cwds whose check
+ * answered yes THIS pass, and is the only licence to walk a cwd synchronously: a last-known answer
+ * says nothing about whether the volume responds now.
+ */
+export interface Existence {
+  exists: Set<string>
+  verified: Set<string>
+}
+
+export type ExistenceProbe = (cwds: readonly string[]) => Promise<Existence>
 
 /** How long a pass waits for existence checks before publishing without them. */
 export const EXISTENCE_DEADLINE_MS = 200
@@ -269,9 +279,8 @@ export const EXISTENCE_MAX_INFLIGHT = 2
  * - at most `maxInflight` checks are unsettled at once, so hung ones cannot starve the thread pool;
  * - a cwd whose check is still pending is not checked or subscribed to again, so a hung check costs
  *   one call and one handler however many passes it outlives.
- * A cwd with no answer this pass reads as its last known answer, or missing if it never had one. That
- * is safe for the resolver: a cwd once seen to exist was resolved then, and the memo answers it
- * without touching the filesystem.
+ * A cwd with no answer this pass reads as its last known answer, or missing if it never had one —
+ * but only for display: it is never `verified`, so the resolver does not walk it on that answer.
  */
 export function existenceProbe(
   isDirectory: (cwd: string) => Promise<boolean>,
@@ -282,15 +291,16 @@ export function existenceProbe(
   const lastKnown = new Map<string, boolean>()
   let inflight = 0
   return (cwds) =>
-    new Promise<Set<string>>((resolve) => {
+    new Promise<Existence>((resolve) => {
       const queue = [...new Set(cwds)].filter((cwd) => !pending.has(cwd))
+      const verified = new Set<string>()
       let running = 0
       let done = false
       const finish = (): void => {
         if (done) return
         done = true
         clearTimeout(timer)
-        resolve(new Set(cwds.filter((cwd) => lastKnown.get(cwd) === true)))
+        resolve({ exists: new Set(cwds.filter((cwd) => lastKnown.get(cwd) === true)), verified: new Set(verified) })
       }
       const pump = (): void => {
         while (!done && inflight < maxInflight && queue.length > 0) {
@@ -302,6 +312,7 @@ export function existenceProbe(
             .catch(() => false)
             .then((exists) => {
               lastKnown.set(cwd, exists)
+              if (exists) verified.add(cwd)
               inflight--
               running--
               pending.delete(cwd)
@@ -348,8 +359,8 @@ export async function indexConversations(
   }
 
   const cwds = [...groups.keys()]
-  const existing = await (options.existing ?? defaultExistence)(cwds)
-  const roots = resolveRoots(cwds, new Set(cwds.filter((c) => !existing.has(c))))
+  const { exists, verified } = await (options.existing ?? defaultExistence)(cwds)
+  const roots = resolveRoots(cwds, new Set(cwds.filter((c) => !verified.has(c))))
 
   const result: ConversationGroup[] = []
   for (const [cwd, conversations] of groups) {
@@ -360,7 +371,7 @@ export async function indexConversations(
       cwd,
       root,
       worktree,
-      exists: existing.has(cwd),
+      exists: exists.has(cwd),
       label: labelForCwd(cwd),
       conversations,
       latestMtime

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { existenceProbe, indexConversations } from '../src/main/sessions/indexer'
-import { ProjectRoots } from '../src/main/sessions/projectRoot'
+import { nodeRootFs, ProjectRoots } from '../src/main/sessions/projectRoot'
 import { listCodexRollouts } from '../src/main/sessions/codexParser'
 
 /** Base for test temp dirs. */
@@ -473,7 +473,7 @@ describe('existenceProbe', () => {
   it('answers by the deadline even when one check never settles', async () => {
     const probe = existenceProbe(async (cwd) => (cwd === '/hung' ? never : cwd === '/here'), 20)
     const started = Date.now()
-    expect(await probe(['/here', '/gone', '/hung'])).toEqual(new Set(['/here']))
+    expect((await probe(['/here', '/gone', '/hung'])).exists).toEqual(new Set(['/here']))
     expect(Date.now() - started).toBeLessThan(1000)
   })
 
@@ -505,16 +505,40 @@ describe('existenceProbe', () => {
     const probe = existenceProbe(async (cwd) => (cwd === '/hung' ? never : true), 300)
     await probe(['/hung', '/ok'])
     const started = Date.now()
-    expect(await probe(['/hung', '/ok'])).toEqual(new Set(['/ok']))
+    expect((await probe(['/hung', '/ok'])).exists).toEqual(new Set(['/ok']))
     expect(Date.now() - started).toBeLessThan(150)
   })
 
   it('reports a cwd with no answer this pass by its last known answer', async () => {
     let calls = 0
     const probe = existenceProbe(async () => (++calls === 1 ? true : never), 10)
-    expect(await probe(['/was-here'])).toEqual(new Set(['/was-here']))
-    expect(await probe(['/was-here'])).toEqual(new Set(['/was-here']))
+    expect((await probe(['/was-here'])).exists).toEqual(new Set(['/was-here']))
+    expect((await probe(['/was-here'])).exists).toEqual(new Set(['/was-here']))
     expect(calls).toBe(2)
+  })
+
+  it('never licenses a walk on a last-known answer', async () => {
+    // A flaky volume: the first check answers late (after its pass gave up), the next one hangs. The
+    // second pass may SHOW the cwd as existing from memory, but must not let the resolver walk it.
+    let calls = 0
+    const isDirectory = (): Promise<boolean> =>
+      ++calls === 1 ? new Promise((r) => setTimeout(() => r(true), 30)) : never
+    const probe = existenceProbe(isDirectory, 10)
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-flaky-'))
+    try {
+      await writeSession(dir, '-flaky', [msgLine('user', '/w/flaky', 'hello')], 1_000_000_000_000)
+      let walks = 0
+      const counting = { ...nodeRootFs, realpath: (p: string) => (walks++, nodeRootFs.realpath(p)) }
+      const roots = new ProjectRoots({ home: path.join(dir, 'home'), fs: counting })
+      const options = { existing: probe, resolveRoots: (c: readonly string[], m: ReadonlySet<string>) => roots.resolveAll(c, m) }
+      await indexConversations(dir, NO_CODEX, undefined, options)
+      await new Promise((r) => setTimeout(r, 60))
+      const { groups } = await indexConversations(dir, NO_CODEX, undefined, options)
+      expect(groups[0].exists).toBe(true)
+      expect(walks).toBe(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('treats a failed check as missing', async () => {
@@ -522,7 +546,7 @@ describe('existenceProbe', () => {
       if (cwd === '/err') throw new Error('EIO')
       return true
     }, 50)
-    expect(await probe(['/err', '/ok'])).toEqual(new Set(['/ok']))
+    expect((await probe(['/err', '/ok'])).exists).toEqual(new Set(['/ok']))
   })
 
   it('does not change a returned snapshot when a late check settles', async () => {
@@ -533,7 +557,7 @@ describe('existenceProbe', () => {
     release(true)
     await late
     await new Promise((r) => setTimeout(r, 0))
-    expect(snapshot).toEqual(new Set(['/ok']))
+    expect(snapshot).toEqual({ exists: new Set(['/ok']), verified: new Set(['/ok']) })
   })
 
   it('never withholds the index behind a hung check', async () => {

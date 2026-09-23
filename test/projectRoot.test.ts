@@ -99,6 +99,23 @@ describe('resolveProjectRoot', () => {
     expect(touched.filter((p) => p === r || p.startsWith(r + path.sep))).toEqual([])
   })
 
+  it('treats a symlinked .git as a repository without following it', () => {
+    const elsewhere = dir('elsewhere', 'gitdata')
+    const r = dir('linked')
+    symlinkSync(elsewhere, path.join(r, '.git'))
+    const touched: string[] = []
+    const spying = {
+      realpath: (p: string) => (touched.push(p), nodeRootFs.realpath(p)),
+      kind: (p: string) => (touched.push(p), nodeRootFs.kind(p)),
+      readFile: (p: string) => (touched.push(p), nodeRootFs.readFile(p))
+    }
+    expect(resolveProjectRoot(dir('linked', 'src'), home, spying)).toEqual({ root: r, worktree: false })
+    expect(touched.filter((p) => p.startsWith(elsewhere))).toEqual([])
+    // lstat, not stat: a following implementation would read the link as the directory it points at
+    // and give the same answer, so assert the link is reported as a link.
+    expect(nodeRootFs.kind(path.join(r, '.git'))).toBe('link')
+  })
+
   it('treats a submodule as its own project, not as a worktree', () => {
     repo('super')
     dir('super', '.git', 'modules', 'sub')

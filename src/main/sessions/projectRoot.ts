@@ -11,7 +11,7 @@
  * Electron-free (the persistence dir is injected) so it stays unit-testable under the node tsconfig.
  */
 
-import { readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { lstatSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -26,8 +26,8 @@ export interface ProjectRoot {
 export interface RootFs {
   /** Canonical path; throws when `p` does not exist. */
   realpath(p: string): string
-  /** What `p` is, following symlinks; null when it is missing or unreadable. */
-  kind(p: string): 'dir' | 'file' | null
+  /** What `p` itself is, NOT following a symlink; null when it is missing or unreadable. */
+  kind(p: string): 'dir' | 'file' | 'link' | null
   /** Contents as UTF-8; throws on failure. */
   readFile(p: string): string
 }
@@ -36,8 +36,9 @@ export const nodeRootFs: RootFs = {
   realpath: (p) => realpathSync(p),
   kind: (p) => {
     try {
-      const st = statSync(p, { throwIfNoEntry: false })
+      const st = lstatSync(p, { throwIfNoEntry: false })
       if (!st) return null
+      if (st.isSymbolicLink()) return 'link'
       if (st.isDirectory()) return 'dir'
       return st.isFile() ? 'file' : null
     } catch {
@@ -104,7 +105,9 @@ export function resolveProjectRoot(cwd: string, home: string, fs: RootFs = nodeR
     if (dir === realHome && start !== realHome) break
     const gitPath = path.join(dir, '.git')
     const kind = fs.kind(gitPath)
-    if (kind === 'dir') return { root: dir, worktree: false }
+    // A symlinked `.git` still marks a repository here, and is never followed: its target can be on
+    // another volume, and this walk must not leave the cwd's own ancestry.
+    if (kind === 'dir' || kind === 'link') return { root: dir, worktree: false }
     if (kind === 'file') return resolveGitFile(fs, dir, gitPath)
     const parent = path.dirname(dir)
     if (parent === dir) break
