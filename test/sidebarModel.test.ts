@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationGroup, ConversationMeta, LiveState, PtyState } from '../src/shared/types'
+import { absorbBind, absorbBindFolder } from '../src/renderer/lib/rowRank'
 import {
   buildSidebar,
   conversationSeed,
@@ -408,7 +409,11 @@ describe('needsYou', () => {
     const base = { groups, ptys, liveState, pinned: ['a-pin'], collapsed: { '/w/a': true } }
     expect(buildSidebar(input(base)).needsYou).toEqual(['a-pin', 'a-row', 'b-late'])
     expect(buildSidebar(input({ ...base, search: new Set(['b1']) })).needsYou).toEqual(['a-pin', 'a-row', 'b-late'])
-    expect(buildSidebar(input({ ...base, mode: 'all' })).needsYou).toEqual(['a-pin', 'a-row', 'b-late'])
+    // A folder rank moving /w/b first must reorder Folders mode's list and leave All mode's alone — a
+    // list sorted globally regardless of mode passes every assertion above.
+    const bFirst = { ...base, folderRanks: { '/w/b': T } }
+    expect(buildSidebar(input(bFirst)).needsYou).toEqual(['b-late', 'a-pin', 'a-row'])
+    expect(buildSidebar(input({ ...bFirst, mode: 'all' })).needsYou).toEqual(['a-pin', 'a-row', 'b-late'])
   })
 })
 
@@ -440,7 +445,53 @@ describe('an empty or loading catalog', () => {
     const collapsed = Object.freeze({ '/w/a': true })
     const pinned = Object.freeze(['a'])
     const model = buildSidebar(input({ rowRanks, folderRanks, collapsed, pinned }))
-    expect(model).toEqual({ groups: [], needsYou: [] })
+    expect(model).toEqual({ groups: [], folders: new Map(), needsYou: [] })
     expect([rowRanks, folderRanks, collapsed, pinned]).toEqual([{ a: T }, { '/w/a': T }, { '/w/a': true }, ['a']])
+  })
+})
+
+describe('All mode is always one group', () => {
+  it('keeps its single group with an empty catalog and with a search matching nothing', () => {
+    const empty = { key: '', collapsed: false, hidden: 0, blocks: [] }
+    expect(shape(buildSidebar(input({ mode: 'all' })))).toEqual([empty])
+    expect(
+      shape(buildSidebar(input({ mode: 'all', groups: [group('/w/a', [conv('a', T)])], search: new Set(['none']) })))
+    ).toEqual([empty])
+  })
+})
+
+describe('an initial bind', () => {
+  // Folder /w/a's only row is a Codex placeholder started at T; /w/b's conversation started at T+1000,
+  // so /w/b leads. The placeholder binds to a conversation whose first message is at T+3000.
+  const before = buildSidebar(
+    input({
+      groups: [group('/w/b', [conv('b', T + 1000)])],
+      ptys: [pty('ph', { agent: 'codex', projectRoot: '/w/a', startedAt: T, provisional: true })]
+    })
+  )
+  const after = (rowRanks: Record<string, number>, folderRanks: Record<string, number>): SidebarModel =>
+    buildSidebar(
+      input({
+        groups: [group('/w/b', [conv('b', T + 1000)]), group('/w/a', [conv('real', T + 3000, { agent: 'codex' })])],
+        ptys: [pty('real', { agent: 'codex', projectRoot: '/w/a', startedAt: T })],
+        rowRanks,
+        folderRanks
+      })
+    )
+
+  it('keeps both the row and its brand-new folder where they were', () => {
+    expect(keys(before)).toEqual(['/w/b', '/w/a'])
+    const rowRanks = absorbBind({}, T, 'ph', 'real')
+    const folderRanks = absorbBindFolder({}, '/w/a', before.folders.get('/w/a')!, T)
+    expect(folderRanks).toEqual({ '/w/a': T })
+    expect(keys(after(rowRanks, folderRanks))).toEqual(['/w/b', '/w/a'])
+    // Without the folder write the folder's seed rises to T+3000 and it jumps above /w/b.
+    expect(keys(after(rowRanks, {}))).toEqual(['/w/a', '/w/b'])
+  })
+
+  it('writes no folder rank when an older row holds the seed or the folder is already placed', () => {
+    expect(absorbBindFolder({}, '/w/a', { rank: T - 50, seed: T - 50 }, T)).toEqual({})
+    const placed = { '/w/a': T - 7 }
+    expect(absorbBindFolder(placed, '/w/a', { rank: T - 7, seed: T }, T)).toBe(placed)
   })
 })

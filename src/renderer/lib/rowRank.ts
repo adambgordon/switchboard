@@ -134,6 +134,28 @@ export function absorbBind(
   return next
 }
 
+/**
+ * The folder half of an initial bind. A folder is seeded by its earliest row, and a brand-new
+ * folder's earliest row can be the placeholder itself — seeded by its terminal's start. Once bound,
+ * that row's seed becomes the real conversation's first message, later than the terminal's start, so
+ * the folder's seed would rise and it could drop below a folder started in between. When the
+ * placeholder is what holds the folder's seed, freeze the folder where it stands.
+ *
+ * Nothing is written when the folder already carries an override (a user-set position the bind must
+ * not disturb) or when an older row holds its seed (the bind cannot move it).
+ */
+export function absorbBindFolder(
+  folderOverrides: RankOverrides,
+  root: string,
+  folder: { rank: number; seed: number },
+  placeholderSeed: number
+): Record<string, number> {
+  if (Object.hasOwn(folderOverrides, root) || placeholderSeed > folder.seed) {
+    return folderOverrides as Record<string, number>
+  }
+  return { ...folderOverrides, [root]: folder.rank }
+}
+
 /** Read a stored override map, keeping only finite numeric entries. Anything malformed reads as empty. */
 export function parseRanks(raw: string | null): Record<string, number> {
   if (!raw) return {}

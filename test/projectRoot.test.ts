@@ -196,6 +196,27 @@ describe('ProjectRoots', () => {
     expect(reloaded.get(plain)).toEqual({ root: plain, worktree: false })
   })
 
+  it('keeps entries another process wrote since this one loaded the cache', () => {
+    // Two processes sharing one userData directory both start from an empty cache, then each learns
+    // a different worktree. The second write must not erase the first process's entry.
+    const data = dir('data')
+    const r = repo('repo')
+    const wtA = dir('work', 'a')
+    const wtB = dir('work', 'b')
+    gitFile(wtA, path.join(r, '.git', 'worktrees', 'a'))
+    gitFile(wtB, path.join(r, '.git', 'worktrees', 'b'))
+    const first = new ProjectRoots({ dir: data, home })
+    const second = new ProjectRoots({ dir: data, home })
+    first.resolve(wtA)
+    second.resolve(wtB)
+    expect(cacheFile(data)).toEqual({
+      [wtA]: { root: r, worktree: true },
+      [wtB]: { root: r, worktree: true }
+    })
+    rmSync(wtA, { recursive: true })
+    expect(new ProjectRoots({ dir: data, home }).resolve(wtA)).toEqual({ root: r, worktree: true })
+  })
+
   it('tolerates a corrupt cache file', () => {
     const data = dir('data')
     writeFileSync(path.join(data, 'project-roots.json'), '{not json')

@@ -11,7 +11,7 @@
  * Electron-free (the persistence dir is injected) so it stays unit-testable under the node tsconfig.
  */
 
-import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -155,7 +155,7 @@ export interface ProjectRootsOptions {
  */
 export class ProjectRoots {
   private readonly memo = new Map<string, ProjectRoot>()
-  private readonly persisted: Map<string, ProjectRoot>
+  private persisted: Map<string, ProjectRoot>
   private readonly dir: string | null
   private readonly home: string
   private readonly fs: RootFs
@@ -205,13 +205,26 @@ export class ProjectRoots {
     return out
   }
 
-  /** Persist the cache. Best-effort — losing it only costs the folding of since-deleted worktrees. */
+  /**
+   * Persist the cache. Best-effort — losing it only costs the folding of since-deleted worktrees.
+   *
+   * Several app processes can share one userData directory, each holding the file as it was when
+   * that process started. So the write folds this launch's fresh resolutions into what is on disk
+   * NOW rather than replacing it with this process's snapshot, which would drop every entry another
+   * process added since. It goes through a rename so a reader never sees a half-written file.
+   */
   private save(): void {
     if (!this.dir) return
+    const merged = loadPersisted(this.dir)
+    for (const [cwd, entry] of this.memo) merged.set(cwd, entry)
     const obj: Record<string, ProjectRoot> = {}
-    for (const [cwd, entry] of this.persisted) obj[cwd] = entry
+    for (const [cwd, entry] of merged) obj[cwd] = entry
+    const file = path.join(this.dir, FILE)
+    const temp = `${file}.${process.pid}.tmp`
     try {
-      writeFileSync(path.join(this.dir, FILE), JSON.stringify(obj))
+      writeFileSync(temp, JSON.stringify(obj))
+      renameSync(temp, file)
+      this.persisted = merged
     } catch {
       /* a lost cache only costs deleted worktrees their folding; not worth surfacing */
     }

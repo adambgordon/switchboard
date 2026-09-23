@@ -42,8 +42,18 @@ export interface SidebarGroup {
   wantsAttention: boolean
 }
 
+export interface FolderRank {
+  /** Effective rank: the stored folder override, else the seed. */
+  rank: number
+  /** The earliest conversation seed in the folder. */
+  seed: number
+}
+
 export interface SidebarModel {
   groups: SidebarGroup[]
+  /** Every folder's rank and seed, in both modes and regardless of search — what a folder drag or a
+   *  bind needs, including for folders not currently rendered. */
+  folders: ReadonlyMap<string, FolderRank>
   /** Every session that needs the user, in fully-expanded display order: the head tag's count and its
    *  cycle order. Unaffected by search, collapse and caps, so nothing can hide one from it. */
   needsYou: string[]
@@ -236,7 +246,8 @@ function buildGroup(
 ): SidebarGroup | null {
   const wantsAttention = all.some((r) => needsYou(r.liveState))
   const rows = input.search ? all.filter((r) => input.search!.has(r.sessionId)) : all
-  if (rows.length === 0) return null
+  // All mode is always exactly one group, even empty; a folder with nothing to show is dropped.
+  if (rows.length === 0 && input.mode === 'folders') return null
   const header = input.mode === 'folders'
   const collapsed = header && isCollapsed(input, key, index, rows)
   const pinned = sortRows(rows.filter((r) => r.pinned))
@@ -273,22 +284,25 @@ function buildGroup(
 export function buildSidebar(input: SidebarInput): SidebarModel {
   const placed = placeRows(input)
 
+  const byRoot = new Map<string, { rows: SidebarRow[]; seed: number }>()
+  for (const p of placed) {
+    const b = byRoot.get(p.root)
+    if (b) {
+      b.rows.push(p.row)
+      b.seed = Math.min(b.seed, p.seed)
+    } else byRoot.set(p.root, { rows: [p.row], seed: p.seed })
+  }
+  // A folder is seeded by its EARLIEST conversation, which is fixed once seen. Its latest would lift
+  // the folder every time a conversation started in it — motion caused by activity.
+  const folders = new Map<string, FolderRank>()
+  for (const [root, b] of byRoot) folders.set(root, { rank: rankOf(root, b.seed, input.folderRanks), seed: b.seed })
+
   let buckets: { key: string; rows: SidebarRow[] }[]
   if (input.mode === 'all') {
     buckets = [{ key: '', rows: placed.map((p) => p.row) }]
   } else {
-    const byRoot = new Map<string, { rows: SidebarRow[]; seed: number }>()
-    for (const p of placed) {
-      const b = byRoot.get(p.root)
-      if (b) {
-        b.rows.push(p.row)
-        b.seed = Math.min(b.seed, p.seed)
-      } else byRoot.set(p.root, { rows: [p.row], seed: p.seed })
-    }
-    // A folder is seeded by its EARLIEST conversation, which is fixed once seen. Its latest would lift
-    // the folder every time a conversation started in it — motion caused by activity.
     buckets = [...byRoot]
-      .map(([root, b]) => ({ id: root, rank: rankOf(root, b.seed, input.folderRanks), rows: b.rows }))
+      .map(([root, b]) => ({ id: root, rank: folders.get(root)!.rank, rows: b.rows }))
       .sort(compareRanked)
       .map((b) => ({ key: b.id, rows: b.rows }))
   }
@@ -305,7 +319,7 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
     const rows = sortRows(b.rows.filter((r) => r.pinned)).concat(sortRows(b.rows.filter((r) => !r.pinned)))
     for (const r of rows) if (needsYou(r.liveState)) order.push(r.sessionId)
   }
-  return { groups, needsYou: order }
+  return { groups, folders, needsYou: order }
 }
 
 /** The rows on screen, top to bottom — what keyboard navigation steps through. */
