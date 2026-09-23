@@ -240,25 +240,63 @@ export interface IndexOptions {
    * omit for a one-shot index (a fresh, unpersisted resolver, i.e. no reuse).
    */
   resolveRoots?: ProjectRootsResolver
+  /** Which cwds exist. Defaults to one process-wide {@link existenceProbe} over the real filesystem. */
+  existing?: ExistenceProbe
 }
 
+/** Resolve the subset of `cwds` that exist as directories. */
+export type ExistenceProbe = (cwds: readonly string[]) => Promise<Set<string>>
+
+/** How long a pass waits for existence checks before publishing without them. */
+export const EXISTENCE_DEADLINE_MS = 200
+
 /**
- * Whether each distinct cwd exists right now — one `stat` apiece, in parallel. Deliberately not
+ * Whether each distinct cwd exists right now — one check apiece, in parallel. Deliberately not
  * memoized like the project root: a directory deleted mid-launch must drop out of the
  * new-conversation chooser on the next pass, not the next launch.
+ *
+ * Bounded, because existence is optional metadata and must never withhold the index: a historical
+ * cwd on an unresponsive volume can leave its check pending indefinitely, and waiting on it would
+ * keep every conversation from publishing. A check unsettled at the deadline counts as missing for
+ * that pass — which also keeps the resolver from walking the path synchronously. A check still in
+ * flight is reused by later passes rather than issued again, so a hung one cannot accumulate.
  */
-async function existingCwds(cwds: readonly string[]): Promise<Set<string>> {
-  const found = await Promise.all(
-    cwds.map(async (cwd) => {
-      try {
-        return (await stat(cwd)).isDirectory()
-      } catch {
-        return false
-      }
+export function existenceProbe(
+  isDirectory: (cwd: string) => Promise<boolean>,
+  deadlineMs = EXISTENCE_DEADLINE_MS
+): ExistenceProbe {
+  const inflight = new Map<string, Promise<boolean>>()
+  const check = (cwd: string): Promise<boolean> => {
+    let p = inflight.get(cwd)
+    if (!p) {
+      p = isDirectory(cwd)
+        .catch(() => false)
+        .finally(() => inflight.delete(cwd))
+      inflight.set(cwd, p)
+    }
+    return p
+  }
+  return async (cwds) => {
+    const found = new Set<string>()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, deadlineMs)
     })
-  )
-  return new Set(cwds.filter((_, i) => found[i]))
+    const all = Promise.all(
+      cwds.map((cwd) =>
+        check(cwd).then((exists) => {
+          if (exists) found.add(cwd)
+        })
+      )
+    )
+    await Promise.race([all, deadline])
+    clearTimeout(timer)
+    // A copy, so a check settling after the deadline cannot change a snapshot already published.
+    return new Set(found)
+  }
 }
+
+const defaultExistence = existenceProbe(async (cwd) => (await stat(cwd)).isDirectory())
 
 /**
  * Scan both agents' roots and return conversations grouped by exact cwd. Groups are sorted by
@@ -289,7 +327,7 @@ export async function indexConversations(
   }
 
   const cwds = [...groups.keys()]
-  const existing = await existingCwds(cwds)
+  const existing = await (options.existing ?? defaultExistence)(cwds)
   const roots = resolveRoots(cwds, new Set(cwds.filter((c) => !existing.has(c))))
 
   const result: ConversationGroup[] = []

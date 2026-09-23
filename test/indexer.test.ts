@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { indexConversations } from '../src/main/sessions/indexer'
+import { existenceProbe, indexConversations } from '../src/main/sessions/indexer'
 import { ProjectRoots } from '../src/main/sessions/projectRoot'
 import { listCodexRollouts } from '../src/main/sessions/codexParser'
 
@@ -461,6 +461,62 @@ describe('indexConversations project roots and existence', () => {
         // A filesystem that does not report creation time yields 0, which must stay absent.
         expect(meta.birthtimeMs).toBe(birthtimeMs > 0 ? birthtimeMs : undefined)
       }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('existenceProbe', () => {
+  const never = new Promise<boolean>(() => {})
+
+  it('answers by the deadline even when one check never settles', async () => {
+    const probe = existenceProbe(async (cwd) => (cwd === '/hung' ? never : cwd === '/here'), 20)
+    const started = Date.now()
+    expect(await probe(['/here', '/gone', '/hung'])).toEqual(new Set(['/here']))
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('reuses a check still in flight instead of issuing another', async () => {
+    const calls: string[] = []
+    const probe = existenceProbe(async (cwd) => {
+      calls.push(cwd)
+      return cwd === '/hung' ? never : true
+    }, 10)
+    await probe(['/hung', '/ok'])
+    await probe(['/hung', '/ok'])
+    // The settled check runs again on the next pass; the hung one is joined, not repeated.
+    expect(calls).toEqual(['/hung', '/ok', '/ok'])
+  })
+
+  it('treats a failed check as missing', async () => {
+    const probe = existenceProbe(async (cwd) => {
+      if (cwd === '/err') throw new Error('EIO')
+      return true
+    }, 50)
+    expect(await probe(['/err', '/ok'])).toEqual(new Set(['/ok']))
+  })
+
+  it('does not change a returned snapshot when a late check settles', async () => {
+    let release: (v: boolean) => void = () => {}
+    const late = new Promise<boolean>((r) => (release = r))
+    const probe = existenceProbe(async (cwd) => (cwd === '/late' ? late : true), 10)
+    const snapshot = await probe(['/late', '/ok'])
+    release(true)
+    await late
+    await new Promise((r) => setTimeout(r, 0))
+    expect(snapshot).toEqual(new Set(['/ok']))
+  })
+
+  it('never withholds the index behind a hung check', async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-hung-'))
+    try {
+      await writeSession(dir, '-a', [msgLine('user', '/w/a', 'hello')], 1_000_000_000_000)
+      await writeSession(dir, '-hung', [msgLine('user', '/w/hung', 'hello')], 1_000_000_001_000)
+      const existing = existenceProbe(async (cwd) => (cwd === '/w/hung' ? never : true), 20)
+      const { groups } = await indexConversations(dir, NO_CODEX, undefined, { existing })
+      const byCwd = new Map(groups.map((g) => [g.cwd, g.exists]))
+      expect(byCwd).toEqual(new Map([['/w/hung', false], ['/w/a', true]]))
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
