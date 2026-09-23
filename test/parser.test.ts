@@ -489,6 +489,56 @@ describe('extractMeta', () => {
   })
 })
 
+describe('extractMeta — headless (programmatic launch) detection', () => {
+  /** One JSONL line per entry: a string stamps that `entrypoint`, null writes a line with none. */
+  async function headlessFor(entrypoints: (string | null)[], content = 'hello'): Promise<boolean | undefined> {
+    const file = path.join(tmpDir, `${randomUUID()}.jsonl`)
+    const lines = entrypoints.map((entrypoint, i) => ({
+      type: i % 2 === 0 ? 'user' : 'assistant',
+      uuid: randomUUID(),
+      isSidechain: false,
+      timestamp: `2026-05-29T23:00:0${i}.000Z`,
+      cwd: CWD,
+      ...(entrypoint === null ? {} : { entrypoint }),
+      message: { role: i % 2 === 0 ? 'user' : 'assistant', content }
+    }))
+    await writeFile(file, jsonl(lines), 'utf8')
+    const meta = await extractMeta(file)
+    expect(meta).not.toBeNull()
+    return meta!.headless
+  }
+
+  it('is headless when every stamped line came from an SDK launch, ignoring unstamped lines', async () => {
+    expect(await headlessFor([null, 'sdk-cli', null, 'sdk-cli'])).toBe(true)
+    expect(await headlessFor(['sdk-ts', 'sdk-ts'])).toBe(true)
+    expect(await headlessFor(['sdk-py'])).toBe(true)
+  })
+
+  it('is not headless once any stamped line came from another launch, wherever it falls', async () => {
+    // Later interactive resume of a `claude -p` transcript.
+    expect(await headlessFor(['sdk-cli', 'sdk-cli', 'cli'])).toBe(false)
+    // Headless continuation of an interactive conversation (`claude -p --resume`).
+    expect(await headlessFor(['cli', 'sdk-cli', 'sdk-cli'])).toBe(false)
+    // The interactive line sits between SDK lines: neither the first nor the last line decides.
+    expect(await headlessFor(['sdk-cli', 'cli', 'sdk-cli'])).toBe(false)
+  })
+
+  it('keeps interactive, editor, and unrecognized entrypoints visible', async () => {
+    expect(await headlessFor(['cli', 'cli'])).toBe(false)
+    expect(await headlessFor(['claude-vscode'])).toBe(false)
+    // An unknown value fails open, even one shaped like an SDK name.
+    expect(await headlessFor(['sdk-future'])).toBe(false)
+  })
+
+  it('is not headless when no line carries an entrypoint (older transcripts)', async () => {
+    expect(await headlessFor([null, null])).toBe(false)
+  })
+
+  it('reads the top-level field, not a quoted "entrypoint" inside message content', async () => {
+    expect(await headlessFor([null, null], 'pasted: {"entrypoint":"sdk-cli"}')).toBe(false)
+  })
+})
+
 describe('extractTurnState', () => {
   const T1 = '2026-06-01T17:00:00.000Z'
   const T2 = '2026-06-01T17:00:30.000Z'

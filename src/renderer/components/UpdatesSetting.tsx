@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { UpdateCheck } from '@shared/types'
 import type { Updates } from '../lib/useUpdates'
 
-// The documented manual update (README / CLAUDE.md "Update Switchboard"), shown when this copy can't
+// The documented manual update (README / AGENTS.md "Update Switchboard"), shown when this copy can't
 // rebuild itself (moved out of its dist/ folder).
 const MANUAL_CMD = 'git pull && npm run setup'
 

@@ -14,8 +14,8 @@ const REFRESH_ZOOM_NUDGE = 0.5
  * the same thing a manual ⌘+ / ⌘− does. Changing the zoom relayouts the whole renderer, which
  * (a) fires each terminal host's ResizeObserver → fitAndResize → a real PTY resize (SIGWINCH) →
  * claude repaints its entire screen, and (b) forces a full-page recomposite, which clears a stale
- * WebGL frame (a bare terminal redraw can't do the latter — see the repo CLAUDE.md "stale
- * composite" note). The nudge is kept small (REFRESH_ZOOM_NUDGE) so the flicker is minimal.
+ * WebGL frame (a bare terminal redraw can't do the latter — see "The ⌘R rebind" in
+ * docs/gotchas.md). The nudge is kept small (REFRESH_ZOOM_NUDGE) so the flicker is minimal.
  *
  * This is what ⌘R is bound to INSTEAD of `reload`. A renderer reload would destroy every xterm
  * buffer — the main process keeps no PTY output to replay (PtyManager only streams live bytes), so

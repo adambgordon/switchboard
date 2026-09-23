@@ -150,6 +150,12 @@ export interface ConversationMeta {
    */
   sessionKind?: string
   /**
+   * Claude Code only: true when every line carrying an `entrypoint` was written by a programmatic
+   * launch (`claude -p` / the Agent SDK). The indexer omits these, as it omits `codex exec` rollouts;
+   * one line from an interactive resume clears it. Undefined for Codex.
+   */
+  headless?: boolean
+  /**
    * Codex thread class, read verbatim from `session_meta.payload.thread_source`. 'subagent' marks a
    * delegated agent thread; the indexer drops those so only the parent conversation surfaces.
    * Undefined for Claude and older Codex rollouts that predate the field.

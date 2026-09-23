@@ -6,7 +6,7 @@
  * We read that token to caption the block. Aliases are normalized to a canonical display name so ```ts
  * and ```typescript read the same. Casing is left lowercase — the caption's .label-caps CSS uppercases.
  *
- * Kept DOM/electron-free so it imports under the node tsconfig (see the repo CLAUDE.md testing note). */
+ * Kept DOM/electron-free so it imports under the node tsconfig (see the repo AGENTS.md testing note). */
 
 /** Common short forms → canonical display name. The value is still lowercase (CSS uppercases it). */
 const LANG_ALIASES: Record<string, string> = {
