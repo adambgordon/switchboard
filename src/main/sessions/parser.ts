@@ -552,6 +552,9 @@ function numField(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
 }
 
+/** Entrypoints Claude Code stamps on lines written by a programmatic launch (`claude -p`, the Agent SDK). */
+const SDK_ENTRYPOINTS: ReadonlySet<string> = new Set(['sdk-cli', 'sdk-ts', 'sdk-py'])
+
 /**
  * Efficient metadata-only pass for the sidebar. Returns null when the file has
  * no parseable content or no cwd (cwd is the source of truth for grouping).
@@ -580,6 +583,8 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
   let gitBranch: string | null = null
   let version: string | null = null
   let sessionKind: string | null = null
+  let sdkLineSeen = false
+  let otherLineSeen = false
   let messageCount = 0
   let model: string | null = null
   let outputTokens = 0
@@ -608,6 +613,13 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     // merely quotes `"sessionKind":"bg"` in message content has no such top-level key, so it won't
     // be mistaken for a background session. 'bg' marks an independently resumable background row.
     if (sessionKind == null && typeof obj.sessionKind === 'string') sessionKind = obj.sessionKind
+    // Each line records the `entrypoint` of the process that wrote it. The transcript is headless only
+    // while EVERY stamped line came from an SDK launch: one line from anything else — an interactive
+    // resume, an editor, an unrecognized value — makes it a conversation for good, so stop checking.
+    if (!otherLineSeen && typeof obj.entrypoint === 'string') {
+      if (SDK_ENTRYPOINTS.has(obj.entrypoint)) sdkLineSeen = true
+      else otherLineSeen = true
+    }
 
     switch (obj.type) {
       case 'custom-title':
@@ -723,6 +735,7 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     lastActivityAt,
     awaitingTool,
     sessionKind: sessionKind ?? undefined,
+    headless: sdkLineSeen && !otherLineSeen,
     provisional: false
   }
 }

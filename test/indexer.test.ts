@@ -281,6 +281,35 @@ describe('indexConversations Claude session-kind filtering', () => {
   })
 })
 
+describe('indexConversations headless Claude filtering', () => {
+  it('omits a headless transcript without hiding it, and shows it once an interactive line lands', async () => {
+    const root = await mkdtemp(path.join(TMP_BASE, 'indexer-headless-'))
+    try {
+      const stamped = (entrypoint: string, content: string): unknown => ({
+        ...(msgLine('user', CWD_A, content) as object),
+        entrypoint
+      })
+      const kept = await writeSession(root, '-home-user-project-one', [stamped('cli', 'interactive')], 1_000_000_000_000)
+      const probeLines = [stamped('sdk-cli', 'one-shot probe')]
+      const probe = await writeSession(root, '-home-user-project-one', probeLines, 2_000_000_000_000)
+
+      const cache = new Map()
+      const first = await indexConversations(root, NO_CODEX, cache)
+      expect(first.groups.flatMap((g) => g.conversations.map((c) => c.sessionId))).toEqual([kept.id])
+      // Omitted from the list only: the hidden set is sticky for the app's lifetime, so a headless id
+      // there would keep a later interactive resume hidden too.
+      expect(first.hiddenSessionIds).toEqual([])
+
+      await writeFile(probe.file, jsonl([...probeLines, stamped('cli', 'resumed interactively')]), 'utf8')
+      await utimes(probe.file, 3_000_000_000, 3_000_000_000)
+      const second = await indexConversations(root, NO_CODEX, cache)
+      expect(second.groups.flatMap((g) => g.conversations.map((c) => c.sessionId))).toEqual([probe.id, kept.id])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('indexConversations Codex subagent filtering', () => {
   it('reports hidden ids independently of visible groups and retains their cached metadata', async () => {
     const root = await mkdtemp(path.join(TMP_BASE, 'indexer-hidden-'))

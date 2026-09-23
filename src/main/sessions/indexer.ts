@@ -148,8 +148,10 @@ function labelForCwd(cwd: string): string {
 /**
  * Gather Claude Code conversation metadata from the projects root. Background (`bg`) transcripts are
  * independently resumable conversations and remain visible, matching Claude Code's `/resume` picker;
- * internal `daemon` / `daemon-worker` sessions do not. Drops zero-message sessions. [] if the root is
- * missing.
+ * internal `daemon` / `daemon-worker` sessions do not. Drops zero-message sessions and headless
+ * (`claude -p` / Agent SDK) transcripts — the counterpart of dropping `codex exec` rollouts. Headless
+ * ones are left out of this pass only, never added to the sticky hidden set, because an interactive
+ * resume turns one into a real conversation that must reappear. [] if the root is missing.
  */
 async function indexClaudeMetas(root: string, cache: MetaCache): Promise<ConversationMeta[]> {
   try {
@@ -171,6 +173,7 @@ async function indexClaudeMetas(root: string, cache: MetaCache): Promise<Convers
     if (!meta) continue
     if (meta.messageCount === 0) continue
     if (meta.sessionKind === 'daemon' || meta.sessionKind === 'daemon-worker') continue
+    if (meta.headless) continue
     out.push(meta)
   }
   return out
