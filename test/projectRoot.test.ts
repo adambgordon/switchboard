@@ -116,6 +116,36 @@ describe('resolveProjectRoot', () => {
     expect(nodeRootFs.kind(path.join(r, '.git'))).toBe('link')
   })
 
+  it('keeps a worktree of a submodule as its own project, never git metadata', () => {
+    const superRepo = repo('super')
+    dir('super', '.git', 'modules', 'sub', 'worktrees', 'feature')
+    const wt = dir('work', 'feature')
+    gitFile(wt, path.join(superRepo, '.git', 'modules', 'sub', 'worktrees', 'feature'))
+    expect(resolveProjectRoot(wt, home)).toEqual({ root: wt, worktree: false })
+  })
+
+  it('does not fold a worktree of a submodule whose name ends in .git', () => {
+    const superRepo = repo('super')
+    const wt = dir('work', 'lib-wt')
+    gitFile(wt, path.join(superRepo, '.git', 'modules', 'lib.git', 'worktrees', 'lib-wt'))
+    expect(resolveProjectRoot(wt, home)).toEqual({ root: wt, worktree: false })
+  })
+
+  it('does not name a separated git directory as the project', () => {
+    // `git init --separate-git-dir=<meta>` puts the common dir at an arbitrary path whose work tree
+    // cannot be found from it; folding would name the metadata directory itself.
+    const wt = dir('work', 'sep-wt')
+    gitFile(wt, path.join(base, 'meta', 'worktrees', 'sep-wt'))
+    expect(resolveProjectRoot(wt, home)).toEqual({ root: wt, worktree: false })
+  })
+
+  it('does not mistake a submodule named worktrees/<x> for a worktree', () => {
+    const superRepo = repo('super')
+    const sub = dir('super', 'worktrees', 'x')
+    gitFile(sub, path.join(superRepo, '.git', 'modules', 'worktrees', 'x'))
+    expect(resolveProjectRoot(sub, home)).toEqual({ root: sub, worktree: false })
+  })
+
   it('treats a submodule as its own project, not as a worktree', () => {
     repo('super')
     dir('super', '.git', 'modules', 'sub')
