@@ -5,7 +5,8 @@ import {
   parseFolderCollapse,
   parseRailDensity,
   parseSidebarMode,
-  withFolderCollapse
+  withFolderCollapse,
+  withFoldersCollapse
 } from '../src/renderer/lib/sidebarPrefs'
 
 describe('parseSidebarMode', () => {
@@ -62,5 +63,30 @@ describe('withFolderCollapse', () => {
   it('records an explicit expand for a folder that had no entry', () => {
     // Absent means "follow the automatic rule", so expanding one the rule collapses must write false.
     expect(withFolderCollapse({}, '/r/a', false)).toEqual({ '/r/a': false })
+  })
+})
+
+describe('withFoldersCollapse', () => {
+  it('sets every folder, overwriting either stored value and keeping unnamed folders', () => {
+    const stored = { '/w/a': false, '/w/b': true, '/w/other': false }
+    expect(withFoldersCollapse(stored, ['/w/a', '/w/b', '/w/c'], true)).toEqual({
+      '/w/a': true,
+      '/w/b': true,
+      '/w/c': true,
+      '/w/other': false
+    })
+    expect(withFoldersCollapse(stored, ['/w/a', '/w/b', '/w/c'], false)).toEqual({
+      '/w/a': false,
+      '/w/b': false,
+      '/w/c': false,
+      '/w/other': false
+    })
+  })
+
+  it('returns the stored map itself when nothing changes, and does not mutate it', () => {
+    const stored = Object.freeze({ '/w/a': true, '/w/b': true })
+    expect(withFoldersCollapse(stored, ['/w/a', '/w/b'], true)).toBe(stored)
+    withFoldersCollapse(stored, ['/w/a'], false)
+    expect(stored).toEqual({ '/w/a': true, '/w/b': true })
   })
 })

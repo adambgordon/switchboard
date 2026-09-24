@@ -86,6 +86,15 @@ export const Close = (p: IconProps) =>
   )
 export const Folder = (p: IconProps) =>
   svg(<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />, p)
+// The open counterpart of Folder: the same back panel, with the front flap tipped forward.
+export const FolderOpen = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M3 17V7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v2" />
+      <path d="M3 17l2.3-5.1A1.5 1.5 0 0 1 6.7 11H20a1 1 0 0 1 .95 1.3l-1.6 5.3A2 2 0 0 1 17.4 19H5a2 2 0 0 1-2-2z" />
+    </>,
+    p
+  )
 export const Help = (p: IconProps) =>
   svg(
     <>
@@ -178,6 +187,24 @@ export const NewWindow = (p: IconProps) =>
     <>
       <rect x="3" y="7" width="13" height="12" rx="2" />
       <path d="M8 7V6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-1" />
+    </>,
+    p
+  )
+
+// Two chevrons pointing in — collapse every folder — and out — expand every folder.
+export const CollapseAll = (p: IconProps) =>
+  svg(
+    <>
+      <polyline points="7 20 12 15 17 20" />
+      <polyline points="7 4 12 9 17 4" />
+    </>,
+    p
+  )
+export const ExpandAll = (p: IconProps) =>
+  svg(
+    <>
+      <polyline points="7 15 12 20 17 15" />
+      <polyline points="7 9 12 4 17 9" />
     </>,
     p
   )

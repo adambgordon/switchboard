@@ -21,8 +21,25 @@ import { visibleTabLayout } from '@shared/sessionVisibility'
 import { useSessions } from './lib/useSessions'
 import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
-import { useLiveOrder } from './lib/useLiveOrder'
-import { synthMeta } from './lib/sidebarModel'
+import { useRowRank } from './lib/useRowRank'
+import { useSidebarPrefs } from './lib/useSidebarPrefs'
+import {
+  DEFAULT_SIDEBAR_LIMITS,
+  buildSidebar,
+  freezeFoldersByNewest,
+  rankSpace,
+  resumeWrites,
+  synthMeta,
+  visibleRows,
+  enteredFolders,
+  withFolders,
+  withoutFolders,
+  type ActivePlace,
+  type SidebarBlock,
+  type SidebarModel
+} from './lib/sidebarModel'
+import { absorbBind, absorbBindFolder, dropWrites } from './lib/rowRank'
+import { FOLDER_SEED_TASK, ONCE_TASKS_KEY, parseOnceTasks, withOnceTask } from './lib/onceTasks'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
 import { viewToggleAction } from './lib/viewToggle'
@@ -89,7 +106,7 @@ import {
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
 import type { TabDescriptor } from './components/TabStrip'
-import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
+import Sidebar from './components/Sidebar'
 import ResizeHandle from './components/ResizeHandle'
 import SettingsModal from './components/SettingsModal'
 import ConversationInfoModal from './components/ConversationInfoModal'
@@ -98,45 +115,29 @@ import AppVeil from './components/AppVeil'
 import type { TranscriptScrollState } from './components/TranscriptView'
 import TerminalDeck from './components/TerminalDeck'
 
-/** Recent section: rows shown in 'recent' mode before toggling to 'all'. */
-const RECENT_CAP = 30
-
 export default function App() {
   const { groups, hiddenSessionIds, loading } = useSessions()
   const hiddenSessionIdsRef = useRef(hiddenSessionIds)
   hiddenSessionIdsRef.current = hiddenSessionIds
   const ptys = usePtys()
-  const { pinned, order: pinnedOrder, toggle: togglePin, reorder: reorderPins } = usePins()
+  const { pinned, order: pinnedOrder, toggle: togglePin, move: movePin } = usePins()
   // A nonce bumped on each drag-reorder commit, folded into the rail's FLIP controlSig so the commit
   // settles instantly (the drag already showed the arrangement); pin/unpin toggles don't bump it, so
   // they still glide.
   const [reorderTick, setReorderTick] = useState(0)
-  const commitReorder = useCallback(
-    (from: number, to: number) => {
-      reorderPins(from, to)
-      setReorderTick((t) => t + 1)
-    },
-    [reorderPins]
-  )
-  // The Live section's manual order — ephemeral (live PTYs don't outlive the app). Like the pinned
-  // order it makes Live rows drag-reorderable AND immune to any activity-driven re-sort: a row holds
-  // its slot until you drag it. Every newly-live session (new or resumed) lands on top.
-  const liveUnpinnedIds = useMemo(
-    () => ptys.active.filter((p) => !pinned.has(p.sessionId) && !hiddenSessionIds.has(p.sessionId)).map((p) => p.sessionId),
-    [ptys.active, pinned, hiddenSessionIds]
-  )
+  // Row and folder order: sparse overrides over each row's seed, shared by every window. Written only
+  // by a drop, a Resume and an initial bind — never by a render — see rowRank.
+  const { rows: rowRanks, folders: folderRanks, mutateRows, mutateFolders } = useRowRank()
   const {
-    order: liveOrder,
-    reorder: reorderLive,
-    retarget: retargetLiveOrder
-  } = useLiveOrder(liveUnpinnedIds)
-  const commitLiveReorder = useCallback(
-    (from: number, to: number) => {
-      reorderLive(from, to)
-      setReorderTick((t) => t + 1)
-    },
-    [reorderLive]
-  )
+    mode: sidebarMode,
+    setMode: setSidebarMode,
+    collapsed: folderCollapse,
+    setFolderCollapsed,
+    setFoldersCollapsed
+  } = useSidebarPrefs()
+  // The last rendered sidebar, for handlers that write positions: a drop, a Resume and a bind all
+  // need to know where rows are NOW, and must not re-subscribe on every render to find out.
+  const sidebarModelRef = useRef<SidebarModel | null>(null)
   const { seen, unread, markSeen, markUnread, markRead, rekey: rekeySeen } = useSeen()
   const { dir: defaultDir, setDir: setDefaultDir } = useNewConvoDefault()
   const { enabled: markdownCopy, setEnabled: setMarkdownCopy } = useMarkdownCopy()
@@ -193,11 +194,9 @@ export default function App() {
   const {
     paneWidth,
     paneCollapsed,
-    sections: collapsedSections,
     setPaneWidth,
     togglePane,
-    resetPane,
-    toggleSection
+    resetPane
   } = useLayout({ collapseRail: windowInit.collapseRail, persist: !detached })
   const dragStartRef = useRef(0)
   const bodyElRef = useRef<HTMLDivElement>(null)
@@ -265,8 +264,15 @@ export default function App() {
     if (infoModal && hiddenSessionIds.has(infoModal.sessionId)) setInfoModal(null)
   }, [infoModal, hiddenSessionIds])
   const overlayOpenRef = useRef(false)
-  // Section keys revealed past their cap via "Show more" (ephemeral — resets on reload).
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
+  // Extra rows revealed past a group's cap via "Show more", per group key (ephemeral — resets on reload).
+  const [revealed, setRevealed] = useState<Record<string, number>>({})
+  // Folders the active conversation has been in this session. They stay open after focus moves on:
+  // collapsing one the moment you click elsewhere would slide every row below it under the pointer.
+  // Only a chevron click closes one again. Never persisted.
+  const [navExpanded, setNavExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  // Folders collapsed by hand while a conversation in them was on screen — the only way that folder
+  // closes, since otherwise being active opens it. Navigation into the folder clears its entry.
+  const [activeCollapsed, setActiveCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const searchRef = useRef<HTMLInputElement>(null)
   // Find-in-conversation (main pane). App owns the open/close toggle — ⌘F opens it when focus is
   // in the main pane, Esc closes it; the query + match state live in MainPane. `paneRef` lets the
@@ -464,9 +470,14 @@ export default function App() {
       const ev = { oldId, newId, kind }
       latestBinds.set(ptyId, ev)
       const act = bindActions(ev, selectedIdRef.current, ownedHere)
-      // The Live section orders terminals, not conversations, so its slot follows the terminal on
-      // both kinds; `act.retargetRowOrder` governs conversation positions only.
-      retargetLiveOrder(oldId, newId)
+      // Read before `active-changed` renders the new id: `bindCodex` emits `bound` first, so the last
+      // rendered model still holds the placeholder's row, its rank and its folder.
+      const place = act.retargetRowOrder ? sidebarModelRef.current?.rows.get(oldId) : undefined
+      if (place) {
+        mutateRows((stored) => absorbBind(stored, place.rank, oldId, newId))
+        const folder = sidebarModelRef.current?.folders.get(place.root)
+        if (folder) mutateFolders((stored) => absorbBindFolder(stored, place.root, folder, place.seed))
+      }
       const apply = (): void => {
         if (act.view !== 'none' && findPriorTerminalIdsRef.current.delete(oldId)) {
           findPriorTerminalIdsRef.current.add(newId)
@@ -530,7 +541,8 @@ export default function App() {
     rekeyPendingNavigation,
     rekeySeen,
     requestFocus,
-    retargetLiveOrder,
+    mutateRows,
+    mutateFolders,
     panes.rekeyTabs,
     panes.retargetTabs
   ])
@@ -744,79 +756,89 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- visiblePtyIds folded into the signature
   }, [visiblePtySig])
 
-  const railSections = useMemo<RailSection[]>(() => {
-    const pinnedEntries: RailEntry[] = pinnedOrder
-      .filter((id) => !hiddenSessionIds.has(id))
-      .map((id) => {
-        const pty = ptys.bySession.get(id) ?? null
-        // Prefer indexed meta; fall back to the live process so a pinned-but-
-        // unindexed session still renders a full row. Drop truly stale pins.
-        const meta = metaById.get(id) ?? (pty ? synthMeta(pty) : null)
-        return meta
-          ? { sessionId: id, pty, meta, pinned: true, liveState: liveStateFor(pty, meta, id) }
-          : null
-      })
-      .filter((e): e is RailEntry => e !== null)
-
-    // Live & unpinned, in the manual order (newest on top; drag to reorder). Iterating liveOrder —
-    // not a startedAt sort — is what keeps rows from ever jumping on their own. The guards are
-    // defensive against the one-frame window before useLiveOrder's sync prunes a just-pinned /
-    // just-ended id from the order.
-    const liveEntries: RailEntry[] = liveOrder
-      .map((id): RailEntry | null => {
-        const pty = ptys.bySession.get(id)
-        if (!pty || pinned.has(id) || hiddenSessionIds.has(id)) return null
-        const meta = metaById.get(id) ?? synthMeta(pty)
-        return { sessionId: id, pty, meta, pinned: false, liveState: liveStateFor(pty, meta, id) }
-      })
-      .filter((e): e is RailEntry => e !== null)
-
-    const recentEntries: RailEntry[] = allConversations
-      .filter((c) => !pinned.has(c.sessionId) && !ptys.bySession.has(c.sessionId))
-      .sort((a, b) => b.mtime - a.mtime)
-      .map((c) => ({ sessionId: c.sessionId, pty: null, meta: c, pinned: false, liveState: null }))
-
-    const all: RailSection[] = [
-      { key: 'pinned', label: 'Pinned', variant: 'card', entries: pinnedEntries },
-      { key: 'live', label: 'Live', variant: 'card', entries: liveEntries },
-      { key: 'recent', label: 'Recent', variant: 'row', entries: recentEntries, cap: RECENT_CAP }
+  // THE rail: every row, its folder, its order, and which rows render. One pure build, read by the
+  // rail AND by keyboard navigation, so the two cannot disagree about what is on screen.
+  const sidebarModel = useMemo(
+    () =>
+      buildSidebar({
+        mode: sidebarMode,
+        groups,
+        ptys: ptys.active,
+        pinned: pinnedOrder,
+        hidden: hiddenSessionIds,
+        rowRanks,
+        folderRanks,
+        liveState: liveStateFor,
+        active: visibleIds,
+        collapsed: folderCollapse,
+        navExpanded,
+        activeCollapsed,
+        revealed,
+        search: matchIds,
+        limits: DEFAULT_SIDEBAR_LIMITS
+      }),
+    [
+      sidebarMode,
+      groups,
+      ptys.active,
+      pinnedOrder,
+      hiddenSessionIds,
+      rowRanks,
+      folderRanks,
+      liveStateFor,
+      visibleIds,
+      folderCollapse,
+      navExpanded,
+      activeCollapsed,
+      revealed,
+      matchIds
     ]
-    const scoped = matchIds
-      ? all.map((s) => ({ ...s, entries: s.entries.filter((e) => matchIds.has(e.sessionId)) }))
-      : all
-    return scoped.filter((s) => s.entries.length > 0)
-  }, [pinned, pinnedOrder, liveOrder, metaById, ptys.bySession, allConversations, matchIds, liveStateFor, hiddenSessionIds])
+  )
+  sidebarModelRef.current = sidebarModel
 
-  // Live-session tally over ALL live sessions — never the search-filtered rail set, so the rail's
-  // count + status line reflect everything running even while a query narrows the visible rows.
-  const liveTally = useMemo(() => {
-    let working = 0
-    let asking = 0
-    // Named `unreadCount` (not `unread`) to avoid shadowing the `unread` seen-map from useSeen,
-    // referenced as `unread[p.sessionId]` just below. Surfaced as the tally's `unread` field.
-    let unreadCount = 0
-    let idle = 0
-    // Terminals with no proven conversation identity get their OWN count rather than being folded
-    // into `idle`. Calling an unlinked terminal idle would be a claim about a conversation we can't
-    // identify — and "1 idle" over a terminal the user is actively typing in is exactly the kind of
-    // wrong-dot report this work exists to fix. Sharing the hollow visual does not fold it into idle.
-    let unlinked = 0
-    let count = 0
-    for (const p of ptys.active) {
-      if (hiddenSessionIds.has(p.sessionId)) continue
-      count++
-      const st = liveStateFor(p, metaById.get(p.sessionId) ?? synthMeta(p), p.sessionId)
-      // Every `p` here is live by construction, so the only way to get no state is the unlinked
-      // gate — which makes this bucket definitionally "the rows that were given no dot" rather
-      // than a second reading of the predicate that could drift from the first.
-      if (st === null) unlinked++
-      else if (st === 'working') working++
-      else if (st === 'asking') asking++
-      else if (st === 'awaiting') unreadCount++
-      else idle++
+  // Once per profile, ever: the first time this rail runs, freeze the folders newest-first. Waits for a
+  // load with indexed conversations — the index arrives whole, and a failed one arrives empty, which
+  // must not count as "done" even while a live terminal gives the rail a row of its own. A layout effect, so the frozen order is what first paints. The marker is folded into a
+  // fresh read, and every window checks it first, so a later window finds it done and skips.
+  const catalogReady = !loading && groups.some((g) => g.conversations.length > 0)
+  useLayoutEffect(() => {
+    if (!catalogReady) return
+    let done: string[]
+    try {
+      done = parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY))
+    } catch {
+      return
     }
-    return { count, working, asking, unread: unreadCount, idle, unlinked }
-  }, [ptys.active, metaById, liveStateFor, hiddenSessionIds])
+    if (done.includes(FOLDER_SEED_TASK)) return
+    const model = sidebarModelRef.current
+    if (!model) return
+    mutateFolders((stored) => freezeFoldersByNewest(model, stored))
+    try {
+      localStorage.setItem(ONCE_TASKS_KEY, JSON.stringify(withOnceTask(done, FOLDER_SEED_TASK)))
+    } catch {
+      /* storage unavailable — the freeze simply runs again next launch */
+    }
+  }, [catalogReady, mutateFolders])
+
+  // Navigation entering a folder opens it: remembered so it stays open once focus moves on, and any
+  // collapse made while it was active is forgotten. Keyed on the (conversation, folder) pairs, not the
+  // model, which is rebuilt on every liveness change. A layout effect, so a conversation opened in a
+  // folder the user collapsed never paints with its folder shut.
+  const activePlacesKey = JSON.stringify(
+    [...visibleIds].flatMap((id): ActivePlace[] => {
+      const root = sidebarModel.rows.get(id)?.root
+      return root === undefined ? [] : [[id, root]]
+    })
+  )
+  const activePlacesRef = useRef<ActivePlace[]>([])
+  useLayoutEffect(() => {
+    const places = JSON.parse(activePlacesKey) as ActivePlace[]
+    const entered = enteredFolders(activePlacesRef.current, places)
+    activePlacesRef.current = places
+    if (entered.length === 0) return
+    setNavExpanded((prev) => withFolders(prev, entered))
+    setActiveCollapsed((prev) => withoutFolders(prev, entered))
+  }, [activePlacesKey])
 
   overlayOpenRef.current = settingsPage !== null || infoModal !== null
 
@@ -913,19 +935,9 @@ export default function App() {
     if (view1.id && focused && !view1Unlinked) markSeen(view1.id, Date.now())
   }, [view1.id, focused, view1Unlinked, view1.meta?.turnEndedAt, view1InputRequestedAt, markSeen])
 
-  // Arrow-key order follows what's actually visible — the same visibility rule the pane
-  // renders with (collapse + Recent cap + search override) — so nav never lands on a hidden row.
-  const orderedIds = useMemo(
-    () =>
-      railSections.flatMap((s) =>
-        visibleEntries(s, {
-          collapsed: collapsedSections[s.key],
-          expanded: expandedSections.has(s.key),
-          searching
-        }).map((e) => e.sessionId)
-      ),
-    [railSections, collapsedSections, expandedSections, searching]
-  )
+  // Arrow-key order follows what's actually visible — the model the rail renders — so nav never lands
+  // on a hidden row.
+  const orderedIds = useMemo(() => visibleRows(sidebarModel).map((r) => r.sessionId), [sidebarModel])
   // The new-conversation menu orders by when each repo's newest conversation was STARTED, not by
   // last activity. `groups` arrives sorted by `latestMtime` desc, which answers "where was I last?" —
   // a different question from "where am I likely to start something new?". Sort a COPY so the rail
@@ -1044,6 +1056,11 @@ export default function App() {
       window.api.resumeConversationElsewhere(meta.sessionId)
       return
     }
+    // A Resume lifts its row to the top — the one motion that is not a drag, and always a deliberate
+    // click. Written here, in the window that spawns: a Resume forwarded to another window returned
+    // above, and that window's own `resume` does the write, into the store every window shares.
+    const writes = sidebarModelRef.current ? resumeWrites(sidebarModelRef.current, meta.sessionId, Date.now()) : {}
+    if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
     land(meta.sessionId, 'persistent', { pane })
     chooseSessionView(meta.sessionId, 'terminal')
     requestFocus(meta.sessionId)
@@ -1052,7 +1069,7 @@ export default function App() {
     } catch (error) {
       if (!hiddenSessionIdsRef.current.has(meta.sessionId)) throw error
     }
-  }, [land, requestFocus, chooseSessionView, beginVisit])
+  }, [land, requestFocus, chooseSessionView, beginVisit, mutateRows])
   const resumeRef = useRef(resume)
   resumeRef.current = resume
 
@@ -1164,6 +1181,15 @@ export default function App() {
   const clickLive = useCallback((id: string) => openRemembered(id), [openRemembered])
   const clickConversation = useCallback((id: string) => openRemembered(id), [openRemembered])
   const switchTo = useCallback((id: string) => openRemembered(id), [openRemembered])
+  // The head's needs-you tag: open the next session asking or unread, after the one you are on, in
+  // rail order. Opening makes it active — which expands its folder — and opening an unread one marks
+  // it read, so the count falls as you work through them.
+  const openNextNeedingYou = useCallback(() => {
+    const list = sidebarModelRef.current?.needsYou ?? []
+    if (list.length === 0) return
+    const at = selectedIdRef.current ? list.indexOf(selectedIdRef.current) : -1
+    openRemembered(list[(at + 1) % list.length])
+  }, [openRemembered])
   // Double-click a row: keep it. The editor gesture for promoting a preview tab, and the reason it
   // needs no click-count dedupe is that the two ordinary clicks preceding it are idempotent here —
   // they open (or re-activate) the same conversation, and re-opening the current history stop is an
@@ -1506,10 +1532,72 @@ export default function App() {
     })
   }, [])
 
-  // Reveal the rest of a capped section (the Recent "Show more").
-  const showMore = useCallback((key: string) => {
-    setExpandedSections((s) => new Set(s).add(key))
+  // Reveal a group's next step of rows past its cap, or return it to the cap. The step is the cap.
+  const showMore = useCallback(
+    (key: string) => {
+      const step = sidebarMode === 'all' ? DEFAULT_SIDEBAR_LIMITS.allCap : DEFAULT_SIDEBAR_LIMITS.folderCap
+      setRevealed((r) => ({ ...r, [key]: (r[key] ?? 0) + step }))
+    },
+    [sidebarMode]
+  )
+  const showLess = useCallback((key: string) => {
+    setRevealed((r) => {
+      if (!Object.hasOwn(r, key)) return r
+      const next = { ...r }
+      delete next[key]
+      return next
+    })
   }, [])
+
+  // A header click writes the folder's preference — the opposite of what it shows. Collapsing also
+  // forgets that navigation opened it and closes it even over an active conversation in it; expanding
+  // lifts that. Both hold until navigation next enters the folder.
+  const toggleFolder = useCallback(
+    (root: string) => {
+      const group = sidebarModelRef.current?.groups.find((g) => g.key === root)
+      if (!group) return
+      const collapse = !group.collapsed
+      setFolderCollapsed(root, collapse)
+      if (collapse) {
+        setNavExpanded((prev) => withoutFolders(prev, [root]))
+        setActiveCollapsed((prev) => withFolders(prev, [root]))
+      } else {
+        setActiveCollapsed((prev) => withoutFolders(prev, [root]))
+      }
+    },
+    [setFolderCollapsed]
+  )
+
+  // Collapse all / Expand all: the preference for every folder, rendered or not, and the navigation
+  // expansions with it — otherwise every folder visited this session would stay open. Collapse all
+  // closes the active conversation's folder too, like a header click would.
+  const setAllCollapsed = useCallback(
+    (collapsed: boolean) => {
+      const model = sidebarModelRef.current
+      if (!model) return
+      const roots = [...model.folders.keys()]
+      setFoldersCollapsed(roots, collapsed)
+      setNavExpanded((prev) => (prev.size === 0 ? prev : new Set()))
+      setActiveCollapsed((prev) => (collapsed ? withFolders(prev, roots) : prev.size === 0 ? prev : new Set()))
+    },
+    [setFoldersCollapsed]
+  )
+
+  // A drop between two neighbors of one block. Pins move within the one app-wide pin list; every
+  // other row writes a rank into the global space, so the drop holds in both modes.
+  const dropRow = useCallback(
+    (block: SidebarBlock, draggedId: string, higherId: string | null, lowerId: string | null) => {
+      if (block.kind === 'pinned') movePin(draggedId, higherId, lowerId)
+      else {
+        const model = sidebarModelRef.current
+        if (!model) return
+        const writes = dropWrites(rankSpace(model), draggedId, higherId, lowerId, Date.now())
+        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+      }
+      setReorderTick((t) => t + 1)
+    },
+    [movePin, mutateRows]
+  )
 
   // Resolve the current dot state for any session id (used by the read/unread toggle). Null for any
   // unlinked row — it has no dot to toggle, and ⇧⌘U would otherwise persist an override for a
@@ -1791,9 +1879,12 @@ export default function App() {
         style={{ '--pane-w': `${paneWidth}px` } as CSSProperties}
       >
         {!paneCollapsed && (
-          <TallyRail
-            sections={railSections}
-            live={liveTally}
+          <Sidebar
+            model={sidebarModel}
+            mode={sidebarMode}
+            onModeChange={setSidebarMode}
+            onNeedsYou={openNextNeedingYou}
+            onSetAllCollapsed={setAllCollapsed}
             loading={loading}
             selectedSessionId={selectedId}
             onJump={clickLive}
@@ -1810,10 +1901,10 @@ export default function App() {
             searchOpen={searchOpen}
             onSearchToggle={toggleSearch}
             searching={searching}
-            collapsedSections={collapsedSections}
-            onToggleSection={toggleSection}
-            expandedSections={expandedSections}
+            onToggleFolder={toggleFolder}
+            revealed={revealed}
             onShowMore={showMore}
+            onShowLess={showLess}
             menuOpen={menuOpen}
             onMenuToggle={newConversation}
             onNewContextMenu={openNewMenu}
@@ -1832,10 +1923,7 @@ export default function App() {
             onResumeSession={resumeSession}
             onStopSession={stopSession}
             onShowInfo={showInfo}
-            onReorderPins={commitReorder}
-            pinnedOrder={pinnedOrder}
-            onReorderLive={commitLiveReorder}
-            liveOrder={liveOrder}
+            onDropRow={dropRow}
             reorderTick={reorderTick}
           />
         )}

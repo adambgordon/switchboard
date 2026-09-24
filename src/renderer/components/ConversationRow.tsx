@@ -3,7 +3,7 @@ import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, absShort, basename } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { displayTitleForRow, isParkedOnlyRow, liveDotClass } from '../lib/rowIdentity'
-import { DashedCircle, Dots, NewWindow } from './icons'
+import { DashedCircle, Dots, NewWindow, Pin } from './icons'
 import AgentLogo from './AgentLogo'
 
 interface Props {
@@ -101,7 +101,10 @@ function ConversationRowImpl({
       data-session={meta.sessionId}
     >
       <span className="sb-row-main">
-        <span className="sb-row-title truncate">{displayTitleForRow(live, meta)}</span>
+        <span className="sb-row-title truncate">
+          {pinned && <Pin size={10} filled className="sb-row-pin" />}
+          {displayTitleForRow(live, meta)}
+        </span>
         {parkedOnly ? (
           // This terminal has no conversation of its own — what it produced went into the background
           // agent named above. Without saying so the row reads as an empty, dead conversation while

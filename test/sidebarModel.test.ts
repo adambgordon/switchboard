@@ -5,7 +5,13 @@ import {
   buildSidebar,
   conversationSeed,
   folderLabels,
+  freezeFoldersByNewest,
+  rankSpace,
+  resumeWrites,
   visibleRows,
+  enteredFolders,
+  withFolders,
+  withoutFolders,
   type SidebarInput,
   type SidebarModel
 } from '../src/renderer/lib/sidebarModel'
@@ -79,6 +85,7 @@ function input(over: Partial<SidebarInput> = {}): SidebarInput {
     active: new Set(),
     collapsed: {},
     navExpanded: new Set(),
+    activeCollapsed: new Set(),
     revealed: {},
     search: null,
     limits: LIMITS,
@@ -318,6 +325,18 @@ describe('collapse precedence', () => {
     expect(collapsedOf({ active: new Set(['c']) })).toEqual([false, false, false])
   })
 
+  it('lets a folder the user collapsed while active stay collapsed', () => {
+    expect(
+      collapsedOf({ collapsed: { '/w/a': true }, active: new Set(['a']), activeCollapsed: new Set(['/w/a']) })
+    ).toEqual([true, false, true])
+    // Only the active rule is lifted: with nothing active there, the entry changes nothing.
+    expect(collapsedOf({ activeCollapsed: new Set(['/w/a', '/w/c']), collapsed: { '/w/c': false } })).toEqual([
+      false,
+      false,
+      false
+    ])
+  })
+
   it('expands everything while searching', () => {
     expect(collapsedOf({ collapsed: { '/w/a': true }, search: new Set(['a', 'b', 'c']) })).toEqual([false, false, false])
   })
@@ -457,7 +476,7 @@ describe('an empty or loading catalog', () => {
     const collapsed = Object.freeze({ '/w/a': true })
     const pinned = Object.freeze(['a'])
     const model = buildSidebar(input({ rowRanks, folderRanks, collapsed, pinned }))
-    expect(model).toEqual({ groups: [], folders: new Map(), needsYou: [] })
+    expect(model).toEqual({ groups: [], rows: new Map(), folders: new Map(), needsYou: [] })
     expect([rowRanks, folderRanks, collapsed, pinned]).toEqual([{ a: T }, { '/w/a': T }, { '/w/a': true }, ['a']])
   })
 })
@@ -493,8 +512,11 @@ describe('an initial bind', () => {
 
   it('keeps both the row and its brand-new folder where they were', () => {
     expect(keys(before)).toEqual(['/w/b', '/w/a'])
-    const rowRanks = absorbBind({}, T, 'ph', 'real')
-    const folderRanks = absorbBindFolder({}, '/w/a', before.folders.get('/w/a')!, T)
+    // What App reads off the last rendered model when the bind lands.
+    const place = before.rows.get('ph')!
+    expect(place).toEqual({ rank: T, seed: T, root: '/w/a', pinned: false })
+    const rowRanks = absorbBind({}, place.rank, 'ph', 'real')
+    const folderRanks = absorbBindFolder({}, place.root, before.folders.get(place.root)!, place.seed)
     expect(folderRanks).toEqual({ '/w/a': T })
     expect(keys(after(rowRanks, folderRanks))).toEqual(['/w/b', '/w/a'])
     // Without the folder write the folder's seed rises to T+3000 and it jumps above /w/b.
@@ -505,5 +527,140 @@ describe('an initial bind', () => {
     expect(absorbBindFolder({}, '/w/a', { rank: T - 50, seed: T - 50 }, T)).toEqual({})
     const placed = { '/w/a': T - 7 }
     expect(absorbBindFolder(placed, '/w/a', { rank: T - 7, seed: T }, T)).toBe(placed)
+  })
+})
+
+describe('row places', () => {
+  // A search matching only c1 leaves every other row off screen, and /w/c's rows exceed the folder
+  // cap; the index holds them all anyway. (Collapse is covered by the Resume case below.)
+  const model = buildSidebar(
+    input({
+      groups: [
+        group('/w/c', [conv('c1', T - 1), conv('c2', T - 2), conv('c3', T - 3)]),
+        group('/w/b', [conv('b1', T - 10), conv('pin', T - 11)]),
+        group('/w/a', [conv('a1', T - 20, { cwd: '/w/a/src' })], '/w/a/src'),
+        group('/w/h', [conv('hid', T - 30)])
+      ],
+      ptys: [pty('fresh', { projectRoot: '/w/new', startedAt: T + 7 })],
+      pinned: ['pin'],
+      hidden: new Set(['hid']),
+      rowRanks: { c3: T + 50 },
+      search: new Set(['c1'])
+    })
+  )
+
+  it('holds every row that is not hidden, through search and caps', () => {
+    expect(Object.fromEntries(model.rows)).toEqual({
+      c1: { rank: T - 1, seed: T - 1, root: '/w/c', pinned: false },
+      c2: { rank: T - 2, seed: T - 2, root: '/w/c', pinned: false },
+      c3: { rank: T + 50, seed: T - 3, root: '/w/c', pinned: false },
+      b1: { rank: T - 10, seed: T - 10, root: '/w/b', pinned: false },
+      pin: { rank: -0, seed: T - 11, root: '/w/b', pinned: true },
+      a1: { rank: T - 20, seed: T - 20, root: '/w/a', pinned: false },
+      fresh: { rank: T + 7, seed: T + 7, root: '/w/new', pinned: false }
+    })
+  })
+
+  it('gives drops and Resumes the unpinned rows as their rank space', () => {
+    expect(rankSpace(model).sort((x, y) => x.id.localeCompare(y.id))).toEqual([
+      { id: 'a1', rank: T - 20 },
+      { id: 'b1', rank: T - 10 },
+      { id: 'c1', rank: T - 1 },
+      { id: 'c2', rank: T - 2 },
+      { id: 'c3', rank: T + 50 },
+      { id: 'fresh', rank: T + 7 }
+    ])
+  })
+})
+
+describe('a Resume', () => {
+  // `ahead` was dragged to the top of a folder the automatic rule collapses, so its rank is past the
+  // clock and it is not on screen. A Resume must still land above it.
+  const model = buildSidebar(
+    input({
+      groups: [
+        group('/w/one', [conv('old', T - 5000), conv('pin', T - 100)]),
+        group('/w/two', [conv('mid', T - 3000)]),
+        group('/w/three', [conv('ahead', T - 4000)])
+      ],
+      pinned: ['pin'],
+      rowRanks: { ahead: T + 500 },
+      folderRanks: { '/w/three': T - 9000 }
+    })
+  )
+
+  it('lifts the row above every unpinned row, shown or not', () => {
+    expect(model.groups.find((g) => g.key === '/w/three')?.collapsed).toBe(true)
+    expect(resumeWrites(model, 'old', T)).toEqual({ old: T + 501 })
+  })
+
+  it('writes nothing for a pinned row, or a row the model does not hold', () => {
+    expect(resumeWrites(model, 'pin', T)).toEqual({})
+    expect(resumeWrites(model, 'nobody', T)).toEqual({})
+  })
+})
+
+describe('entering folders', () => {
+  it('enters the folder of every conversation that became active', () => {
+    expect(enteredFolders([['a1', '/w/a']], [['a1', '/w/a'], ['b1', '/w/b']])).toEqual(['/w/b'])
+  })
+
+  it('does not enter a folder that merely stays active, when the OTHER pane moves', () => {
+    // Split view on A and B; the other pane moves B -> C. A was collapsed by hand and must stay so.
+    expect(enteredFolders([['a1', '/w/a'], ['b1', '/w/b']], [['a1', '/w/a'], ['c1', '/w/c']])).toEqual(['/w/c'])
+  })
+
+  it('enters a folder again when another conversation in it becomes active', () => {
+    // The needs-you tag opening a row in the folder the user collapsed while it was active.
+    expect(enteredFolders([['a1', '/w/a']], [['a2', '/w/a']])).toEqual(['/w/a'])
+  })
+
+  it('lists each folder once', () => {
+    expect(enteredFolders([], [['a1', '/w/a'], ['a2', '/w/a']])).toEqual(['/w/a'])
+  })
+})
+
+describe('folder sets', () => {
+  it('adds and removes, returning the same set when nothing changes', () => {
+    const set = new Set(['/w/a'])
+    expect([...withFolders(set, ['/w/a', '/w/b'])]).toEqual(['/w/a', '/w/b'])
+    expect(withFolders(set, ['/w/a'])).toBe(set)
+    expect([...withoutFolders(new Set(['/w/a', '/w/b']), ['/w/a', '/w/z'])]).toEqual(['/w/b'])
+    expect(withoutFolders(set, ['/w/z'])).toBe(set)
+    expect([...set]).toEqual(['/w/a'])
+  })
+})
+
+describe('the one-time folder freeze', () => {
+  // /w/a started long ago but has the newest conversation; /w/b has one conversation in between. By
+  // earliest start (the ordinary seed) /w/b leads; frozen by newest, /w/a leads.
+  const base = input({
+    groups: [
+      group('/w/a', [conv('a-old', T - 100), conv('a-new', T - 5)]),
+      group('/w/b', [conv('b1', T - 50), conv('b-hidden', T + 900)]),
+      group('/w/c', [conv('c1', T - 1)])
+    ],
+    hidden: new Set(['b-hidden']),
+    // b1 was resumed, so its rank is past every start; folders freeze by when rows STARTED.
+    rowRanks: { b1: T + 100 }
+  })
+
+  it('ranks every folder by its newest visible row, and keeps a folder already placed', () => {
+    const model = buildSidebar(base)
+    expect(keys(model)).toEqual(['/w/c', '/w/b', '/w/a'])
+    const frozen = freezeFoldersByNewest(model, { '/w/c': T - 999 })
+    expect(frozen).toEqual({ '/w/a': T - 5, '/w/b': T - 50, '/w/c': T - 999 })
+    expect(keys(buildSidebar({ ...base, folderRanks: frozen }))).toEqual(['/w/a', '/w/b', '/w/c'])
+  })
+
+  it('stays put when a conversation later starts in a folder', () => {
+    const frozen = freezeFoldersByNewest(buildSidebar(base), {})
+    const later = buildSidebar({
+      ...base,
+      groups: [...base.groups, group('/w/b', [conv('b-late', T + 5000)])],
+      folderRanks: frozen
+    })
+    // Frozen newest-first (c at T-1, a at T-5, b at T-50); /w/b's new conversation does not lift it.
+    expect(keys(later)).toEqual(['/w/c', '/w/a', '/w/b'])
   })
 })

@@ -6,6 +6,7 @@ import {
   dropWrites,
   parseRanks,
   rankOf,
+  topRank,
   type Ranked
 } from '../src/renderer/lib/rowRank'
 
@@ -50,6 +51,19 @@ describe('compareRanked', () => {
     ]
     expect([...rows].sort(compareRanked).map((r) => r.id)).toEqual(['c', 'a', 'b'])
     expect([...rows].reverse().sort(compareRanked).map((r) => r.id)).toEqual(['c', 'a', 'b'])
+  })
+})
+
+describe('topRank', () => {
+  it('is the highest rank wherever it sits, and null for an empty space', () => {
+    expect(topRank([])).toBeNull()
+    expect(
+      topRank([
+        { id: 'a', rank: T - 5 },
+        { id: 'b', rank: T + 3 },
+        { id: 'c', rank: T }
+      ])
+    ).toBe(T + 3)
   })
 })
 
@@ -205,9 +219,22 @@ describe('absorbBind', () => {
     expect(next).toEqual({ real: T - 7, other: T - 3 })
   })
 
-  it('overwrites an override the destination already carries', () => {
-    const next = absorbBind({ real: T + 99, other: T - 3 }, T - 7, 'placeholder', 'real')
+  it('takes a dragged placeholder position from the store, over what this window rendered', () => {
+    // Every window folds the bind into a fresh read; a window behind on renders passes a stale rank.
+    const next = absorbBind({ placeholder: T - 7, other: T - 3 }, T, 'placeholder', 'real')
     expect(next).toEqual({ real: T - 7, other: T - 3 })
+  })
+
+  it('lets a dragged placeholder position beat one the destination carries', () => {
+    const next = absorbBind({ placeholder: T - 7, real: T + 99 }, T - 7, 'placeholder', 'real')
+    expect(next).toEqual({ real: T - 7 })
+  })
+
+  it('leaves a transfer another window already made', () => {
+    // Window A moved the dragged position T-7 onto `real`. Window B, whose model had already caught
+    // up with that write, sees the placeholder at its seed T — writing that would lose the drag.
+    const transferred = Object.freeze({ real: T - 7, other: T - 3 })
+    expect(absorbBind(transferred, T, 'placeholder', 'real')).toBe(transferred)
   })
 
   it('does not mutate its input and is a no-op for equal ids', () => {

@@ -23,6 +23,9 @@ export interface Ranked {
 
 export type RankOverrides = Readonly<Record<string, number>>
 
+export const ROW_RANK_KEY = 'switchboard.rowRank'
+export const FOLDER_RANK_KEY = 'switchboard.folderRank'
+
 export function rankOf(id: string, seed: number, overrides: RankOverrides): number {
   // `hasOwn`, not `?? `: a parsed JSON object inherits `Object.prototype`, and an id that names one of
   // its members must not resolve to a function.
@@ -33,6 +36,13 @@ export function rankOf(id: string, seed: number, overrides: RankOverrides): numb
 export function compareRanked(a: Ranked, b: Ranked): number {
   if (a.rank !== b.rank) return b.rank - a.rank
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+}
+
+/** The highest rank in a space, or null when it is empty. */
+export function topRank(space: readonly Ranked[]): number | null {
+  let top: number | null = null
+  for (const e of space) if (top === null || e.rank > top) top = e.rank
+  return top
 }
 
 /**
@@ -114,23 +124,29 @@ function respace(items: readonly Ranked[], at: number, draggedId: string): Recor
  * never dragged would be wrong: the real conversation's own seed (its first message) is later than
  * the placeholder's (the terminal's start), and a row started in between would jump past it.
  *
- * The destination is overwritten even if it carries its own override. It can only have been placed
- * during the instant between its first index and the bind, as a duplicate of the row the user has
- * actually been looking at, so the placeholder's position is the one that means something.
+ * `overrides` is the STORED map, re-read at the time of the write, and every window folds the same
+ * bind into it. So the fold reads the placeholder's override from the store rather than trusting
+ * `seenRank` — what this window last rendered — and it is idempotent: a store where the placeholder
+ * has no override but the real id does is exactly what an earlier window's transfer leaves, and it is
+ * left alone. Only when neither id has an override does `seenRank` (the placeholder's seed) apply.
+ * A dragged placeholder's position beats one the real id carries: the real id can only have been
+ * placed in the instant between its first index and the bind, beside the row the user was watching.
  *
  * A CORRECTION — a terminal moving between two real conversations — must never come here: both ids
  * are durable rows at positions of their own, and this would destroy one. See `bindActions`.
  */
 export function absorbBind(
   overrides: RankOverrides,
-  placeholderRank: number,
+  seenRank: number,
   placeholderId: string,
   realId: string
 ): Record<string, number> {
   if (placeholderId === realId) return overrides as Record<string, number>
+  const dragged = Object.hasOwn(overrides, placeholderId)
+  if (!dragged && Object.hasOwn(overrides, realId)) return overrides as Record<string, number>
   const next: Record<string, number> = { ...overrides }
   delete next[placeholderId]
-  next[realId] = placeholderRank
+  next[realId] = dragged ? overrides[placeholderId] : seenRank
   return next
 }
 

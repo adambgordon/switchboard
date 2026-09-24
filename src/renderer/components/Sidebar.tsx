@@ -1,78 +1,29 @@
-import { Fragment, useEffect, useRef, useState, type MouseEvent, type RefObject } from 'react'
-import type { AgentKind, ConversationMeta, LiveState, PtyState } from '@shared/types'
-import type { SectionKey } from '../lib/useLayout'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
+import type { AgentKind } from '@shared/types'
+import type { SidebarBlock, SidebarModel, SidebarRow } from '../lib/sidebarModel'
+import { visibleRows } from '../lib/sidebarModel'
+import type { SidebarMode } from '../lib/sidebarPrefs'
+import { reorderArray } from '../lib/reorder'
 import { useRailFlip } from '../lib/useRailFlip'
 import { useRowReorder } from '../lib/useRowReorder'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
+import SidebarHead from './SidebarHead'
+import SidebarGroupHeader from './SidebarGroupHeader'
 import { isUnlinkedRow } from '../lib/rowIdentity'
-import NewConversationMenu from './NewConversationMenu'
-import {
-  Chevron,
-  Close,
-  Plus,
-  Search,
-  Pin,
-  Info,
-  NewWindow,
-  SplitVertical,
-  Stop,
-  Play
-} from './icons'
-
-/** One row in the pane: a conversation that may be live, pinned, both, or neither. */
-export interface RailEntry {
-  sessionId: string
-  /** The live process, when this conversation is currently running. */
-  pty: PtyState | null
-  /** Display metadata — indexed, or synthesized from the live process if not yet on disk. */
-  meta: ConversationMeta
-  pinned: boolean
-  /** Resolved liveness (working / asking / awaiting / quiet); null when not live. */
-  liveState: LiveState | null
-}
-
-export interface RailSection {
-  key: SectionKey
-  label: string
-  /** 'card' = raised cards (Pinned/Live); 'row' = flat rows (Recent). */
-  variant: 'card' | 'row'
-  entries: RailEntry[]
-  /** When set, the section shows at most this many rows until expanded via "Show more". */
-  cap?: number
-}
-
-/**
- * The rows actually shown for a section — the single source of truth for visibility,
- * shared by the renderer below and by App's keyboard-nav ordering so the two never drift.
- * Search expands everything (no collapse, no cap); otherwise a collapsed section shows
- * nothing and a capped section (Recent) is sliced until the user reveals the rest.
- */
-export function visibleEntries(
-  section: RailSection,
-  opts: { collapsed: boolean; expanded: boolean; searching: boolean }
-): RailEntry[] {
-  if (opts.searching) return section.entries
-  if (opts.collapsed) return []
-  return section.cap != null && !opts.expanded ? section.entries.slice(0, section.cap) : section.entries
-}
+import { Pin, Info, NewWindow, SplitVertical, Stop, Play } from './icons'
 
 interface Props {
-  /** Ordered, non-empty sections (Pinned / Live / Recent), built in App. */
-  sections: RailSection[]
-  /** Live tally over ALL sessions (not the search-filtered set) — drives the count + status line.
-   *  `unlinked` is its own bucket, not part of `idle`: those terminals have no proven conversation, so
-   *  they have no turn-state to be counted as anything. The five must still sum to `count`. */
-  live: {
-    count: number
-    working: number
-    asking: number
-    unread: number
-    idle: number
-    unlinked: number
-  }
-  /** True during the initial conversation index, before sections are populated. */
+  /** What to draw — built in App by `buildSidebar`, which keyboard navigation walks too. */
+  model: SidebarModel
+  mode: SidebarMode
+  onModeChange: (mode: SidebarMode) => void
+  /** Focus the next session that needs you (the head tag), cycling. */
+  onNeedsYou: () => void
+  /** Collapse all / Expand all. */
+  onSetAllCollapsed: (collapsed: boolean) => void
+  /** True during the initial conversation index, before the model is populated. */
   loading: boolean
   /** Conversations another window holds tabs for — those rows are marked, since clicking one raises
    *  that window instead of opening here. */
@@ -88,42 +39,31 @@ interface Props {
   /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
   onOpenInNewWindow?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
-  // search — lives on the status line; opening it replaces the working/idle sub-label
   query: string
   onQueryChange: (q: string) => void
   searchRef: RefObject<HTMLInputElement>
   searchOpen: boolean
   onSearchToggle: () => void
-  /** True when a query is active — sections render expanded and uncapped. */
+  /** True when a query is active — every folder renders expanded and uncapped, and drags are off. */
   searching: boolean
-  // collapse + capped-section reveal
-  collapsedSections: Record<SectionKey, boolean>
-  onToggleSection: (key: SectionKey) => void
-  /** Section keys the user has revealed past their cap (the Recent "Show more"). */
-  expandedSections: Set<string>
-  onShowMore: (key: SectionKey) => void
-  // new conversation — the "+" above search opens the folder menu (mirrors ⌘N)
+  /** A folder header's chevron — writes that folder's collapse preference. */
+  onToggleFolder: (root: string) => void
+  /** Extra rows revealed per group key (ephemeral). */
+  revealed: Readonly<Record<string, number>>
+  onShowMore: (key: string) => void
+  onShowLess: (key: string) => void
   menuOpen: boolean
   onMenuToggle: () => void
-  /** Right-click the "+" → open the chooser even when a default folder is set (the escape hatch). */
   onNewContextMenu: () => void
   onMenuClose: () => void
   recentDirs: string[]
-  /** The default folder ('' = none) — pinned + preselected at the top of the menu's directory list. */
   menuDefaultDir: string
-  /** Agents to offer in the menu's segmented control; collapses to a single agent when <2. */
   menuAgents: AgentKind[]
-  /** The agent the menu shows selected (sticky last-picked / resolved default). */
   menuAgent: AgentKind
-  /** Report the agent the user picks in the menu's segment, so the choice sticks across opens. */
   onMenuAgentChange: (agent: AgentKind) => void
-  /** Start a new conversation in `cwd` with `agent` (a recent-dir click, or the resolved default). */
   onChoose: (cwd: string, agent: AgentKind) => void
-  /** Pick a folder via the native dialog, then start a new `agent` conversation there. */
   onPickOther: (agent: AgentKind) => void
-  /** True when a default folder is set + enabled — the "+" / ⌘N spawn straight into it. */
   defaultDirActive: boolean
-  /** Basename of the default folder, surfaced in the "+" tooltip when active. */
   defaultDirLabel: string
   /** Toggle a conversation read/unread (from its right-click menu). */
   onToggleUnread: (id: string) => void
@@ -136,28 +76,59 @@ interface Props {
   /** Open the conversation-info modal for a row (the right-click "Session details…" item). `edit`
    *  starts it in title-edit mode. */
   onShowInfo: (id: string, edit: boolean) => void
-  /** Reorder the pinned list — the drag-to-reorder commit (indices into `pinnedOrder`). */
-  onReorderPins: (from: number, to: number) => void
-  /** Current pinned order (display order, top-first) — resolves drag from/to indices. */
-  pinnedOrder: string[]
-  /** Reorder the live list — the drag-to-reorder commit (indices into `liveOrder`). */
-  onReorderLive: (from: number, to: number) => void
-  /** Current live order (display order, top-first) — resolves drag from/to indices. */
-  liveOrder: string[]
+  /** A row dropped between two neighbors of its block, either null at an edge. */
+  onDropRow: (block: SidebarBlock, draggedId: string, higherId: string | null, lowerId: string | null) => void
   /** Bumped on each drag-reorder commit; folded into controlSig so that commit settles instantly. */
   reorderTick: number
 }
 
 /**
- * The unified conversation pane (the former Tally Rail, now the single left column).
- * A status head counting live sessions — with an inline search that replaces the
- * working/idle sub-label — then three collapsible, mutually-exclusive sections:
- * Pinned, Live, and Recent (a flat history capped with a "Show more" reveal).
- * Liveness is the cobalt dot, never a section.
+ * One block's rows, and the drag that reorders them. Each block gets its own gesture over its own
+ * wrapper, so a drag can never carry a row out of the block it belongs to — pinned into unpinned, or
+ * one folder into another. The gesture reports indices; they become the two neighbors the row landed
+ * between, which is what both a rank write and a pin move need.
  */
-export default function TallyRail({
-  sections,
-  live,
+function SidebarBlockView({
+  block,
+  enabled,
+  onDrop,
+  children
+}: {
+  block: SidebarBlock
+  enabled: boolean
+  onDrop: Props['onDropRow']
+  children: ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const ids = block.rows.map((r) => r.sessionId)
+  useRowReorder(ref, {
+    enabled,
+    order: ids,
+    onReorder: (from, to) => {
+      const moved = reorderArray(ids, from, to)
+      onDrop(block, ids[from], moved[to - 1] ?? null, moved[to + 1] ?? null)
+    },
+    selector: '.sb-row[data-session]'
+  })
+  return (
+    <div className="sb-block" data-block={block.id} ref={ref}>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * The unified conversation pane. A head (grouping mode, the needs-you tag, search, new) above one
+ * scrolling list of groups: one headerless group in All mode, one sticky-headed group per project in
+ * Folders mode. Every group holds its pinned rows, then its unpinned ones; liveness is the dot, never
+ * a grouping.
+ */
+export default function Sidebar({
+  model,
+  mode,
+  onModeChange,
+  onNeedsYou,
+  onSetAllCollapsed,
   loading,
   openElsewhere,
   selectedSessionId,
@@ -174,10 +145,10 @@ export default function TallyRail({
   searchOpen,
   onSearchToggle,
   searching,
-  collapsedSections,
-  onToggleSection,
-  expandedSections,
+  onToggleFolder,
+  revealed,
   onShowMore,
+  onShowLess,
   menuOpen,
   onMenuToggle,
   onNewContextMenu,
@@ -196,31 +167,12 @@ export default function TallyRail({
   onResumeSession,
   onStopSession,
   onShowInfo,
-  onReorderPins,
-  pinnedOrder,
-  onReorderLive,
-  liveOrder,
+  onDropRow,
   reorderTick
 }: Props) {
-  const { count, working, asking, unread, idle, unlinked } = live
-  const empty = sections.length === 0
-
-  // The status sub-label, shown when something is live (the search field replaces it).
-  // working = mid-turn · asking = blocked on your reply · unread = finished, not yet seen ·
-  // idle = finished and seen · unlinked = a terminal with no conversation identity, which is NOT any
-  // of the other four. It gets its own word so the line stays honest: describing a terminal the user
-  // may be actively typing in as "idle" is the misreport this state exists to avoid. The `all idle`
-  // fallback can only be reached when every bucket is zero, i.e. never while `count > 0`.
-  let subLabel = ''
-  if (count > 0) {
-    const parts: string[] = []
-    if (working > 0) parts.push(`${working} working`)
-    if (asking > 0) parts.push(`${asking} waiting on you`)
-    if (unread > 0) parts.push(`${unread} unread`)
-    if (idle > 0) parts.push(`${idle} idle`)
-    if (unlinked > 0) parts.push(`${unlinked} unlinked`)
-    subLabel = parts.length > 0 ? parts.join(' · ') : 'all idle'
-  }
+  // Nothing to draw: no folder has a row, or All mode's one group is empty. A collapsed folder is not
+  // empty — it has rows, just not on screen.
+  const empty = model.groups.every((g) => g.blocks.length === 0 && !g.collapsed)
 
   // Obsidian-style scrollbar: the thumb shows only while scrolling (+ a beat after), never at rest.
   const listRef = useRef<HTMLDivElement>(null)
@@ -233,21 +185,21 @@ export default function TallyRail({
   // scrollTop — a boolean, so setState is a no-op re-render until it actually flips (no per-event cost).
   const [scrolled, setScrolled] = useState(false)
 
-  // Each section's visible rows, computed once via visibleEntries (the single source of truth for
-  // visibility) and reused by both the FLIP signature below and the render, so the two never diverge.
-  const rendered = sections.map((section) => {
-    const collapsed = !searching && collapsedSections[section.key]
-    const expanded = expandedSections.has(section.key)
-    return { section, collapsed, shown: visibleEntries(section, { collapsed, expanded, searching }) }
-  })
-  // Glide rows that change position (pinned / resumed / unpinned) to their new section instead of
-  // teleporting. orderSig (the visible ids, in order) drives a slide; controlSig (search query +
-  // collapse + show-more) marks a layout change we deliberately keep instant — see useRailFlip.
-  const orderSig = rendered.flatMap((r) => r.shown.map((e) => e.sessionId)).join('|')
-  const controlSig = JSON.stringify([query, [...expandedSections].sort(), collapsedSections, reorderTick])
+  const shown = visibleRows(model)
+  // Glide rows that change position (pinned / resumed / unpinned) instead of teleporting. orderSig
+  // (the visible ids, in order) drives a slide; controlSig (search, mode, collapse, reveal) marks a
+  // layout change we deliberately keep instant — see useRailFlip.
+  const orderSig = shown.map((r) => r.sessionId).join('|')
+  const controlSig = JSON.stringify([
+    query,
+    mode,
+    model.groups.map((g) => [g.key, g.collapsed]),
+    revealed,
+    reorderTick
+  ])
   useRailFlip(listRef, orderSig, controlSig)
 
-  // Re-evaluate the head divider when the visible content changes: collapsing a section or running a
+  // Re-evaluate the head divider when the visible content changes: collapsing a folder or running a
   // search can shrink the list back within the viewport (scrollTop snaps to 0) WITHOUT firing a scroll
   // event, which would otherwise leave the divider stuck on.
   useEffect(() => {
@@ -255,27 +207,8 @@ export default function TallyRail({
     if (el) setScrolled(el.scrollTop > 0)
   }, [orderSig, controlSig])
 
-  // Look up a rendered entry by id — used by the right-click menu.
-  const entryById = (id: string): RailEntry | undefined =>
-    sections.flatMap((s) => s.entries).find((en) => en.sessionId === id)
-
-  // Click + drag a row to reorder its section — Pinned and Live each get their own instance on the
-  // same container, partitioned by selector (a pinned-live row carries `.pinned`, so the pinned
-  // instance owns it; pure-live rows match `.live:not(.pinned)`). Disabled during search (sections
-  // are filtered then); commits only on drop, so useRailFlip stays dormant during the drag and glides
-  // the settle afterward.
-  useRowReorder(listRef, {
-    enabled: !searching,
-    order: pinnedOrder,
-    onReorder: onReorderPins,
-    selector: '.sb-row.pinned[data-session]'
-  })
-  useRowReorder(listRef, {
-    enabled: !searching,
-    order: liveOrder,
-    onReorder: onReorderLive,
-    selector: '.sb-row.live:not(.pinned)[data-session]'
-  })
+  // Look up a rendered row by id — used by the right-click menu, which only rendered rows can open.
+  const entryById = (id: string): SidebarRow | undefined => shown.find((r) => r.sessionId === id)
 
   // Row actions menu, on any row (live or not): Pin/Unpin, plus — live — mark read/unread + Stop, or —
   // not-live — Resume, and Session details. One shared instance, opened by CLICKING the ⋮ button
@@ -394,81 +327,56 @@ export default function TallyRail({
     []
   )
 
+  const renderRow = (row: SidebarRow): ReactNode => (
+    <ConversationRow
+      key={row.sessionId}
+      meta={row.meta}
+      selected={row.sessionId === selectedSessionId}
+      live={row.pty}
+      liveState={row.liveState}
+      pinned={row.pinned}
+      elsewhere={openElsewhere.has(row.sessionId)}
+      showCwd
+      card={!!row.pty}
+      onSelect={onSelect}
+      onJump={onJump}
+      onStick={onStick}
+      // onOpenToSide / onOpenInNewWindow are deliberately NOT passed down: they are menu actions now,
+      // not click gestures. The rail still holds them for its own ⋮ and right-click menus below.
+      onMarkUnread={onMarkUnread}
+      onOpenMenu={openRowMenuFromButton}
+      onContextMenu={openRowMenu}
+    />
+  )
+
   return (
     <aside className="sb-rail">
-      <div className={`sb-rail-head${scrolled ? ' scrolled' : ''}`}>
-        <div className="sb-rail-head-top">
-          <div className="sb-rail-count-wrap">
-            <span className={`sb-rail-count${count > 0 ? ' on' : ''}`}>{count}</span>
-            <span className="sb-rail-count-label label-caps">{count === 1 ? 'live session' : 'live sessions'}</span>
-          </div>
-          <div className="sb-newwrap sb-rail-newwrap">
-            <button
-              className={`sb-rail-new-btn${menuOpen ? ' open' : ''}`}
-              onClick={onMenuToggle}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                onNewContextMenu()
-              }}
-              data-tip={
-                defaultDirActive
-                  ? `New conversation in ${defaultDirLabel} (⌘N) · right-click to choose`
-                  : 'New conversation (⌘N)'
-              }
-              aria-label="New conversation"
-            >
-              <Plus size={16} />
-            </button>
-            <NewConversationMenu
-              open={menuOpen}
-              recentDirs={recentDirs}
-              defaultDir={menuDefaultDir}
-              agents={menuAgents}
-              initialAgent={menuAgent}
-              onAgentChange={onMenuAgentChange}
-              onChoose={onChoose}
-              onPickOther={onPickOther}
-              onClose={onMenuClose}
-            />
-          </div>
-        </div>
-        <div className="sb-rail-sub-row">
-          {searchOpen ? (
-            <div className="sb-rail-search-box">
-              <input
-                ref={searchRef}
-                className="sb-rail-search-input"
-                placeholder="Search conversations"
-                value={query}
-                spellCheck={false}
-                autoCorrect="off"
-                autoCapitalize="off"
-                onChange={(e) => onQueryChange(e.target.value)}
-              />
-              <button
-                className="sb-rail-search-clear"
-                onClick={onSearchToggle}
-                data-tip="Close search"
-                aria-label="Close search"
-              >
-                <Close size={14} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="sb-rail-sub mono">{subLabel}</div>
-              <button
-                className="sb-rail-search-btn"
-                onClick={onSearchToggle}
-                data-tip="Search all conversations (⌘F)"
-                aria-label="Search all conversations"
-              >
-                <Search size={15} />
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+      <SidebarHead
+        scrolled={scrolled}
+        mode={mode}
+        onModeChange={onModeChange}
+        needsYou={model.needsYou.length}
+        onNeedsYou={onNeedsYou}
+        onSetAllCollapsed={onSetAllCollapsed}
+        query={query}
+        onQueryChange={onQueryChange}
+        searchRef={searchRef}
+        searchOpen={searchOpen}
+        onSearchToggle={onSearchToggle}
+        menuOpen={menuOpen}
+        onMenuToggle={onMenuToggle}
+        onNewContextMenu={onNewContextMenu}
+        onMenuClose={onMenuClose}
+        recentDirs={recentDirs}
+        menuDefaultDir={menuDefaultDir}
+        menuAgents={menuAgents}
+        menuAgent={menuAgent}
+        onMenuAgentChange={onMenuAgentChange}
+        onChoose={onChoose}
+        onPickOther={onPickOther}
+        defaultDirActive={defaultDirActive}
+        defaultDirLabel={defaultDirLabel}
+      />
 
       <div
         className="sb-rail-body sb-autoscroll"
@@ -489,50 +397,41 @@ export default function TallyRail({
             )}
           </div>
         ) : (
-          rendered.map(({ section, collapsed, shown }) => {
-            const hiddenByCap = section.entries.length - shown.length
+          model.groups.map((g) => {
+            const extra = revealed[g.key] ?? 0
+            const more = !g.collapsed && !searching && g.hidden > 0
+            const less = !g.collapsed && !searching && extra > 0
             return (
-              <Fragment key={section.key}>
-                <div className="sb-rail-section">
-                  <button
-                    className="sb-rail-section-head"
-                    onClick={() => onToggleSection(section.key)}
-                    aria-expanded={!collapsed}
-                  >
-                    <Chevron size={11} className={`sb-rail-chevron${collapsed ? ' collapsed' : ''}`} />
-                    <span className="sb-rail-section-label label-caps">{section.label}</span>
-                    <span className="sb-rail-section-rule" />
-                    <span className="sb-rail-section-count mono">{section.entries.length}</span>
-                  </button>
-                </div>
-                {shown.map((entry) => (
-                  <ConversationRow
-                    key={entry.sessionId}
-                    meta={entry.meta}
-                    selected={entry.sessionId === selectedSessionId}
-                    live={entry.pty}
-                    liveState={entry.liveState}
-                    pinned={entry.pinned}
-                    elsewhere={openElsewhere.has(entry.sessionId)}
-                    showCwd
-                    card={section.variant === 'card' && !!entry.pty}
-                    onSelect={onSelect}
-                    onJump={onJump}
-                    onStick={onStick}
-                    // onOpenToSide / onOpenInNewWindow are deliberately NOT passed down: they are
-                    // menu actions now, not click gestures. The rail still holds them for its own ⋮
-                    // and right-click menus below.
-                    onMarkUnread={onMarkUnread}
-                    onOpenMenu={openRowMenuFromButton}
-                    onContextMenu={openRowMenu}
+              <section key={g.key} className="sb-group">
+                {g.header && (
+                  <SidebarGroupHeader
+                    root={g.key}
+                    label={g.label}
+                    collapsed={g.collapsed}
+                    wantsAttention={g.wantsAttention}
+                    onToggle={onToggleFolder}
                   />
-                ))}
-                {!collapsed && !searching && hiddenByCap > 0 && (
-                  <button className="sb-rail-more label-caps" onClick={() => onShowMore(section.key)}>
-                    Show {hiddenByCap} more
-                  </button>
                 )}
-              </Fragment>
+                {g.blocks.map((b) => (
+                  <SidebarBlockView key={b.id} block={b} enabled={!searching} onDrop={onDropRow}>
+                    {b.rows.map(renderRow)}
+                  </SidebarBlockView>
+                ))}
+                {(more || less) && (
+                  <div className="sb-rail-more-row">
+                    {more && (
+                      <button className="sb-rail-more" onClick={() => onShowMore(g.key)}>
+                        Show more
+                      </button>
+                    )}
+                    {less && (
+                      <button className="sb-rail-more" onClick={() => onShowLess(g.key)}>
+                        Show less
+                      </button>
+                    )}
+                  </div>
+                )}
+              </section>
             )
           })
         )}

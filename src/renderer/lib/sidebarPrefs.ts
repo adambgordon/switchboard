@@ -59,3 +59,14 @@ export function withFolderCollapse(
   if (Object.hasOwn(stored, root) && stored[root] === collapsed) return stored as Record<string, boolean>
   return { ...stored, [root]: collapsed }
 }
+
+/** Fold one collapse value for many folders at once — Collapse all / Expand all. Same rules as above. */
+export function withFoldersCollapse(
+  stored: Readonly<Record<string, boolean>>,
+  roots: Iterable<string>,
+  collapsed: boolean
+): Record<string, boolean> {
+  let next = stored as Record<string, boolean>
+  for (const root of roots) next = withFolderCollapse(next, root, collapsed)
+  return next
+}

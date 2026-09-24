@@ -1,5 +1,5 @@
 import type { ConversationGroup, ConversationMeta, LiveState, PtyState } from '../../shared/types'
-import { compareRanked, rankOf, type RankOverrides } from './rowRank'
+import { bumpRank, compareRanked, rankOf, topRank, type RankOverrides, type Ranked } from './rowRank'
 import type { SidebarMode } from './sidebarPrefs'
 
 /**
@@ -49,8 +49,19 @@ export interface FolderRank {
   seed: number
 }
 
+/** Where one row sits, whatever is rendered — what a drag, a Resume or a bind needs to write. */
+export interface RowPlace {
+  rank: number
+  /** The row's conversation seed, or its terminal's start when nothing is indexed yet. */
+  seed: number
+  root: string
+  pinned: boolean
+}
+
 export interface SidebarModel {
   groups: SidebarGroup[]
+  /** Every row that is not hidden, in both modes and regardless of search, collapse and caps. */
+  rows: ReadonlyMap<string, RowPlace>
   /** Every folder's rank and seed, in both modes and regardless of search — what a folder drag or a
    *  bind needs, including for folders not currently rendered. */
   folders: ReadonlyMap<string, FolderRank>
@@ -87,6 +98,9 @@ export interface SidebarInput {
   collapsed: Readonly<Record<string, boolean>>
   /** Folders expanded by navigation this session, which keep a folder open after focus moves on. */
   navExpanded: ReadonlySet<string>
+  /** Folders the user collapsed while a conversation in them was active — the one thing that closes
+   *  an active conversation's folder. Cleared for a folder when navigation next enters it. */
+  activeCollapsed: ReadonlySet<string>
   /** Extra unpinned rows revealed per group key. */
   revealed: Readonly<Record<string, number>>
   /** Matching ids while searching, else null. Searching expands everything and lifts every cap. */
@@ -226,8 +240,9 @@ export function folderLabels(roots: readonly string[]): Map<string, string> {
 
 function isCollapsed(input: SidebarInput, key: string, index: number, rows: readonly SidebarRow[]): boolean {
   if (input.search) return false
-  // Derived, not stored: whatever path made a conversation active, its folder cannot be closed on it.
-  if (rows.some((r) => input.active.has(r.sessionId))) return false
+  // Derived, not stored: whatever path made a conversation active, its folder opens for it — unless
+  // the user has collapsed it since, which only they can do.
+  if (!input.activeCollapsed.has(key) && rows.some((r) => input.active.has(r.sessionId))) return false
   if (input.navExpanded.has(key)) return false
   if (Object.hasOwn(input.collapsed, key)) return input.collapsed[key]
   return index >= input.limits.autoExpand
@@ -319,10 +334,77 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
     const rows = sortRows(b.rows.filter((r) => r.pinned)).concat(sortRows(b.rows.filter((r) => !r.pinned)))
     for (const r of rows) if (needsYou(r.liveState)) order.push(r.sessionId)
   }
-  return { groups, folders, needsYou: order }
+  const rows = new Map<string, RowPlace>()
+  for (const p of placed) rows.set(p.row.sessionId, { rank: p.row.rank, seed: p.seed, root: p.root, pinned: p.row.pinned })
+  return { groups, rows, folders, needsYou: order }
+}
+
+/**
+ * The unpinned rows' ranks: the one space every drop and Resume writes into. Global rather than per
+ * folder, so the same numbers order All mode and every folder at once. Pinned rows are excluded —
+ * their rank is pin order, which is not a number an override can be compared with.
+ */
+export function rankSpace(model: SidebarModel): Ranked[] {
+  const out: Ranked[] = []
+  for (const [id, p] of model.rows) if (!p.pinned) out.push({ id, rank: p.rank })
+  return out
 }
 
 /** The rows on screen, top to bottom — what keyboard navigation steps through. */
 export function visibleRows(model: SidebarModel): SidebarRow[] {
   return model.groups.flatMap((g) => g.blocks.flatMap((b) => b.rows))
+}
+
+/**
+ * A Resume's write: lift the row above every unpinned row, in every folder and in All mode at once.
+ * Pinned rows are left where they are — their order is an arrangement the user made — and a row the
+ * model does not hold (hidden, or not yet indexed) writes nothing.
+ */
+export function resumeWrites(model: SidebarModel, id: string, now: number): Record<string, number> {
+  const place = model.rows.get(id)
+  if (!place || place.pinned) return {}
+  return { [id]: bumpRank(topRank(rankSpace(model)), now) }
+}
+
+/** One conversation on screen and the folder it belongs to. */
+export type ActivePlace = readonly [sessionId: string, root: string]
+
+/**
+ * The folders navigation just ENTERED: the folder of every conversation that became active. Keyed by
+ * conversation, not folder, so moving to another conversation in a folder that was already active
+ * still counts — the needs-you tag opening a row in a folder the user collapsed must show it. A folder
+ * that merely stays active is not entered, so navigating the OTHER split pane leaves it alone.
+ */
+export function enteredFolders(before: readonly ActivePlace[], after: readonly ActivePlace[]): string[] {
+  const was = new Set(before.map(([id]) => id))
+  return [...new Set(after.filter(([id]) => !was.has(id)).map(([, root]) => root))]
+}
+
+/** `set` with `roots` added — the same set when nothing is new. */
+export function withFolders(set: ReadonlySet<string>, roots: readonly string[]): ReadonlySet<string> {
+  const add = roots.filter((r) => !set.has(r))
+  return add.length === 0 ? set : new Set([...set, ...add])
+}
+
+/** `set` with `roots` removed — the same set when none were there. */
+export function withoutFolders(set: ReadonlySet<string>, roots: readonly string[]): ReadonlySet<string> {
+  if (!roots.some((r) => set.has(r))) return set
+  const next = new Set(set)
+  for (const r of roots) next.delete(r)
+  return next
+}
+
+/**
+ * The folder overrides after freezing every folder at its NEWEST row — the one-time freeze of folder
+ * order the first time a profile runs this rail (see `onceTasks`). A folder that already carries an
+ * override keeps it: it was placed by a drag or a bind. Written as overrides, so the order is fixed
+ * from then on and nothing moves when a conversation later starts in a folder. Folders first seen
+ * after the freeze are seeded by their earliest row, which for a brand-new folder is also its newest.
+ */
+export function freezeFoldersByNewest(model: SidebarModel, stored: RankOverrides): Record<string, number> {
+  const newest: Record<string, number> = {}
+  for (const p of model.rows.values()) {
+    if (!Object.hasOwn(newest, p.root) || p.seed > newest[p.root]) newest[p.root] = p.seed
+  }
+  return { ...newest, ...stored }
 }
