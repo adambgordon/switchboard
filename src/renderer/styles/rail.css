@@ -36,17 +36,14 @@
 }
 
 .sb-rail-head {
-  /* Bottom padding drops the scroll divider below the count text so it isn't cramped, and it is PAIRED
-     with .sb-rail-body's top padding: the two must always SUM TO 10px, because that sum is what fixes
-     where the first row sits. Move one, move the other the opposite way. The split favours the body
-     (4 here, 6 there) because the body's side of it is also the hover shadow's only clearance above a
-     card — see .sb-rail-body, which carries the reach-vs-budget figures for all three directions.
+  /* Even top and bottom padding, so the head's controls sit centered between the title bar's rule and
+     the scroll divider below them. The bottom padding is PAIRED with .sb-rail-body's top padding: the
+     two SUM TO 17px, and that sum is what fixes where the first row sits. Move one, move the other the
+     opposite way (and .sb-group-head's sticky offset with the body's).
      L/R is --rail-text-inset, NOT the body's padding: the head sits outside the scroller, so it has no
-     gutter to account for, and matching the body's raw padding would leave the head's label a full
-     --bar-thin left of the titles underneath it. Aligning to the text column instead puts
-     "N working · M idle" over the flat-row titles, and the "+" / magnifier over the far end of that
-     same column. (Live CARDS indent a further 3px inside that column — see --rail-text-inset.) */
-  padding: 18px var(--rail-text-inset) 4px;
+     gutter to account for, and matching the body's raw padding would leave the head's controls a full
+     --bar-thin left of the rows underneath them. */
+  padding: 11px var(--rail-text-inset);
   flex-shrink: 0;
   /* Divider under the head, shown only when the list is scrolled off the top (the `.scrolled`
      class is toggled from Sidebar off the body's scrollTop). INSET box-shadow, not a border or a
@@ -75,7 +72,12 @@
   gap: 2px;
   margin-left: auto;
 }
-/* The grouping toggle — the shared .sb-seg pill, a size down: it sits in chrome, not in a form. */
+/* The grouping toggle — the shared .sb-seg pill, a size down: it sits in chrome, not in a form. It
+   hangs out of the head's text inset toward the rail's leading edge, lining up with the folder icons
+   below (a folder header's icon sits 5px into its fill, which starts 5px into the body's padding). */
+.sb-rail-mode {
+  margin-left: calc(var(--rail-inset) + var(--bar-thin) - 5px + 5px - var(--rail-text-inset));
+}
 .sb-rail-mode .sb-seg-btn {
   padding: 3px 10px;
   font-size: var(--text-xs);
@@ -209,38 +211,14 @@
      overflow doesn't reclaim the 7px gutter and shift every row sideways. The
      padding stays constant; the gutter just sits empty when there's nothing to scroll. */
   scrollbar-gutter: stable;
-  /* The L/R padding is ASYMMETRIC ON PURPOSE — that is what makes the rows look CENTERED. Two facts
-     drive it. (1) `stable` reserves the gutter at the inline-END only, so an even padding puts a card's
-     right border a full --bar-thin further in than its left. (2) The overflow clip edge is the PADDING
-     BOX, which sits INSIDE that gutter: descendants cannot paint into the gutter
-     at all, so a hover shadow can never "slide under" the scrollbar — set a small padding-right and a
-     bare strip opens between where the shadow is cut and where the thumb begins. So the scrollbar side
-     gets --rail-inset, and the other side gets --rail-inset PLUS the gutter it doesn't have to reserve;
-     both of a card's borders then land the same distance from the rail's edge. Equalizing the two
-     un-centers the rows again; taking the end one below --rail-inset hard-cuts the shadow (that token's
-     comment has the numbers).
-     The block padding is NOT --rail-inset either: top and bottom are the hover shadow's only clearance
-     above and below a card. All three directions are budgets against the same clip. Measured reach vs
-     budget in light — the binding theme, since its shadow carries the larger peaks:
-
-         edge     reach    budget                  clearance
-         side     7.5px    --rail-inset      7px     -0.5px   over budget; accepted, see below
-         top      4.0px    padding-top       6px     +2.0px
-         bottom  11.5px    padding-bottom   12px     +0.5px
-
-     Read the clearance column and draw the ordering yourself. There is deliberately no adjective here
-     naming one edge the tightest: which one wins changes the moment any budget moves, and a superlative
-     written next to numbers goes stale silently while the numbers stay right.
-     The side runs OVER and is kept that way on purpose — closing it costs another 1px of row width per
-     side, and the residue is verified clean by inspection. That is an accepted exception, not a standard
-     to match on the other edges.
-     Clearance is not the same as risk, and only the SECTION order is guaranteed: Pinned and Live precede
-     Recent. Inside Pinned the order is the user's (a new pin lands at the END) and card chrome is decided
-     per row, so a live card can sit anywhere, last included — do not reason from where cards "usually"
-     are. padding-bottom governs exactly one case: a hovered card at max scroll. At any intermediate
-     scrollTop the clip falls wherever the viewport ends, so a card within the shadow's reach of it is cut
-     with rows still below, and the rail's bottom fade does NOT cover that — the same :hover rule that
-     draws the shadow sets z-index: 1, which outranks the fade's ::after.
+  /* The L/R padding is ASYMMETRIC ON PURPOSE — that is what makes the rows look CENTERED. `stable`
+     reserves the gutter at the inline-END only, so an even padding puts a row's right edge a full
+     --bar-thin further in than its left. So the scrollbar side gets --rail-inset, and the other side gets
+     --rail-inset PLUS the gutter it doesn't have to reserve; both of a row's edges then land the same
+     distance from the rail's edge. Equalizing the two un-centers the rows again.
+     The padding is also the only room anything may paint OUTSIDE a row, because the overflow clip edge
+     is the padding box: the white row's 2px edge, and a folder header's hover fill,
+     which hangs into the leading side (.sb-group-toggle).
      Top also trades against .sb-rail-head's bottom padding: that pair must always sum to 10px or the
      first row moves. Bottom has no such partner, so it is the cheap one to widen. */
   padding: 6px var(--rail-inset) 12px calc(var(--rail-inset) + var(--bar-thin));
@@ -275,96 +253,68 @@
   line-height: 1.45;
 }
 
-/* Rail rows transition only border-color across the go-live morph — NOT background or padding.
-   background-color is deliberately off: the selection fill (.sb-row.selected → white) and the hover
-   fill must SNAP, or every arrow-key / click eases that white in on the new row and out on the old
-   one — a perceptible selection lag. padding is off too: it's a LAYOUT property, so animating the
-   8→10px card growth reflows every frame and the row's text visibly slides/chops; snapping it lets
-   the text settle in one step while the card's *paint* (background, border, shadow) eases in. The
-   go-live *entry* eases that paint via the .card rule below; box-shadow is off here so a flat row's
-   selection ring snaps. */
+/* Selection and hover SNAP: easing the white in on the new row and out on the old one reads as a
+   selection lag on every arrow key and click. */
 .sb-rail-body .sb-row {
-  transition: border-color var(--dur-fast) var(--ease);
+  transition: none;
+}
+/* The focused pane's conversation — the one the keyboard acts on — is the rail's one white row
+   (.selected, sidebar.css), edged in 2px of cobalt. One row, not one per pane: the other pane's tab
+   says it is on screen by itself (tabs.css), and two white rows read as two selections. This edge is
+   the one sanctioned use of cobalt for something other than liveness: it is --live, not --dot, so a
+   user's dot color never repaints it, and it marks only the single row the keyboard acts on. */
+.sb-rail-body .sb-row.selected {
+  box-shadow: 0 0 0 2px var(--live);
+}
+/* Hovering it shifts its white a step, as a resting row's hover shifts the rail's paper. */
+.sb-rail-body .sb-row.selected:hover {
+  background: var(--rail-selected-hover);
+}
+/* A sliding row keeps its :hover the whole glide (a compositor transform doesn't re-run it — see
+   .sb-flipping in sidebar.css), so the shift is dropped for the slide. */
+.sb-rail-body .sb-row.sb-flipping.selected {
+  background: var(--paper-raised);
 }
 
-/* ---- Card chrome = LIVE rows only (a white card === a live session, whether it sits in
-   Pinned or Live). Gated on liveness in Sidebar, so a non-live pinned row drops the .card
-   class and falls back to the flat Recent look (incl. its .selected:not(.card) styling below).
-   Scoped under .sb-rail-body so these win over the bare .sb-row rules without touching the
-   sidebar, and never leak onto the rail's flat (non-live) rows. ---- */
-.sb-rail-body .sb-row.card {
-  background: var(--paper-raised);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  padding: 10px;
-  /* Only background-color eases. border-color and box-shadow are deliberately NOT transitioned so
-     the cobalt selection (.card.live.selected — border + ring + glow) SNAPS on select AND deselect,
-     matching the flat-row rule below and the app-wide "selection is instant" principle. Transitioning
-     them made the blue linger ~120ms (an expo-out tail) when you selected a different conversation —
-     the new selection appeared instantly while the old live row's cobalt faded, a "weird delay". This
-     also snaps the card's hover lift, consistent with the rail's flat rows (which never eased hover).
-     The go-live morph keeps the background fill ease (no sb-patch-in keyframe, so no collapse/re-expand);
-     padding is off too — animating the 8→10px growth reflows per frame and the text slid choppily, so
-     it snaps. Section moves are animated by useRailFlip. */
-  transition: background-color var(--dur-fast) var(--ease);
-}
-.sb-rail-body .sb-row.card:hover {
-  background: var(--paper-raised);
-  border-color: var(--ink-ghost);
-  box-shadow: var(--shadow-sel-hover);
-}
-/* Lift the selected row above its siblings so its drop shadow paints ON TOP of adjacent rows —
-   otherwise a neighboring live card (opaque --paper-raised background, later in DOM) occludes the
-   shadow where they overlap. Rows are already position:relative (sidebar.css), so z-index alone does
-   it. Hover gets the same lift so a hovered card's shadow isn't occluded by the next card either. */
-.sb-rail-body .sb-row.selected,
-.sb-rail-body .sb-row.card:hover {
-  z-index: 1;
-}
-/* selection — a single tier. The main pane always owns the keyboard now, so there's no list-focus
-   "loud" state: the selected row carries its color as a thin 1px ring — cobalt for a LIVE row
-   (border + ring), neutral gray for the rest (cobalt stays liveness-only) — with no drop shadow or
-   lift. (Mouse-hover keeps its own lift, above — deliberately separate from selection.) border-color
-   is set so the ring snaps instantly on select/deselect, matching the flat rows. */
-.sb-rail-body .sb-row.card.selected {
-  background: var(--paper-raised);
-  border-color: var(--ink-ghost);
-  box-shadow: 0 0 0 1px var(--rule-strong);
-}
-.sb-rail-body .sb-row.card.live.selected {
-  border-color: var(--live);
-  box-shadow: 0 0 0 1px var(--live);
-}
-/* Unlive rows are flat (Recent + non-live Pinned, no card chrome): a single heavy-weight 2px gray
-   outline. (Cobalt reads strongly at 1px; gray needs the extra weight to carry the selection.) */
-.sb-rail-body .sb-row.selected:not(.card) {
-  box-shadow: 0 0 0 2px var(--ink-ghost);
-}
-
-/* Lightweight inter-row dividers — a thin, inset hairline centered in the 5px gap between two adjacent
-   flat rows, but ONLY when both are at rest: a live card carries its own border, a selected row a ring,
-   a hovered row a fill, so the divider yields to all three. It's a painted pseudo (not a border that
-   adds height), and the + combinator re-evaluates on hover/select, so it appears/disappears with zero
-   reflow. Inset (narrower than the row) so it reads quieter than the section rules above. */
-.sb-rail-body .sb-row:not(.card):not(.selected):not(:hover) + .sb-row:not(.card):not(.selected):not(:hover)::before {
+/* Lightweight inter-row dividers, Spacious only — Compact draws no lines at all, rows or folders. An
+   inset hairline centered in the 3px gap between two adjacent rows, but only when both are at rest: the
+   white row and a hovered row each carry a fill, so the divider yields to both. A NATIVE border on a
+   zero-height box, not a 1px background band: at fractional zoom a band
+   alternates between physical-pixel thicknesses from row to row, where a border snaps its weight. The
+   + combinator re-evaluates on hover and selection, so it appears and disappears with zero reflow. */
+/* The pinned and unpinned blocks are siblings, not their rows, so the pair that straddles them takes
+   the same rule through :has. */
+.sb-rail-body .sb-row.spacious:not(.selected):not(:hover) + .sb-row.spacious:not(.selected):not(:hover)::before,
+.sb-rail-body
+  .sb-block:has(> .sb-row.spacious:last-child:not(.selected):not(:hover))
+  + .sb-block
+  > .sb-row.spacious:first-child:not(.selected):not(:hover)::before {
   content: '';
   position: absolute;
-  top: -3px;
+  top: -2px;
   left: 8px;
   right: 8px;
-  height: 1px;
-  background: var(--rule);
+  height: 0;
+  border-top: 1px solid var(--rule);
   pointer-events: none;
 }
 
 /* ---- groups: one headerless group in All mode, one per project in Folders mode. A group is its
-   header, its blocks (pinned, then unpinned) and its Show more / Show less. Blocks keep the body's
-   5px row gap, which the drag gesture's stride assumes. ---- */
+   header, its blocks (pinned, then unpinned) and its Show more / Show less. A block's row gap is what
+   the drag gesture's stride assumes (useRowReorder's GAP) — change the two together. ---- */
 .sb-group,
 .sb-block {
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+.sb-block {
+  gap: 3px;
+}
+/* Pinned and unpinned rows are separate blocks, but not a visible break: the second block closes the
+   group's 5px gap down to the rows' own 3px, so the boundary spaces like any other pair of rows. */
+.sb-block + .sb-block {
+  margin-top: -2px;
 }
 /* Sticky, and inside its own group, so a header un-sticks as its group scrolls away — you always know
    which folder you are in. It paints the rail's own surface over the rows sliding beneath, and sits
@@ -386,6 +336,12 @@
      and so the stuck fade below it — ends at the name's hover pill rather than 4px of solid paper lower. */
   margin-bottom: 4px;
   background: var(--paper-sunken);
+  /* The paper reaches out across the body's side padding (14px leading, 7px trailing), past the
+     header's own box: the white row's edge paints outside the row, so a header only as wide as the
+     rows would leave its edges showing beside it as the row scrolls underneath. */
+  box-shadow:
+    -14px 0 0 var(--paper-sunken),
+    7px 0 0 var(--paper-sunken);
 }
 /* While a header is STUCK, a fade hangs under it so the rows scrolling beneath dissolve instead of
    being sliced mid-letter. Only while stuck (a scroll-state container query, no scroll listener): at
@@ -420,15 +376,15 @@
 /* The whole header is the collapse control: no chrome at rest, a darkened fill across its full width on
    hover, a deeper one while pressed. Neutral ink, never an accent.
    The folder icon hangs partway into the rail body's left padding (14px), and the fill reaches left
-   to cover it, stopping 4px short of the rail's edge (icon 15 + gap 5, from 5px of fill padding). The name lands 7px right of the row titles: exact
-   alignment would put the icon 2px from the window edge, which reads cramped. */
+   to cover it, stopping 9px short of the rail's edge; the icon sits 5px into the fill, lined up with
+   the grouping toggle in the head. */
 .sb-group-toggle {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-left: -10px;
+  margin-left: -5px;
   padding: 3px 8px 3px 5px;
   border-radius: var(--r-md);
   background: none;
@@ -440,7 +396,7 @@
 .sb-group-toggle:hover,
 .sb-group-toggle:focus-visible {
   outline: none;
-  background: var(--paper-hover);
+  background: var(--rail-hover);
 }
 .sb-group-toggle:active {
   background: var(--paper-active);
@@ -456,6 +412,10 @@
   height: 0;
   border-top: 1px solid var(--ink-ghost);
 }
+/* Compact draws no rules; the reserved line closing each folder (Sidebar) is the break instead. */
+.sb-rail.compact .sb-group-toggle::after {
+  display: none;
+}
 /* The folder glyph follows the name: same ink, and heavier with it. Open while the folder is
    expanded, closed while collapsed. */
 .sb-group-icon {
@@ -465,6 +425,17 @@
 .sb-group-toggle.attention .sb-group-icon {
   stroke-width: 2.3;
 }
+/* Open while expanded, closed while collapsed — and the opposite while hovered, previewing the click. */
+.sb-group-toggle[aria-expanded='false'] .sb-group-icon-open,
+.sb-group-toggle[aria-expanded='true'] .sb-group-icon-closed,
+.sb-group-toggle[aria-expanded='false']:hover .sb-group-icon-closed,
+.sb-group-toggle[aria-expanded='true']:hover .sb-group-icon-open {
+  display: none;
+}
+.sb-group-toggle[aria-expanded='false']:hover .sb-group-icon-open,
+.sb-group-toggle[aria-expanded='true']:hover .sb-group-icon-closed {
+  display: block;
+}
 /* The folder name. Two copies stacked in one grid cell: the hidden one
    is always bold, so the cell is always as wide as the heavier weight and a folder going bold or plain
    moves nothing. */
@@ -473,8 +444,8 @@
   min-width: 0;
   font-family: var(--font-ui);
   /* A half-step above the row titles, so a folder reads as the heading over its conversations. */
-  font-size: calc(var(--text-sm) + 0.5px);
-  font-weight: 500;
+  font-size: calc(var(--text-base) + 0.5px);
+  font-weight: 400;
   line-height: 1.35;
   color: var(--ink);
 }
@@ -525,8 +496,12 @@
   display: flex;
   gap: var(--s3);
   padding: 0 8px;
-  /* Tucked up into the row gap above it, so the reserved line costs as little space as it can. */
-  margin-top: -3px;
+  /* A little air from the last row above it, and tucked well into the group gap below, so it reads as
+     the folder's closing line rather than the next folder's opener. */
+  margin-top: -1px;
+  margin-bottom: -4px;
+  /* The button's line box, so an empty reserved line (Compact's folder break) is as tall as a full one. */
+  min-height: calc(var(--text-2xs) * 1.1);
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease);
 }

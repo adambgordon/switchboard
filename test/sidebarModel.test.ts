@@ -5,6 +5,7 @@ import {
   buildSidebar,
   conversationSeed,
   folderLabels,
+  needsYou,
   freezeFoldersByNewest,
   rankSpace,
   resumeWrites,
@@ -448,6 +449,16 @@ describe('needsYou', () => {
   })
 })
 
+describe('needsYou', () => {
+  it('is asking or unread, and nothing else — the tag, a bold folder and a bold row all read it', () => {
+    expect(needsYou('asking')).toBe(true)
+    expect(needsYou('awaiting')).toBe(true)
+    expect(needsYou('working')).toBe(false)
+    expect(needsYou('quiet')).toBe(false)
+    expect(needsYou(null)).toBe(false)
+  })
+})
+
 describe('labels', () => {
   it('uses the basename, widened only where two projects collide', () => {
     const labels = folderLabels(['/w/one/app', '/w/two/app', '/w/solo', '/x/y/one/app'])
@@ -467,6 +478,25 @@ describe('labels', () => {
     const model = buildSidebar(input({ groups: [group('/w/one/app', [conv('a', T)]), group('/w/two/app', [conv('b', T - 1)])] }))
     expect(model.groups.map((g) => g.label)).toEqual(['one/app', 'two/app'])
   })
+
+  it('labels every folder in All mode too, where no header shows one — including a terminal-only root', () => {
+    // Colliding basenames, so a map of bare basenames fails; a root that only a live terminal names,
+    // so a map built from the indexed groups alone misses it.
+    const model = buildSidebar(
+      input({
+        mode: 'all',
+        groups: [group('/w/one/app', [conv('a', T)]), group('/w/two/app', [conv('b', T - 1)])],
+        ptys: [pty('t', { projectRoot: '/w/fresh', cwd: '/w/fresh' })]
+      })
+    )
+    expect(Object.fromEntries(model.labels)).toEqual({
+      '/w/one/app': 'one/app',
+      '/w/two/app': 'two/app',
+      '/w/fresh': 'fresh'
+    })
+    // The one All-mode group stays unlabeled.
+    expect(model.groups.map((g) => g.label)).toEqual([''])
+  })
 })
 
 describe('an empty or loading catalog', () => {
@@ -476,7 +506,7 @@ describe('an empty or loading catalog', () => {
     const collapsed = Object.freeze({ '/w/a': true })
     const pinned = Object.freeze(['a'])
     const model = buildSidebar(input({ rowRanks, folderRanks, collapsed, pinned }))
-    expect(model).toEqual({ groups: [], rows: new Map(), folders: new Map(), needsYou: [] })
+    expect(model).toEqual({ groups: [], rows: new Map(), folders: new Map(), labels: new Map(), needsYou: [] })
     expect([rowRanks, folderRanks, collapsed, pinned]).toEqual([{ a: T }, { '/w/a': T }, { '/w/a': true }, ['a']])
   })
 })

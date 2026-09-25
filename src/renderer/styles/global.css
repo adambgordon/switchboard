@@ -205,6 +205,18 @@ input::placeholder {
   font-weight: 400;
   opacity: 0.72;
 }
+/* Re-filled while scrubbing down a column (data-tip-scrub): the label glides to the new host rather
+   than jumping, so a sweep reads as one label following the pointer. Only `top` moves — the column's
+   hosts share a right edge. */
+.sb-tip-glide {
+  transition: top 90ms var(--ease);
+}
+/* Three-line variant (data-tip-at / data-tip-meta): a quieter line still — when, and where. */
+.sb-tip-meta {
+  margin-top: 4px;
+  font-weight: 400;
+  opacity: 0.5;
+}
 
 .sb-tip-compact {
   padding: 5px 8px;

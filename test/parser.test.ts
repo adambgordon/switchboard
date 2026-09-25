@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { cleanTitle, extractMeta, extractTurnState, parseTranscript } from '../src/main/sessions/parser'
+import { cleanTitle, extractMeta, extractTurnState, parseTranscript, toPreview } from '../src/main/sessions/parser'
 import { countConversationalMessages } from '../src/shared/messageCount'
 import type { TranscriptBlock } from '../src/shared/types'
 
@@ -167,6 +167,33 @@ describe('cleanTitle', () => {
 
   it('collapses internal whitespace', () => {
     expect(cleanTitle('hello     there   world')).toBe('hello there world')
+  })
+})
+
+describe('toPreview', () => {
+  it('collapses whitespace to one line and leaves a preview within the cap untouched', () => {
+    expect(toPreview('  first\n\n  second   line ')).toBe('first second line')
+    // Exactly at the cap is not "too long": no ellipsis.
+    expect(toPreview('abcdefghij', 10)).toBe('abcdefghij')
+  })
+
+  it('marks a cut preview with an ellipsis, inside the budget', () => {
+    const out = toPreview('x'.repeat(500))
+    expect(out).toBe('x'.repeat(319) + '…')
+    expect(out).toHaveLength(320)
+  })
+
+  it('backs a cut up to the last word break near the cap, rather than ending on half a word', () => {
+    // The cap (20) falls inside "branch"; the space before it is within reach.
+    expect(toPreview('Review the entire branch today', 20)).toBe('Review the entire…')
+  })
+
+  it('cuts mid-word when no break is close enough to the cap', () => {
+    // The only space is 36 characters before the cut, past the backoff: backing up to it would throw
+    // away most of the budget.
+    const out = toPreview(`ab ${'y'.repeat(60)}`, 40)
+    expect(out).toBe(`ab ${'y'.repeat(36)}…`)
+    expect(out).toHaveLength(40)
   })
 })
 

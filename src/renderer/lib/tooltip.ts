@@ -8,6 +8,8 @@
  * test reaching it.
  */
 
+import { relTime } from './format'
+
 /**
  * Longest label we will show, in code points. A `data-tip` carries whatever the host hands it, and a
  * link's tip is its raw href — some of which encode state and run past a thousand characters, enough
@@ -58,6 +60,34 @@ export function clampTipText(text: string, max: number = MAX_TIP): string {
 export const visibleTipLength = (text: string): number =>
   Array.from(text).filter((c) => c !== WJ).length
 
+/**
+ * Shorten PROSE to `max` code points, cutting the END. A conversation title or preview is read from
+ * its start, so the middle-cut above — right for a URL — would splice two unrelated halves of a
+ * sentence together. Counted by code point for the same surrogate-pair reason as `clampTipText`.
+ */
+export function endClampTip(text: string, max: number): string {
+  const chars = Array.from(text)
+  if (chars.length <= max) return text
+  if (max < 1) return '…'
+  return `${chars.slice(0, max - 1).join('')}…`
+}
+
+/**
+ * A tooltip's quiet third line: how long ago the host was last active, then whatever the host
+ * describes itself with, joined by a middot. The age is formatted HERE, at reveal, from a timestamp
+ * rather than baked into the attribute — a host rendered hours ago would otherwise still say "now".
+ * Null when there is nothing to say.
+ */
+export function tipMetaLine(at: number | null, meta: string | null, now: number): string | null {
+  const parts: string[] = []
+  if (at !== null) {
+    const rel = relTime(at, now)
+    parts.push(rel === 'now' ? 'Just now' : `${rel} ago`)
+  }
+  if (meta) parts.push(meta)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 export interface TipBox {
   /** Viewport y of the host's top edge. */
   hostTop: number
@@ -105,4 +135,63 @@ export function placeTip(box: TipBox): TipPlacement {
   const ceiling = Math.max(edge, viewport - edge - height)
   const clamped = Math.min(Math.max(visualTop, edge), ceiling)
   return { side, top: side === 'bottom' ? clamped : clamped + height }
+}
+
+/** Where a label sits beside its host: `left` and `top` of its box, in viewport coordinates. */
+export interface SideBox {
+  hostTop: number
+  hostBottom: number
+  hostRight: number
+  width: number
+  height: number
+  viewportWidth: number
+  viewportHeight: number
+  gap: number
+  edge: number
+}
+
+/**
+ * Place a label to the RIGHT of its host, centered on it vertically — for hosts stacked in a column
+ * (the rail's rows), where a label above or below would cover the very neighbors the pointer is about
+ * to move onto. Clamped into the viewport on both axes; a label taller than the viewport is pinned to
+ * the top edge, as in `placeTip`.
+ */
+export function placeTipRight(box: SideBox): { left: number; top: number } {
+  const { hostTop, hostBottom, hostRight, width, height, viewportWidth, viewportHeight, gap, edge } = box
+  const centered = (hostTop + hostBottom) / 2 - height / 2
+  const top = Math.min(Math.max(centered, edge), Math.max(edge, viewportHeight - edge - height))
+  const left = Math.max(edge, Math.min(hostRight + gap, viewportWidth - edge - width))
+  return { left, top }
+}
+
+/** What the pointer moved onto: no tooltip host, an ordinary one, or a scrub host. */
+export type TipTarget = 'none' | 'plain' | 'scrub'
+
+/**
+ * Scrubbing: once a SCRUB host's label is on screen (the rail's rows opt in with `data-tip-scrub`),
+ * moving onto another scrub host re-fills the label at once instead of waiting out the show delay, so
+ * a column can be read by sweeping the pointer down it. What a pointer leaving the active host does:
+ * - onto another scrub host — `keep`: the next host re-fills it;
+ * - onto no host at all, like the gap between two rows — `grace`: hold it briefly, since the pointer
+ *   is most likely crossing to the next row, and hiding for one frame would read as a blink;
+ * - anything else, or from a label that is not a scrub host's on screen — `hide`.
+ */
+export function tipOnLeave(scrubShown: boolean, to: TipTarget): 'keep' | 'grace' | 'hide' {
+  if (!scrubShown) return 'hide'
+  if (to === 'scrub') return 'keep'
+  if (to === 'none') return 'grace'
+  return 'hide'
+}
+
+/**
+ * What entering a host does:
+ * - `refill` — a scrub-host label is on screen and this is another scrub host: re-fill it at once;
+ * - `replace` — a scrub-host label is on screen (within its grace) but this host is an ordinary one:
+ *   dismiss it now, then wait out the delay. Left up, it would describe a row the pointer has left for
+ *   the whole delay, and the new host would inherit its scrub state;
+ * - `arm` — otherwise, wait out the delay.
+ */
+export function tipOnEnter(scrubShown: boolean, to: Exclude<TipTarget, 'none'>): 'refill' | 'replace' | 'arm' {
+  if (!scrubShown) return 'arm'
+  return to === 'scrub' ? 'refill' : 'replace'
 }

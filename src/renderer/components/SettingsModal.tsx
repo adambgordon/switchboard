@@ -6,6 +6,7 @@ import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLive
 import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
 import type { TabLayout } from '../lib/tabLayoutPreference'
+import type { RailDensity } from '../lib/sidebarPrefs'
 import type { Updates } from '../lib/useUpdates'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import AgentLogo from './AgentLogo'
@@ -15,6 +16,11 @@ const THEME_MODES: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'System' },
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' }
+]
+
+const RAIL_DENSITIES: { value: RailDensity; label: string }[] = [
+  { value: 'compact', label: 'Compact' },
+  { value: 'spacious', label: 'Spacious' }
 ]
 
 // The info-tooltip copy for the live-sessions cap — mirrors the capacity modal, plus the
@@ -219,6 +225,9 @@ interface Props {
   themeMode: ThemeMode
   /** Set the theme mode (from the Appearance segmented control). */
   onSetThemeMode: (mode: ThemeMode) => void
+  /** Conversation-list row density (Appearance). */
+  railDensity: RailDensity
+  onSetRailDensity: (density: RailDensity) => void
   /** Whether the macOS dock icon uses the dark variant (independent of the theme). */
   darkIcon: boolean
   /** Toggle the dark dock icon (a Light / Dark segmented control). */
@@ -284,6 +293,8 @@ export default function SettingsModal({
   updates,
   themeMode,
   onSetThemeMode,
+  railDensity,
+  onSetRailDensity,
   darkIcon,
   onSetDarkIcon,
   defaultDir,
@@ -486,6 +497,27 @@ export default function SettingsModal({
                       </button>
                     </div>
                     <div className="sb-setting-desc">Use a dark dock icon, independent of the app theme.</div>
+                  </div>
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">Sidebar</div>
+                    <div className="sb-seg" role="radiogroup" aria-label="Sidebar">
+                      {RAIL_DENSITIES.map((d) => (
+                        <button
+                          key={d.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={railDensity === d.value}
+                          className={`sb-seg-btn${railDensity === d.value ? ' active' : ''}`}
+                          onClick={() => onSetRailDensity(d.value)}
+                        >
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="sb-setting-desc">
+                      Compact rows are one line; hover one for its preview, folder and last activity.
+                      Spacious rows show the preview and details inline.
+                    </div>
                   </div>
                 </div>
               </>

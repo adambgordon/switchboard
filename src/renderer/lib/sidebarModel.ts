@@ -65,6 +65,9 @@ export interface SidebarModel {
   /** Every folder's rank and seed, in both modes and regardless of search — what a folder drag or a
    *  bind needs, including for folders not currently rendered. */
   folders: ReadonlyMap<string, FolderRank>
+  /** Every folder's display label, disambiguated across all of them, in both modes — a row's tooltip
+   *  names its folder even in All mode, where no header does. */
+  labels: ReadonlyMap<string, string>
   /** Every session that needs the user, in fully-expanded display order: the head tag's count and its
    *  cycle order. Unaffected by search, collapse and caps, so nothing can hide one from it. */
   needsYou: string[]
@@ -79,7 +82,7 @@ export interface SidebarLimits {
   autoExpand: number
 }
 
-export const DEFAULT_SIDEBAR_LIMITS: SidebarLimits = { folderCap: 5, allCap: 25, autoExpand: 8 }
+export const DEFAULT_SIDEBAR_LIMITS: SidebarLimits = { folderCap: 5, allCap: 40, autoExpand: 8 }
 
 export interface SidebarInput {
   mode: SidebarMode
@@ -151,7 +154,12 @@ interface Placed {
   seed: number
 }
 
-function needsYou(state: LiveState | null): boolean {
+/**
+ * A session that needs the user: asking, or finished and unread. The one predicate behind the needs-you
+ * tag, a folder name going bold, and a row's title going bold — so the three always agree. Working
+ * alone does not count: bold means "go look", and an agent working in the background is not a reason.
+ */
+export function needsYou(state: LiveState | null): boolean {
   return state === 'asking' || state === 'awaiting'
 }
 
@@ -322,7 +330,7 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
       .map((b) => ({ key: b.id, rows: b.rows }))
   }
 
-  const labels = input.mode === 'folders' ? folderLabels(buckets.map((b) => b.key)) : new Map<string, string>()
+  const labels = folderLabels([...byRoot.keys()])
   const groups: SidebarGroup[] = []
   buckets.forEach((b, i) => {
     const g = buildGroup(input, b.key, labels.get(b.key) ?? '', i, b.rows)
@@ -336,7 +344,7 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
   }
   const rows = new Map<string, RowPlace>()
   for (const p of placed) rows.set(p.row.sessionId, { rank: p.row.rank, seed: p.seed, root: p.root, pinned: p.row.pinned })
-  return { groups, rows, folders, needsYou: order }
+  return { groups, rows, folders, labels, needsYou: order }
 }
 
 /**

@@ -5,8 +5,8 @@ import NewConversationMenu from './NewConversationMenu'
 import { Close, CollapseAll, ExpandAll, Plus, Search } from './icons'
 
 const MODES: { value: SidebarMode; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'folders', label: 'Folders' }
+  { value: 'folders', label: 'Folders' },
+  { value: 'all', label: 'All' }
 ]
 
 interface Props {

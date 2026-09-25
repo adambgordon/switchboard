@@ -1,6 +1,9 @@
 import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
-import { relTime, absShort, basename } from '../lib/format'
+import { relTime, absShort } from '../lib/format'
+import type { RailDensity } from '../lib/sidebarPrefs'
+import { rowTipPreview, rowTipTitle } from '../lib/rowTip'
+import { needsYou } from '../lib/sidebarModel'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { displayTitleForRow, isParkedOnlyRow, liveDotClass } from '../lib/rowIdentity'
 import { DashedCircle, Dots, NewWindow, Pin } from './icons'
@@ -8,7 +11,13 @@ import AgentLogo from './AgentLogo'
 
 interface Props {
   meta: ConversationMeta
+  /** Compact: one line — logo, title, dot — with the rest in the hover. Spacious: title, preview and
+   *  a meta line. */
+  density: RailDensity
+  /** The focused pane's active tab — the one the keyboard acts on. The rail's one white row. */
   selected: boolean
+  /** The folder half of the hover's quiet third line (see `rowTipMeta`). */
+  tipMeta: string
   live: PtyState | null
   /** Resolved liveness for the dot (working / asking / awaiting / quiet); null when not live. */
   liveState?: LiveState | null
@@ -17,9 +26,6 @@ interface Props {
    *  opening it here. Marked, because a click that brings a different window forward is startling
    *  when nothing said it would. */
   elsewhere?: boolean
-  showCwd?: boolean
-  /** Raised card chrome — used by the rail's Pinned/Live sections. */
-  card?: boolean
   onSelect: (id: string) => void
   /** When set and the row is live, clicking jumps to its terminal instead of previewing. */
   onJump?: (id: string) => void
@@ -42,13 +48,13 @@ interface Props {
 
 function ConversationRowImpl({
   meta,
+  density,
   selected,
+  tipMeta,
   live,
   liveState,
   pinned,
   elsewhere,
-  showCwd,
-  card,
   onSelect,
   onJump,
   onStick,
@@ -69,9 +75,30 @@ function ConversationRowImpl({
   const dotClass = liveDotClass(live, meta, liveState)
   // Phase-lock the breathing/ripple to the app-wide beat (a no-op for the static quiet/awaiting dots).
   const dotRef = useSyncedAnimation<HTMLSpanElement>(dotClass)
+  const title = displayTitleForRow(live, meta)
+  const lastActive = meta.lastActivityAt ?? meta.mtime
+  // The logo slot, which the Claude background-session variant shares: the agent is the one cue a row
+  // must carry at rest in a two-agent app, since Resume does materially different things per agent.
+  const mark =
+    meta.agent === 'claude' && meta.sessionKind === 'bg' ? (
+      <span className="sb-bg-agent-mark" role="img" aria-label="Claude Code background session">
+        <DashedCircle size={16} className="sb-bg-agent-ring" />
+        <span className="sb-bg-agent-logo" aria-hidden="true">
+          <AgentLogo agent="claude" size={9} />
+        </span>
+      </span>
+    ) : (
+      <AgentLogo agent={meta.agent} />
+    )
+  // No label of its own: the row's hover takes over the whole row, and names this in its last line.
+  const elsewhereMark = elsewhere && (
+    <span className="sb-row-elsewhere" role="img" aria-label="Open in another window">
+      <NewWindow size={11} />
+    </span>
+  )
   return (
     <div
-      className={`sb-row${card ? ' card' : ''}${selected ? ' selected' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}`}
+      className={`sb-row ${density}${selected ? ' selected' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
       onClick={(e) => {
         if (e.altKey) {
           // Option+click = mark unread only; never navigate (selecting/engaging would trip the
@@ -99,83 +126,75 @@ function ConversationRowImpl({
       role="button"
       tabIndex={-1}
       data-session={meta.sessionId}
+      // The hover carries what the row no longer shows: the full title, the preview, and when and
+      // where. The preview is the tab strip's derivation, so a parked row keeps its explanation; with
+      // no real preview the line is omitted rather than spent saying there is nothing to say.
+      data-tip={rowTipTitle(title)}
+      data-tip-sub={
+        rowTipPreview(parkedOnly ? 'Terminal only — work is in a background agent' : meta.preview) ?? undefined
+      }
+      data-tip-meta={tipMeta}
+      data-tip-at={lastActive}
+      // Beside the row rather than over its neighbors, and re-filled at once as the pointer sweeps down
+      // the list — once one row's hover is up, the rest read without waiting.
+      data-tip-scrub=""
     >
-      <span className="sb-row-main">
-        <span className="sb-row-title truncate">
-          {pinned && <Pin size={10} filled className="sb-row-pin" />}
-          {displayTitleForRow(live, meta)}
-        </span>
-        {parkedOnly ? (
-          // This terminal has no conversation of its own — what it produced went into the background
-          // agent named above. Without saying so the row reads as an empty, dead conversation while
-          // the user is actively working in it. Styled as the ordinary empty placeholder: the
-          // dedicated unlinked treatment was retired, and the row's distinction now lives in the
-          // title, the Live tally, and the accessibility label rather than in bespoke preview color.
-          <span className="sb-row-preview sb-row-preview-empty truncate">
-            Terminal only — work is in a background agent
+      {density === 'compact' ? (
+        <>
+          <span className="sb-row-lead">{mark}</span>
+          <span className="sb-row-title truncate">
+            {pinned && <Pin size={10} filled className="sb-row-pin" />}
+            {title}
           </span>
-        ) : meta.preview ? (
-          <span className="sb-row-preview truncate">{meta.preview}</span>
-        ) : (
-          // No preview (a just-spawned session has no transcript yet) — render a muted
-          // placeholder so the row keeps the same height as ones that carry a preview.
-          <span className="sb-row-preview sb-row-preview-empty truncate">
-            {meta.messageCount === 0 ? 'No messages yet' : 'No preview'}
+          {elsewhereMark}
+        </>
+      ) : (
+        <span className="sb-row-main">
+          <span className="sb-row-title truncate">
+            {pinned && <Pin size={10} filled className="sb-row-pin" />}
+            {title}
           </span>
-        )}
-        <span className="sb-row-meta">
-          {meta.agent === 'claude' && meta.sessionKind === 'bg' ? (
-            <span
-              className="sb-bg-agent-mark"
-              data-tip="Claude Code background session"
-              role="img"
-              aria-label="Claude Code background session"
-            >
-              <DashedCircle size={16} className="sb-bg-agent-ring" />
-              <span className="sb-bg-agent-logo" aria-hidden="true">
-                <AgentLogo agent="claude" size={9} />
-              </span>
+          {parkedOnly ? (
+            // This terminal has no conversation of its own — what it produced went into the background
+            // agent named above. Without saying so the row reads as an empty, dead conversation while
+            // the user is actively working in it. Styled as the ordinary empty placeholder; the row's
+            // distinction lives in the title and the accessibility label, not in bespoke color.
+            <span className="sb-row-preview sb-row-preview-empty truncate">
+              Terminal only — work is in a background agent
             </span>
+          ) : meta.preview ? (
+            <span className="sb-row-preview truncate">{meta.preview}</span>
           ) : (
-            <AgentLogo agent={meta.agent} />
+            // No preview (a just-spawned session has no transcript yet) — render a muted
+            // placeholder so the row keeps the same height as ones that carry a preview.
+            <span className="sb-row-preview sb-row-preview-empty truncate">
+              {meta.messageCount === 0 ? 'No messages yet' : 'No preview'}
+            </span>
           )}
-          <span className="mono" data-tip={absShort(meta.lastActivityAt ?? meta.mtime)}>
-            {relTime(meta.lastActivityAt ?? meta.mtime)}
+          <span className="sb-row-meta">
+            {mark}
+            <span className="mono" data-tip={absShort(lastActive)}>
+              {relTime(lastActive)}
+            </span>
+            <span className="sb-sep">·</span>
+            <span className="mono">{meta.messageCount} msg</span>
+            {elsewhere && (
+              <>
+                <span className="sb-sep">·</span>
+                {elsewhereMark}
+              </>
+            )}
           </span>
-          <span className="sb-sep">·</span>
-          <span className="mono">{meta.messageCount} msg</span>
-          {elsewhere && (
-            <>
-              <span className="sb-sep">·</span>
-              <span
-                className="sb-row-elsewhere"
-                data-tip="Open in another window — click to go there"
-                role="img"
-                aria-label="Open in another window"
-              >
-                <NewWindow size={11} />
-              </span>
-            </>
-          )}
-          {showCwd && (
-            <>
-              <span className="sb-sep">·</span>
-              <span className="sb-row-cwd mono truncate" data-tip={meta.cwd}>
-                {basename(meta.cwd)}
-              </span>
-            </>
-          )}
         </span>
-      </span>
+      )}
       <span className="sb-row-gutter">
         {dotClass && (
           <span
             ref={dotRef}
             className={`sb-dot ${dotClass}`}
-            // No data-tip, matching the other markers: hovering the gutter fades the dot out to
-            // reveal the ⋮ button, so a tooltip anchored here would point at an invisible element.
-            // The visible row uses the shared empty placeholder; this label preserves the exact
-            // unlinked meaning for assistive technology.
+            // No data-tip, matching the other markers: hovering the row swaps the dot for the ⋮
+            // button, so a tooltip anchored here would point at an invisible element. The label
+            // preserves the exact unlinked meaning for assistive technology.
             aria-label={
               parkedOnly
                 ? 'live terminal, work is in a background agent'

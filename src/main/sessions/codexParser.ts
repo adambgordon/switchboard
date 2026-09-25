@@ -47,14 +47,12 @@ import type {
   TranscriptMessage
 } from '../../shared/types'
 import { isConversationalMessage } from '../../shared/messageCount'
-import { cleanTitle } from './parser'
+import { cleanTitle, toPreview } from './parser'
 
 /** Default Codex sessions root: `~/.codex/sessions`. */
 export function defaultCodexRoot(): string {
   return path.join(homedir(), '.codex', 'sessions')
 }
-
-const PREVIEW_MAX = 200
 
 function splitLines(text: string): string[] {
   const out: string[] = []
@@ -80,11 +78,6 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 
 function numField(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
-}
-
-function toPreview(raw: string, max = PREVIEW_MAX): string {
-  const oneLine = raw.replace(/\s+/g, ' ').trim()
-  return oneLine.length > max ? oneLine.slice(0, max).trimEnd() : oneLine
 }
 
 function safeStringify(v: unknown): string {

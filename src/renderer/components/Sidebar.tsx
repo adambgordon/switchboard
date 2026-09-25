@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import type { AgentKind } from '@shared/types'
 import type { SidebarBlock, SidebarModel, SidebarRow } from '../lib/sidebarModel'
 import { visibleRows } from '../lib/sidebarModel'
-import type { SidebarMode } from '../lib/sidebarPrefs'
+import type { RailDensity, SidebarMode } from '../lib/sidebarPrefs'
+import { rowTipMeta } from '../lib/rowTip'
 import { reorderArray } from '../lib/reorder'
 import { useRailFlip } from '../lib/useRailFlip'
 import { useRowReorder } from '../lib/useRowReorder'
@@ -19,6 +20,7 @@ interface Props {
   model: SidebarModel
   mode: SidebarMode
   onModeChange: (mode: SidebarMode) => void
+  density: RailDensity
   /** Focus the next session that needs you (the head tag), cycling. */
   onNeedsYou: () => void
   /** Collapse all / Expand all. */
@@ -127,6 +129,7 @@ export default function Sidebar({
   model,
   mode,
   onModeChange,
+  density,
   onNeedsYou,
   onSetAllCollapsed,
   loading,
@@ -193,6 +196,7 @@ export default function Sidebar({
   const controlSig = JSON.stringify([
     query,
     mode,
+    density,
     model.groups.map((g) => [g.key, g.collapsed]),
     revealed,
     reorderTick
@@ -327,30 +331,36 @@ export default function Sidebar({
     []
   )
 
-  const renderRow = (row: SidebarRow): ReactNode => (
-    <ConversationRow
-      key={row.sessionId}
-      meta={row.meta}
-      selected={row.sessionId === selectedSessionId}
-      live={row.pty}
-      liveState={row.liveState}
-      pinned={row.pinned}
-      elsewhere={openElsewhere.has(row.sessionId)}
-      showCwd
-      card={!!row.pty}
-      onSelect={onSelect}
-      onJump={onJump}
-      onStick={onStick}
-      // onOpenToSide / onOpenInNewWindow are deliberately NOT passed down: they are menu actions now,
-      // not click gestures. The rail still holds them for its own ⋮ and right-click menus below.
-      onMarkUnread={onMarkUnread}
-      onOpenMenu={openRowMenuFromButton}
-      onContextMenu={openRowMenu}
-    />
-  )
+  const renderRow = (row: SidebarRow): ReactNode => {
+    const root = model.rows.get(row.sessionId)?.root ?? row.meta.cwd
+    return (
+      <ConversationRow
+        key={row.sessionId}
+        meta={row.meta}
+        density={density}
+        selected={row.sessionId === selectedSessionId}
+        tipMeta={rowTipMeta(model.labels.get(root) ?? '', row.meta.cwd, root, {
+        background: row.meta.agent === 'claude' && row.meta.sessionKind === 'bg',
+        elsewhere: openElsewhere.has(row.sessionId)
+      })}
+        live={row.pty}
+        liveState={row.liveState}
+        pinned={row.pinned}
+        elsewhere={openElsewhere.has(row.sessionId)}
+        onSelect={onSelect}
+        onJump={onJump}
+        onStick={onStick}
+        // onOpenToSide / onOpenInNewWindow are deliberately NOT passed down: they are menu actions now,
+        // not click gestures. The rail still holds them for its own ⋮ and right-click menus below.
+        onMarkUnread={onMarkUnread}
+        onOpenMenu={openRowMenuFromButton}
+        onContextMenu={openRowMenu}
+      />
+    )
+  }
 
   return (
-    <aside className="sb-rail">
+    <aside className={`sb-rail ${density}`}>
       <SidebarHead
         scrolled={scrolled}
         mode={mode}
@@ -401,6 +411,10 @@ export default function Sidebar({
             const extra = revealed[g.key] ?? 0
             const more = !g.collapsed && !searching && g.hidden > 0
             const less = !g.collapsed && !searching && extra > 0
+            // Compact draws no rules, so the space closing each expanded folder is what separates it
+            // from the next — reserved whether or not there is anything to show more of, so every
+            // break is the same size.
+            const reserve = density === 'compact' && g.header && !g.collapsed
             return (
               <section key={g.key} className="sb-group">
                 {g.header && (
@@ -417,7 +431,7 @@ export default function Sidebar({
                     {b.rows.map(renderRow)}
                   </SidebarBlockView>
                 ))}
-                {(more || less) && (
+                {(more || less || reserve) && (
                   <div className="sb-rail-more-row">
                     {more && (
                       <button className="sb-rail-more" onClick={() => onShowMore(g.key)}>

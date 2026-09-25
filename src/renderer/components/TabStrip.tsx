@@ -15,6 +15,10 @@ export interface TabDescriptor {
    *  tooltip. A tab truncates far harder than a row, so without it hovering the tab tells you less
    *  than glancing at the sidebar does. Null when the conversation has no preview. */
   subtitle: string | null
+  /** The hover's quiet last line, as a rail row's: when the conversation was last active (aged at
+   *  reveal) and the folder half from `rowTipMeta`. Null for a tab with nothing to say there. */
+  lastActiveAt: number | null
+  tipMeta: string | null
   /** This is the pane's replaceable tab — the one the next ordinary open takes over. Shown italic,
    *  the way an editor marks it. */
   preview: boolean
@@ -118,9 +122,12 @@ function Tab({
       tabIndex={active ? 0 : -1}
       // A tab truncates aggressively, so the full title lives in the shared tooltip layer — never a
       // native `title`, which lags and resets on the slightest pointer move. `data-tip-sub` adds the
-      // preview line beneath it, giving the hover the same content as a rail row.
+      // preview line beneath it and `data-tip-at` / `data-tip-meta` the when-and-where line, giving the
+      // hover the same content as a rail row.
       data-tip={tab.title}
       {...(tab.subtitle ? { 'data-tip-sub': tab.subtitle } : {})}
+      {...(tab.lastActiveAt !== null ? { 'data-tip-at': tab.lastActiveAt } : {})}
+      {...(tab.tipMeta ? { 'data-tip-meta': tab.tipMeta } : {})}
       // Selection is decided on PRESS, not on click. A press is the moment the user commits to a tab,
       // it is what every list of this kind responds to, and it does not depend on a `click` arriving
       // afterwards — which is the fragile part, since a press begins a drag, moves focus, and can

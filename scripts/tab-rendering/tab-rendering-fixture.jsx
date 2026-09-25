@@ -18,7 +18,7 @@ window.api = new Proxy({}, { get: (_, key) => () => {
 } })
 const titles = ['Arithmetic sketch', 'Review examples in depth', 'Slider mechanics', 'Evaluate powers', 'Square root example', 'Review system thoroughly', 'Planning a moonlit picnic for seventeen imaginary penguins', 'Calculate square root']
 const makeTabs = count => Array.from({ length: count }, (_, i) => ({
-  sessionId: String(i), title: titles[i % titles.length], subtitle: null, preview: false, dot: null, unlinked: false
+  sessionId: String(i), title: titles[i % titles.length], subtitle: null, lastActiveAt: null, tipMeta: null, preview: false, dot: null, unlinked: false
 }))
 const noAction = () => {}
 function Fixture() {

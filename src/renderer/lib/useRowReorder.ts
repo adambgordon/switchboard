@@ -22,7 +22,7 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
  */
 
 const DRAG_THRESHOLD = 4
-const GAP = 5 // the rail body's inter-row flex gap (rail.css)
+const GAP = 3 // a block's inter-row flex gap (.sb-block, rail.css)
 const SETTLE_MS = 200
 const SPRING = 'cubic-bezier(0.22, 1, 0.36, 1)'
 // How far the floating clone may travel past the Pinned section before it clamps, as a fraction of a
@@ -172,7 +172,10 @@ export function useRowReorder(containerRef: RefObject<HTMLElement>, opts: RowReo
         // A fixed clone on <body> escapes the rail body's overflow clip → floats over the head.
         const clone = dragged.cloneNode(true) as HTMLElement
         clone.classList.add('dragging')
-        clone.style.cssText = `position:fixed;top:${r.top}px;left:${r.left}px;width:${r.width}px;height:${r.height}px;margin:0;padding:10px;box-sizing:border-box;pointer-events:none;z-index:1000`
+        // The row's own padding, not a constant: on <body> the clone loses the rail-scoped rules that
+        // set it, and a different pad shifts the content the moment the drag lifts.
+        const pad = getComputedStyle(dragged).padding
+        clone.style.cssText = `position:fixed;top:${r.top}px;left:${r.left}px;width:${r.width}px;height:${r.height}px;margin:0;padding:${pad};box-sizing:border-box;pointer-events:none;z-index:1000`
         document.body.appendChild(clone)
         cloneRef.current = clone
         dragged.style.visibility = 'hidden' // keep the slot (the source gap); the clone is the visual

@@ -103,6 +103,7 @@ import {
   liveDotClass,
   resolveRowLiveState
 } from './lib/rowIdentity'
+import { rowTipMeta, rowTipPreview, rowTipTitle } from './lib/rowTip'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
 import type { TabDescriptor } from './components/TabStrip'
@@ -131,6 +132,8 @@ export default function App() {
   const {
     mode: sidebarMode,
     setMode: setSidebarMode,
+    density: railDensity,
+    setDensity: setRailDensity,
     collapsed: folderCollapse,
     setFolderCollapsed,
     setFoldersCollapsed
@@ -855,6 +858,19 @@ export default function App() {
     [ptys.bySession, metaById]
   )
 
+  // A tab's when-and-where line, from the same folder and label the rail row uses. A conversation the
+  // rail does not hold (hidden) falls back to its terminal's project, else its own directory.
+  const tabTipMeta = useCallback(
+    (meta: ConversationMeta, pty: PtyState | null): string => {
+      const root = sidebarModel.rows.get(meta.sessionId)?.root ?? pty?.projectRoot ?? meta.cwd
+      return rowTipMeta(sidebarModel.labels.get(root) ?? basename(root), meta.cwd, root, {
+        background: meta.agent === 'claude' && meta.sessionKind === 'bg',
+        elsewhere: false
+      })
+    },
+    [sidebarModel]
+  )
+
   // Per-pane tab descriptors for the strips. Resolved here rather than in TabStrip so the strip stays
   // presentational, and so a tab's title comes from the SAME derivation the rail row and the pane
   // header use — a tab must not name one thing while the row beside it names another.
@@ -866,15 +882,20 @@ export default function App() {
           const meta = metaById.get(tab.sessionId) ?? (pty ? synthMeta(pty) : null)
           return {
             sessionId: tab.sessionId,
-            title: pty && meta ? displayTitleForRow(pty, meta) : meta?.title ?? 'Conversation',
+            title: rowTipTitle(pty && meta ? displayTitleForRow(pty, meta) : meta?.title ?? 'Conversation'),
             // The hover carries the rail row's preview line, since a tab truncates far harder than a
             // row does. A row falls back to a "No preview" placeholder to hold its height; a tooltip
             // has no height to hold, so absent a real preview the second line is simply omitted
             // rather than spending it saying there is nothing to say.
-            subtitle:
+            subtitle: rowTipPreview(
               meta && pty && isParkedOnlyRow(pty, meta)
                 ? 'Terminal only — work is in a background agent'
-                : meta?.preview ?? null,
+                : meta?.preview ?? null
+            ),
+            // The same when-and-where line as the rail row. A tab is in this window by definition, so
+            // it never says "In another window".
+            lastActiveAt: meta ? meta.lastActivityAt ?? meta.mtime : null,
+            tipMeta: meta ? tabTipMeta(meta, pty) : null,
             preview: tab.preview,
             // Null meta implies null pty (meta falls back to the pty's stand-in whenever one exists),
             // so this resolves to "no dot" for exactly the sessions that have no state to report.
@@ -883,7 +904,7 @@ export default function App() {
           }
         })
       ),
-    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor]
+    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor, tabTipMeta]
   )
 
   // Activating a tab is a landing like any other: it marks the conversation read and hands the pane
@@ -1883,6 +1904,7 @@ export default function App() {
             model={sidebarModel}
             mode={sidebarMode}
             onModeChange={setSidebarMode}
+            density={railDensity}
             onNeedsYou={openNextNeedingYou}
             onSetAllCollapsed={setAllCollapsed}
             loading={loading}
@@ -2079,6 +2101,8 @@ export default function App() {
         onSetThemeMode={setThemeMode}
         darkIcon={darkIcon.value}
         onSetDarkIcon={darkIcon.set}
+        railDensity={railDensity}
+        onSetRailDensity={setRailDensity}
         defaultDir={defaultDir}
         onChooseDefaultDir={chooseDefaultDir}
         onClearDefaultDir={clearDefaultDir}

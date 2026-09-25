@@ -30,6 +30,13 @@
      against --rule #2b2b2b — a one-value difference, invisible — so dark needs the stronger step.
      Same shape as --shadow-sel-hover. */
   --rule-raised: #e6e6e6;
+  /* The rail's hover fill (rows, folder headers). Its own token because it must stay QUIETER than the
+     white row (--paper-raised): in light the two already part ways (hover darkens, the selection goes
+     white), but dark's shared --paper-hover is brighter than --paper-raised. */
+  --rail-hover: var(--paper-hover);
+  /* The hover fill of the white row (--paper-raised): a half-step off it — in light, midway between
+     the white and the rail (--paper-sunken), so it still reads as the selection while hovered. */
+  --rail-selected-hover: #f9f9f9;
 
   /* ---- accent 1: electric cobalt = alive ---- */
   --live: #1f5ae6;
@@ -68,7 +75,7 @@
   --text-2xs: 10.5px;
   --text-xs: 11.5px;
   --text-sm: 12.5px;
-  --text-base: 13.5px;
+  --text-base: 13px;
   --text-md: 15px;
   --text-lg: 18px;
   --text-xl: 23px;
@@ -108,21 +115,13 @@
 
   /* ---- layout ---- */
   --pane-w: 320px;
-  --titlebar-h: 44px;
+  --titlebar-h: 40px; /* mirrored in main/trafficLights.ts, which centers the native lights in it */
 
   /* ---- rail insets ----
      Horizontal room between a rail row and the scrollport edge, and the dial for how much side space the
-     rail spends: a card's visible inset on BOTH sides is this plus --bar-thin (see .sb-rail-body for why),
-     so 7 + 7 = 14px. .sb-rail-body's overflow clip truncates the card hover-lift shadow at exactly this
-     distance, and --shadow-sel-hover's side reach is 7.5px in light (the binding theme), so this runs
-     0.5px short of the reach — an overshoot small enough to verify clean by inspection rather than pay
-     a further 1px per side to eliminate.
-     Do NOT set this from an arithmetic threshold, in either direction. Upward: the cut is a straight edge
-     along the card's full run, and vision resolves edges far better than the same difference spread over
-     a flat field, so a 4/255 step measures negligible and still reads as a line. Downward: a residual in
-     the 0–2/255 range is at the quantization floor and is NOT stable — sub-pixel layout differences move
-     it, so two measurements of the same build can disagree and neither is wrong. Which means: judge the edge
-     by eye, and treat reach-versus-budget as the durable check. Raising this costs row width, 1px/side. */
+     rail spends: a row's visible inset on BOTH sides is this plus --bar-thin (see .sb-rail-body for why),
+     so 7 + 7 = 14px. It is also the room anything painted outside a row has before .sb-rail-body's
+     overflow clip cuts it — today the focused row's 2px edge. Raising this costs row width, 1px/side. */
   --rail-inset: 7px;
   /* Where the rail's FLAT-row text column starts: a row's inset, plus the gutter it doesn't reserve, plus
      .sb-row's own 8px padding. The head and the New popover align to it, so the head's label sits over
@@ -140,52 +139,40 @@
   /* Neutral-ink RGB channels for ad-hoc one-off shadows (rgba(var(--shadow-color), α)); dark flips
      it to pure black so a near-black shadow doesn't vanish into a dark surface. */
   --shadow-color: 26, 26, 26;
-  /* Card hover-lift shadow — narrow + downward-biased (negative spread); strength is opacity, not size.
-     Reach in light: 7.5px to the sides, 4.0px above, 11.5px below (peaks 26 / 6 / 42 against the rail).
-     Those are measured, not derived — a blur's real reach runs well past what `blur/2 - spread` predicts,
-     because Chromium's Gaussian tail extends beyond the shadow's geometric edge, so arithmetic will
-     under-estimate it badly. Every one of the three runs against a clip inside .sb-rail-body, which
-     carries the reach-vs-budget table, the per-edge clearances, and the one accepted overshoot. Read it
-     before touching blur, spread, or offset-y, and re-measure all THREE afterwards. No edge is called
-     the tightest here on purpose: which one that is flips whenever a budget moves, so the figures live
-     in one place and the ordering is derived from them, never asserted alongside them.
-     There is NO automated gate on any of this. Every figure quoted came from one-off measurement, so a
-     change made without measuring again is simply unverified — the type checker, the unit tests, and the
-     production build all stay green straight through a visible hard edge.
-     NOTE three consumers — the rail card, .sb-btn-resume:hover, and a transcript control that carries
-     this shadow at REST rather than on hover, so a change there is permanently visible, not hover-only.
-     Only the rail one is clipped, so fix a clipped edge at the RAIL's inset, never in this geometry, or
-     two unrelated surfaces move with it. Theme-aware: the dark block swaps in a near-opaque black.
-     Selection itself is shadowless (a 1px ring — see rail.css). */
+  /* Hover-lift shadow — narrow + downward-biased (negative spread); strength is opacity, not size.
+     Reach in light: 7.5px to the sides, 4.0px above, 11.5px below. Those are measured, not derived — a
+     blur's real reach runs well past what `blur/2 - spread` predicts, because Chromium's Gaussian tail
+     extends beyond the shadow's geometric edge, so arithmetic will under-estimate it badly; re-measure
+     after touching blur, spread, or offset-y, and check every consumer for a clip within that reach.
+     NOTE two consumers — .sb-btn-resume:hover, and a transcript control that carries this shadow at REST
+     rather than on hover, so a change there is permanently visible, not hover-only. Theme-aware: the dark
+     block swaps in a near-opaque black. */
   --shadow-sel-hover: 0 4px 10px -4px rgba(var(--shadow-color), 0.3), 0 2px 7px -2px rgba(var(--shadow-color), 0.26);
   /* modal/overlay dim */
   --scrim: rgba(26, 26, 26, 0.28);
 }
 
 /*
- * Dark mode — neutral, with an INVERTED elevation (experiment): unlike light mode and the usual
- * dark convention, the left pane / rail is the LIGHTER chrome and the main content (pane /
- * Formatted / terminal) is the DARK canvas. So --paper-sunken (rail) sits ABOVE --paper-pane
- * (content) in lightness here — the token names keep their light-mode meaning while the dark values
- * deliberately invert it. The two accents keep their one job (cobalt = alive, red = destructive),
- * brightened for the dark; their soft/wash tints are dark-tinted. data-theme is JS-resolved
- * (System/Light/Dark) on <html>, so explicit Light/Dark beat the OS. Only color + shadow tokens are
- * redeclared here; type / spacing / radii / motion / layout are shared.
+ * Dark mode — neutral, with the same elevation ORDER as light: the main content (pane / Formatted /
+ * terminal) is the lighter surface and the rail and chrome the darker one, so --paper-sunken sits
+ * BELOW --paper-pane in both themes. Content set apart inside the pane (code, tool output) is recessed
+ * a step below it, as in light. The two accents keep their one job (cobalt = alive, red =
+ * destructive), brightened for the dark; their soft/wash tints are dark-tinted. data-theme is
+ * JS-resolved (System/Light/Dark) on <html>, so explicit Light/Dark beat the OS. Only color + shadow
+ * tokens are redeclared here; type / spacing / radii / motion / layout are shared.
  */
 :root[data-theme='dark'] {
-  /* ---- paper & ink (neutral; INVERTED elevation — rail/chrome lighter, content the dark canvas) ---- *
-   * Lightened a tad from the original near-black set (pane #0f0f0f / rail #161616) to ease the contrast
-   * while preserving the inverted-elevation ORDER: pane < sunken(=app shell) < raised < hover < active. */
-  --paper: #1f1f1f; /* app shell / titlebar — the lighter chrome (tracks --paper-sunken) */
-  --paper-raised: #2a2a2a; /* raised tiles: live cards, modals, menus — lighter still, so they pop on the rail */
-  --paper-pane: #191919; /* main content (pane / Formatted / terminal) — the DARK canvas. Nudged up
-     from #171717 to ease the contrast against the pane's ink; must stay BELOW --paper-sunken so the
-     inverted-elevation order above still holds. */
-  --paper-sunken: #1f1f1f; /* left pane / rail + recessed bits — lighter chrome (sits ABOVE --paper-pane here) */
-  --paper-code: #222222; /* unified mono surface: fenced + inline code AND tool result/JSON — a step up from sunken, below raised */
+  /* ---- paper & ink (neutral) ---- *
+   * Order: sunken (= app shell) < code < pane < raised < hover < active. */
+  --paper: #191919; /* app shell / titlebar — the chrome (tracks --paper-sunken) */
+  --paper-raised: #2a2a2a; /* raised tiles: modals, menus, the rows on screen — lighter still */
+  --paper-pane: #212121; /* main content (pane / Formatted / terminal). The terminal's theme repeats
+     this value (TerminalView) — move the two together. */
+  --paper-sunken: #191919; /* left pane / rail + recessed bits — the darker chrome, below the pane */
+  --paper-code: #1c1c1c; /* unified mono surface: fenced + inline code AND tool result/JSON — recessed a step below the pane, above sunken */
   --paper-hover: #313131;
   --paper-active: #3a3a3a;
-  --btn: #313131; /* settings buttons: kept at the readable dark gray (inverted elevation) */
+  --btn: #313131; /* settings buttons: a readable dark gray */
   --btn-hover: #3a3a3a;
 
   --ink: #f2f2f2; /* primary text — soft off-white, not pure */
@@ -198,6 +185,8 @@
   --rule-strong: #3f3f3f; /* stronger = more contrast */
   --rule-raised: #3f3f3f; /* hairline on --paper-raised — see the light-mode note; dark needs the
      stronger value because --rule (#2b2b2b) is one step off --paper-raised (#2a2a2a) */
+  --rail-hover: #232323; /* a step above the rail, and below the rows on screen — see the light note */
+  --rail-selected-hover: #323232; /* a step lighter than the white row at rest (--paper-raised) */
 
   /* ---- accent 1: electric cobalt = alive (brightened for dark; tints flip to dark) ---- */
   --live: #3b6cf0;
@@ -225,14 +214,18 @@
   --shadow-pane: 0 1px 1px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.45);
   --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.4), 0 16px 44px rgba(0, 0, 0, 0.55);
   --shadow-color: 0, 0, 0;
-  /* Card hover-lift shadow — same geometry as light, near-OPAQUE black. A LOW-ALPHA black does vanish on
-     the near-black rail, which is why this isn't just the light value; an opaque one darkens toward #000
-     and reads fine (a 17/255 peak below the card against --paper-sunken). A light glow is the wrong
-     instrument here: it inverts the elevation cue, haloing the card rather than seating it. Reach is
-     6.0px to the sides, 3.5px above, 9.5px below — shorter than light's on every axis, and the smaller
-     peaks make any truncation a smaller step, so LIGHT sets all THREE budgets — --rail-inset sideways,
-     padding-top above, padding-bottom below. Do not tune any of them against dark and assume light
-     follows: dark is the slacker constraint on every axis. See --rail-inset and .sb-rail-body. */
+  /* Hover-lift shadow — same geometry as light, near-OPAQUE black. A LOW-ALPHA black vanishes on a
+     near-black surface, which is why this isn't just the light value; an opaque one darkens toward #000
+     and reads. A light glow is the wrong instrument here: it inverts the elevation cue, haloing the
+     element rather than seating it. Reach is shorter than light's on every axis (6.0 / 3.5 / 9.5px), so
+     light is the binding theme for any clip. */
   --shadow-sel-hover: 0 4px 10px -4px rgba(0, 0, 0, 1), 0 2px 7px -2px rgba(0, 0, 0, 0.85);
   --scrim: rgba(0, 0, 0, 0.6);
+}
+/* A hairline's strength is its step off the surface under it, and the pane sits above the chrome in
+   dark. So inside the pane the rules step up to match — table lines, code borders, the header's
+   bottom rule — while the chrome keeps the quieter values it is tuned against. */
+:root[data-theme='dark'] .sb-pane {
+  --rule: #353535;
+  --rule-soft: #2e2e2e;
 }

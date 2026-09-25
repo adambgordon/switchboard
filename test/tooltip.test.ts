@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   clampTipText,
+  endClampTip,
   MAX_TIP,
   placeTip,
+  placeTipRight,
+  tipMetaLine,
+  tipOnEnter,
+  tipOnLeave,
   visibleTipLength,
   type TipBox
 } from '../src/renderer/lib/tooltip'
@@ -122,5 +127,118 @@ describe('placeTip', () => {
     const p = placeTip(box(200, { hostTop: 40, hostBottom: 60, viewport: 260 }))
     const visualTop = p.side === 'bottom' ? p.top : p.top - 200
     expect(visualTop).toBeGreaterThanOrEqual(8)
+  })
+})
+
+describe('endClampTip', () => {
+  it('leaves text at or under the budget exactly as it was', () => {
+    expect(endClampTip('abcde', 5)).toBe('abcde')
+    expect(endClampTip('abc', 5)).toBe('abc')
+  })
+
+  it('cuts the END, landing exactly on the budget with the ellipsis', () => {
+    expect(endClampTip('abcdefghij', 6)).toBe('abcde…')
+  })
+
+  it('never splits a surrogate pair', () => {
+    // Each emoji is two UTF-16 units; a budget of 4 keeps three code points. A UTF-16 slice would
+    // keep one and a half emoji — a lone surrogate — and this would not equal the expected string.
+    expect(endClampTip('😀😀😀😀😀', 4)).toBe('😀😀😀…')
+    expect(endClampTip('a😀😀😀😀', 3)).toBe('a😀…')
+  })
+
+  it('degrades to a bare ellipsis at a budget too small for text', () => {
+    expect(endClampTip('abc', 1)).toBe('…')
+    expect(endClampTip('abc', 0)).toBe('…')
+  })
+})
+
+describe('tipMetaLine', () => {
+  const NOW = 1_800_000_000_000
+
+  it('ages the timestamp against the time it is SHOWN, not a fixed clock', () => {
+    expect(tipMetaLine(NOW - 3 * 3600_000, null, NOW)).toBe('3h ago')
+    // The same timestamp, shown two days later.
+    expect(tipMetaLine(NOW - 3 * 3600_000, null, NOW + 2 * 86400_000)).toBe('2d ago')
+  })
+
+  it('says "Just now" rather than "now ago"', () => {
+    expect(tipMetaLine(NOW - 5_000, null, NOW)).toBe('Just now')
+  })
+
+  it('joins the age and the host\'s own line with a middot', () => {
+    expect(tipMetaLine(NOW - 4 * 60_000, 'app · fix-scroll', NOW)).toBe('4m ago · app · fix-scroll')
+  })
+
+  it('omits whichever half is missing, and is null with neither', () => {
+    expect(tipMetaLine(null, 'app', NOW)).toBe('app')
+    expect(tipMetaLine(NOW, '', NOW)).toBe('Just now')
+    expect(tipMetaLine(null, null, NOW)).toBeNull()
+    expect(tipMetaLine(null, '', NOW)).toBeNull()
+  })
+})
+
+describe('placeTipRight', () => {
+  const base = {
+    hostTop: 200,
+    hostBottom: 230,
+    hostRight: 300,
+    width: 250,
+    height: 70,
+    viewportWidth: 1200,
+    viewportHeight: 800,
+    gap: 7,
+    edge: 8
+  }
+
+  it('sits beside the host, centered on it', () => {
+    // Center 215, so the top of a 70px label is 180.
+    expect(placeTipRight(base)).toEqual({ left: 307, top: 180 })
+  })
+
+  it('clamps at the top and bottom edges instead of leaving the viewport', () => {
+    expect(placeTipRight({ ...base, hostTop: 0, hostBottom: 30 }).top).toBe(8)
+    expect(placeTipRight({ ...base, hostTop: 780, hostBottom: 800 }).top).toBe(800 - 8 - 70)
+  })
+
+  it('pins a label taller than the viewport to the top edge', () => {
+    expect(placeTipRight({ ...base, height: 2000 }).top).toBe(8)
+  })
+
+  it('pulls left rather than running off the right edge', () => {
+    expect(placeTipRight({ ...base, viewportWidth: 500 }).left).toBe(500 - 8 - 250)
+  })
+})
+
+describe('scrubbing', () => {
+  it('keeps a scrub-host label up moving onto the next scrub host', () => {
+    expect(tipOnLeave(true, 'scrub')).toBe('keep')
+  })
+
+  it('holds it through a gap between hosts rather than blinking', () => {
+    expect(tipOnLeave(true, 'none')).toBe('grace')
+  })
+
+  it('hides it moving onto an ordinary host, whose own label takes its delay', () => {
+    expect(tipOnLeave(true, 'plain')).toBe('hide')
+  })
+
+  it('hides immediately when no scrub-host label is on screen, whatever comes next', () => {
+    // A label still waiting out its delay has nothing to hold: leaving cancels it, as before.
+    for (const to of ['none', 'plain', 'scrub'] as const) expect(tipOnLeave(false, to)).toBe('hide')
+  })
+
+  it('re-fills a scrub-host label at once on the next scrub host', () => {
+    expect(tipOnEnter(true, 'scrub')).toBe('refill')
+  })
+
+  it('dismisses a scrub-host label still in its grace when the pointer reaches an ordinary host', () => {
+    // Row, gap, toolbar button: the row's label must not stay up through the button's delay.
+    expect(tipOnEnter(true, 'plain')).toBe('replace')
+  })
+
+  it('waits out the delay when no scrub-host label is on screen', () => {
+    expect(tipOnEnter(false, 'scrub')).toBe('arm')
+    expect(tipOnEnter(false, 'plain')).toBe('arm')
   })
 })

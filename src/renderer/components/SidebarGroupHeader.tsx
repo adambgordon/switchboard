@@ -24,7 +24,10 @@ export default function SidebarGroupHeader({ root, label, collapsed, wantsAttent
         onClick={() => onToggle(root)}
         aria-expanded={!collapsed}
       >
-        {collapsed ? <Folder size={15} className="sb-group-icon" /> : <FolderOpen size={15} className="sb-group-icon" />}
+        {/* Both glyphs, one shown: the folder's state at rest, and the state a click would give it while
+            hovered (rail.css), so the icon previews the toggle. */}
+        <Folder size={15} className="sb-group-icon sb-group-icon-closed" />
+        <FolderOpen size={15} className="sb-group-icon sb-group-icon-open" />
         <span className="sb-group-label">
           <span className="sb-group-label-text truncate">{label}</span>
           <span className="sb-group-label-reserve truncate" aria-hidden="true">
