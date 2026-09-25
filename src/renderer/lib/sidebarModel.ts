@@ -358,6 +358,11 @@ export function rankSpace(model: SidebarModel): Ranked[] {
   return out
 }
 
+/** The folders' ranks: the space a folder drop writes into. Every folder, rendered or not. */
+export function folderRankSpace(model: SidebarModel): Ranked[] {
+  return [...model.folders].map(([id, f]) => ({ id, rank: f.rank }))
+}
+
 /** The rows on screen, top to bottom — what keyboard navigation steps through. */
 export function visibleRows(model: SidebarModel): SidebarRow[] {
   return model.groups.flatMap((g) => g.blocks.flatMap((b) => b.rows))

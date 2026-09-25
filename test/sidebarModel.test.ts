@@ -7,6 +7,7 @@ import {
   folderLabels,
   needsYou,
   freezeFoldersByNewest,
+  folderRankSpace,
   rankSpace,
   resumeWrites,
   visibleRows,
@@ -599,6 +600,27 @@ describe('row places', () => {
       { id: 'c2', rank: T - 2 },
       { id: 'c3', rank: T + 50 },
       { id: 'fresh', rank: T + 7 }
+    ])
+  })
+})
+
+describe('the folder rank space', () => {
+  it('holds every folder at its override, else its earliest row, whatever search shows', () => {
+    const model = buildSidebar(
+      input({
+        groups: [
+          group('/w/c', [conv('c1', T - 1), conv('c2', T - 9)]),
+          group('/w/b', [conv('b1', T - 10)]),
+          group('/w/a', [conv('a1', T - 20)])
+        ],
+        folderRanks: { '/w/a': T + 5 },
+        search: new Set(['b1'])
+      })
+    )
+    expect(folderRankSpace(model).sort((x, y) => x.id.localeCompare(y.id))).toEqual([
+      { id: '/w/a', rank: T + 5 },
+      { id: '/w/b', rank: T - 10 },
+      { id: '/w/c', rank: T - 9 }
     ])
   })
 })

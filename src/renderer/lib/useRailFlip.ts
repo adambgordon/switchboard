@@ -45,7 +45,7 @@ export function useRailFlip(
   useLayoutEffect(() => {
     const container = containerRef.current
     if (!container) return
-    const rows = container.querySelectorAll<HTMLElement>('.sb-row[data-session]')
+    const rows = container.querySelectorAll<HTMLElement>('.sb-row[data-key]')
 
     // Cancel our own in-flight slides so getBoundingClientRect reads settled positions, not
     // mid-animation transformed ones — keeps rapid pin/unpin from compounding offsets.
@@ -54,12 +54,14 @@ export function useRailFlip(
       el.classList.remove(FLIPPING_CLASS) // clean slate (cancel() fires oncancel, not onfinish)
     }
 
-    // "Last": where every visible row sits now. Viewport coords, so a cross-section move is one
-    // continuous slide (all rows share the same scroll container).
+    // "Last": where every visible row sits now, in the container's CONTENT coordinates — viewport
+    // positions would make a scroll between two order changes slide every row by the distance
+    // scrolled. One space for every row, so a move between folders is one continuous slide.
     const tops = new Map<string, number>()
+    const origin = container.getBoundingClientRect().top - container.scrollTop
     for (const el of rows) {
-      const id = el.dataset.session
-      if (id) tops.set(id, el.getBoundingClientRect().top)
+      const id = el.dataset.key
+      if (id) tops.set(id, el.getBoundingClientRect().top - origin)
     }
 
     const controlChanged = controlSig !== prevControlSig.current
@@ -68,7 +70,7 @@ export function useRailFlip(
 
     if (animate) {
       for (const el of rows) {
-        const id = el.dataset.session
+        const id = el.dataset.key
         if (!id) continue
         const prev = prevTops.current.get(id)
         let anim: Animation | undefined

@@ -301,7 +301,7 @@
 
 /* ---- groups: one headerless group in All mode, one per project in Folders mode. A group is its
    header, its blocks (pinned, then unpinned) and its Show more / Show less. A block's row gap is what
-   the drag gesture's stride assumes (useRowReorder's GAP) — change the two together. ---- */
+   the drag gesture measures rather than assumes (useBlockReorder). ---- */
 .sb-group,
 .sb-block {
   display: flex;
@@ -412,7 +412,26 @@
   height: 0;
   border-top: 1px solid var(--ink-ghost);
 }
-/* Compact draws no rules; the reserved line closing each folder (Sidebar) is the break instead. */
+/* While a folder is being moved it folds to its header (folderFold): held at its header's height,
+   clipped below it, its rows fading as it folds, with the closed glyph. Display only — nothing is
+   written, and the drop opens it again, the rows fading back in. Clipped on the vertical axis alone, so
+   the header's paper can still reach sideways. */
+.sb-rail-body > .sb-group > :not(.sb-group-head) {
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.sb-group.sb-folded {
+  overflow-y: clip;
+}
+.sb-group.sb-folded > :not(.sb-group-head) {
+  opacity: 0;
+}
+.sb-group.sb-folded .sb-group-icon-open {
+  display: none !important;
+}
+.sb-group.sb-folded .sb-group-icon-closed {
+  display: block !important;
+}
+/* Compact draws no rules; the reserved line closing each folder (Sidebar) is the break instead.
 .sb-rail.compact .sb-group-toggle::after {
   display: none;
 }

@@ -1,6 +1,6 @@
 import { useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
 import { useTabStripScroll } from '../lib/useTabStripScroll'
-import { TAB_SCROLL_EDGE } from '../lib/tabScroll'
+import { SCROLL_EDGE } from '../lib/edgeScroll'
 import type { TabLayout } from '../lib/tabLayoutPreference'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { useTabReorder } from '../lib/useTabReorder'
@@ -293,7 +293,7 @@ export default function TabStrip({
   return (
     <div
       className={`sb-tabstrip-frame${layout === 'scroll' ? ' horizontal' : ''}`}
-      style={{ '--tab-edge': `${TAB_SCROLL_EDGE}px` } as CSSProperties}
+      style={{ '--tab-edge': `${SCROLL_EDGE}px` } as CSSProperties}
     >
       <div
         className={`sb-tabstrip${layout === 'scroll' ? ' horizontal' : ''}`}

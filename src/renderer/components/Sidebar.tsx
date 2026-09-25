@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import type { AgentKind } from '@shared/types'
 import type { SidebarBlock, SidebarModel, SidebarRow } from '../lib/sidebarModel'
 import { visibleRows } from '../lib/sidebarModel'
 import type { RailDensity, SidebarMode } from '../lib/sidebarPrefs'
 import { rowTipMeta } from '../lib/rowTip'
-import { reorderArray } from '../lib/reorder'
 import { useRailFlip } from '../lib/useRailFlip'
-import { useRowReorder } from '../lib/useRowReorder'
+import { useBlockReorder, type BlockDrop } from '../lib/useBlockReorder'
+import { foldFolder } from '../lib/folderFold'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
@@ -80,44 +80,14 @@ interface Props {
   onShowInfo: (id: string, edit: boolean) => void
   /** A row dropped between two neighbors of its block, either null at an edge. */
   onDropRow: (block: SidebarBlock, draggedId: string, higherId: string | null, lowerId: string | null) => void
+  /** A folder dropped between two neighboring folders, either null at an edge. */
+  onDropFolder: (root: string, higherRoot: string | null, lowerRoot: string | null) => void
   /** Bumped on each drag-reorder commit; folded into controlSig so that commit settles instantly. */
   reorderTick: number
 }
 
-/**
- * One block's rows, and the drag that reorders them. Each block gets its own gesture over its own
- * wrapper, so a drag can never carry a row out of the block it belongs to — pinned into unpinned, or
- * one folder into another. The gesture reports indices; they become the two neighbors the row landed
- * between, which is what both a rank write and a pin move need.
- */
-function SidebarBlockView({
-  block,
-  enabled,
-  onDrop,
-  children
-}: {
-  block: SidebarBlock
-  enabled: boolean
-  onDrop: Props['onDropRow']
-  children: ReactNode
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const ids = block.rows.map((r) => r.sessionId)
-  useRowReorder(ref, {
-    enabled,
-    order: ids,
-    onReorder: (from, to) => {
-      const moved = reorderArray(ids, from, to)
-      onDrop(block, ids[from], moved[to - 1] ?? null, moved[to + 1] ?? null)
-    },
-    selector: '.sb-row[data-session]'
-  })
-  return (
-    <div className="sb-block" data-block={block.id} ref={ref}>
-      {children}
-    </div>
-  )
-}
+/** The drag block holding the folders themselves, in Folders mode — the rail body. */
+const FOLDERS_BLOCK = 'folders'
 
 /**
  * The unified conversation pane. A head (grouping mode, the needs-you tag, search, new) above one
@@ -171,6 +141,7 @@ export default function Sidebar({
   onStopSession,
   onShowInfo,
   onDropRow,
+  onDropFolder,
   reorderTick
 }: Props) {
   // Nothing to draw: no folder has a row, or All mode's one group is empty. A collapsed folder is not
@@ -201,7 +172,29 @@ export default function Sidebar({
     revealed,
     reorderTick
   ])
+  // One drag gesture for the whole rail. A drag never leaves its block — a row stays among its folder's
+  // pinned or unpinned rows, a folder among folders — and reports the two neighbors it landed between,
+  // which is what both a rank write and a pin move need. Declared BEFORE useRailFlip: a committed drop's
+  // layout effect clears the siblings' drag transforms, and the flip must measure the rows after that.
+  const onDrop = useCallback(
+    (drop: BlockDrop) => {
+      if (drop.block === FOLDERS_BLOCK) return onDropFolder(drop.key, drop.above, drop.below)
+      const block = model.groups.flatMap((g) => g.blocks).find((b) => b.id === drop.block)
+      if (block) onDropRow(block, drop.key, drop.above, drop.below)
+    },
+    [model, onDropRow, onDropFolder]
+  )
+  useBlockReorder(listRef, {
+    enabled: !searching,
+    onDrop,
+    commitKey: reorderTick,
+    cancelKey: JSON.stringify([mode, density, searchOpen, searching]),
+    // Moving a folder folds it to its header, so it moves as one short card.
+    reshape: (block, unit) => (block === FOLDERS_BLOCK ? foldFolder(unit) : null)
+  })
+
   useRailFlip(listRef, orderSig, controlSig)
+
 
   // Re-evaluate the head divider when the visible content changes: collapsing a folder or running a
   // search can shrink the list back within the viewport (scrollTop snaps to 0) WITHOUT firing a scroll
@@ -391,6 +384,7 @@ export default function Sidebar({
       <div
         className="sb-rail-body sb-autoscroll"
         ref={listRef}
+        data-block={mode === 'folders' ? FOLDERS_BLOCK : undefined}
         onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
       >
         {loading ? (
@@ -416,7 +410,7 @@ export default function Sidebar({
             // break is the same size.
             const reserve = density === 'compact' && g.header && !g.collapsed
             return (
-              <section key={g.key} className="sb-group">
+              <section key={g.key} className="sb-group" data-key={g.header ? g.key : undefined}>
                 {g.header && (
                   <SidebarGroupHeader
                     root={g.key}
@@ -427,9 +421,9 @@ export default function Sidebar({
                   />
                 )}
                 {g.blocks.map((b) => (
-                  <SidebarBlockView key={b.id} block={b} enabled={!searching} onDrop={onDropRow}>
+                  <div key={b.id} className="sb-block" data-block={b.id}>
                     {b.rows.map(renderRow)}
-                  </SidebarBlockView>
+                  </div>
                 ))}
                 {(more || less || reserve) && (
                   <div className="sb-rail-more-row">

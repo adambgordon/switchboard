@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { makeTabDragPayload } from '@shared/tabDrag'
 import type { TabLayout } from './tabLayoutPreference'
-import { tabEdgeScrollSpeed, tabDragScrollRequest, tabDragScrollFeedback, type TabEdgeMotion } from './tabScroll'
+import { edgeScrollSpeed, dragScrollRequest, dragScrollFeedback, type EdgeMotion } from './edgeScroll'
 import {
   groupDragFollowerIndices,
   groupDragIndices,
@@ -100,7 +100,7 @@ export function useTabReorder(
     let moveFrame: number | null = null
     let edgeFrame: number | null = null
     let edgeTime = 0
-    let edgeMotion: TabEdgeMotion<HTMLElement> | null = null
+    let edgeMotion: EdgeMotion<HTMLElement> | null = null
     let latestX = 0
     let latestY = 0
     let suppressClick = false
@@ -230,8 +230,8 @@ export function useTabReorder(
         return
       }
       const before = strip.scrollLeft
-      const request = tabDragScrollRequest(
-        edgeMotion, strip, tabEdgeScrollSpeed(latestX, box.left, box.right), time - edgeTime,
+      const request = dragScrollRequest(
+        edgeMotion, strip, edgeScrollSpeed(latestX, box.left, box.right), time - edgeTime,
         before, strip.scrollWidth - strip.clientWidth
       )
       if (!request) {
@@ -239,7 +239,7 @@ export function useTabReorder(
         return
       }
       strip.scrollLeft += request.delta
-      edgeMotion = tabDragScrollFeedback(request, before, strip.scrollLeft, 1 / window.devicePixelRatio)
+      edgeMotion = dragScrollFeedback(request, before, strip.scrollLeft, 1 / window.devicePixelRatio)
       edgeTime = time
       if (strip.scrollLeft !== before) updateTarget(latestX, latestY)
       if (!edgeMotion) {

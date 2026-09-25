@@ -191,11 +191,12 @@
   background: var(--paper-active);
 }
 
-/* ---- gesture affordances (useRowReorder) ---- */
-/* Drag-to-reorder (pinned rows): the moving card is a `position:fixed` CLONE on <body> (useRowReorder)
-   so it escapes the rail body's overflow clip and floats over the live-sessions head; this `.dragging`
-   look (white + hairline ring + shadow, via box-shadow so no border reflow) styles that clone. The
-   real row is hidden in place as the gap; siblings glide as the gap relocates; commits on drop. */
+/* ---- gesture affordances (useBlockReorder) ---- */
+/* Drag-to-reorder: the moving unit is a `position:fixed` CLONE on <body> (useBlockReorder), so it
+   escapes the rail body's overflow clip and floats over the head and the sticky folder headers; this
+   `.dragging` look (white + hairline ring + shadow, via box-shadow so no border reflow) styles that
+   clone. The real unit is hidden in place as the gap; siblings glide as the gap relocates; commits on
+   drop. */
 .sb-row.dragging {
   cursor: grabbing;
   background: var(--paper-raised) !important;
@@ -212,7 +213,22 @@ body.sb-dragging-row * {
 body.sb-dragging-row {
   user-select: none;
 }
+/* A folder lifts on the rail's own surface, so its rows read as they did in place. */
+.sb-group.dragging {
+  border-radius: var(--r-md);
+  background: var(--paper-sunken);
+  box-shadow:
+    0 0 0 1px var(--rule-strong),
+    var(--shadow-pane);
+}
+/* In place, the header's paper reaches past it to cover rows scrolling beneath; on the card it would
+   paint over the card's edge instead. */
+.sb-group.dragging > .sb-group-head {
+  box-shadow: none;
+  background: transparent;
+}
 /* Siblings glide as the gap relocates. */
-body.sb-dragging-row .sb-rail-body .sb-row:not(.dragging) {
+body.sb-dragging-row .sb-rail-body .sb-row:not(.dragging),
+body.sb-dragging-row .sb-rail-body > .sb-group {
   transition: transform 0.18s var(--ease);
 }

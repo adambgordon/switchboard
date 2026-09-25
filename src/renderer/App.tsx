@@ -27,6 +27,7 @@ import {
   DEFAULT_SIDEBAR_LIMITS,
   buildSidebar,
   freezeFoldersByNewest,
+  folderRankSpace,
   rankSpace,
   resumeWrites,
   synthMeta,
@@ -1620,6 +1621,19 @@ export default function App() {
     [movePin, mutateRows]
   )
 
+  // A folder dropped between two neighboring folders: one key in the folder rank space, the same
+  // arithmetic as a row.
+  const dropFolder = useCallback(
+    (root: string, higherRoot: string | null, lowerRoot: string | null) => {
+      const model = sidebarModelRef.current
+      if (!model) return
+      const writes = dropWrites(folderRankSpace(model), root, higherRoot, lowerRoot, Date.now())
+      if (Object.keys(writes).length > 0) mutateFolders((stored) => ({ ...stored, ...writes }))
+      setReorderTick((t) => t + 1)
+    },
+    [mutateFolders]
+  )
+
   // Resolve the current dot state for any session id (used by the read/unread toggle). Null for any
   // unlinked row — it has no dot to toggle, and ⇧⌘U would otherwise persist an override for a
   // conversation the row isn't showing.
@@ -1946,6 +1960,7 @@ export default function App() {
             onStopSession={stopSession}
             onShowInfo={showInfo}
             onDropRow={dropRow}
+            onDropFolder={dropFolder}
             reorderTick={reorderTick}
           />
         )}

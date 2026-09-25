@@ -126,6 +126,9 @@ function ConversationRowImpl({
       role="button"
       tabIndex={-1}
       data-session={meta.sessionId}
+      // The drag contract (useBlockReorder): the row is its own unit and its own handle.
+      data-key={meta.sessionId}
+      data-drag=""
       // The hover carries what the row no longer shows: the full title, the preview, and when and
       // where. The preview is the tab strip's derivation, so a parked row keeps its explanation; with
       // no real preview the line is omitted rather than spent saying there is nothing to say.
@@ -212,6 +215,7 @@ function ConversationRowImpl({
         )}
         <button
           className="sb-row-menu-btn"
+          data-no-drag=""
           aria-label="Conversation actions"
           aria-haspopup="menu"
           onClick={(e) => {

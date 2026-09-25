@@ -18,7 +18,8 @@ interface Props {
  */
 export default function SidebarGroupHeader({ root, label, collapsed, wantsAttention, onToggle }: Props) {
   return (
-    <div className="sb-group-head" role="group" aria-label={label}>
+    // The folder's drag handle: the header grabs the whole folder around it (useBlockReorder).
+    <div className="sb-group-head" role="group" aria-label={label} data-drag="">
       <button
         className={`sb-group-toggle${wantsAttention ? ' attention' : ''}`}
         onClick={() => onToggle(root)}
