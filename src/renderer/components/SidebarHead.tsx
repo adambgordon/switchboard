@@ -26,19 +26,15 @@ interface Props {
   onSearchToggle: () => void
   menuOpen: boolean
   onMenuToggle: () => void
-  /** Right-click the "+" → open the chooser even when a default folder is set (the escape hatch). */
-  onNewContextMenu: () => void
   onMenuClose: () => void
-  recentDirs: string[]
-  /** The default folder ('' = none) — pinned + preselected at the top of the menu's directory list. */
-  menuDefaultDir: string
+  menuDirs: string[]
+  /** The folder the chooser focuses on open, or null for the first. */
+  menuPreselect: string | null
   menuAgents: AgentKind[]
   menuAgent: AgentKind
   onMenuAgentChange: (agent: AgentKind) => void
   onChoose: (cwd: string, agent: AgentKind) => void
   onPickOther: (agent: AgentKind) => void
-  defaultDirActive: boolean
-  defaultDirLabel: string
 }
 
 /**
@@ -60,17 +56,14 @@ export default function SidebarHead({
   onSearchToggle,
   menuOpen,
   onMenuToggle,
-  onNewContextMenu,
   onMenuClose,
-  recentDirs,
-  menuDefaultDir,
+  menuDirs,
+  menuPreselect,
   menuAgents,
   menuAgent,
   onMenuAgentChange,
   onChoose,
-  onPickOther,
-  defaultDirActive,
-  defaultDirLabel
+  onPickOther
 }: Props) {
   const needsTip = `${needsYou} ${needsYou === 1 ? 'conversation needs' : 'conversations need'} you — click to go there`
   return (
@@ -129,23 +122,15 @@ export default function SidebarHead({
             <button
               className={`sb-rail-new-btn${menuOpen ? ' open' : ''}`}
               onClick={onMenuToggle}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                onNewContextMenu()
-              }}
-              data-tip={
-                defaultDirActive
-                  ? `New conversation in ${defaultDirLabel} (⌘N) · right-click to choose`
-                  : 'New conversation (⌘N)'
-              }
+              data-tip="New conversation (⌘N)"
               aria-label="New conversation"
             >
               <Plus size={16} />
             </button>
             <NewConversationMenu
               open={menuOpen}
-              recentDirs={recentDirs}
-              defaultDir={menuDefaultDir}
+              dirs={menuDirs}
+              preselect={menuPreselect}
               agents={menuAgents}
               initialAgent={menuAgent}
               onAgentChange={onMenuAgentChange}

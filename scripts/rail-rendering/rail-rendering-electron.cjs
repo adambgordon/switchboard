@@ -5,7 +5,7 @@ const installRailHelpers = require('./rail-page-helpers.cjs')
 
 // Native regression checks for the rail: the real Sidebar in a fixed-height column, driven by real
 // pointer input (CDP Input.dispatchMouseEvent), in both themes and at several native zoom steps.
-// RAIL_CHECKS=1,5,9 runs a subset.
+// RAIL_CHECKS=1,5,9 runs a subset, by number or by name (RAIL_CHECKS=pencil).
 
 const output = process.argv[2]
 app.setPath('userData', join(output, 'profile'))
@@ -1031,6 +1031,325 @@ CHECKS['13-fold-clamp'] = async () => {
     targetInRail: +(targetY - b.top).toFixed(1), gap: gap.index, shot: shot.file })
 }
 
+// A folder header's new-conversation actions (SidebarGroupHeader). The pencil shows while the pointer is
+// anywhere in its folder; the agent logos slide out from under it while the pointer is on the pencil or a
+// logo, each box abutting the next so the pointer never crosses a gap between them; a click reports the
+// folder (and, on a logo, its agent); a press there never starts a folder drag; and a folder drag hides
+// them on every folder and in the clone. Judged with one agent installed and with two, in both densities.
+// The header around them: Compact draws no leader rule and Spacious runs it to the toggle's content edge,
+// the toggle's hover fill spans the header with the pencil painting that same fill, a long name stops
+// clear of the actions, and each action's tooltip names what it starts.
+const PENCIL_KEY = '/home/dev/projects/atlas'
+const LONG_KEY = '/home/dev/projects/prism-shared-component-library-migration-notes'
+const AGENT_LABELS = { claude: 'Claude Code', codex: 'Codex' }
+// The toggle's trailing padding in Spacious, where the leader rule ends; and the least room a name
+// leaves between itself and the header's edge, for the actions overlaid there.
+const RULE_INSET = 8
+const LABEL_CLEARANCE = 22
+const TRANSPARENT = 'rgba(0, 0, 0, 0)'
+// A row of each agent in the pencil's folder (the fixture gives a row Codex when its index plus its
+// folder's is a multiple of three).
+const TIP_ROWS = [['atlas-1', 'claude'], ['atlas-3', 'codex']]
+const PENCIL_AGENT_SETS = [['claude', 'codex'], ['codex']]
+const middle = (r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 })
+const shown = (el) => el.opacity > 0.999 && el.pointerEvents === 'auto'
+const folderDragging = (key) => js(`[...document.querySelectorAll('.sb-rail-body > section.sb-group')].some((g) => g.dataset.key === ${JSON.stringify(key)} && g.classList.contains('dragging'))`)
+// Opacity and transform transition over --dur-fast / --dur: read the actions once nothing on them moves.
+async function waitNewStill(ms = 1200) {
+  await frames(2)
+  const start = Date.now()
+  do {
+    if ((await call('newMotion')) === 0) return true
+    await delay(30)
+  } while (Date.now() - start < ms)
+  harnessNotes.push(`${label()}: header actions still transitioning after ${ms}ms`)
+  return false
+}
+// The toggle's fill transitions too: read a header once nothing in it moves.
+async function waitHeadStill(key, ms = 1200) {
+  await frames(2)
+  const start = Date.now()
+  do {
+    const h = await call('headerPaint', key)
+    if (h && h.motion === 0) return h
+    await delay(30)
+  } while (Date.now() - start < ms)
+  harnessNotes.push(`${label()}: ${key}'s header still transitioning after ${ms}ms`)
+  return call('headerPaint', key)
+}
+// The tooltip once it shows what `want` accepts, re-read a little later so a passing label must hold.
+// Past the layer's show delay (450ms) with room to spare; returns the last label seen either way.
+async function waitTip(want, ms = 1600) {
+  await frames(2)
+  const start = Date.now()
+  let tip
+  do {
+    tip = await call('tip')
+    if (tip && want(tip)) {
+      await delay(150)
+      return call('tip')
+    }
+    await delay(40)
+  } while (Date.now() - start < ms)
+  return tip
+}
+
+async function pencilCase(density, agents, failures) {
+  const tag = `${density}/${agents.join('+')}`
+  const info = { tag }
+  await reset({ mode: 'folders', density, agents })
+  await waitNewStill()
+  let a = await call('newActions', PENCIL_KEY)
+  if (!a) { failures.push(`${tag}: ${PENCIL_KEY} has no pencil`); return info }
+  if (a.logos.length !== agents.length) failures.push(`${tag}: ${a.logos.length} agent logos for ${agents.length} installed agents`)
+  if (a.logos.length === 0) return info
+
+  // At rest, pointer outside every folder. Compact draws no leader rule; Spacious runs it to the toggle's
+  // content edge, which is the header's edge less the toggle's padding, so the overlaid pencil does not
+  // shorten it. A name long enough to truncate stops clear of the actions in both densities.
+  const rest = await waitHeadStill(PENCIL_KEY)
+  const long = await call('headerPaint', LONG_KEY)
+  if (!rest || !long) { failures.push(`harness: ${tag}: missing header ${rest ? LONG_KEY : PENCIL_KEY}`); return info }
+  for (const h of [rest, long]) {
+    const which = h === rest ? PENCIL_KEY : LONG_KEY
+    if (density === 'compact' && h.rule.display !== 'none') failures.push(`${tag}: Compact draws ${which}'s leader rule (::after display ${h.rule.display})`)
+    if (density !== 'compact' && h.rule.display === 'none') failures.push(`${tag}: Spacious draws no leader rule on ${which}`)
+  }
+  if (density !== 'compact' && rest.rule.display !== 'none') {
+    const toToggle = rest.rule.right - (rest.toggle.right - rest.paddingRight)
+    const toHead = rest.rule.right - (rest.head.right - RULE_INSET)
+    if (Math.abs(toToggle) > 1) failures.push(`${tag}: the leader rule ends ${toToggle.toFixed(2)}px from the toggle's content edge`)
+    if (Math.abs(toHead) > 1) failures.push(`${tag}: the leader rule ends ${toHead.toFixed(2)}px from ${RULE_INSET}px inside the header's edge (the pencil shortens it)`)
+    info.rule = { toToggle: +toToggle.toFixed(2), toHead: +toHead.toFixed(2), width: rest.rule.width }
+  }
+  const clearance = long.head.right - long.label.right
+  if (!long.truncated) failures.push(`harness: ${tag}: ${LONG_KEY}'s name does not truncate`)
+  if (clearance < LABEL_CLEARANCE - 0.5) failures.push(`${tag}: a truncated name ends ${clearance.toFixed(2)}px from the header's edge, under the actions (want >= ${LABEL_CLEARANCE}px)`)
+  info.labelClearance = +clearance.toFixed(2)
+
+  // Pointer outside every folder: no pencil shows.
+  const showing = (await call('pencilOpacities')).filter((p) => p.opacity === null || p.opacity > 0.001)
+  if (a.hovered) failures.push(`harness: ${tag}: the parked pointer still hovers the header actions`)
+  if (showing.length) failures.push(`${tag}: pointer outside every folder, yet ${showing.length} pencils show (${JSON.stringify(showing.slice(0, 3))})`)
+
+  // Pointer on one of the folder's rows: its pencil shows, no other folder's does, and the logos stay put away.
+  const rows = await call('units', `un:${PENCIL_KEY}`)
+  const row = await call('rowRect', rows[1].key)
+  await hover(row.left + 60, row.top + row.height / 2)
+  await waitNewStill()
+  a = await call('newActions', PENCIL_KEY)
+  const others = (await call('pencilOpacities')).filter((p) => p.key !== PENCIL_KEY && p.opacity > 0.001)
+  if (a.pencil.opacity < 0.999) failures.push(`${tag}: pointer on a row of the folder, its pencil has opacity ${a.pencil.opacity}`)
+  if (others.length) failures.push(`${tag}: pointer on a row of ${PENCIL_KEY}, other folders' pencils show (${JSON.stringify(others.slice(0, 3))})`)
+  const early = a.logos.filter((l) => l.opacity > 0.001 || l.pointerEvents !== 'none')
+  if (early.length) failures.push(`${tag}: pointer on a row, ${early.length} logos are out (${JSON.stringify(early.map((l) => [l.opacity, l.pointerEvents]))})`)
+
+  // Pointer on the folder's name: the toggle's fill spans the header to its trailing edge, and the pencil
+  // over that edge paints the same fill, so the fill has no hole where the pencil sits.
+  const lab = rest.label
+  await hover(lab.left + Math.min(20, lab.width / 2), lab.top + lab.height / 2)
+  const over = await waitHeadStill(PENCIL_KEY)
+  if (!over.toggleHovered) failures.push(`harness: ${tag}: the pointer on the folder's name does not hover its toggle`)
+  const fillGap = over.head.right - over.toggle.right
+  if (Math.abs(fillGap) > 0.5) failures.push(`${tag}: the toggle's fill ends ${fillGap.toFixed(2)}px short of the header's edge`)
+  if (over.toggleBackground === TRANSPARENT) failures.push(`${tag}: the toggle has no fill while hovered`)
+  if (over.pencilBackground !== over.toggleBackground) failures.push(`${tag}: the pencil paints ${over.pencilBackground} over the toggle's ${over.toggleBackground} fill`)
+  if (over.pencilOpacity < 0.999) failures.push(`${tag}: pointer on the folder's name, its pencil has opacity ${over.pencilOpacity}`)
+  info.fill = { gap: +fillGap.toFixed(2), toggle: over.toggleBackground, pencil: over.pencilBackground }
+
+  // Pointer on the pencil: every logo out, each box abutting the next — the nearest against the pencil —
+  // on the pencil's line, and inside the header.
+  const pc = middle(a.pencil.rect)
+  await hover(pc.x, pc.y)
+  await waitNewStill()
+  a = await call('newActions', PENCIL_KEY)
+  if (!a.hovered) failures.push(`${tag}: the pointer on the pencil does not hover the header actions`)
+  const onPencil = await waitHeadStill(PENCIL_KEY)
+  if (onPencil.toggleBackground !== TRANSPARENT) failures.push(`${tag}: pointer on the pencil, the toggle keeps its fill (${onPencil.toggleBackground})`)
+  const hidden = a.logos.filter((l) => !shown(l))
+  if (hidden.length) failures.push(`${tag}: pointer on the pencil, ${hidden.length} logos not shown (${JSON.stringify(hidden.map((l) => [l.opacity, l.pointerEvents]))})`)
+  const nearest = a.logos.slice().sort((x, y) => y.rect.right - x.rect.right)
+  const p = a.pencil.rect
+  if (p.left < a.head.left - 0.5 || p.right > a.head.right + 0.5) failures.push(`${tag}: the pencil (${p.left.toFixed(2)}–${p.right.toFixed(2)}) leaves the header (${a.head.left.toFixed(2)}–${a.head.right.toFixed(2)})`)
+  let prev = p
+  info.edges = []
+  nearest.forEach((l, i) => {
+    const r = l.rect
+    const seam = r.right - prev.left
+    info.edges.push(+seam.toFixed(2))
+    if (Math.abs(seam) > 0.5) failures.push(`${tag}: logo ${i + 1}'s right edge sits ${seam.toFixed(2)}px from the ${i ? `logo ${i}'s` : "pencil's"} left edge`)
+    if (Math.abs(r.top - p.top) > 0.5 || Math.abs(r.height - p.height) > 0.5) failures.push(`${tag}: logo ${i + 1} (top ${r.top.toFixed(2)}, height ${r.height.toFixed(2)}) is off the pencil's line (top ${p.top.toFixed(2)}, height ${p.height.toFixed(2)})`)
+    if (r.left < a.head.left - 0.5 || r.right > a.head.right + 0.5) failures.push(`${tag}: logo ${i + 1} (${r.left.toFixed(2)}–${r.right.toFixed(2)}) leaves the header (${a.head.left.toFixed(2)}–${a.head.right.toFixed(2)})`)
+    prev = r
+  })
+  if (nearest.some((l, i) => l.slot !== i + 1)) failures.push(`${tag}: logo slots nearest-first are ${JSON.stringify(nearest.map((l) => l.slot))}`)
+  info.shot = (await screenshot(`${label()}-pencil-${tag}`)).file
+
+  // From the pencil's center to the farthest logo's in steps under 2px: the logos stay out at every step.
+  const lc = middle(nearest[nearest.length - 1].rect)
+  const steps = Math.ceil(Math.abs(lc.x - pc.x) / 1.5)
+  const drops = []
+  for (let i = 1; i <= steps; i++) {
+    const x = pc.x + ((lc.x - pc.x) * i) / steps
+    await send('mouseMoved', x, pc.y)
+    await frames(1)
+    const s = await call('newActions', PENCIL_KEY)
+    if (!s.hovered || !s.logos.every(shown)) drops.push({ dx: +(x - pc.x).toFixed(2), hovered: s.hovered, logos: s.logos.map((l) => [+l.opacity.toFixed(2), l.pointerEvents]) })
+  }
+  const seen = await js('window.lastPointer')
+  if (!seen || Math.abs(seen.x - lc.x) > 1.5) failures.push(`harness: ${tag}: the walk to the last logo never reached the page`)
+  if (drops.length) failures.push(`${tag}: walking from the pencil to the last logo, the logos went away at ${drops.length}/${steps} steps (first ${JSON.stringify(drops[0])})`)
+  info.walk = { steps, drops: drops.length }
+
+  // Clicks: the pencil reports the folder; each logo, nearest first, the folder and that slot's agent.
+  await moveTo(pc.x, pc.y, 1.5)
+  await press(pc.x, pc.y)
+  await release()
+  for (const l of nearest) {
+    const c = middle(l.rect)
+    await moveTo(c.x, c.y, 1.5)
+    await press(c.x, c.y)
+    await release()
+  }
+  await delay(80)
+  const calls = await js('window.newCalls')
+  const want = [{ kind: 'new', root: PENCIL_KEY }, ...agents.map((agent) => ({ kind: 'start', root: PENCIL_KEY, agent }))]
+  if (JSON.stringify(calls) !== JSON.stringify(want)) failures.push(`${tag}: clicks reported ${JSON.stringify(calls)}, expected ${JSON.stringify(want)}`)
+  const after = await call('state')
+  if (after.calls || (await js('window.selectCalls')).length || after.dragging || after.clones) failures.push(`${tag}: clicking the header actions also dragged, dropped or selected (${JSON.stringify(after)})`)
+  if (!(await js('window.order()')).blocks.some((x) => x.id === `un:${PENCIL_KEY}`)) failures.push(`${tag}: clicking the header actions collapsed the folder`)
+
+  // A press on the pencil moved 30px down does not lift the folder, and its release does nothing.
+  await reset({ mode: 'folders', density, agents })
+  await hover(pc.x, pc.y)
+  await waitNewStill()
+  await press(pc.x, pc.y)
+  await moveTo(pc.x, pc.y + 30, 3)
+  await frames(2)
+  const pressed = await call('state')
+  const lifted = await folderDragging(PENCIL_KEY)
+  if (pressed.dragging || pressed.clones || lifted) failures.push(`${tag}: a press on the pencil moved 30px started a drag (dragging ${pressed.dragging}, clones ${pressed.clones}, folder .dragging ${lifted})`)
+  await release()
+  await delay(250)
+  const released = await waitClean()
+  const stray = { drops: await js('window.dropCalls'), news: await js('window.newCalls'), selects: await js('window.selectCalls') }
+  if (!clean(released)) failures.push(`${tag}: the pencil press left drag state behind: ${JSON.stringify(released)}`)
+  if (stray.drops.length || stray.news.length || stray.selects.length) failures.push(`${tag}: the release after pressing the pencil and moving away reported ${JSON.stringify(stray)}`)
+  info.press = { dragging: pressed.dragging, clones: pressed.clones, lifted }
+
+  // Tooltips. The pencil's leaves the folder and agent open; each logo's names its agent. A row's logo
+  // still names its agent, but the row is a scrub host, which the tooltip layer prefers to anything
+  // inside it, so the pointer on it shows the row's own label.
+  await reset({ mode: 'folders', density, agents, tips: true })
+  info.tips = []
+  const expectTip = async (what, want) => {
+    const tip = await waitTip((t) => t.text === want)
+    info.tips.push({ what, text: tip ? tip.text : null })
+    if (!tip || tip.text !== want) failures.push(`${tag}: the pointer on ${what} shows the tooltip ${JSON.stringify(tip && tip.text)}, expected ${JSON.stringify(want)}`)
+  }
+  const pencilGlyph = await call('newGlyph', PENCIL_KEY, 0)
+  const pg = middle(pencilGlyph)
+  await hover(pg.x, pg.y)
+  await expectTip('the pencil', 'New conversation')
+  await waitNewStill()
+  for (let i = 0; i < agents.length; i++) {
+    const c = middle(await call('newGlyph', PENCIL_KEY, i + 1))
+    await moveTo(c.x, c.y, 1.5)
+    await expectTip(`the ${agents[i]} logo`, `New ${AGENT_LABELS[agents[i]]} conversation`)
+  }
+  info.tipShot = (await screenshot(`${label()}-pencil-tip-${tag}`)).file
+  for (const [key, agent] of TIP_ROWS) {
+    const logo = await call('rowLogo', key)
+    if (!logo) { failures.push(`harness: ${tag}: row ${key} has no agent logo`); continue }
+    if (logo.tip !== AGENT_LABELS[agent] || logo.role !== 'img') failures.push(`${tag}: row ${key}'s logo is labeled ${JSON.stringify(logo.tip)} (role ${logo.role}), expected ${JSON.stringify(AGENT_LABELS[agent])} as an image`)
+    if (!logo.scrub) failures.push(`${tag}: row ${key} is not a scrub host`)
+    const c = middle(logo.rect)
+    await hover(c.x, c.y)
+    const tip = await waitTip((t) => (t.title ?? t.text) === logo.rowTip)
+    const shownText = tip ? tip.title ?? tip.text : null
+    info.tips.push({ what: `row ${key}'s logo`, text: shownText })
+    if (shownText !== logo.rowTip) failures.push(`${tag}: the pointer on row ${key}'s logo shows ${JSON.stringify(shownText)}, expected the row's label ${JSON.stringify(logo.rowTip)}`)
+  }
+  await park()
+  return info
+}
+
+CHECKS['14-pencil'] = async () => {
+  const failures = []
+  const details = {}
+  for (const density of ['compact', 'spacious']) {
+    for (const agents of PENCIL_AGENT_SETS) {
+      const info = await pencilCase(density, agents, failures)
+      details[info.tag] = info
+    }
+    // A folder drag from a header's label: the actions are hidden on every folder and in the clone for
+    // its duration, and visible again once it ends.
+    await reset({ mode: 'folders', density })
+    const g = await folderGrab()
+    const hit = await call('hitAt', g.px, g.py)
+    if (hit.toggle !== FOLDER_KEY) failures.push(`harness: ${density}: the folder drag press point misses ${FOLDER_KEY}'s label (${JSON.stringify(hit)})`)
+    await press(g.px, g.py)
+    await moveTo(g.px, g.py + 12, 3)
+    await delay(260)
+    await frames(2)
+    if (!(await call('state')).dragging) { failures.push(`${density}: a folder header drag did not start`); await release(); continue }
+    const during = await call('newVisibility')
+    const visible = during.rail.filter((v) => v.visibility !== 'hidden')
+    if (visible.length) failures.push(`${density}: mid-drag, ${visible.length}/${during.rail.length} folders still show their header actions (${visible.slice(0, 3).map((v) => v.key).join(', ')})`)
+    if (during.clone.length !== 1 || during.clone[0] !== 'hidden') failures.push(`${density}: mid-drag, the clone's header actions are ${JSON.stringify(during.clone)}, expected one hidden`)
+    await moveTo(g.px, g.py, 3)
+    await frames(2)
+    await release()
+    await delay(450)
+    const cleaned = await waitClean()
+    const ended = await call('newVisibility')
+    const still = ended.rail.filter((v) => v.visibility !== 'visible')
+    if (!clean(cleaned)) failures.push(`${density}: the folder drag left state behind: ${JSON.stringify(cleaned)}`)
+    if (still.length || ended.clone.length) failures.push(`${density}: after the drag, ${still.length} folders' header actions are not visible (${still.slice(0, 3).map((v) => v.key).join(', ')}), ${ended.clone.length} in a clone`)
+    details[`${density}/drag`] = { during: { rail: during.rail.length, visible: visible.length, clone: during.clone }, after: { notVisible: still.length } }
+  }
+  record('14-pencil', failures, details)
+}
+
+// The new-conversation chooser's focus: it opens on the preselected folder, follows a preselect that
+// changes while it stays open, and holds the user's place when only the list changes. A focus check, so
+// it runs at one zoom step.
+const CHOOSER_SAMPLE = [
+  { dirs: ['/w/alpha', '/w/beta', '/w/gamma'], preselect: '/w/alpha', want: '/w/alpha', what: 'on open' },
+  { dirs: ['/w/gamma', '/w/alpha', '/w/beta'], preselect: '/w/gamma', want: '/w/gamma', what: 'after the preselect changed while open' },
+  // Same preselect, new order, with focus first moved to /w/beta. The order keeps /w/beta's node in place
+  // (React moves /w/alpha past it), so focus can only leave it if the menu moves it.
+  { dirs: ['/w/gamma', '/w/beta', '/w/alpha'], preselect: '/w/gamma', want: '/w/beta', focusFirst: '/w/beta', what: 'after only the list order changed' }
+]
+CHECKS['15-chooser'] = async () => {
+  if (ctx.zoom !== 0) return
+  const failures = []
+  const steps = []
+  await reset({ mode: 'folders' })
+  for (const [i, step] of CHOOSER_SAMPLE.entries()) {
+    const tag = `step ${i + 1} (${step.what})`
+    if (step.focusFirst && !(await call('focusChooserItem', step.focusFirst))) failures.push(`harness: ${tag}: could not focus ${step.focusFirst}`)
+    await configure({ menuOpen: true, menuDirs: step.dirs, menuPreselect: step.preselect })
+    await frames(2)
+    const c = await call('chooser')
+    steps.push({ step: i + 1, ...c })
+    if (!c) { failures.push(`${tag}: the chooser is not open`); continue }
+    const paths = c.items.map((it) => it.path)
+    if (JSON.stringify(paths) !== JSON.stringify(step.dirs)) failures.push(`harness: ${tag}: the chooser lists ${JSON.stringify(paths)}, expected ${JSON.stringify(step.dirs)}`)
+    const marked = c.items.filter((it) => it.selected).map((it) => it.path)
+    if (marked.length !== 1 || marked[0] !== step.preselect) failures.push(`${tag}: the items marked selected are ${JSON.stringify(marked)}, expected [${step.preselect}]`)
+    const current = c.items.filter((it) => it.current === 'true').map((it) => it.path)
+    if (current.length !== 1 || current[0] !== step.preselect) failures.push(`${tag}: the items with aria-current are ${JSON.stringify(current)}, expected [${step.preselect}]`)
+    if (c.active.path !== step.want) failures.push(`${tag}: focus is on ${c.active.path ?? `a ${c.active.tag} outside the folder items`}, expected ${step.want}`)
+    else if (step.want === step.preselect && !c.active.selected) failures.push(`${tag}: the focused item ${step.want} is not marked selected`)
+  }
+  await configure({ menuOpen: false })
+  const closed = await call('chooser')
+  if (closed) failures.push('the chooser is still open after menuOpen went false')
+  await reset({ mode: 'folders' })
+  record('15-chooser', failures, { steps })
+}
+
 // Geometry: the selected row's 2px ring must clear the rail body's overflow clip on every side.
 async function ringCase(mode, density, position, failures) {
   await reset({ mode, density })
@@ -1097,7 +1416,7 @@ function summary(r) {
 
 async function runCheck(name) {
   const number = name.split('-')[0]
-  if (ONLY.size && !ONLY.has(number)) return
+  if (ONLY.size && !ONLY.has(number) && !ONLY.has(name) && !ONLY.has(name.slice(number.length + 1))) return
   ctx.check = name
   try {
     await CHECKS[name]()

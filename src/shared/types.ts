@@ -201,6 +201,9 @@ export interface ConversationGroup {
   worktree: boolean
   /** Whether `cwd` still exists on disk. A conversation outlives its directory. */
   exists: boolean
+  /** Whether `root` still exists on disk — checked directly, since a worktree can outlive its repository
+   *  and a repository its worktrees. */
+  rootExists: boolean
   /** Display label (typically the basename, with full path available on hover). */
   label: string
   conversations: ConversationMeta[]

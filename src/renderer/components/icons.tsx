@@ -75,6 +75,16 @@ export const Plus = (p: IconProps) =>
     </>,
     p
   )
+// New conversation: a pencil breaking out of an open-cornered page.
+export const Compose = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M11 4.5H7A2.5 2.5 0 0 0 4.5 7v10A2.5 2.5 0 0 0 7 19.5h10a2.5 2.5 0 0 0 2.5-2.5v-4" />
+      <path d="M17.4 3.6a1.9 1.9 0 0 1 2.7 2.7L12.5 14l-3.6.9.9-3.6z" />
+      <line x1="15.6" y1="5.4" x2="18.3" y2="8.1" />
+    </>,
+    p
+  )
 export const Play = (p: IconProps) => svg(<polygon points="7 5 19 12 7 19 7 5" />, { ...p, strokeWidth: p.strokeWidth ?? 1.4 })
 export const Close = (p: IconProps) =>
   svg(

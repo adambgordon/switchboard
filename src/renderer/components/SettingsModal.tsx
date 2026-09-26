@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Close, Folder, Info, Reset, Warning } from './icons'
+import { Close, Info, Reset, Warning } from './icons'
 import { DOT_COLOR_COMMIT_MS, DOT_COLOR_PLACEHOLDER, shouldCommit } from '../lib/dotColor'
-import { basename } from '../lib/format'
 import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
 import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
@@ -232,16 +231,9 @@ interface Props {
   darkIcon: boolean
   /** Toggle the dark dock icon (a Light / Dark segmented control). */
   onSetDarkIcon: (value: boolean) => void
-  // --- App page: default folder for new conversations ---
-  /** Absolute path of the default folder ('' = none chosen). A chosen folder is always active. */
-  defaultDir: string
-  /** Open the native picker to choose the default folder. */
-  onChooseDefaultDir: () => void
-  /** Forget the default folder. */
-  onClearDefaultDir: () => void
   // --- App page: default agent for new conversations ---
-  /** The default-agent choice: 'none' (no default) or the agent ⌘N / + should start with. With <2
-   *  agents installed this is the forced display value (the sole agent, or 'none'). */
+  /** The default-agent choice: 'none' (no default) or the agent a new conversation preselects. With
+   *  <2 agents installed this is the forced display value (the sole agent, or 'none'). */
   defaultAgentChoice: 'none' | AgentKind
   /** True when <2 agents are launchable — the control renders selected-but-disabled (no choice). */
   defaultAgentDisabled: boolean
@@ -281,7 +273,7 @@ interface Props {
  * The Preferences modal — a left nav (Appearance / Application / Beta Features / Shortcuts / FAQ)
  * over the shared
  * scrim+card. Appearance holds theme + dock icon; Application holds Updates (first), the live-session
- * cap, and the new-conversation defaults; Beta Features holds the tabs / split / windows flag;
+ * cap, and the new-conversation default agent; Beta Features holds the tabs / split / windows flag;
  * Shortcuts / FAQ are reference. Open it to a specific page via
  * `page` (⌘, / title-bar gear → appearance; ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is
  * handled by App's global key handler, which also makes the rest of the keyboard inert while open.
@@ -297,9 +289,6 @@ export default function SettingsModal({
   onSetRailDensity,
   darkIcon,
   onSetDarkIcon,
-  defaultDir,
-  onChooseDefaultDir,
-  onClearDefaultDir,
   defaultAgentChoice,
   defaultAgentDisabled,
   onSetDefaultAgentChoice,
@@ -649,43 +638,8 @@ export default function SettingsModal({
                       ))}
                     </div>
                     <div className="sb-setting-desc">
-                      Skip the agent picker: <kbd className="sb-kbd">⌘N</kbd> and the{' '}
-                      <strong>+</strong> button start new conversations with this agent.
-                    </div>
-                  </div>
-                  <div className="sb-setting">
-                    <div className="sb-setting-title">Default directory</div>
-                    <div className="sb-setting-folder">
-                      {defaultDir ? (
-                        <>
-                          <Folder size={15} className="sb-setting-folder-icon" />
-                          <div className="sb-setting-folder-info">
-                            <span className="sb-setting-folder-name truncate">{basename(defaultDir)}</span>
-                            <span className="sb-setting-folder-path mono truncate">{defaultDir}</span>
-                          </div>
-                          <div className="sb-setting-actions">
-                            <button className="sb-setting-btn" onClick={onChooseDefaultDir}>
-                              Change…
-                            </button>
-                            <button className="sb-setting-btn" onClick={onClearDefaultDir}>
-                              Clear
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <span className="sb-setting-folder-empty">No folder chosen yet.</span>
-                          <button className="sb-setting-btn" onClick={onChooseDefaultDir}>
-                            Choose…
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <div className="sb-setting-desc">
-                      Skip folder selection: <kbd className="sb-kbd">⌘N</kbd> and the{' '}
-                      <strong>+</strong> button start new conversations in this location
-                      automatically. Right-click the <strong>+</strong> button to choose a specific
-                      folder.
+                      Preselects this agent when you start a new conversation with{' '}
+                      <kbd className="sb-kbd">⌘N</kbd> or a folder&apos;s pencil.
                     </div>
                   </div>
                 </div>

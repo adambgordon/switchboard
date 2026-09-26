@@ -56,17 +56,20 @@ interface Props {
   onShowLess: (key: string) => void
   menuOpen: boolean
   onMenuToggle: () => void
-  onNewContextMenu: () => void
   onMenuClose: () => void
-  recentDirs: string[]
-  menuDefaultDir: string
+  menuDirs: string[]
+  /** The folder the chooser focuses on open, or null for the first. */
+  menuPreselect: string | null
+  /** Installed agents: the chooser's agent choice, and each folder header's logos. */
   menuAgents: AgentKind[]
   menuAgent: AgentKind
   onMenuAgentChange: (agent: AgentKind) => void
   onChoose: (cwd: string, agent: AgentKind) => void
   onPickOther: (agent: AgentKind) => void
-  defaultDirActive: boolean
-  defaultDirLabel: string
+  /** A folder's pencil: the new-conversation chooser with that folder preselected. */
+  onNewInFolder: (root: string) => void
+  /** A folder's agent logo: start that agent in the folder straight away. */
+  onStartInFolder: (root: string, agent: AgentKind) => void
   /** Toggle a conversation read/unread (from its right-click menu). */
   onToggleUnread: (id: string) => void
   /** Option+click a live row — always mark it unread (never toggles). */
@@ -124,17 +127,16 @@ export default function Sidebar({
   onShowLess,
   menuOpen,
   onMenuToggle,
-  onNewContextMenu,
   onMenuClose,
-  recentDirs,
-  menuDefaultDir,
+  menuDirs,
+  menuPreselect,
   menuAgents,
   menuAgent,
   onMenuAgentChange,
   onChoose,
   onPickOther,
-  defaultDirActive,
-  defaultDirLabel,
+  onNewInFolder,
+  onStartInFolder,
   onToggleUnread,
   onMarkUnread,
   onResumeSession,
@@ -368,17 +370,14 @@ export default function Sidebar({
         onSearchToggle={onSearchToggle}
         menuOpen={menuOpen}
         onMenuToggle={onMenuToggle}
-        onNewContextMenu={onNewContextMenu}
         onMenuClose={onMenuClose}
-        recentDirs={recentDirs}
-        menuDefaultDir={menuDefaultDir}
+        menuDirs={menuDirs}
+        menuPreselect={menuPreselect}
         menuAgents={menuAgents}
         menuAgent={menuAgent}
         onMenuAgentChange={onMenuAgentChange}
         onChoose={onChoose}
         onPickOther={onPickOther}
-        defaultDirActive={defaultDirActive}
-        defaultDirLabel={defaultDirLabel}
       />
 
       <div
@@ -418,6 +417,9 @@ export default function Sidebar({
                     collapsed={g.collapsed}
                     wantsAttention={g.wantsAttention}
                     onToggle={onToggleFolder}
+                    agents={menuAgents}
+                    onNew={onNewInFolder}
+                    onStart={onStartInFolder}
                   />
                 )}
                 {g.blocks.map((b) => (

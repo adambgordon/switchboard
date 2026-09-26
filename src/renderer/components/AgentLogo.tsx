@@ -13,8 +13,20 @@ const LOGOS: Record<AgentKind, string> = {
  * the surrounding text color via `currentColor` — grayscale, and theme-aware for free — regardless
  * of the source SVG's own fill (Claude's is orange, ChatGPT's black). The mask URL is set inline
  * (Vite resolves the import to a hashed asset URL); size + color come from CSS.
+ *
+ * On its own it names its agent, as an image and a tooltip. `decorative` drops both, for a control
+ * that names itself: the tooltip layer takes the nearest `data-tip`, so the glyph's own would
+ * otherwise replace the control's whenever the pointer is over it.
  */
-export default function AgentLogo({ agent, size = 12 }: { agent: AgentKind; size?: number }) {
+export default function AgentLogo({
+  agent,
+  size = 12,
+  decorative = false
+}: {
+  agent: AgentKind
+  size?: number
+  decorative?: boolean
+}) {
   const url = LOGOS[agent]
   const style: CSSProperties = {
     width: size,
@@ -22,6 +34,7 @@ export default function AgentLogo({ agent, size = 12 }: { agent: AgentKind; size
     maskImage: `url("${url}")`,
     WebkitMaskImage: `url("${url}")`
   }
+  if (decorative) return <span className="sb-agent-logo" style={style} aria-hidden="true" />
   return (
     <span
       className="sb-agent-logo"

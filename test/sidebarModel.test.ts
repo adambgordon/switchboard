@@ -42,7 +42,7 @@ function conv(sessionId: string, start: number | null, over: Partial<Conversatio
 }
 
 function group(root: string, conversations: ConversationMeta[], cwd = root): ConversationGroup {
-  return { cwd, root, worktree: cwd !== root, exists: true, label: cwd, conversations, latestMtime: 0 }
+  return { cwd, root, worktree: cwd !== root, exists: true, rootExists: true, label: cwd, conversations, latestMtime: 0 }
 }
 
 function pty(sessionId: string, over: Partial<PtyState> = {}): PtyState {

@@ -815,45 +815,6 @@ body.sb-resizing .sb-pane {
   vertical-align: baseline;
 }
 
-/* the chosen-folder row */
-.sb-setting-folder {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  padding: 10px 12px;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  background: var(--paper-sunken);
-}
-.sb-setting-folder-icon {
-  flex-shrink: 0;
-  color: var(--ink-faint);
-}
-.sb-setting-folder-info {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-.sb-setting-folder-name {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-}
-.sb-setting-folder-path {
-  font-size: var(--text-xs);
-  color: var(--ink-faint);
-}
-.sb-setting-folder-empty {
-  flex: 1;
-  font-size: var(--text-sm);
-  color: var(--ink-faint);
-}
-.sb-setting-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-}
 .sb-setting-btn {
   padding: 5px 10px;
   font-size: var(--text-xs);

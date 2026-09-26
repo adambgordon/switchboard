@@ -79,7 +79,7 @@ import {
 } from './lib/tabSelection'
 import { nextPtyHomes } from './lib/ptyHome'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
-import { useNewConvoDefault } from './lib/useNewConvoDefault'
+import { chooserDirs, chooserPreselect } from './lib/chooserDirs'
 import { useNewConvoDefaultAgent } from './lib/useNewConvoDefaultAgent'
 import { useAgentAvailability } from './lib/useAgentAvailability'
 import { useMaxLiveSessions } from './lib/useMaxLiveSessions'
@@ -143,7 +143,6 @@ export default function App() {
   // need to know where rows are NOW, and must not re-subscribe on every render to find out.
   const sidebarModelRef = useRef<SidebarModel | null>(null)
   const { seen, unread, markSeen, markUnread, markRead, rekey: rekeySeen } = useSeen()
-  const { dir: defaultDir, setDir: setDefaultDir } = useNewConvoDefault()
   const { enabled: markdownCopy, setEnabled: setMarkdownCopy } = useMarkdownCopy()
   const {
     agent: defaultAgent,
@@ -258,6 +257,9 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  // The folder the new-conversation chooser opens on — fixed when it opens, so the list does not
+  // reshuffle under the pointer as the focused conversation changes behind it.
+  const [menuPreselect, setMenuPreselect] = useState<string | null>(null)
   const [settingsPage, setSettingsPage] = useState<
     'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq' | null
   >(null)
@@ -960,35 +962,22 @@ export default function App() {
   // Arrow-key order follows what's actually visible — the model the rail renders — so nav never lands
   // on a hidden row.
   const orderedIds = useMemo(() => visibleRows(sidebarModel).map((r) => r.sessionId), [sidebarModel])
-  // The new-conversation menu orders by when each repo's newest conversation was STARTED, not by
-  // last activity. `groups` arrives sorted by `latestMtime` desc, which answers "where was I last?" —
-  // a different question from "where am I likely to start something new?". Sort a COPY so the rail
-  // keeps its own order. `firstActivityAt` is the first real message, so a session that was opened
-  // but never typed in scores 0 and sinks — deliberate: an empty session isn't evidence you work there.
-  const recentDirs = useMemo(() => {
-    const startedAt = (g: (typeof groups)[number]): number =>
-      g.conversations.reduce((max, c) => Math.max(max, c.firstActivityAt ?? 0), 0)
-    return [...groups].sort((a, b) => startedAt(b) - startedAt(a)).map((g) => g.cwd)
-  }, [groups])
+  // Computed only while the chooser is open: the list is otherwise unused, and `groups` changes on
+  // every index pass of a live session.
+  const menuDirs = useMemo(
+    () => (menuOpen ? chooserDirs(groups, menuPreselect) : []),
+    [menuOpen, groups, menuPreselect]
+  )
   const metaByIdRef = useRef(metaById)
   metaByIdRef.current = metaById
 
-  // Agent axis for "new conversation". `availableAgents` are the launchable CLIs. The agent is
-  // RESOLVED (no choice to present) when a usable default is set, or when only one agent exists;
-  // otherwise it's an open choice the menu must surface. Mirrors the directory axis (`resolvedDir`).
+  // Agent axis for "new conversation". `availableAgents` are the launchable CLIs: the chooser's agent
+  // choice, and each folder header's logos.
   const availableAgents = useMemo<AgentKind[]>(
     () => (['claude', 'codex'] as AgentKind[]).filter((a) => agents[a]),
     [agents]
   )
-  const resolvedAgent = useMemo<AgentKind | null>(() => {
-    if (defaultAgentEnabled && agents[defaultAgent]) return defaultAgent
-    if (availableAgents.length === 1) return availableAgents[0]
-    return null
-  }, [defaultAgentEnabled, defaultAgent, agents, availableAgents])
-  const resolvedDir = defaultDir || null
-  // Which agent the New menu shows selected (and commits with when its segment is hidden): the sticky
-  // last-picked agent if still available, else the resolved one, else the saved default, else the
-  // first available.
+  // Which agent the New menu shows selected (and commits with when its segment is hidden).
   const menuAgent = useMemo<AgentKind>(() => {
     // An explicit, enabled default agent wins over the sticky last pick; otherwise the menu remembers
     // your last selection, falling back to the first available agent.
@@ -1114,30 +1103,40 @@ export default function App() {
     [startNew]
   )
 
-  // The "+" / ⌘N primary action. Spawn straight away only when BOTH axes are settled — a usable
-  // default directory AND a resolved agent (a usable default-agent, or the sole installed one). A
-  // failed spawn (e.g. a stale default dir) falls back to the menu. Otherwise
-  // toggle the menu, which presents exactly the unresolved choice(s): the agent segment and/or the
-  // directory list.
-  const newConversation = useCallback(() => {
-    if (resolvedDir && resolvedAgent) {
-      void startNew(resolvedDir, resolvedAgent).catch(() => setMenuOpen(true))
-    } else {
-      setMenuOpen((o) => !o)
-    }
-  }, [resolvedDir, resolvedAgent, startNew])
+  // Read through refs, so the new-conversation handlers — and the window key handler holding them —
+  // are not rebuilt on every index pass.
+  const groupsRef = useRef(groups)
+  groupsRef.current = groups
+  const ptysBySessionRef = useRef(ptys.bySession)
+  ptysBySessionRef.current = ptys.bySession
 
-  // Right-clicking the "+" always opens the chooser, even when a default is set — the escape hatch to
-  // start somewhere else once without clearing the default in Preferences.
-  const openNewMenu = useCallback(() => setMenuOpen(true), [])
+  const openChooser = useCallback((preselect: string | null) => {
+    setMenuPreselect(preselect)
+    setMenuOpen(true)
+  }, [])
 
-  // Preferences (App page) handlers for the default folder. A chosen folder is always active (no
-  // on/off toggle), so choosing sets it and clearing forgets it.
-  const chooseDefaultDir = useCallback(async () => {
-    const dir = await window.api.pickDirectory()
-    if (dir) setDefaultDir(dir)
-  }, [setDefaultDir])
-  const clearDefaultDir = useCallback(() => setDefaultDir(''), [setDefaultDir])
+  // "A new conversation where I am": the focused conversation's folder, per chooserPreselect.
+  const focusedPreselect = useCallback((): string | null => {
+    const id = selectedIdRef.current
+    if (!id) return null
+    const root = sidebarModelRef.current?.rows.get(id)?.root
+    const cwd = metaByIdRef.current.get(id)?.cwd ?? ptysBySessionRef.current.get(id)?.cwd
+    return root && cwd ? chooserPreselect(groupsRef.current, cwd, root) : null
+  }, [])
+
+  // ⌘N opens the chooser; the "+" toggles it.
+  const newConversation = useCallback(() => openChooser(focusedPreselect()), [openChooser, focusedPreselect])
+  const toggleNewConversation = useCallback(() => {
+    if (menuOpen) setMenuOpen(false)
+    else newConversation()
+  }, [menuOpen, newConversation])
+
+  // A folder's logo names both the folder and the agent, so it starts straight away; a failed start
+  // (the folder is gone) falls back to the chooser on that folder.
+  const startInFolder = useCallback(
+    (root: string, agent: AgentKind) => void startNew(root, agent).catch(() => openChooser(root)),
+    [startNew, openChooser]
+  )
 
   // The default-agent setting is a single tri-state (None / Claude Code / Codex), like Theme — no
   // separate on/off toggle. 'none' just disables it (keeping the last agent value, unused).
@@ -1942,18 +1941,17 @@ export default function App() {
             onShowMore={showMore}
             onShowLess={showLess}
             menuOpen={menuOpen}
-            onMenuToggle={newConversation}
-            onNewContextMenu={openNewMenu}
+            onMenuToggle={toggleNewConversation}
             onMenuClose={() => setMenuOpen(false)}
-            recentDirs={recentDirs}
-            menuDefaultDir={defaultDir}
+            menuDirs={menuDirs}
+            menuPreselect={menuPreselect}
             menuAgents={availableAgents}
             menuAgent={menuAgent}
             onMenuAgentChange={setLastAgent}
             onChoose={startNew}
             onPickOther={pickOther}
-            defaultDirActive={!!defaultDir}
-            defaultDirLabel={defaultDir ? basename(defaultDir) : ''}
+            onNewInFolder={openChooser}
+            onStartInFolder={startInFolder}
             onToggleUnread={toggleUnread}
             onMarkUnread={markUnreadGated}
             onResumeSession={resumeSession}
@@ -2118,9 +2116,6 @@ export default function App() {
         onSetDarkIcon={darkIcon.set}
         railDensity={railDensity}
         onSetRailDensity={setRailDensity}
-        defaultDir={defaultDir}
-        onChooseDefaultDir={chooseDefaultDir}
-        onClearDefaultDir={clearDefaultDir}
         defaultAgentChoice={defaultAgentChoice}
         defaultAgentDisabled={defaultAgentDisabled}
         onSetDefaultAgentChoice={setDefaultAgentChoice}

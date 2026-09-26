@@ -431,9 +431,13 @@
 .sb-group.sb-folded .sb-group-icon-closed {
   display: block !important;
 }
-/* Compact draws no rules; the reserved line closing each folder (Sidebar) is the break instead.
+/* Compact draws no rules; the reserved line closing each folder (Sidebar) is the break instead. Without
+   the rule's minimum width, the trailing padding alone keeps the name clear of the pencil (.sb-group-new). */
 .sb-rail.compact .sb-group-toggle::after {
   display: none;
+}
+.sb-rail.compact .sb-group-toggle {
+  padding-right: 24px;
 }
 /* The folder glyph follows the name: same ink, and heavier with it. Open while the folder is
    expanded, closed while collapsed. */
@@ -480,6 +484,94 @@
    look", and an agent working in the background is not a reason to. */
 .sb-group-toggle.attention .sb-group-label-text {
   font-weight: 800;
+}
+
+/* New conversation in this folder (SidebarGroupHeader). The pencil shows while the pointer is anywhere
+   in the folder, like Show more. The agent logos wait under the pencil and slide out to its left while
+   the pointer is on the pencil or a logo. Each logo's box is exactly one step wide and the boxes abut
+   the pencil's, so the pointer never crosses a gap on its way to one — a gap would end the container's
+   hover and put the logos away.
+   Overlaid on the header's trailing edge rather than beside the toggle, so the toggle — its leader rule
+   and its hover fill — keeps the header's full width, and hovering changes no layout. Each box paints
+   the surface it sits on, which ends the rule short of it: the rail's paper at rest, the toggle's fill
+   while the toggle is hovered. The label never reaches under it: the toggle's trailing padding plus the
+   rule's minimum width and margin keep the name 24px clear of the edge. Inset 2px from the fill's
+   corner so the box's rounded corners stay inside the fill's larger ones. */
+.sb-group-new {
+  --new-size: 20px;
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+}
+.sb-group-pencil,
+.sb-group-agent {
+  width: var(--new-size);
+  height: var(--new-size);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--paper-sunken);
+  color: var(--ink-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    transform var(--dur) var(--ease);
+}
+/* Above the logos, which rest beneath it. */
+.sb-group-pencil {
+  position: relative;
+  z-index: 1;
+}
+.sb-group:hover .sb-group-pencil,
+.sb-group:focus-within .sb-group-pencil {
+  opacity: 1;
+}
+.sb-group-agent {
+  position: absolute;
+  top: 0;
+  right: 0;
+  border: none;
+  pointer-events: none;
+}
+.sb-group-new:hover .sb-group-agent,
+.sb-group-new:focus-within .sb-group-agent {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(calc(var(--slot) * -1 * var(--new-size)));
+}
+/* The farthest logo carries a strip of paper past its box, so the leader rule stops the same 4px short
+   of the logos as it starts after the name. Paint only: the strip is not part of the hover area. */
+.sb-group-agent:last-child {
+  box-shadow: -4px 0 0 var(--paper-sunken);
+}
+.sb-group-pencil:hover,
+.sb-group-pencil:focus-visible,
+.sb-group-agent:hover,
+.sb-group-agent:focus-visible {
+  outline: none;
+  color: var(--ink);
+  background: var(--rail-hover);
+}
+.sb-group-toggle:hover ~ .sb-group-new .sb-group-pencil,
+.sb-group-toggle:focus-visible ~ .sb-group-new .sb-group-pencil {
+  background: var(--rail-hover);
+}
+.sb-group-pencil:active,
+.sb-group-agent:active,
+.sb-group-toggle:active ~ .sb-group-new .sb-group-pencil {
+  background: var(--paper-active);
+}
+/* Nothing to start from mid-drag: hidden on every folder while one moves, and in the moving copy. */
+.sb-dragging-row .sb-group-new,
+.sb-drag-clone .sb-group-new {
+  visibility: hidden;
 }
 
 /* Per-agent logo (AgentLogo) — a CSS-mask glyph painted in the CURRENT text color, so it renders

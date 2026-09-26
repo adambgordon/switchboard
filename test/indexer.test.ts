@@ -399,6 +399,48 @@ describe('indexConversations project roots and existence', () => {
     }
   })
 
+  it('reports whether each group’s project root exists, including one no conversation runs in', async () => {
+    const base = await realpath(await mkdtemp(path.join(TMP_BASE, 'indexer-root-exists-')))
+    const root = path.join(base, 'claude')
+    try {
+      // repoA is itself a cwd; repoB is reached only through its worktree; the third worktree's
+      // repository was deleted, leaving the worktree behind.
+      const repoA = path.join(base, 'repo-a')
+      const repoB = path.join(base, 'repo-b')
+      const goneRepo = path.join(base, 'repo-gone')
+      const wtA = path.join(base, 'work', 'a')
+      const wtB = path.join(base, 'work', 'b')
+      const orphan = path.join(base, 'work', 'orphan')
+      await mkdir(path.join(repoA, '.git'), { recursive: true })
+      await mkdir(path.join(repoB, '.git'), { recursive: true })
+      for (const [wt, repo] of [[wtA, repoA], [wtB, repoB], [orphan, goneRepo]]) {
+        await mkdir(wt, { recursive: true })
+        await writeFile(path.join(wt, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', path.basename(wt))}\n`)
+      }
+      let t = 1_000_000_000_000
+      for (const cwd of [repoA, wtA, wtB, orphan]) {
+        await writeSession(root, cwd.replace(/[/.]/g, '-'), [msgLine('user', cwd, 'hello')], (t += 1000))
+      }
+
+      const roots = new ProjectRoots({ home: path.join(base, 'home') })
+      let checks = 0
+      const existing = existenceProbe(async (p) => (checks++, (await stat(p)).isDirectory()))
+      const { groups } = await indexConversations(root, NO_CODEX, undefined, {
+        resolveRoots: (cwds, missing) => roots.resolveAll(cwds, missing),
+        existing
+      })
+      // One check per cwd, and one per root no cwd already answered for (repoB, the deleted repo).
+      expect(checks).toBe(6)
+      const byCwd = new Map(groups.map((g) => [g.cwd, { root: g.root, rootExists: g.rootExists }]))
+      expect(byCwd.get(repoA)).toEqual({ root: repoA, rootExists: true })
+      expect(byCwd.get(wtA)).toEqual({ root: repoA, rootExists: true })
+      expect(byCwd.get(wtB)).toEqual({ root: repoB, rootExists: true })
+      expect(byCwd.get(orphan)).toEqual({ root: goneRepo, rootExists: false })
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
   it('reports existence fresh on every pass', async () => {
     const base = await realpath(await mkdtemp(path.join(TMP_BASE, 'indexer-exists-')))
     const root = path.join(base, 'claude')

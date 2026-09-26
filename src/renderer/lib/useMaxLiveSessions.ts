@@ -9,7 +9,7 @@ import { useStorageSync } from './useStorageSync'
  * [liveSessionsMin, liveSessionsMax] bounds — the ceiling tracks Chromium's WebGL-context limit,
  * past which live terminals fall back to the canvas renderer.
  *
- * Owned once in App (mirrors useNewConvoDefault / useLayout): both the slider handler and the IPC
+ * Owned once in App (mirrors useMarkdownCopy / useLayout): both the slider handler and the IPC
  * push read this one copy, so a second useState(load) elsewhere can't desync from its writes.
  */
 const KEY = 'switchboard.maxLiveSessions'

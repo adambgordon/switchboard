@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import Sidebar from '@renderer/components/Sidebar'
+import TooltipLayer from '@renderer/components/TooltipLayer'
 import { buildSidebar, folderRankSpace, rankSpace } from '@renderer/lib/sidebarModel'
 import { dropWrites } from '@renderer/lib/rowRank'
 import { moveBetween } from '@renderer/lib/reorder'
@@ -28,6 +29,8 @@ window.addEventListener('unhandledrejection', (event) => window.auditErrors.push
 window.api = new Proxy({}, { get: () => () => undefined })
 window.dropCalls = []
 window.selectCalls = []
+// A folder header's new-conversation actions: the pencil (onNewInFolder) and each agent logo (onStartInFolder).
+window.newCalls = []
 // The last pointer event the page saw, so the runner can tell a dropped synthetic event from a real one
 // and calibrate its coordinate space against the page's at each zoom step.
 window.lastPointer = null
@@ -49,8 +52,10 @@ const FOLDERS = [
   { root: '/home/dev/projects/delta', count: 5 },
   { root: '/home/dev/notes', count: 3 },
   // Small folders, so the rail still overflows with every folder collapsed to its header — a folder drag
-  // collapses the rail, and holding the grabbed header in place needs room to scroll.
-  ...['echo', 'fjord', 'grove', 'harbor', 'iris', 'juniper', 'kestrel', 'lumen', 'meadow', 'nimbus', 'orbit', 'prism']
+  // collapses the rail, and holding the grabbed header in place needs room to scroll. The last name is
+  // long enough to truncate in the rail's width.
+  ...['echo', 'fjord', 'grove', 'harbor', 'iris', 'juniper', 'kestrel', 'lumen', 'meadow', 'nimbus', 'orbit',
+    'prism-shared-component-library-migration-notes']
     .map((name, i) => ({ root: `/home/dev/projects/${name}`, count: 1 + (i % 2) }))
 ]
 const TITLES = [
@@ -78,7 +83,7 @@ function catalog() {
         sizeBytes: 0, model: null, outputTokens: 0, inputTokens: 0, contextTokens: 0, firstActivityAt: seed
       }
     })
-    return { cwd: f.root, root: f.root, worktree: false, exists: true, label: name, conversations, latestMtime: 0 }
+    return { cwd: f.root, root: f.root, worktree: false, exists: true, rootExists: true, label: name, conversations, latestMtime: 0 }
   })
   const ptys = Object.keys(LIVE).map((id, i) => {
     const root = groups.find((g) => g.conversations.some((c) => c.sessionId === id)).root
@@ -94,7 +99,15 @@ const CATALOG = catalog()
 let added = 0
 // Caps high enough that every row renders: the tall folder must overflow the rail on its own.
 const LIMITS = { folderCap: 100, allCap: 200, autoExpand: 40 }
-const DEFAULTS = { mode: 'folders', density: 'compact', searchOpen: false, query: '', collapsed: {}, selected: 'atlas-3' }
+// `agents`: the installed agents, in the order the header logos take their slots outward from the pencil.
+// `tips`: mount the app's tooltip layer. Off by default, so a label left up by a hover never paints over
+// what another check reads.
+// `menuOpen` / `menuDirs` / `menuPreselect`: the new-conversation chooser, closed by default so its
+// backdrop never covers the rail another check drives. `menuDirs` is already ordered, preselect first.
+const DEFAULTS = {
+  mode: 'folders', density: 'compact', searchOpen: false, query: '', collapsed: {}, selected: 'atlas-3', agents: ['claude', 'codex'], tips: false,
+  menuOpen: false, menuDirs: [], menuPreselect: null
+}
 const noop = () => {}
 
 function Fixture() {
@@ -149,6 +162,9 @@ function Fixture() {
   window.reset = () => {
     window.dropCalls = []
     window.selectCalls = []
+    window.newCalls = []
+    // A clicked header button keeps focus, and :focus-within would hold its folder's actions shown.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
     flushSync(() => {
       setCfg(DEFAULTS)
       setPins(initialPins())
@@ -201,12 +217,16 @@ function Fixture() {
         onToggleFolder={(root) => setCfg((p) => ({ ...p, collapsed: { ...p.collapsed, [root]: !p.collapsed[root] } }))}
         revealed={revealed} onShowMore={(k) => setRevealed((r) => ({ ...r, [k]: (r[k] ?? 0) + 5 }))}
         onShowLess={(k) => setRevealed((r) => ({ ...r, [k]: 0 }))}
-        menuOpen={false} onMenuToggle={noop} onNewContextMenu={noop} onMenuClose={noop} recentDirs={[]}
-        menuDefaultDir="" menuAgents={['claude', 'codex']} menuAgent="claude" onMenuAgentChange={noop}
-        onChoose={noop} onPickOther={noop} defaultDirActive={false} defaultDirLabel=""
+        menuOpen={cfg.menuOpen} onMenuToggle={noop} onMenuClose={() => setCfg((p) => ({ ...p, menuOpen: false }))}
+        menuDirs={cfg.menuDirs} menuPreselect={cfg.menuPreselect}
+        menuAgents={cfg.agents} menuAgent={cfg.agents[0]} onMenuAgentChange={noop}
+        onChoose={noop} onPickOther={noop}
+        onNewInFolder={(root) => window.newCalls.push({ kind: 'new', root })}
+        onStartInFolder={(root, agent) => window.newCalls.push({ kind: 'start', root, agent })}
         onToggleUnread={noop} onMarkUnread={noop} onResumeSession={noop} onStopSession={noop} onShowInfo={noop}
         onDropRow={onDropRow} onDropFolder={onDropFolder} reorderTick={reorderTick}
       />
+      {cfg.tips && <TooltipLayer />}
     </div>
   )
 }

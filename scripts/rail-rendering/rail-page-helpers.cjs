@@ -177,6 +177,108 @@ module.exports = function installRailHelpers() {
       const l = document.querySelector('.sb-drag-clone .sb-group-label-text')
       return l ? l.getBoundingClientRect().toJSON() : null
     },
+    // A folder header's new-conversation actions: the pencil, then each agent logo in DOM order, with
+    // what the pointer can see of them (computed opacity and pointer-events) and their boxes.
+    newActions: (key) => {
+      const g = [...body().querySelectorAll(':scope > section.sb-group')].find((s) => s.dataset.key === key)
+      const head = g && g.querySelector(':scope > .sb-group-head')
+      const wrap = head && head.querySelector('.sb-group-new')
+      const pencil = wrap && wrap.querySelector('.sb-group-pencil')
+      if (!pencil) return null
+      const read = (el) => {
+        const cs = getComputedStyle(el)
+        return { rect: el.getBoundingClientRect().toJSON(), opacity: Number(cs.opacity), pointerEvents: cs.pointerEvents, label: el.getAttribute('aria-label') }
+      }
+      return {
+        head: head.getBoundingClientRect().toJSON(), noDrag: wrap.hasAttribute('data-no-drag'), hovered: wrap.matches(':hover'),
+        pencil: read(pencil),
+        logos: [...wrap.querySelectorAll('.sb-group-agent')].map((el) => ({ ...read(el), slot: Number(el.style.getPropertyValue('--slot')) }))
+      }
+    },
+    // A folder header's paint and layout: the collapse toggle's box, fill and trailing padding, its leader
+    // rule (the ::after, placed from the label's edge plus the flex gap and the rule's margin, since a
+    // pseudo-element has no rect of its own), the label's box and whether it truncates, and the pencil's fill.
+    headerPaint: (key) => {
+      const g = [...body().querySelectorAll(':scope > section.sb-group')].find((s) => s.dataset.key === key)
+      const head = g && g.querySelector(':scope > .sb-group-head')
+      const toggle = head && head.querySelector('.sb-group-toggle')
+      const cell = head && head.querySelector('.sb-group-label')
+      const text = head && head.querySelector('.sb-group-label-text')
+      const pencil = head && head.querySelector('.sb-group-pencil')
+      if (!toggle || !cell || !text || !pencil) return null
+      const ts = getComputedStyle(toggle), rule = getComputedStyle(toggle, '::after')
+      const label = cell.getBoundingClientRect()
+      const ruleLeft = label.right + parseFloat(ts.columnGap) + parseFloat(rule.marginLeft)
+      return {
+        head: head.getBoundingClientRect().toJSON(), toggle: toggle.getBoundingClientRect().toJSON(),
+        toggleBackground: ts.backgroundColor, paddingRight: parseFloat(ts.paddingRight),
+        rule: { display: rule.display, width: rule.width, left: ruleLeft, right: ruleLeft + parseFloat(rule.width) },
+        label: label.toJSON(), truncated: text.scrollWidth > text.clientWidth + 0.5,
+        pencilBackground: getComputedStyle(pencil).backgroundColor, pencilOpacity: Number(getComputedStyle(pencil).opacity),
+        toggleHovered: toggle.matches(':hover'),
+        // Background and opacity transitions still running anywhere in the header.
+        motion: head.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length
+      }
+    },
+    // The visible tooltip, if any: its whole text, and its title line when it carries more than one.
+    tip: () => {
+      const el = document.querySelector('.sb-tip[role="tooltip"]')
+      if (!el) return null
+      const title = el.querySelector('.sb-tip-title')
+      return { text: el.textContent, title: title ? title.textContent : null }
+    },
+    // A header action's glyph: the pencil's icon, or a logo button's AgentLogo.
+    newGlyph: (key, index) => {
+      const g = [...body().querySelectorAll(':scope > section.sb-group')].find((s) => s.dataset.key === key)
+      const wrap = g && g.querySelector(':scope > .sb-group-head .sb-group-new')
+      const buttons = wrap ? [...wrap.querySelectorAll('.sb-group-pencil, .sb-group-agent')] : []
+      const glyph = buttons[index] && buttons[index].querySelector('.sb-agent-logo, svg')
+      return glyph ? glyph.getBoundingClientRect().toJSON() : null
+    },
+    // A row's agent logo, with the row's own tooltip text and the logo's.
+    rowLogo: (key) => {
+      const row = body().querySelector(`.sb-row[data-key="${CSS.escape(key)}"], .sb-row[data-session="${CSS.escape(key)}"]`)
+      const logo = row && row.querySelector('.sb-agent-logo')
+      return logo ? { rect: logo.getBoundingClientRect().toJSON(), tip: logo.getAttribute('data-tip'), role: logo.getAttribute('role'),
+        rowTip: row.getAttribute('data-tip'), scrub: row.hasAttribute('data-tip-scrub') } : null
+    },
+    // Every folder's pencil opacity, by folder key.
+    pencilOpacities: () => [...body().querySelectorAll(':scope > section.sb-group')].map((g) => {
+      const p = g.querySelector(':scope > .sb-group-head .sb-group-pencil')
+      return { key: g.dataset.key, opacity: p ? Number(getComputedStyle(p).opacity) : null }
+    }),
+    // Transitions and animations still running on any header's new-conversation actions.
+    newMotion: () => document.getAnimations().filter((a) => {
+      const t = a.effect && a.effect.target
+      return t instanceof Element && !!t.closest('.sb-group-new') && a.playState === 'running'
+    }).length,
+    // The computed visibility of every header's new-conversation actions, in the rail and in a clone.
+    newVisibility: () => ({
+      rail: [...body().querySelectorAll('.sb-group-new')].map((w) => ({ key: w.closest('section.sb-group')?.dataset.key ?? null, visibility: getComputedStyle(w).visibility })),
+      clone: [...document.querySelectorAll('.sb-drag-clone .sb-group-new')].map((w) => getComputedStyle(w).visibility)
+    }),
+    // The new-conversation chooser: its folder items in order (path, `selected`, aria-current), and which
+    // of them holds focus (null path when focus is elsewhere, with the focused element's tag).
+    chooser: () => {
+      const menu = document.querySelector('.sb-newmenu[role="menu"]')
+      if (!menu) return null
+      const pathOf = (el) => el.querySelector('.sb-newmenu-path')?.textContent ?? null
+      const items = [...menu.querySelectorAll('.sb-newmenu-item[role="menuitem"]')].map((el) => ({
+        path: pathOf(el), selected: el.classList.contains('selected'), current: el.getAttribute('aria-current')
+      }))
+      const a = document.activeElement
+      const item = a instanceof Element ? a.closest('.sb-newmenu-item') : null
+      return {
+        items, firstMenuItem: pathOf(menu.querySelector('[role="menuitem"]')),
+        active: { path: item ? pathOf(item) : null, selected: item ? item.classList.contains('selected') : false, tag: a ? a.tagName : null }
+      }
+    },
+    // Focus the chooser item for `path`, as arrowing to it would.
+    focusChooserItem: (path) => {
+      const item = [...document.querySelectorAll('.sb-newmenu-item')].find((el) => el.querySelector('.sb-newmenu-path')?.textContent === path)
+      if (item) item.focus()
+      return !!item && document.activeElement === item
+    },
     selectedKey: () => {
       const row = body().querySelector('.sb-row.selected')
       return row ? keyOf(row) : null

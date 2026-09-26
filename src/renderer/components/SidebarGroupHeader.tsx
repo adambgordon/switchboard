@@ -1,4 +1,6 @@
-import { Folder, FolderOpen } from './icons'
+import { AGENTS, type AgentKind } from '@shared/types'
+import AgentLogo from './AgentLogo'
+import { Compose, Folder, FolderOpen } from './icons'
 
 interface Props {
   root: string
@@ -7,6 +9,12 @@ interface Props {
   /** Something inside is asking or unread — the label goes heavier. */
   wantsAttention: boolean
   onToggle: (root: string) => void
+  /** The installed agents, nearest the pencil first. */
+  agents: AgentKind[]
+  /** The pencil: start a new conversation, choosing the agent, with this folder preselected. */
+  onNew: (root: string) => void
+  /** An agent's logo: folder and agent are both known, so the conversation starts at once. */
+  onStart: (root: string, agent: AgentKind) => void
 }
 
 /**
@@ -15,8 +23,21 @@ interface Props {
  *
  * The label stacks a hidden bold copy under the visible one, so the cell is always as wide as the
  * heavier weight: a folder going bold or plain as its sessions change never shifts anything around it.
+ *
+ * The new-conversation actions are one hover container: the pencil shows while the pointer is anywhere
+ * in the folder, and the agent logos slide out from under it while the pointer is on the pencil or the
+ * logos — so moving from the pencil to a logo never crosses a gap that would put them away.
  */
-export default function SidebarGroupHeader({ root, label, collapsed, wantsAttention, onToggle }: Props) {
+export default function SidebarGroupHeader({
+  root,
+  label,
+  collapsed,
+  wantsAttention,
+  onToggle,
+  agents,
+  onNew,
+  onStart
+}: Props) {
   return (
     // The folder's drag handle: the header grabs the whole folder around it (useBlockReorder).
     <div className="sb-group-head" role="group" aria-label={label} data-drag="">
@@ -36,6 +57,35 @@ export default function SidebarGroupHeader({ root, label, collapsed, wantsAttent
           </span>
         </span>
       </button>
+      {/* The pencil first, so Tab reaches it before the logos; the logos are placed around it. */}
+      <div className="sb-group-new" data-no-drag="">
+        <button
+          className="sb-group-pencil"
+          onClick={() => onNew(root)}
+          // The tooltip leaves the folder implied; the label names it, or every folder's pencil would
+          // read the same to a screen reader.
+          data-tip="New conversation"
+          aria-label={`New conversation in ${label}`}
+        >
+          <Compose size={15} />
+        </button>
+        {agents.map((a, i) => {
+          const tip = `New ${AGENTS[a].label} conversation`
+          return (
+            <button
+              key={a}
+              className="sb-group-agent"
+              // Each logo's slot, counted outward from the pencil; the slide distance derives from it.
+              style={{ '--slot': i + 1 } as React.CSSProperties}
+              onClick={() => onStart(root, a)}
+              data-tip={tip}
+              aria-label={`${tip} in ${label}`}
+            >
+              <AgentLogo agent={a} size={13} decorative />
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }

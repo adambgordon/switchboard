@@ -7,11 +7,11 @@ import AgentLogo from './AgentLogo'
 
 interface Props {
   open: boolean
-  recentDirs: string[]
-  /** The default folder ('' = none). When set it's pinned to the top of the list, tagged, and focused
-   *  on open — so a ⌘N with a default directory but no default agent opens the menu with the folder
-   *  already preselected (pick the agent, press Enter). */
-  defaultDir: string
+  /** The folders to offer, in order (`chooserDirs`). */
+  dirs: string[]
+  /** The folder the menu opens on — already first in `dirs`, marked, and focused, so Enter starts
+   *  there. Null focuses the first folder. */
+  preselect: string | null
   /** Agents to offer in the segmented control. With <2 the control is hidden (auto-collapse) and
    *  everything commits with the selected agent — single-agent users get the exact pre-Codex flow. */
   agents: AgentKind[]
@@ -26,8 +26,8 @@ interface Props {
 
 export default function NewConversationMenu({
   open,
-  recentDirs,
-  defaultDir,
+  dirs,
+  preselect,
   agents,
   initialAgent,
   onAgentChange,
@@ -35,9 +35,6 @@ export default function NewConversationMenu({
   onPickOther,
   onClose
 }: Props) {
-  // The default folder (when set) is pinned first and deduped from the recents, so it's the focused
-  // item on open (items()[0]) — Enter commits it without re-picking the directory.
-  const dirs = defaultDir ? [defaultDir, ...recentDirs.filter((d) => d !== defaultDir)] : recentDirs
   const ref = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   // The recent-dirs list reveals its scrollbar only while scrolling (matches the rail), not at rest.
@@ -63,14 +60,16 @@ export default function NewConversationMenu({
 
   const showSegment = agents.length >= 2
 
-  // Focus the first menu item (the pinned default folder, else the first recent) ONCE when the menu
-  // opens, so arrows + Enter drive it immediately. Keyed on `open` only — doing this inside the
-  // keydown effect below re-fired it on every re-render (an agent switch re-creates App's inline
-  // onClose), which jumped the directory selection back to the top of the list.
+  // Focus the first menu item (the preselected folder, else the first recent) when the menu opens, so
+  // arrows + Enter drive it immediately — and again when the preselect changes while it is open (a
+  // folder's pencil, then ⌘N), or Enter would start in the folder focused before rather than the one
+  // now marked. Keyed on those two alone — doing this inside the keydown effect below re-fired it on
+  // every re-render (an agent switch re-creates App's inline onClose), which jumped the directory
+  // selection back to the top of the list.
   useEffect(() => {
     if (!open) return
     ref.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
-  }, [open])
+  }, [open, preselect])
 
   useEffect(() => {
     if (!open) return
@@ -165,10 +164,10 @@ export default function NewConversationMenu({
           {dirs.map((d) => (
             <button
               key={d}
-              className={`sb-newmenu-item${d === defaultDir ? ' selected' : ''}`}
+              className={`sb-newmenu-item${d === preselect ? ' selected' : ''}`}
               onClick={() => onChoose(d, agent)}
               role="menuitem"
-              aria-current={d === defaultDir ? 'true' : undefined}
+              aria-current={d === preselect ? 'true' : undefined}
             >
               <Folder size={14} className="sb-newmenu-folder" />
               <span className="sb-newmenu-name truncate">{basename(d)}</span>

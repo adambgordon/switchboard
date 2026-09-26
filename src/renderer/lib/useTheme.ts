@@ -21,7 +21,7 @@ export interface Theme {
  * App theme, persisted in localStorage ('switchboard.theme' = system|light|dark; default system).
  * 'system' tracks the OS via matchMedia and flips live; explicit light/dark ignore it. The
  * resolved theme is applied to <html data-theme> (+ the window bg) once in main.tsx before first
- * paint (no flash) and re-applied here on every mode / OS change. Mirrors useNewConvoDefault /
+ * paint (no flash) and re-applied here on every mode / OS change. Mirrors useMarkdownCopy /
  * useLayout — owned once in App.
  */
 export function useTheme(): Theme {

@@ -4,7 +4,8 @@
  * metadata by the absolute cwd each session ran in. Grouping by cwd unifies the agents: a repo's
  * Claude and Codex conversations land in the same group. Each group also carries the project its cwd
  * belongs to (`root` / `worktree`, see projectRoot.ts) so the rail can fold a repository's
- * subdirectories and worktrees together, and whether the cwd still exists (`exists`).
+ * subdirectories and worktrees together, and whether the cwd and that project still exist (`exists`,
+ * `rootExists`).
  *
  * Pure Node — no Electron, no DOM. Resilient: a single unreadable file or
  * directory must never crash the whole index.
@@ -359,8 +360,15 @@ export async function indexConversations(
   }
 
   const cwds = [...groups.keys()]
-  const { exists, verified } = await (options.existing ?? defaultExistence)(cwds)
+  const probe = options.existing ?? defaultExistence
+  const { exists, verified } = await probe(cwds)
   const roots = resolveRoots(cwds, new Set(cwds.filter((c) => !verified.has(c))))
+  // A root no conversation runs in directly — typically a repository used only through worktrees — has
+  // no answer from the check above, so it gets one of its own under the same bounds. Usually there is
+  // none: most roots are some group's cwd.
+  const cwdSet = new Set(cwds)
+  const unchecked = [...new Set([...roots.values()].map((r) => r.root))].filter((r) => !cwdSet.has(r))
+  const { exists: rootsExisting } = await probe(unchecked)
 
   const result: ConversationGroup[] = []
   for (const [cwd, conversations] of groups) {
@@ -372,6 +380,7 @@ export async function indexConversations(
       root,
       worktree,
       exists: exists.has(cwd),
+      rootExists: exists.has(root) || rootsExisting.has(root),
       label: labelForCwd(cwd),
       conversations,
       latestMtime
