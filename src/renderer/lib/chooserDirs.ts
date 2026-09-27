@@ -20,7 +20,7 @@ import type { ConversationGroup } from '@shared/types'
  * into, or as the preselect. A directory the index says nothing about is unknown and stays: the
  * chooser cannot tell it from a live terminal's new directory.
  */
-export function chooserDirs(groups: readonly ConversationGroup[], preselect: string | null = null): string[] {
+export function chooserDirs(groups: readonly ConversationGroup[], preselect: string | null = null): ChooserFolder[] {
   const gone = new Set<string>()
   for (const g of groups) {
     if (!g.exists) gone.add(g.cwd)
@@ -33,7 +33,29 @@ export function chooserDirs(groups: readonly ConversationGroup[], preselect: str
     started.set(dir, Math.max(started.get(dir) ?? 0, at))
   }
   const dirs = [...started.keys()].filter((d) => !gone.has(d)).sort((a, b) => started.get(b)! - started.get(a)!)
-  return preselect === null || gone.has(preselect) ? dirs : [preselect, ...dirs.filter((d) => d !== preselect)]
+  const ordered =
+    preselect === null || gone.has(preselect) ? dirs : [preselect, ...dirs.filter((d) => d !== preselect)]
+  return ordered.map((dir) => ({ dir, startedAt: started.get(dir) ?? 0 }))
+}
+
+/** One folder the chooser offers, with when its newest conversation started (0: never, or unknown). */
+export interface ChooserFolder {
+  dir: string
+  startedAt: number
+}
+
+/**
+ * The folders matching a typed filter, in the order given. Every whitespace-separated word must appear in
+ * the path, case-insensitively — so "sw rev" finds `…/switchboard/sidebar-revamp` — and the ranking stays
+ * the chooser's own, since a filter narrows the list rather than re-deciding what is likely.
+ */
+export function filterChooserFolders(folders: readonly ChooserFolder[], query: string): readonly ChooserFolder[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return folders
+  return folders.filter((f) => {
+    const path = f.dir.toLowerCase()
+    return words.every((w) => path.includes(w))
+  })
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
   type MutableRefObject,
+  type ReactNode,
   type RefObject
 } from 'react'
 import type { ConversationMeta, PtyState, Transcript } from '@shared/types'
@@ -104,6 +105,8 @@ interface Props {
   onFindToggle: () => void
   /** Preferences → Application: copy Formatted-view selections as Markdown rather than rendered text. */
   markdownCopy: boolean
+  /** The active tab is a new-conversation chooser: it fills the pane, with no conversation header. */
+  chooser?: ReactNode
 }
 
 function EmptyState() {
@@ -204,7 +207,8 @@ export default function MainPane(props: Props) {
     onFindClose,
     onFindActivate,
     onFindToggle,
-    markdownCopy
+    markdownCopy,
+    chooser
   } = props
   const onPaneFocusRef = useRef(onPaneFocus)
   onPaneFocusRef.current = onPaneFocus
@@ -364,7 +368,7 @@ export default function MainPane(props: Props) {
         />
       )}
       <div className="sb-pane-body" ref={bodyRef}>
-        {!selectedId && <EmptyState />}
+        {!selectedId && (chooser ?? <EmptyState />)}
         {showTranscript &&
           (transcript || transcriptLoading ? (
             <div className="sb-pane-layer">

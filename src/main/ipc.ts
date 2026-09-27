@@ -56,6 +56,7 @@ import { renameCodexThread } from './sessions/codexRename'
 import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
 import { syncTrafficLights } from './trafficLights'
+import { setTabsMenuEnabled } from './menu'
 import { buildInfo, checkForUpdates, runUpdate, relaunchForUpdate } from './updater'
 import { singleFlight } from './updater-core'
 import { UpdateChecks } from './updateChecks'
@@ -1077,6 +1078,20 @@ export function registerIpc(): void {
     })
     if (opened) claimTabsForWindow(opened.webContents.id, payload.sessionIds)
   })
+  // ⇧⌘N: a fresh window onto the new-conversation chooser, with the rail hidden like any other window
+  // beyond the first — ⌘B brings it back. `preselect` is the sender's folder, so "new window here" starts
+  // where the user was.
+  ipcMain.on(IPC.windowOpenNew, (_e, preselect: unknown) => {
+    openWindow?.({
+      sessionIds: [],
+      activeSessionId: null,
+      restoredTabs: null,
+      primary: false,
+      collapseRail: true,
+      newConversation: { preselect: typeof preselect === 'string' ? preselect : null }
+    })
+  })
+  ipcMain.on(IPC.menuSetTabsEnabled, (_e, enabled: unknown) => setTabsMenuEnabled(enabled === true))
   // Keep the OS window background in lockstep with the renderer's theme, so a live window resize
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.
   ipcMain.on(IPC.windowSetBackgroundColor, (e, color: string) =>

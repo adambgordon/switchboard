@@ -21,6 +21,7 @@
 
 import type { PersistedTabLayout, TabOpenMode } from '@shared/types'
 import { sanitizeTabLayout } from '../../shared/tabWorkspace'
+import { isChooserTab } from './chooserTab'
 
 /** A conversation occupying a slot in a pane. */
 export interface Tab {
@@ -133,12 +134,21 @@ export function restorePaneLayout(
   return { panes, focusIndex: 0, splitFraction: SPLIT_LIMITS.default }
 }
 
+/**
+ * The layout as it should come back after a restart: conversations only. A chooser tab is a moment's
+ * question, not something to reopen onto, so it is left out — and a pane standing on one restores onto
+ * the neighbor that closing it would have selected.
+ */
 export function snapshotPaneLayout(layout: PaneLayout): PersistedTabLayout | null {
   const panes = layout.panes
-    .map((pane) => ({
-      sessionIds: pane.tabs.map((tab) => tab.sessionId),
-      activeSessionId: paneActiveId(pane)
-    }))
+    .map((pane) => {
+      const keep = pane.tabs.filter((tab) => !isChooserTab(tab.sessionId))
+      const active = activeAfterKeep(pane, keep)
+      return {
+        sessionIds: keep.map((tab) => tab.sessionId),
+        activeSessionId: active >= 0 ? keep[active].sessionId : null
+      }
+    })
     .filter((pane) => pane.sessionIds.length > 0)
   return panes.length > 0 ? { panes } : null
 }
@@ -182,10 +192,10 @@ export function canPlaceTabsToSide(
   return true
 }
 
-/** Every conversation with a tab anywhere in the window. */
+/** Every conversation with a tab anywhere in the window. A chooser tab holds none. */
 export function openSessionIds(layout: PaneLayout): Set<string> {
   const out = new Set<string>()
-  for (const p of layout.panes) for (const t of p.tabs) out.add(t.sessionId)
+  for (const p of layout.panes) for (const t of p.tabs) if (!isChooserTab(t.sessionId)) out.add(t.sessionId)
   return out
 }
 

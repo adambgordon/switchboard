@@ -257,27 +257,10 @@ module.exports = function installRailHelpers() {
       rail: [...body().querySelectorAll('.sb-group-new')].map((w) => ({ key: w.closest('section.sb-group')?.dataset.key ?? null, visibility: getComputedStyle(w).visibility })),
       clone: [...document.querySelectorAll('.sb-drag-clone .sb-group-new')].map((w) => getComputedStyle(w).visibility)
     }),
-    // The new-conversation chooser: its folder items in order (path, `selected`, aria-current), and which
-    // of them holds focus (null path when focus is elsewhere, with the focused element's tag).
-    chooser: () => {
-      const menu = document.querySelector('.sb-newmenu[role="menu"]')
-      if (!menu) return null
-      const pathOf = (el) => el.querySelector('.sb-newmenu-path')?.textContent ?? null
-      const items = [...menu.querySelectorAll('.sb-newmenu-item[role="menuitem"]')].map((el) => ({
-        path: pathOf(el), selected: el.classList.contains('selected'), current: el.getAttribute('aria-current')
-      }))
-      const a = document.activeElement
-      const item = a instanceof Element ? a.closest('.sb-newmenu-item') : null
-      return {
-        items, firstMenuItem: pathOf(menu.querySelector('[role="menuitem"]')),
-        active: { path: item ? pathOf(item) : null, selected: item ? item.classList.contains('selected') : false, tag: a ? a.tagName : null }
-      }
-    },
-    // Focus the chooser item for `path`, as arrowing to it would.
-    focusChooserItem: (path) => {
-      const item = [...document.querySelectorAll('.sb-newmenu-item')].find((el) => el.querySelector('.sb-newmenu-path')?.textContent === path)
-      if (item) item.focus()
-      return !!item && document.activeElement === item
+    // The rail head's new-conversation button: its box, tooltip text and accessible name.
+    headNew: () => {
+      const btn = document.querySelector('.sb-rail-head .sb-rail-new-btn')
+      return btn ? { rect: btn.getBoundingClientRect().toJSON(), tip: btn.getAttribute('data-tip'), label: btn.getAttribute('aria-label') } : null
     },
     selectedKey: () => {
       const row = body().querySelector('.sb-row.selected')

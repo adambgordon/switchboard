@@ -92,7 +92,7 @@ input::placeholder {
 /* ---- shared auto-hiding scrollbar (see attachAutoHide / useAutoHideScrollbar) ----
    Hidden at rest; revealed while the element scrolls (JS toggles .is-scrolling) and on hover so it
    can be grabbed, then disappears a beat after scrolling stops. ONE mechanic for the rail, the
-   New-conversation menu, and the transcript. (No opacity fade — Chromium doesn't animate scrollbar
+   new-conversation chooser, and the transcript. (No opacity fade — Chromium doesn't animate scrollbar
    pseudo-elements, so a transition would just snap; the show/hide is intentionally instant.) */
 .sb-autoscroll::-webkit-scrollbar {
   width: var(--bar-thin);

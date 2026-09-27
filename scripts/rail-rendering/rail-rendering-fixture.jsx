@@ -31,6 +31,8 @@ window.dropCalls = []
 window.selectCalls = []
 // A folder header's new-conversation actions: the pencil (onNewInFolder) and each agent logo (onStartInFolder).
 window.newCalls = []
+// How many times the rail head's new-conversation button called onNewConversation.
+window.headNewCalls = 0
 // The last pointer event the page saw, so the runner can tell a dropped synthetic event from a real one
 // and calibrate its coordinate space against the page's at each zoom step.
 window.lastPointer = null
@@ -102,11 +104,8 @@ const LIMITS = { folderCap: 100, allCap: 200, autoExpand: 40 }
 // `agents`: the installed agents, in the order the header logos take their slots outward from the pencil.
 // `tips`: mount the app's tooltip layer. Off by default, so a label left up by a hover never paints over
 // what another check reads.
-// `menuOpen` / `menuDirs` / `menuPreselect`: the new-conversation chooser, closed by default so its
-// backdrop never covers the rail another check drives. `menuDirs` is already ordered, preselect first.
 const DEFAULTS = {
-  mode: 'folders', density: 'compact', searchOpen: false, query: '', collapsed: {}, selected: 'atlas-3', agents: ['claude', 'codex'], tips: false,
-  menuOpen: false, menuDirs: [], menuPreselect: null
+  mode: 'folders', density: 'compact', searchOpen: false, query: '', collapsed: {}, selected: 'atlas-3', agents: ['claude', 'codex'], tips: false
 }
 const noop = () => {}
 
@@ -163,7 +162,8 @@ function Fixture() {
     window.dropCalls = []
     window.selectCalls = []
     window.newCalls = []
-    // A clicked header button keeps focus, and :focus-within would hold its folder's actions shown.
+    window.headNewCalls = 0
+    // Each case starts with nothing focused, so a click earlier cannot carry into it.
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
     flushSync(() => {
       setCfg(DEFAULTS)
@@ -217,10 +217,7 @@ function Fixture() {
         onToggleFolder={(root) => setCfg((p) => ({ ...p, collapsed: { ...p.collapsed, [root]: !p.collapsed[root] } }))}
         revealed={revealed} onShowMore={(k) => setRevealed((r) => ({ ...r, [k]: (r[k] ?? 0) + 5 }))}
         onShowLess={(k) => setRevealed((r) => ({ ...r, [k]: 0 }))}
-        menuOpen={cfg.menuOpen} onMenuToggle={noop} onMenuClose={() => setCfg((p) => ({ ...p, menuOpen: false }))}
-        menuDirs={cfg.menuDirs} menuPreselect={cfg.menuPreselect}
-        menuAgents={cfg.agents} menuAgent={cfg.agents[0]} onMenuAgentChange={noop}
-        onChoose={noop} onPickOther={noop}
+        onNewConversation={() => { window.headNewCalls++ }} agents={cfg.agents}
         onNewInFolder={(root) => window.newCalls.push({ kind: 'new', root })}
         onStartInFolder={(root, agent) => window.newCalls.push({ kind: 'start', root, agent })}
         onToggleUnread={noop} onMarkUnread={noop} onResumeSession={noop} onStopSession={noop} onShowInfo={noop}

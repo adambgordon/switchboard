@@ -373,6 +373,10 @@ export const IPC = {
   menuCloseTab: 'menu:closeTab', // push: ⌘W — the renderer closes the active tab, or asks main to close the window when there is none
   windowClose: 'window:close', // renderer -> main: close the sender's window (⌘W with no tab to close)
   windowOpenConversation: 'window:openConversation', // renderer -> main: open a NEW window with an ordered tab group
+  menuNewConversation: 'menu:newConversation', // push: ⌘N / ⌘T — open (or focus) a new-conversation chooser
+  menuNewWindow: 'menu:newWindow', // push: ⇧⌘N — the renderer asks for a new window if tabs are on
+  menuSetTabsEnabled: 'menu:setTabsEnabled', // renderer -> main: show/enable the tab-only File items
+  windowOpenNew: 'window:openNew', // renderer -> main: open a NEW window onto a chooser (preselect)
   // Dragging a tab between windows. While a mouse button is held the OS routes every move to the
   // window the drag STARTED in, so the window under the cursor never learns the pointer is there —
   // main is the only party that can see all the windows, so it referees. It reads the cursor on
@@ -513,6 +517,8 @@ export interface WindowInit {
    * shared by every window of the app.
    */
   collapseRail: boolean
+  /** Open onto a new-conversation chooser with this folder focused (null: the first). Absent otherwise. */
+  newConversation?: { preselect: string | null }
 }
 
 
@@ -627,6 +633,14 @@ export interface SwitchboardApi {
   closeWindow(): void
   /** Open a NEW window showing this ordered tab group, with the rail hidden. Fire-and-forget. */
   openConversationWindow(payload: TabDragPayload): void
+  /** File → New Conversation (⌘N) and New Tab (⌘T), pushed to the focused window. */
+  onMenuNewConversation(cb: () => void): () => void
+  /** File → New Window (⇧⌘N), pushed to the focused window. */
+  onMenuNewWindow(cb: () => void): () => void
+  /** Whether tabs are on, so the File menu offers only the items that do something. */
+  setTabsMenuEnabled(enabled: boolean): void
+  /** Open a NEW window onto the new-conversation chooser, rail hidden, with `preselect` focused. */
+  openNewWindow(preselect: string | null): void
 
   // ---- dragging a tab between windows ----
   /** Tell main a tab-group drag started here, so it can referee where the cursor goes. */

@@ -108,14 +108,14 @@ function groupsFor(tabsEnabled: boolean): Group[] {
     {
       title: 'Conversations',
       items: [
-        { keys: ['⌘N'], desc: 'New conversation' },
+        { keys: tabsEnabled ? ['⌘N', '⌘T'] : ['⌘N'], desc: 'New conversation' },
         { keys: ['⌘F'], desc: 'Search' },
         { keys: ['⌘J'], desc: 'Toggle Formatted / Terminal, resuming if needed' },
         { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
         { keys: ['⌥-click'], desc: 'Mark conversation unread' },
-        // Double-click is the only click gesture tabs add. The ⌘/⇧ variants were removed: they came
-        // from browsers, and in an editor-shaped app they read as arbitrary rather than familiar.
-        // Opening to the side or in a new window lives on the ⋮ and right-click menus, which say so.
+        // Double-click is the only click gesture tabs add: ⌘/⇧-click variants come from browsers, and in
+        // an editor-shaped app they read as arbitrary rather than familiar. Opening to the side or in a new
+        // window lives on the ⋮ and right-click menus, which say so.
         ...(tabsEnabled ? [{ keys: ['double-click'], desc: 'Keep a conversation’s tab' }] : [])
       ]
     },
@@ -126,7 +126,7 @@ function groupsFor(tabsEnabled: boolean): Group[] {
             items: [
               { keys: ['⌘W'], desc: 'Close tab' },
               { keys: ['⌘\\'], desc: 'Split / unsplit the view' },
-              { keys: ['⇧⌘N'], desc: 'Open the conversation in a new window' }
+              { keys: ['⇧⌘N'], desc: 'New window' }
             ]
           }
         ]

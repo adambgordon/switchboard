@@ -112,7 +112,7 @@
   margin-top: 5px;
   min-height: 25px; /* = the magnifier button, so opening/closing search doesn't shift the head */
 }
-/* Search, and Collapse all / Expand all beside it: quiet icon buttons that darken on hover. */
+/* Search, Collapse all / Expand all and New conversation: quiet icon buttons that darken on hover. */
 .sb-rail-search-btn,
 .sb-rail-icon-btn {
   display: inline-flex;
@@ -132,33 +132,6 @@
 .sb-rail-search-btn.open {
   color: var(--ink);
   background: var(--paper-active);
-}
-/* the New "+" — same icon-button treatment as the search magnifier, so they pair up vertically */
-.sb-rail-new-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 5px;
-  border-radius: var(--r-sm);
-  color: var(--ink-ghost);
-  flex-shrink: 0;
-  transition: all var(--dur-fast) var(--ease);
-}
-.sb-rail-new-btn:hover {
-  color: var(--ink);
-  background: var(--paper-hover);
-}
-.sb-rail-new-btn.open {
-  color: var(--ink);
-  background: var(--paper-active);
-}
-/* In the rail, the New popover drops under the "+" and spans the head's content width (between the
-   --rail-text-inset gutters) — overriding the title-bar anchoring (right:0; width:330px) in app.css. */
-.sb-rail-newwrap .sb-newmenu {
-  right: 0;
-  left: auto;
-  width: calc(var(--pane-w) - 2 * var(--rail-text-inset));
-  top: calc(100% + 8px);
 }
 /* While searching, the field fills the whole row and the ✕ floats inside its right edge (the
    magnifier shows only when search is closed). Boxed like the rename title input; the box stays the
@@ -331,10 +304,10 @@
   gap: var(--s2);
   /* Top padding is most of the space between folders: the leader rule running out of each name does the
      separating, so the break stays tight. */
+  /* No space below: the group's own gap is all that separates the name from its first row, so the name
+     sits about as close to its rows as the previous folder's Show more line sits above it. The painted
+     box — and so the stuck fade below it — ends at the name's hover pill. */
   padding: 6px 0 0;
-  /* Margin, not padding: the same 4px of space under the name at rest, but the header's painted box —
-     and so the stuck fade below it — ends at the name's hover pill rather than 4px of solid paper lower. */
-  margin-bottom: 4px;
   background: var(--paper-sunken);
   /* The paper reaches out across the body's side padding (14px leading, 7px trailing), past the
      header's own box: the white row's edge paints outside the row, so a header only as wide as the
@@ -530,7 +503,7 @@
   z-index: 1;
 }
 .sb-group:hover .sb-group-pencil,
-.sb-group:focus-within .sb-group-pencil {
+.sb-group:has(:focus-visible) .sb-group-pencil {
   opacity: 1;
 }
 .sb-group-agent {
@@ -541,7 +514,7 @@
   pointer-events: none;
 }
 .sb-group-new:hover .sb-group-agent,
-.sb-group-new:focus-within .sb-group-agent {
+.sb-group-new:has(:focus-visible) .sb-group-agent {
   opacity: 1;
   pointer-events: auto;
   transform: translateX(calc(var(--slot) * -1 * var(--new-size)));
@@ -617,7 +590,7 @@
   transition: opacity var(--dur-fast) var(--ease);
 }
 .sb-group:hover .sb-rail-more-row,
-.sb-group:focus-within .sb-rail-more-row {
+.sb-group:has(:focus-visible) .sb-rail-more-row {
   opacity: 1;
 }
 .sb-rail-more {

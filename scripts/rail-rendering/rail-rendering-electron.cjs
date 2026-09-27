@@ -1038,8 +1038,10 @@ CHECKS['13-fold-clamp'] = async () => {
 // them on every folder and in the clone. Judged with one agent installed and with two, in both densities.
 // The header around them: Compact draws no leader rule and Spacious runs it to the toggle's content edge,
 // the toggle's hover fill spans the header with the pencil painting that same fill, a long name stops
-// clear of the actions, and each action's tooltip names what it starts.
+// clear of the actions, and each action's tooltip names what it starts. The rail head's own
+// new-conversation button is judged here too: its tooltip, and one call per click.
 const PENCIL_KEY = '/home/dev/projects/atlas'
+const HEAD_NEW_TIP = 'New conversation (⌘N)'
 const LONG_KEY = '/home/dev/projects/prism-shared-component-library-migration-notes'
 const AGENT_LABELS = { claude: 'Claude Code', codex: 'Codex' }
 // The toggle's trailing padding in Spacious, where the leader rule ends; and the least room a name
@@ -1277,11 +1279,49 @@ async function pencilCase(density, agents, failures) {
 CHECKS['14-pencil'] = async () => {
   const failures = []
   const details = {}
+  // The rail head's new-conversation button: labeled with its shortcut, and one click reports one call.
+  await reset({ mode: 'folders' })
+  const head = await call('headNew')
+  if (!head) failures.push('head: the rail head has no .sb-rail-new-btn')
+  else {
+    if (head.tip !== HEAD_NEW_TIP) failures.push(`head: the new-conversation button's tooltip is ${JSON.stringify(head.tip)}, expected ${JSON.stringify(HEAD_NEW_TIP)}`)
+    const c = middle(head.rect)
+    await press(c.x, c.y)
+    await release()
+    await delay(80)
+    const headCalls = await js('window.headNewCalls')
+    if (headCalls !== 1) failures.push(`head: one click on the new-conversation button called onNewConversation ${headCalls} times, expected 1`)
+    const stray = { drops: await js('window.dropCalls'), news: await js('window.newCalls'), selects: await js('window.selectCalls') }
+    if (stray.drops.length || stray.news.length || stray.selects.length) failures.push(`head: the click on the new-conversation button also reported ${JSON.stringify(stray)}`)
+    details.head = { tip: head.tip, label: head.label, calls: headCalls }
+  }
   for (const density of ['compact', 'spacious']) {
     for (const agents of PENCIL_AGENT_SETS) {
       const info = await pencilCase(density, agents, failures)
       details[info.tag] = info
     }
+    // A click on a folder's name collapses it and leaves focus on its toggle. Once the pointer leaves,
+    // the pencil hides again: only keyboard focus holds the actions shown, which Tab then does. Nothing
+    // selected, since a folder holding the conversation on screen stays open.
+    await reset({ mode: 'folders', density, selected: null })
+    const named = await waitHeadStill(PENCIL_KEY)
+    const nc = { x: named.label.left + Math.min(20, named.label.width / 2), y: named.label.top + named.label.height / 2 }
+    await press(nc.x, nc.y)
+    await release()
+    await park()
+    await waitNewStill()
+    const collapsed = !(await js('window.order()')).blocks.some((x) => x.id === `un:${PENCIL_KEY}`)
+    const toggleFocused = await js(`!!document.activeElement?.matches('section.sb-group[data-key=${JSON.stringify(PENCIL_KEY)}] .sb-group-toggle')`)
+    if (!collapsed || !toggleFocused) failures.push(`harness: ${density}: clicking ${PENCIL_KEY}'s name did not collapse it with focus on its toggle (collapsed ${collapsed}, focused ${toggleFocused})`)
+    const afterClick = (await call('pencilOpacities')).find((p) => p.key === PENCIL_KEY)
+    if (!afterClick || afterClick.opacity > 0.001) failures.push(`${density}: after a click collapsed ${PENCIL_KEY} and the pointer left, its pencil still shows (opacity ${afterClick && afterClick.opacity})`)
+    for (const type of ['keyDown', 'keyUp']) {
+      await dbg.sendCommand('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 })
+    }
+    await waitNewStill()
+    const afterTab = (await call('pencilOpacities')).find((p) => p.key === PENCIL_KEY)
+    if (!afterTab || afterTab.opacity < 0.999) failures.push(`${density}: Tab from ${PENCIL_KEY}'s toggle to its pencil leaves the pencil hidden (opacity ${afterTab && afterTab.opacity})`)
+    details[`${density}/focus`] = { afterClick: afterClick && afterClick.opacity, afterTab: afterTab && afterTab.opacity }
     // A folder drag from a header's label: the actions are hidden on every folder and in the clone for
     // its duration, and visible again once it ends.
     await reset({ mode: 'folders', density })
@@ -1309,45 +1349,6 @@ CHECKS['14-pencil'] = async () => {
     details[`${density}/drag`] = { during: { rail: during.rail.length, visible: visible.length, clone: during.clone }, after: { notVisible: still.length } }
   }
   record('14-pencil', failures, details)
-}
-
-// The new-conversation chooser's focus: it opens on the preselected folder, follows a preselect that
-// changes while it stays open, and holds the user's place when only the list changes. A focus check, so
-// it runs at one zoom step.
-const CHOOSER_SAMPLE = [
-  { dirs: ['/w/alpha', '/w/beta', '/w/gamma'], preselect: '/w/alpha', want: '/w/alpha', what: 'on open' },
-  { dirs: ['/w/gamma', '/w/alpha', '/w/beta'], preselect: '/w/gamma', want: '/w/gamma', what: 'after the preselect changed while open' },
-  // Same preselect, new order, with focus first moved to /w/beta. The order keeps /w/beta's node in place
-  // (React moves /w/alpha past it), so focus can only leave it if the menu moves it.
-  { dirs: ['/w/gamma', '/w/beta', '/w/alpha'], preselect: '/w/gamma', want: '/w/beta', focusFirst: '/w/beta', what: 'after only the list order changed' }
-]
-CHECKS['15-chooser'] = async () => {
-  if (ctx.zoom !== 0) return
-  const failures = []
-  const steps = []
-  await reset({ mode: 'folders' })
-  for (const [i, step] of CHOOSER_SAMPLE.entries()) {
-    const tag = `step ${i + 1} (${step.what})`
-    if (step.focusFirst && !(await call('focusChooserItem', step.focusFirst))) failures.push(`harness: ${tag}: could not focus ${step.focusFirst}`)
-    await configure({ menuOpen: true, menuDirs: step.dirs, menuPreselect: step.preselect })
-    await frames(2)
-    const c = await call('chooser')
-    steps.push({ step: i + 1, ...c })
-    if (!c) { failures.push(`${tag}: the chooser is not open`); continue }
-    const paths = c.items.map((it) => it.path)
-    if (JSON.stringify(paths) !== JSON.stringify(step.dirs)) failures.push(`harness: ${tag}: the chooser lists ${JSON.stringify(paths)}, expected ${JSON.stringify(step.dirs)}`)
-    const marked = c.items.filter((it) => it.selected).map((it) => it.path)
-    if (marked.length !== 1 || marked[0] !== step.preselect) failures.push(`${tag}: the items marked selected are ${JSON.stringify(marked)}, expected [${step.preselect}]`)
-    const current = c.items.filter((it) => it.current === 'true').map((it) => it.path)
-    if (current.length !== 1 || current[0] !== step.preselect) failures.push(`${tag}: the items with aria-current are ${JSON.stringify(current)}, expected [${step.preselect}]`)
-    if (c.active.path !== step.want) failures.push(`${tag}: focus is on ${c.active.path ?? `a ${c.active.tag} outside the folder items`}, expected ${step.want}`)
-    else if (step.want === step.preselect && !c.active.selected) failures.push(`${tag}: the focused item ${step.want} is not marked selected`)
-  }
-  await configure({ menuOpen: false })
-  const closed = await call('chooser')
-  if (closed) failures.push('the chooser is still open after menuOpen went false')
-  await reset({ mode: 'folders' })
-  record('15-chooser', failures, { steps })
 }
 
 // Geometry: the selected row's 2px ring must clear the rail body's overflow clip on every side.

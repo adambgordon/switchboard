@@ -1,8 +1,6 @@
 import type { RefObject } from 'react'
-import type { AgentKind } from '@shared/types'
 import type { SidebarMode } from '../lib/sidebarPrefs'
-import NewConversationMenu from './NewConversationMenu'
-import { Close, CollapseAll, ExpandAll, Plus, Search } from './icons'
+import { Close, CollapseAll, Compose, ExpandAll, Search } from './icons'
 
 const MODES: { value: SidebarMode; label: string }[] = [
   { value: 'folders', label: 'Folders' },
@@ -24,17 +22,8 @@ interface Props {
   searchRef: RefObject<HTMLInputElement>
   searchOpen: boolean
   onSearchToggle: () => void
-  menuOpen: boolean
-  onMenuToggle: () => void
-  onMenuClose: () => void
-  menuDirs: string[]
-  /** The folder the chooser focuses on open, or null for the first. */
-  menuPreselect: string | null
-  menuAgents: AgentKind[]
-  menuAgent: AgentKind
-  onMenuAgentChange: (agent: AgentKind) => void
-  onChoose: (cwd: string, agent: AgentKind) => void
-  onPickOther: (agent: AgentKind) => void
+  /** A new-conversation chooser — the same as ⌘N. */
+  onNewConversation: () => void
 }
 
 /**
@@ -54,16 +43,7 @@ export default function SidebarHead({
   searchRef,
   searchOpen,
   onSearchToggle,
-  menuOpen,
-  onMenuToggle,
-  onMenuClose,
-  menuDirs,
-  menuPreselect,
-  menuAgents,
-  menuAgent,
-  onMenuAgentChange,
-  onChoose,
-  onPickOther
+  onNewConversation
 }: Props) {
   const needsTip = `${needsYou} ${needsYou === 1 ? 'conversation needs' : 'conversations need'} you — click to go there`
   return (
@@ -118,27 +98,14 @@ export default function SidebarHead({
           >
             <Search size={15} />
           </button>
-          <div className="sb-newwrap sb-rail-newwrap">
-            <button
-              className={`sb-rail-new-btn${menuOpen ? ' open' : ''}`}
-              onClick={onMenuToggle}
-              data-tip="New conversation (⌘N)"
-              aria-label="New conversation"
-            >
-              <Plus size={16} />
-            </button>
-            <NewConversationMenu
-              open={menuOpen}
-              dirs={menuDirs}
-              preselect={menuPreselect}
-              agents={menuAgents}
-              initialAgent={menuAgent}
-              onAgentChange={onMenuAgentChange}
-              onChoose={onChoose}
-              onPickOther={onPickOther}
-              onClose={onMenuClose}
-            />
-          </div>
+          <button
+            className="sb-rail-icon-btn sb-rail-new-btn"
+            onClick={onNewConversation}
+            data-tip="New conversation (⌘N)"
+            aria-label="New conversation"
+          >
+            <Compose size={15} />
+          </button>
         </div>
       </div>
       {searchOpen && (

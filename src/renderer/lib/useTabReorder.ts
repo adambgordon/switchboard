@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { makeTabDragPayload } from '@shared/tabDrag'
 import type { TabLayout } from './tabLayoutPreference'
+import { isChooserTab } from './chooserTab'
 import { edgeScrollSpeed, dragScrollRequest, dragScrollFeedback, type EdgeMotion } from './edgeScroll'
 import {
   groupDragFollowerIndices,
@@ -304,7 +305,9 @@ export function useTabReorder(
       fromIndex = tabs.indexOf(tab)
       if (fromIndex < 0) return
       sessionId = optsRef.current.order[fromIndex] ?? ''
-      if (!sessionId) return
+      // A chooser tab never travels: a drag can end in another window, and a chooser is this window's
+      // alone. Refusing the drag outright (rather than only the cross-window drop) keeps one rule.
+      if (!sessionId || isChooserTab(sessionId)) return
       pressed = tab
       pointerId = e.pointerId
       // Capture on the tab until the threshold, so plain clicks still activate it. Capturing only

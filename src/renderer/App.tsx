@@ -55,6 +55,7 @@ import { usePaneLayout } from './lib/usePaneLayout'
 import { useTabsEnabled } from './lib/useTabsEnabled'
 import {
   SPLIT_LIMITS,
+  activeTabId,
   canPlaceTabsToSide,
   canSplitActiveTab,
   effectiveTabOpenMode,
@@ -64,6 +65,7 @@ import {
   snapshotPaneLayout,
   stepTab
 } from './lib/paneModel'
+import { chooserTabId, isChooserTab, newConversationTarget, strayChoosers } from './lib/chooserTab'
 import {
   NO_SELECTION,
   actionTargets,
@@ -79,7 +81,7 @@ import {
 } from './lib/tabSelection'
 import { nextPtyHomes } from './lib/ptyHome'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
-import { chooserDirs, chooserPreselect } from './lib/chooserDirs'
+import { chooserDirs, chooserPreselect, type ChooserFolder } from './lib/chooserDirs'
 import { useNewConvoDefaultAgent } from './lib/useNewConvoDefaultAgent'
 import { useAgentAvailability } from './lib/useAgentAvailability'
 import { useMaxLiveSessions } from './lib/useMaxLiveSessions'
@@ -116,6 +118,9 @@ import TooltipLayer from './components/TooltipLayer'
 import AppVeil from './components/AppVeil'
 import type { TranscriptScrollState } from './components/TranscriptView'
 import TerminalDeck from './components/TerminalDeck'
+import ChooserView from './components/ChooserView'
+
+const NO_FOLDERS: readonly ChooserFolder[] = []
 
 export default function App() {
   const { groups, hiddenSessionIds, loading } = useSessions()
@@ -151,9 +156,9 @@ export default function App() {
     setEnabled: setDefaultAgentEnabled
   } = useNewConvoDefaultAgent()
   const agents = useAgentAvailability()
-  // The agent the New menu shows selected — sticky within a session (the last one picked or started),
-  // so reopening the menu remembers your choice. Ephemeral on purpose: the persisted default-agent
-  // preference is the cross-restart mechanism; this is just menu stickiness.
+  // The agent a new-conversation chooser opens on — sticky within a session (the last one picked or
+  // started), so the next chooser remembers your choice. Ephemeral on purpose: the persisted default-agent
+  // preference is the cross-restart mechanism; this is just stickiness.
   const [lastAgent, setLastAgent] = useState<AgentKind | null>(null)
   const {
     value: maxLive,
@@ -224,8 +229,13 @@ export default function App() {
   )
   const pendingWorkspaceKeyRef = useRef<string | null>(null)
   const pendingBoundClaimsRef = useRef(new Map<string, PendingBoundTab>())
-  // THE selection: the active tab of the focused pane. Derived, never stored twice.
-  const selectedId = panes.selectedId
+  // THE selection: the active tab of the focused pane. Derived, never stored twice. `selectedId` is the
+  // CONVERSATION selected — null while the tab is a new-conversation chooser, which holds none — and is
+  // what everything conversation-keyed reads; only focus and tab bookkeeping read the tab itself.
+  const selectedTabId = panes.selectedId
+  const selectedId = selectedTabId !== null && isChooserTab(selectedTabId) ? null : selectedTabId
+  const selectedTabIdRef = useRef(selectedTabId)
+  selectedTabIdRef.current = selectedTabId
 
   const navigationApplyRef = useRef<((command: NavigationCommand) => void) | null>(null)
   const {
@@ -256,10 +266,17 @@ export default function App() {
   const [viewBySession, setViewBySession] = useState<Record<string, ConversationView>>({})
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
-  // The folder the new-conversation chooser opens on — fixed when it opens, so the list does not
-  // reshuffle under the pointer as the focused conversation changes behind it.
-  const [menuPreselect, setMenuPreselect] = useState<string | null>(null)
+  // Per open new-conversation chooser tab: the folder it opens on — fixed at open, so the list does not
+  // reshuffle as the focused conversation changes behind it — and the tab it was opened from, where Esc
+  // returns, and `aim`, bumped each time a folder's pencil re-aims it. Ids are minted per window and never
+  // reused.
+  const [choosers, setChoosers] = useState<
+    Readonly<Record<string, { preselect: string | null; from: string | null; aim: number }>>
+  >({})
+  const choosersRef = useRef(choosers)
+  choosersRef.current = choosers
+  const nextChooserRef = useRef(1)
+  const chooserFocusRef = useRef(new Map<string, number>())
   const [settingsPage, setSettingsPage] = useState<
     'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq' | null
   >(null)
@@ -383,15 +400,26 @@ export default function App() {
   // Declared HERE, beside the state, rather than beside the drag handlers where they are used — the
   // group-capable actions further down all call `targetsFor`, and a `const` defined after them is not
   // hoisted, so it would be a temporal-dead-zone error at the first one.
-  const toggleTabSelected = useCallback((pane: number, sessionId: string) => {
+  //
+  // A chooser tab is never part of a selection: every group action — a move to another window above all
+  // — carries conversations, and a chooser is not one. It is left out of both the gesture and the run.
+  const selectableActive = (pane: number): string | null => {
     const p = paneLayoutRef.current.panes[pane]
-    setTabSelection((s) => toggleSelected(s, pane, p ? paneActiveId(p) : null, sessionId))
+    const id = p ? paneActiveId(p) : null
+    return id !== null && isChooserTab(id) ? null : id
+  }
+  const toggleTabSelected = useCallback((pane: number, sessionId: string) => {
+    if (isChooserTab(sessionId)) return
+    const active = selectableActive(pane)
+    setTabSelection((s) => toggleSelected(s, pane, active, sessionId))
   }, [])
   const extendTabSelection = useCallback((pane: number, sessionId: string) => {
+    if (isChooserTab(sessionId)) return
     const p = paneLayoutRef.current.panes[pane]
-    const order = p?.tabs.map((t) => t.sessionId) ?? []
+    const order = p?.tabs.map((t) => t.sessionId).filter((id) => !isChooserTab(id)) ?? []
     // The active tab is the fallback anchor, so a first ⇧-click takes the run from where the user is.
-    setTabSelection((s) => extendSelection(s, pane, order, sessionId, p ? paneActiveId(p) : null))
+    const active = selectableActive(pane)
+    setTabSelection((s) => extendSelection(s, pane, order, sessionId, active))
   }, [])
 
   // What a command invoked on ONE tab should actually act on: the group when that tab belongs to one,
@@ -443,12 +471,12 @@ export default function App() {
       if (overlayOpenRef.current) return
       beginVisit()
       const l = paneLayoutRef.current
-      const ids = keyboardCloseTargets(
-        tabSelectionRef.current,
-        l.focusIndex,
-        paneActiveId(l.panes[l.focusIndex])
-      )
-      if (tabsEnabledRef.current && ids.length > 0) panes.closeTabs(ids)
+      const active = paneActiveId(l.panes[l.focusIndex])
+      const ids = keyboardCloseTargets(tabSelectionRef.current, l.focusIndex, active)
+      // A chooser closes like a tab even with tabs off, where it is the one thing ⌘W should not
+      // mistake for the whole window: it is a question on top of what was showing.
+      const closesTab = tabsEnabledRef.current || (active !== null && isChooserTab(active))
+      if (closesTab && ids.length > 0) panes.closeTabs(ids)
       else window.api.closeWindow()
     })
     return off
@@ -578,14 +606,15 @@ export default function App() {
 
   // A selection change normally hands the conversation surface the keyboard. Roving through the tab
   // strip is the one exception: keep focus on its newly-active tab so another arrow can continue.
+  // Keyed on the TAB, so landing on a chooser hands its filter the keyboard too.
   useEffect(() => {
-    if (!selectedId) return
+    if (!selectedTabId) return
     if (keepTabFocusRef.current) {
       keepTabFocusRef.current = false
       return
     }
-    requestFocus(selectedId)
-  }, [selectedId, requestFocus])
+    requestFocus(selectedTabId)
+  }, [selectedTabId, requestFocus])
 
   // Keep the main-process LRU cap in lockstep with the persisted preference — on mount and on each
   // change. Fire-and-forget, and runs after commit, so it never touches the render/paint path.
@@ -673,7 +702,10 @@ export default function App() {
    */
   const paneView = (index: number) => {
     const pane = paneLayout.panes[index] ?? null
-    const id = pane ? paneActiveId(pane) : null
+    const tabId = pane ? paneActiveId(pane) : null
+    // A chooser shows no conversation: everything below resolves as for an empty pane.
+    const chooser = tabId !== null && isChooserTab(tabId) ? tabId : null
+    const id = chooser ? null : tabId
     const meta = id ? metaById.get(id) ?? null : null
     const pty = id ? ptys.bySession.get(id) ?? null : null
     // A terminal renders here only if this WINDOW owns it (main decides, one owner app-wide) and this
@@ -693,6 +725,7 @@ export default function App() {
     return {
       pane,
       id,
+      chooser,
       meta,
       pty,
       terminalAt,
@@ -853,8 +886,12 @@ export default function App() {
   // row must not persist read state or a pin under an id that may never bind, and a gate copied per
   // call site is how one copy ends up missing (which is what put a stranger's liveness dot on a
   // background-agent row).
+  //
+  // A chooser tab stands for no conversation either, so it answers here too — which is what keeps it out
+  // of read marks and pins, and its tab menu free of conversation items.
   const isUnlinkedId = useCallback(
     (id: string): boolean => {
+      if (isChooserTab(id)) return true
       const pty = ptys.bySession.get(id) ?? null
       return !!pty && isUnlinkedRow(pty, metaById.get(id) ?? synthMeta(pty))
     },
@@ -881,6 +918,18 @@ export default function App() {
     () =>
       paneLayout.panes.map((p) =>
         p.tabs.map((tab) => {
+          if (isChooserTab(tab.sessionId)) {
+            return {
+              sessionId: tab.sessionId,
+              title: 'New conversation',
+              subtitle: null,
+              lastActiveAt: null,
+              tipMeta: null,
+              preview: tab.preview,
+              dot: null,
+              unlinked: true
+            }
+          }
           const pty = ptys.bySession.get(tab.sessionId) ?? null
           const meta = metaById.get(tab.sessionId) ?? (pty ? synthMeta(pty) : null)
           return {
@@ -919,7 +968,7 @@ export default function App() {
       if (!id) return
       // A plain click means "just this one", so it is also the way out of a multi-selection.
       setTabSelection(selectOnly())
-      if (!focusSurface && id !== selectedIdRef.current) keepTabFocusRef.current = true
+      if (!focusSurface && id !== selectedTabIdRef.current) keepTabFocusRef.current = true
       panes.activateTab(pane, index)
       if (!isUnlinkedId(id)) markRead(id)
       if (focusSurface) requestFocus(id)
@@ -931,10 +980,9 @@ export default function App() {
   const selectedMeta = focusedView.meta
   const selectedPty = focusedView.pty
   const effectiveView = focusedView.view
+  // An unlinked row shows no read state, so it must not persist one either — see rowIdentity.
   const view0Unlinked = view0.id ? isUnlinkedId(view0.id) : false
   const view1Unlinked = view1.id ? isUnlinkedId(view1.id) : false
-  // An unlinked row shows no read state, so it must not persist one either — see rowIdentity.
-  const selectedUnlinked = paneLayout.focusIndex === 1 ? view1Unlinked : view0Unlinked
 
   const view0InputRequestedAt = view0.pty
     ? currentInputRequestedAt(view0.meta ?? synthMeta(view0.pty), view0.pty.inputRequestedAt)
@@ -962,11 +1010,19 @@ export default function App() {
   // Arrow-key order follows what's actually visible — the model the rail renders — so nav never lands
   // on a hidden row.
   const orderedIds = useMemo(() => visibleRows(sidebarModel).map((r) => r.sessionId), [sidebarModel])
-  // Computed only while the chooser is open: the list is otherwise unused, and `groups` changes on
-  // every index pass of a live session.
-  const menuDirs = useMemo(
-    () => (menuOpen ? chooserDirs(groups, menuPreselect) : []),
-    [menuOpen, groups, menuPreselect]
+  // Each pane's chooser list, computed only while that pane shows a chooser: the list is otherwise
+  // unused, and `groups` changes on every index pass of a live session.
+  const preselect0 = view0.chooser ? choosers[view0.chooser]?.preselect ?? null : null
+  const preselect1 = view1.chooser ? choosers[view1.chooser]?.preselect ?? null : null
+  const showsChooser0 = view0.chooser !== null
+  const showsChooser1 = view1.chooser !== null
+  const folders0 = useMemo(
+    () => (showsChooser0 ? chooserDirs(groups, preselect0) : NO_FOLDERS),
+    [showsChooser0, groups, preselect0]
+  )
+  const folders1 = useMemo(
+    () => (showsChooser1 ? chooserDirs(groups, preselect1) : NO_FOLDERS),
+    [showsChooser1, groups, preselect1]
   )
   const metaByIdRef = useRef(metaById)
   metaByIdRef.current = metaById
@@ -977,9 +1033,9 @@ export default function App() {
     () => (['claude', 'codex'] as AgentKind[]).filter((a) => agents[a]),
     [agents]
   )
-  // Which agent the New menu shows selected (and commits with when its segment is hidden).
-  const menuAgent = useMemo<AgentKind>(() => {
-    // An explicit, enabled default agent wins over the sticky last pick; otherwise the menu remembers
+  // Which agent a chooser opens on (and starts with when it shows no choice).
+  const chooserAgent = useMemo<AgentKind>(() => {
+    // An explicit, enabled default agent wins over the sticky last pick; otherwise the chooser remembers
     // your last selection, falling back to the first available agent.
     if (defaultAgentEnabled && agents[defaultAgent]) return defaultAgent
     if (lastAgent && availableAgents.includes(lastAgent)) return lastAgent
@@ -1084,21 +1140,48 @@ export default function App() {
   const resumeRef = useRef(resume)
   resumeRef.current = resume
 
-  const startNew = useCallback(async (cwd: string, agent: AgentKind) => {
+  /**
+   * Start a conversation, from a chooser tab when `chooser` names one. The spawn takes a moment, and what
+   * the user did meanwhile decides where it lands:
+   *  - The chooser is still open: with tabs on it BECOMES the conversation, in place — `rekey`, since a
+   *    chooser id is a placeholder that names nothing — shown only if it is still what the user is on.
+   *    With tabs off it gives way and the conversation opens as the pane's one tab, as it always has.
+   *  - The chooser was closed: with tabs on the conversation still gets a tab, in the background, so
+   *    closing a chooser mid-start never quietly strands a session the user asked for.
+   *  - No chooser (a folder's logo), or tabs off: shown only if nothing else was navigated to meanwhile.
+   */
+  const startNew = useCallback(async (cwd: string, agent: AgentKind, chooser?: string) => {
     const current = beginVisit()
-    setMenuOpen(false)
-    setLastAgent(agent) // starting an agent makes it the sticky menu default too
+    setLastAgent(agent) // starting an agent makes it the sticky chooser default too
     const st = await window.api.startNew(cwd, agent)
+    const l = paneLayoutRef.current
+    if (chooser && locateTab(l, chooser)) {
+      const shown = activeTabId(l) === chooser
+      if (tabsEnabledRef.current) panes.rekeyTabs(chooser, st.sessionId)
+      else {
+        panes.closeTabs([chooser])
+        if (shown) land(st.sessionId, 'persistent')
+      }
+      if (shown) {
+        chooseSessionView(st.sessionId, 'terminal')
+        requestFocus(st.sessionId)
+      }
+      return
+    }
+    if (chooser && tabsEnabledRef.current) {
+      land(st.sessionId, 'persistent', { focus: false })
+      return
+    }
     if (!current()) return
     land(st.sessionId, 'persistent')
     chooseSessionView(st.sessionId, 'terminal')
     requestFocus(st.sessionId)
-  }, [land, requestFocus, chooseSessionView, beginVisit])
+  }, [land, requestFocus, chooseSessionView, beginVisit, panes.rekeyTabs, panes.closeTabs])
 
   const pickOther = useCallback(
-    async (agent: AgentKind) => {
+    async (agent: AgentKind, chooser?: string) => {
       const dir = await window.api.pickDirectory()
-      if (dir) await startNew(dir, agent)
+      if (dir) await startNew(dir, agent, chooser)
     },
     [startNew]
   )
@@ -1110,13 +1193,41 @@ export default function App() {
   const ptysBySessionRef = useRef(ptys.bySession)
   ptysBySessionRef.current = ptys.bySession
 
-  const openChooser = useCallback((preselect: string | null) => {
-    setMenuPreselect(preselect)
-    setMenuOpen(true)
-  }, [])
+  // A new chooser tab after the active one, in the focused pane. Persistent, so a preview open does not
+  // replace it — and with tabs off it sits beside the one preview tab, which Esc returns to.
+  const openChooserTab = useCallback(
+    (preselect: string | null) => {
+      beginVisit()
+      const id = chooserTabId(nextChooserRef.current++)
+      // Read NOW, not inside the updater: React runs the updater during the next render, by which time
+      // the selected tab is this chooser.
+      const from = selectedTabIdRef.current
+      setChoosers((prev) => ({ ...prev, [id]: { preselect, from, aim: 0 } }))
+      // Landing on it is a landing like a tab click, which ends a multi-selection — else ⌘W, which
+      // closes the focused pane's group, would close the tabs left behind rather than the chooser.
+      setTabSelection(NO_SELECTION)
+      panes.openTab(id, 'persistent')
+    },
+    [beginVisit, panes.openTab]
+  )
+
+  // Esc on a chooser: close it and go back to the tab it was opened from, not to whichever neighbor
+  // slid into its slot. Revealed where it stands — a 'preview' open of a tab that exists moves nothing.
+  const dismissChooser = useCallback(
+    (id: string) => {
+      beginVisit()
+      const from = choosersRef.current[id]?.from ?? null
+      panes.closeTabs([id])
+      if (from !== null && from !== id && locateTab(paneLayoutRef.current, from)) panes.openTab(from, 'preview')
+    },
+    [beginVisit, panes.closeTabs, panes.openTab]
+  )
 
   // "A new conversation where I am": the focused conversation's folder, per chooserPreselect.
+  // On a chooser, the folder it is aimed at.
   const focusedPreselect = useCallback((): string | null => {
+    const tab = selectedTabIdRef.current
+    if (tab !== null && isChooserTab(tab)) return choosersRef.current[tab]?.preselect ?? null
     const id = selectedIdRef.current
     if (!id) return null
     const root = sidebarModelRef.current?.rows.get(id)?.root
@@ -1124,19 +1235,89 @@ export default function App() {
     return root && cwd ? chooserPreselect(groupsRef.current, cwd, root) : null
   }, [])
 
-  // ⌘N opens the chooser; the "+" toggles it.
-  const newConversation = useCallback(() => openChooser(focusedPreselect()), [openChooser, focusedPreselect])
-  const toggleNewConversation = useCallback(() => {
-    if (menuOpen) setMenuOpen(false)
-    else newConversation()
-  }, [menuOpen, newConversation])
+  // ⌘N, ⌘T and the head pencil. Standing on a chooser already, they hand it the keyboard rather than
+  // stack a second empty one beside it.
+  const newConversation = useCallback(() => {
+    const target = newConversationTarget(paneLayoutRef.current)
+    if (target.kind === 'focus') requestFocus(target.id)
+    else openChooserTab(focusedPreselect())
+  }, [openChooserTab, focusedPreselect, requestFocus])
+
+  // A folder's pencil: the same, aimed at that folder — re-aiming the chooser the user is on, if any.
+  const newInFolder = useCallback(
+    (root: string) => {
+      const target = newConversationTarget(paneLayoutRef.current)
+      if (target.kind === 'open') {
+        openChooserTab(root)
+        return
+      }
+      setChoosers((prev) => ({
+        ...prev,
+        [target.id]: { from: prev[target.id]?.from ?? null, preselect: root, aim: (prev[target.id]?.aim ?? 0) + 1 }
+      }))
+      requestFocus(target.id)
+    },
+    [openChooserTab, requestFocus]
+  )
 
   // A folder's logo names both the folder and the agent, so it starts straight away; a failed start
-  // (the folder is gone) falls back to the chooser on that folder.
+  // (the folder is gone) falls back to a chooser on that folder.
   const startInFolder = useCallback(
-    (root: string, agent: AgentKind) => void startNew(root, agent).catch(() => openChooser(root)),
-    [startNew, openChooser]
+    (root: string, agent: AgentKind) => void startNew(root, agent).catch(() => openChooserTab(root)),
+    [startNew, openChooserTab]
   )
+
+  // A window opened by ⇧⌘N starts on a chooser.
+  const openedChooserRef = useRef(false)
+  useEffect(() => {
+    if (!windowInit.newConversation || openedChooserRef.current) return
+    openedChooserRef.current = true
+    openChooserTab(windowInit.newConversation.preselect)
+  }, [openChooserTab])
+
+  // With tabs off a chooser only ever fills the pane, so one that is no longer on screen is dropped —
+  // see strayChoosers. A layout effect, so the dropped tab never paints.
+  useLayoutEffect(() => {
+    if (tabsEnabled) return
+    const stray = strayChoosers(paneLayout)
+    if (stray.length > 0) panes.closeTabs(stray)
+  }, [tabsEnabled, paneLayout, panes.closeTabs])
+
+  // Forget closed choosers. Judged against this render's committed pair — the records it held and the
+  // layout it drew — and only those go: a chooser opened by an effect in this same commit has its record
+  // queued but not yet its tab, and must not be mistaken for a closed one.
+  useEffect(() => {
+    const open = new Set<string>()
+    for (const p of paneLayout.panes) for (const t of p.tabs) if (isChooserTab(t.sessionId)) open.add(t.sessionId)
+    const closed = Object.keys(choosers).filter((k) => !open.has(k))
+    if (closed.length === 0) return
+    for (const k of closed) chooserFocusRef.current.delete(k)
+    setChoosers((prev) => {
+      const next = { ...prev }
+      for (const k of closed) delete next[k]
+      return next
+    })
+  }, [paneLayout, choosers])
+
+  // File → New Conversation / New Tab / New Window arrive as pushes: menu accelerators never reach the
+  // page as keydowns. Inert behind a modal, like ⌘W.
+  useEffect(
+    () =>
+      window.api.onMenuNewConversation(() => {
+        if (!overlayOpenRef.current) newConversation()
+      }),
+    [newConversation]
+  )
+  useEffect(
+    () =>
+      window.api.onMenuNewWindow(() => {
+        if (!overlayOpenRef.current && tabsEnabledRef.current) window.api.openNewWindow(focusedPreselect())
+      }),
+    [focusedPreselect]
+  )
+  useEffect(() => {
+    window.api.setTabsMenuEnabled(tabsEnabled)
+  }, [tabsEnabled])
 
   // The default-agent setting is a single tri-state (None / Claude Code / Codex), like Theme — no
   // separate on/off toggle. 'none' just disables it (keeping the last agent value, unused).
@@ -1483,7 +1664,12 @@ export default function App() {
     beginVisit()
     if (paneLayoutRef.current.panes.length > 1) panes.unsplit()
     else panes.splitActiveTab()
-  }, [panes.splitActiveTab, panes.unsplit, beginVisit])
+    // Either way the selected tab changes pane, so a chooser remounts there — with its last focus request
+    // already spent, since a chooser acts on each request once. Hand it a fresh one so typing still
+    // filters. (Split Right and Move Right/Left already request focus for the tab they move.)
+    const tab = selectedTabIdRef.current
+    if (tab !== null && isChooserTab(tab)) requestFocus(tab)
+  }, [panes.splitActiveTab, panes.unsplit, beginVisit, requestFocus])
   const killSession = useCallback((ptyId: string) => window.api.kill(ptyId), [])
   // Stop a session by its conversation id — the rail's right-click menu works in session ids, while
   // the PtyManager kills by ptyId, so resolve the live process first (mirrors the pane header's
@@ -1681,6 +1867,8 @@ export default function App() {
   }, [findOpen, closeFind])
 
   // --- keyboard ---
+  // ⌘N / ⌘T / ⇧⌘N and ⌘W are File-menu accelerators and never arrive here as keydowns — see the
+  // onMenu* subscriptions.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.metaKey || e.ctrlKey
@@ -1737,17 +1925,8 @@ export default function App() {
           chooseSessionView(selectedId, viewAction)
           requestFocus(selectedId)
         }
-      } else if (tabsEnabled && e.metaKey && e.shiftKey && !e.altKey && e.code === 'KeyN') {
-        // ⇧⌘N — open the selected conversation in its own window. Must come BEFORE the ⌘N branch:
-        // that one matches on `e.key.toLowerCase()`, so Shift+N lowercases to 'n' and it would
-        // otherwise swallow this chord and start a new conversation instead. (The same shadowing
-        // still applies to ⇧⌘F and ⇧⌘B, which nothing binds.)
-        e.preventDefault()
-        if (selectedId && !selectedUnlinked) moveToNewWindow(selectedId)
-      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault()
-        newConversation()
       } else if (mod && e.key.toLowerCase() === 'f') {
+        // Matched on the lowercased key, so ⇧⌘F lands here too.
         e.preventDefault()
         if (inMain && selectedId) {
           // Focus is in the main pane → find within the open conversation. Also bump the focus
@@ -1832,7 +2011,6 @@ export default function App() {
         if (findOpen) closeFind()
         else if (query) setQuery('')
         else setSearchOpen(false)
-        setMenuOpen(false)
       } else if (e.key === 'Enter' && !inInput && selectedId && inTranscript) {
         // ⏎ from the read-only Formatted transcript: a not-live conversation resumes; a live one
         // (shown in Formatted) jumps into its terminal — so you can read history and hit Enter to
@@ -1866,13 +2044,10 @@ export default function App() {
     goHistory,
     togglePane,
     toggleUnread,
-    newConversation,
     tabsEnabled,
     paneLayout,
     goToTab,
-    toggleSplit,
-    moveToNewWindow,
-    selectedUnlinked
+    toggleSplit
   ])
 
   // Find belongs to whichever pane has the keyboard. Moving to the other pane closes it rather than
@@ -1940,17 +2115,9 @@ export default function App() {
             revealed={revealed}
             onShowMore={showMore}
             onShowLess={showLess}
-            menuOpen={menuOpen}
-            onMenuToggle={toggleNewConversation}
-            onMenuClose={() => setMenuOpen(false)}
-            menuDirs={menuDirs}
-            menuPreselect={menuPreselect}
-            menuAgents={availableAgents}
-            menuAgent={menuAgent}
-            onMenuAgentChange={setLastAgent}
-            onChoose={startNew}
-            onPickOther={pickOther}
-            onNewInFolder={openChooser}
+            onNewConversation={newConversation}
+            agents={availableAgents}
+            onNewInFolder={newInFolder}
             onStartInFolder={startInFolder}
             onToggleUnread={toggleUnread}
             onMarkUnread={markUnreadGated}
@@ -2090,6 +2257,28 @@ export default function App() {
                   onFindActivate={onFindActivate}
                   onFindToggle={toggleFind}
                   markdownCopy={markdownCopy}
+                  chooser={
+                    v.chooser && (
+                      <ChooserView
+                        key={v.chooser}
+                        id={v.chooser}
+                        folders={i === 1 ? folders1 : folders0}
+                        aim={choosers[v.chooser]?.aim ?? 0}
+                        agents={availableAgents}
+                        initialAgent={chooserAgent}
+                        onAgentChange={setLastAgent}
+                        onStart={(dir, agent) => startNew(dir, agent, v.chooser ?? undefined)}
+                        onPickOther={(agent) => pickOther(agent, v.chooser ?? undefined)}
+                        onDismiss={() => {
+                          if (v.chooser) dismissChooser(v.chooser)
+                        }}
+                        focusKey={
+                          focusReq && focusReq.sessionId === v.chooser && isFocused ? focusReq.n : null
+                        }
+                        consumedFocus={chooserFocusRef}
+                      />
+                    )
+                  }
                 />
               </Fragment>
             )

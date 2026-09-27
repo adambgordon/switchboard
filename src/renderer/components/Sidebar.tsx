@@ -54,18 +54,10 @@ interface Props {
   revealed: Readonly<Record<string, number>>
   onShowMore: (key: string) => void
   onShowLess: (key: string) => void
-  menuOpen: boolean
-  onMenuToggle: () => void
-  onMenuClose: () => void
-  menuDirs: string[]
-  /** The folder the chooser focuses on open, or null for the first. */
-  menuPreselect: string | null
-  /** Installed agents: the chooser's agent choice, and each folder header's logos. */
-  menuAgents: AgentKind[]
-  menuAgent: AgentKind
-  onMenuAgentChange: (agent: AgentKind) => void
-  onChoose: (cwd: string, agent: AgentKind) => void
-  onPickOther: (agent: AgentKind) => void
+  /** The head's pencil: a new-conversation chooser (⌘N). */
+  onNewConversation: () => void
+  /** Installed agents: each folder header's logos. */
+  agents: AgentKind[]
   /** A folder's pencil: the new-conversation chooser with that folder preselected. */
   onNewInFolder: (root: string) => void
   /** A folder's agent logo: start that agent in the folder straight away. */
@@ -125,16 +117,8 @@ export default function Sidebar({
   revealed,
   onShowMore,
   onShowLess,
-  menuOpen,
-  onMenuToggle,
-  onMenuClose,
-  menuDirs,
-  menuPreselect,
-  menuAgents,
-  menuAgent,
-  onMenuAgentChange,
-  onChoose,
-  onPickOther,
+  onNewConversation,
+  agents,
   onNewInFolder,
   onStartInFolder,
   onToggleUnread,
@@ -368,16 +352,7 @@ export default function Sidebar({
         searchRef={searchRef}
         searchOpen={searchOpen}
         onSearchToggle={onSearchToggle}
-        menuOpen={menuOpen}
-        onMenuToggle={onMenuToggle}
-        onMenuClose={onMenuClose}
-        menuDirs={menuDirs}
-        menuPreselect={menuPreselect}
-        menuAgents={menuAgents}
-        menuAgent={menuAgent}
-        onMenuAgentChange={onMenuAgentChange}
-        onChoose={onChoose}
-        onPickOther={onPickOther}
+        onNewConversation={onNewConversation}
       />
 
       <div
@@ -417,7 +392,7 @@ export default function Sidebar({
                     collapsed={g.collapsed}
                     wantsAttention={g.wantsAttention}
                     onToggle={onToggleFolder}
-                    agents={menuAgents}
+                    agents={agents}
                     onNew={onNewInFolder}
                     onStart={onStartInFolder}
                   />
