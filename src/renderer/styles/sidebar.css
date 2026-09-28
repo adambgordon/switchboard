@@ -19,10 +19,12 @@
 .sb-row.selected:hover {
   background: var(--paper-raised);
 }
-/* Compact: one line. Logo, title, then the elsewhere glyph and the dot/⋮ slot, all centered. */
+/* Compact: one line. Logo, title, then the elsewhere glyph and the dot/⋮ slot, all centered. The
+   trailing padding is short of the leading: the dot/⋮ slot is wider than the mark it holds, and this
+   centers that mark under its folder's pencil, with its edge about as far in as the logo's. */
 .sb-row.compact {
   align-items: center;
-  padding: 3px 8px;
+  padding: 3px 3px 3px 8px;
 }
 /* Asking or unread: the title goes as heavy as its folder's name does for the same reason (needsYou). */
 .sb-row.attention .sb-row-title {

@@ -19,6 +19,7 @@ import { readdir } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
+  CONVERSATION_MENU_ACTIONS,
   IPC,
   type AgentAvailability,
   type AgentKind,
@@ -30,7 +31,8 @@ import {
   type PtyState,
   type TabDragPayload,
   type TabDropOutcome,
-  type TabMenuAction,
+  type ConversationMenuAction,
+  type ConversationMenuEntry,
   type TabOpenMode,
   type UpdateRunState,
   type WindowInit
@@ -656,72 +658,62 @@ export function popCodeContextMenu(code: string, win: BrowserWindow | null): voi
 }
 
 /**
- * Pop the NATIVE context menu for a tab and resolve with what was chosen (null if dismissed).
- * Native for the same reasons as the link and code menus above, plus one specific to a strip: an OS
- * menu isn't anchored to a DOM node, so the strip scrolling out from under it cannot close it.
+ * Pop the NATIVE context menu for a tab and resolve with what was chosen (null if dismissed). The
+ * renderer builds the list (conversationMenu) — the same one the rail row's menu renders — so this only
+ * turns it into menu items. Native for the same reasons as the link and code menus above, plus one
+ * specific to a strip: an OS menu isn't anchored to a DOM node, so the strip scrolling out from under
+ * it cannot close it. A destructive entry cannot be colored in a native menu; its label says enough.
  *
  * Resolution is settle-once. A click resolves immediately with its action; the close callback
  * resolves `null` only if nothing was picked, and is deferred a tick because the ordering of a menu
  * item's `click` against the popup's close callback is not something to rely on.
  *
- * No accelerator is attached to Close Tab here even though ⌘W performs it. A popup-menu accelerator
+ * No accelerator is attached to Close tab here even though ⌘W performs it. A popup-menu accelerator
  * would register a second binding for a chord the File menu already owns; the label alone is enough,
  * and the item is reached by pointer anyway.
  */
 export function popTabContextMenu(
-  opts: {
-    count: number
-    closeOthers: boolean
-    details: boolean
-    splitRight: boolean
-    moveRight: boolean
-    moveLeft: boolean
-    newWindow: boolean
-  },
+  entries: ConversationMenuEntry[],
   win: BrowserWindow | null
-): Promise<TabMenuAction | null> {
+): Promise<ConversationMenuAction | null> {
   return new Promise((resolve) => {
     let settled = false
-    const finish = (action: TabMenuAction | null): void => {
+    const finish = (action: ConversationMenuAction | null): void => {
       if (settled) return
       settled = true
       resolve(action)
     }
-    const pick = (action: TabMenuAction) => () => finish(action)
-    // Every label counts its targets, so a command that will act on a whole selection says so. The
-    // suffix is empty for one tab, which keeps the ordinary menu reading exactly as it did.
-    const n = Math.max(1, opts.count)
-    const many = n > 1
-    const tabs = many ? `${n} Tabs` : 'Tab'
-    const items: MenuItemConstructorOptions[] = [
-      { label: `Close ${tabs}`, click: pick('close') }
-    ]
-    if (opts.closeOthers) items.push({ label: 'Close Other Tabs', click: pick('closeOthers') })
-    // Where a tab can be sent. Hidden rather than disabled when it does not apply, matching `details`
-    // and the row menu: a control that silently does nothing is worse than an absent one. The label
-    // says what will actually happen — "Split" only when a pane is about to be created, "Move" when
-    // both already exist.
-    if (opts.splitRight || opts.moveRight || opts.moveLeft || opts.newWindow) {
-      items.push({ type: 'separator' })
-      if (opts.splitRight) items.push({ label: 'Split Right', click: pick('splitRight') })
-      if (opts.moveRight) items.push({ label: 'Move Right', click: pick('moveRight') })
-      if (opts.moveLeft) items.push({ label: 'Move Left', click: pick('moveLeft') })
-      if (opts.newWindow) {
-        // Singular window either way: a group moves into ONE new window, not one each.
-        items.push({
-          label: many ? `Move ${n} Tabs to New Window` : 'Move to New Window',
-          click: pick('newWindow')
-        })
-      }
-    }
-    if (opts.details) {
-      items.push({ type: 'separator' }, { label: 'Session Details…', click: pick('details') })
+    const items: MenuItemConstructorOptions[] = entries.map((e) =>
+      'separator' in e ? { type: 'separator' } : { label: e.label, click: () => finish(e.action) }
+    )
+    if (items.length === 0) {
+      finish(null)
+      return
     }
     Menu.buildFromTemplate(items).popup({
       ...(win ? { window: win } : {}),
       callback: () => setTimeout(() => finish(null), 0)
     })
   })
+}
+
+/** A menu list from a renderer, kept only if every entry is one this app defines. */
+function parseMenuEntries(value: unknown): ConversationMenuEntry[] | null {
+  if (!Array.isArray(value)) return null
+  const known: readonly string[] = CONVERSATION_MENU_ACTIONS
+  const out: ConversationMenuEntry[] = []
+  for (const e of value) {
+    if (e && typeof e === 'object' && (e as { separator?: unknown }).separator === true) out.push({ separator: true })
+    else if (
+      e &&
+      typeof e === 'object' &&
+      typeof (e as { label?: unknown }).label === 'string' &&
+      known.includes((e as { action?: unknown }).action as string)
+    ) {
+      out.push({ action: (e as { action: ConversationMenuAction }).action, label: (e as { label: string }).label })
+    } else return null
+  }
+  return out
 }
 
 export function registerIpc(): void {
@@ -901,21 +893,10 @@ export function registerIpc(): void {
   ipcMain.on(IPC.codeContextMenu, (e, code: string) =>
     popCodeContextMenu(code, BrowserWindow.fromWebContents(e.sender))
   )
-  ipcMain.handle(
-    IPC.tabContextMenu,
-    (
-      e,
-      opts: {
-        count: number
-        closeOthers: boolean
-        details: boolean
-        splitRight: boolean
-        moveRight: boolean
-        moveLeft: boolean
-        newWindow: boolean
-      }
-    ) => popTabContextMenu(opts, BrowserWindow.fromWebContents(e.sender))
-  )
+  ipcMain.handle(IPC.tabContextMenu, (e, value: unknown) => {
+    const entries = parseMenuEntries(value)
+    return entries ? popTabContextMenu(entries, BrowserWindow.fromWebContents(e.sender)) : null
+  })
   // ---- dragging a tab between windows ----
   // The referee. While a mouse button is held the OS delivers every move to the window the drag began
   // in, so no other window can see the pointer over itself; main is the only party that can. It reads
@@ -1081,14 +1062,17 @@ export function registerIpc(): void {
   // ⇧⌘N: a fresh window onto the new-conversation chooser, with the rail hidden like any other window
   // beyond the first — ⌘B brings it back. `preselect` is the sender's folder, so "new window here" starts
   // where the user was.
-  ipcMain.on(IPC.windowOpenNew, (_e, preselect: unknown) => {
+  // Given an agent too, the window starts that conversation rather than offering the chooser.
+  ipcMain.on(IPC.windowOpenNew, (_e, preselect: unknown, agent: unknown) => {
+    const dir = typeof preselect === 'string' ? preselect : null
     openWindow?.({
       sessionIds: [],
       activeSessionId: null,
       restoredTabs: null,
       primary: false,
       collapseRail: true,
-      newConversation: { preselect: typeof preselect === 'string' ? preselect : null }
+      newConversation:
+        dir !== null && (agent === 'claude' || agent === 'codex') ? { preselect: dir, agent } : { preselect: dir }
     })
   })
   ipcMain.on(IPC.menuSetTabsEnabled, (_e, enabled: unknown) => setTabsMenuEnabled(enabled === true))

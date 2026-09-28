@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { Close, Chevron } from './icons'
+import { formatCount } from '../lib/format'
 
 interface Props {
   query: string
@@ -57,7 +58,7 @@ export default function TranscriptSearch({
   }
 
   const hasQuery = query.trim().length > 0
-  const readout = !hasQuery ? '' : count === 0 ? 'No results' : `${activeIndex + 1} / ${count}`
+  const readout = !hasQuery ? '' : count === 0 ? 'No results' : `${formatCount(activeIndex + 1)} / ${formatCount(count)}`
   const noMatches = count === 0
 
   return (
@@ -74,7 +75,7 @@ export default function TranscriptSearch({
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={onKeyDown}
       />
-      <span className="sb-find-count mono">{readout}</span>
+      <span className="sb-find-count">{readout}</span>
       <button
         className="sb-find-nav"
         onClick={onPrev}

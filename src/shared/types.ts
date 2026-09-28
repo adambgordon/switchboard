@@ -462,15 +462,28 @@ export interface UpdateCheckState {
   checking: boolean
 }
 
-/** What the native tab context menu resolved to. */
-export type TabMenuAction =
-  | 'close'
-  | 'closeOthers'
-  | 'details'
-  | 'splitRight'
-  | 'moveRight'
-  | 'moveLeft'
-  | 'newWindow'
+/** The commands in a conversation's menu — the rail row's and the tab's are one list
+ *  (conversationMenu). A value list, so main can check what a renderer asks it to show. */
+export const CONVERSATION_MENU_ACTIONS = [
+  'resume',
+  'toSide',
+  'newWindow',
+  'pin',
+  'unpin',
+  'markRead',
+  'markUnread',
+  'rename',
+  'details',
+  'close',
+  'closeOthers',
+  'stop'
+] as const
+export type ConversationMenuAction = (typeof CONVERSATION_MENU_ACTIONS)[number]
+
+/** One line of that menu: a command, or a divider between its groups. */
+export type ConversationMenuEntry =
+  | { action: ConversationMenuAction; label: string; danger?: boolean }
+  | { separator: true }
 
 /** What became of a tab group released outside its own window's strips. See `tabDragDrop`. */
 export type TabDropOutcome = 'moved' | 'detached' | 'cancelled'
@@ -518,7 +531,9 @@ export interface WindowInit {
    */
   collapseRail: boolean
   /** Open onto a new-conversation chooser with this folder focused (null: the first). Absent otherwise. */
-  newConversation?: { preselect: string | null }
+  /** Opened for a new conversation: onto the chooser with `preselect` focused, or — with an `agent` —
+   *  starting one with it in `preselect`. */
+  newConversation?: { preselect: string | null; agent?: AgentKind }
 }
 
 
@@ -602,28 +617,11 @@ export interface SwitchboardApi {
   /** Pop the NATIVE macOS context menu for an inline code span (Copy Code). Same reasoning as above,
    *  and the same one-gesture-one-payload intent: the code, without its backticks. */
   codeContextMenu(code: string): void
-  /** Pop the NATIVE macOS context menu for a tab and resolve with the chosen action (null if
-   *  dismissed). Native for the same reasons as the two above, plus one specific to a strip: an OS
-   *  menu is not anchored to a DOM node, so the strip scrolling out from under it cannot close it.
-   *  `closeOthers` / `details` gate the items that would otherwise be offered as no-ops. */
-  tabContextMenu(opts: {
-    /** How many tabs the chosen command will act on — 1 unless a multi-selection is in effect and the
-     *  right-clicked tab belongs to it. Labels are pluralised from this, so a group action cannot read
-     *  as a single-tab one. */
-    count: number
-    closeOthers: boolean
-    details: boolean
-    /**
-     * Sending the tab sideways, as three mutually exclusive offers. Which one applies is the
-     * renderer's call, since only it knows the layout — and they are named for what actually happens:
-     * `splitRight` CREATES the second pane, while `moveRight` / `moveLeft` move between panes that
-     * already exist. Calling the latter "Split" would promise a split that is already there.
-     */
-    splitRight: boolean
-    moveRight: boolean
-    moveLeft: boolean
-    newWindow: boolean
-  }): Promise<TabMenuAction | null>
+  /** Pop the NATIVE macOS context menu for a tab, built from the renderer's list (conversationMenu),
+   *  and resolve with the chosen action (null if dismissed). Native for the same reasons as the two
+   *  above, plus one specific to a strip: an OS menu is not anchored to a DOM node, so the strip
+   *  scrolling out from under it cannot close it. */
+  tabContextMenu(entries: ConversationMenuEntry[]): Promise<ConversationMenuAction | null>
   /** ⌘W: main pushes this to the focused window, which closes its active tab — or calls
    *  `closeWindow()` when it has none, so the shortcut still behaves like macOS expects. Returns an
    *  unsubscribe fn. */
@@ -639,8 +637,9 @@ export interface SwitchboardApi {
   onMenuNewWindow(cb: () => void): () => void
   /** Whether tabs are on, so the File menu offers only the items that do something. */
   setTabsMenuEnabled(enabled: boolean): void
-  /** Open a NEW window onto the new-conversation chooser, rail hidden, with `preselect` focused. */
-  openNewWindow(preselect: string | null): void
+  /** Open a NEW window, rail hidden, onto the new-conversation chooser with `preselect` focused — or,
+   *  given an `agent`, straight onto a new conversation with it in `preselect`. */
+  openNewWindow(preselect: string | null, agent?: AgentKind): void
 
   // ---- dragging a tab between windows ----
   /** Tell main a tab-group drag started here, so it can referee where the cursor goes. */

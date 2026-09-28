@@ -1,6 +1,6 @@
 import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
-import { relTime, absShort } from '../lib/format'
+import { relTime, absShort, formatCount } from '../lib/format'
 import type { RailDensity } from '../lib/sidebarPrefs'
 import { rowTipPreview, rowTipTitle } from '../lib/rowTip'
 import { needsYou } from '../lib/sidebarModel'
@@ -176,11 +176,11 @@ function ConversationRowImpl({
           )}
           <span className="sb-row-meta">
             {mark}
-            <span className="mono" data-tip={absShort(lastActive)}>
+            <span data-tip={absShort(lastActive)}>
               {relTime(lastActive)}
             </span>
             <span className="sb-sep">·</span>
-            <span className="mono">{meta.messageCount} msg</span>
+            <span>{formatCount(meta.messageCount)} msg</span>
             {elsewhere && (
               <>
                 <span className="sb-sep">·</span>

@@ -554,7 +554,7 @@ export default function SettingsModal({
                         aria-valuetext={String(maxLiveSessions)}
                         style={{ '--pct': `${sliderPos}%` } as CSSProperties}
                       />
-                      <span className="sb-slider-value mono">{maxLiveSessions}</span>
+                      <span className="sb-slider-value">{maxLiveSessions}</span>
                       <button
                         type="button"
                         className="sb-slider-reset"

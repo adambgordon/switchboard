@@ -340,3 +340,10 @@ body.sb-window-drop-target .sb-tabstrip {
   background: var(--paper-active);
   color: var(--ink);
 }
+/* With ⌥ held, a running tab's × stops the session as well as closing the tab — destructive, so it
+   takes the danger colors on hover, as the menus' Stop session does. The held key is a root
+   attribute (heldKeys), so pressing ⌥ re-renders nothing. */
+:root[data-alt-held] .sb-tab.running .sb-tab-close:hover {
+  background: var(--danger-wash);
+  color: var(--danger-ink);
+}

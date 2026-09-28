@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { heldKeys, onHeldKeys } from '../lib/heldKeys'
 import { clampTipText, placeTip, placeTipRight, tipMetaLine, tipOnEnter, tipOnLeave, type TipTarget } from '../lib/tooltip'
 
 interface Tip {
@@ -16,10 +17,12 @@ interface Tip {
   hostBottom: number
   /** Viewport x of the host's right edge. */
   hostRight: number
-  /** A scrub host (`data-tip-scrub`): the label sits to its right, and sweeping across such hosts
-   *  re-fills it. */
+  /** A scrub host (`data-tip-scrub`), stacked in a column: the label sits to its right. */
   scrub: boolean
-  /** Re-filled from a neighboring scrub host rather than freshly shown — the label glides to its new
+  /** The host's tooltip group (`data-tip-group`), or null: moving onto another host in it re-fills the
+   *  label at once. */
+  group: Element | null
+  /** Re-filled from a neighbor in its group rather than freshly shown — the label glides to its new
    *  place instead of appearing there. */
   glide: boolean
   /** Host opted into a wrapping, max-width label (for paragraph-length copy) via `data-tip-wide`. */
@@ -28,8 +31,11 @@ interface Tip {
   compact: boolean
 }
 
-const SHOW_DELAY = 450
-/** How long a scrub-host label outlives its host while the pointer crosses a gap between hosts. */
+const SHOW_DELAY = 700
+/** For hosts whose purpose is plain from their icon (`data-tip-slow`): the label is there for whoever
+ *  lingers, and must not flash up under a pointer merely passing over — or resting on — them. */
+const SLOW_SHOW_DELAY = 1500
+/** How long a grouped label outlives its host while the pointer crosses a gap between hosts. */
 const SCRUB_GRACE = 150
 const GAP = 7
 const EDGE = 8
@@ -41,8 +47,20 @@ function hostOf(t: EventTarget | null): Element | null {
   return el?.closest('[data-tip-scrub]') ?? el?.closest('[data-tip]') ?? null
 }
 
-const targetOf = (host: Element | null): TipTarget =>
-  host === null ? 'none' : host.hasAttribute('data-tip-scrub') ? 'scrub' : 'plain'
+const groupOf = (host: Element): Element | null => host.closest('[data-tip-group]')
+
+const targetOf = (host: Element | null): TipTarget => (host === null ? null : { group: groupOf(host) })
+
+/** A host's label under the modifiers held now: `data-tip-alt` while ⌥ is down, `data-tip-shift` while
+ *  ⇧ is, for a control whose meaning changes under one (see heldKeys). */
+function tipText(el: Element): string | null {
+  const keys = heldKeys()
+  return (
+    (keys.alt ? el.getAttribute('data-tip-alt') : null) ??
+    (keys.shift ? el.getAttribute('data-tip-shift') : null) ??
+    el.getAttribute('data-tip')
+  )
+}
 
 /**
  * App-wide tooltips. One fixed-positioned label driven by `data-tip` attributes anywhere in the
@@ -62,8 +80,10 @@ export default function TooltipLayer() {
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const activeRef = useRef<Element | null>(null)
   const graceTimer = useRef<ReturnType<typeof setTimeout>>()
-  // A scrub host's label is on screen (possibly within its grace) — what makes the next one instant.
-  const scrubShownRef = useRef(false)
+  // The group of the label on screen (possibly within its grace) — what makes its neighbors instant.
+  const shownGroupRef = useRef<Element | null>(null)
+  // The host whose label is on screen, so a modifier going down or up can re-word it in place.
+  const shownHostRef = useRef<Element | null>(null)
 
   useEffect(() => {
     const clearGrace = (): void => {
@@ -75,12 +95,14 @@ export default function TooltipLayer() {
       timer.current = undefined
       clearGrace()
       activeRef.current = null
-      scrubShownRef.current = false
+      shownGroupRef.current = null
+      shownHostRef.current = null
       setTip(null)
     }
     const reveal = (el: Element, glide: boolean): void => {
-      const text = el.getAttribute('data-tip')
+      const text = tipText(el)
       if (!text) return
+      shownHostRef.current = el
       const r = el.getBoundingClientRect()
       const sub = el.getAttribute('data-tip-sub')
       // Preferences copy is never truncated. The clamp exists for strings the app does not author and
@@ -123,6 +145,7 @@ export default function TooltipLayer() {
         hostBottom: r.bottom,
         hostRight: r.right,
         scrub: el.hasAttribute('data-tip-scrub'),
+        group: groupOf(el),
         glide,
         wide: el.hasAttribute('data-tip-wide'),
         compact: el.hasAttribute('data-tip-compact')
@@ -138,7 +161,7 @@ export default function TooltipLayer() {
       const el = hostOf(e.target)
       if (!el || el === activeRef.current) return
       clearGrace()
-      const next = tipOnEnter(scrubShownRef.current, targetOf(el) === 'scrub' ? 'scrub' : 'plain')
+      const next = tipOnEnter(shownGroupRef.current, { group: groupOf(el) })
       if (next === 'replace') hide()
       activeRef.current = el
       if (timer.current) clearTimeout(timer.current)
@@ -146,7 +169,8 @@ export default function TooltipLayer() {
         timer.current = undefined
         reveal(el, true)
       } else {
-        timer.current = setTimeout(() => reveal(el, false), SHOW_DELAY)
+        const delay = el.hasAttribute('data-tip-slow') ? SLOW_SHOW_DELAY : SHOW_DELAY
+        timer.current = setTimeout(() => reveal(el, false), delay)
       }
     }
     const onOut = (e: MouseEvent): void => {
@@ -154,12 +178,20 @@ export default function TooltipLayer() {
       // Ignore moves that stay within the active host (e.g. onto its child icon).
       const to = hostOf(e.relatedTarget)
       if (to === activeRef.current) return
-      const next = tipOnLeave(scrubShownRef.current, targetOf(to))
+      const next = tipOnLeave(shownGroupRef.current, targetOf(to))
       if (next === 'hide') return hide()
       // Keep the label up: the host being entered re-fills it, or the grace ends it.
       activeRef.current = null
       if (next === 'grace') graceTimer.current = setTimeout(hide, SCRUB_GRACE)
     }
+    // Pressing or releasing ⌥ / ⇧ over a control that means something else under it re-words its label
+    // at once, where it stands.
+    const offKeys = onHeldKeys(() => {
+      const el = shownHostRef.current
+      if (el && el === activeRef.current && (el.hasAttribute('data-tip-alt') || el.hasAttribute('data-tip-shift'))) {
+        reveal(el, false)
+      }
+    })
     document.addEventListener('mouseover', onOver)
     document.addEventListener('mouseout', onOut)
     // Any click, scroll, or window blur dismisses immediately — a stale tooltip is worse than none.
@@ -167,6 +199,7 @@ export default function TooltipLayer() {
     window.addEventListener('scroll', hide, true)
     window.addEventListener('blur', hide)
     return () => {
+      offKeys()
       document.removeEventListener('mouseover', onOver)
       document.removeEventListener('mouseout', onOut)
       document.removeEventListener('mousedown', hide, true)
@@ -183,7 +216,7 @@ export default function TooltipLayer() {
   useLayoutEffect(() => {
     const el = elRef.current
     if (!el || !tip) return
-    scrubShownRef.current = tip.scrub
+    shownGroupRef.current = tip.group
 
     if (tip.scrub) {
       const { left, top } = placeTipRight({
@@ -214,13 +247,14 @@ export default function TooltipLayer() {
     el.style.top = `${top}px`
     el.style.transform = side === 'bottom' ? 'translate(-50%, 0)' : 'translate(-50%, -100%)'
 
-    // Horizontal: centered on the host, shifted just enough to clear either edge.
-    el.style.left = `${tip.x}px`
-    const r = el.getBoundingClientRect()
+    // Horizontal: centered on the host, shifted just enough to clear either edge. Worked out from the
+    // label's width rather than read back from its rect: a label gliding between neighbors is still
+    // mid-transition, and its rect would report where it is coming from.
+    const half = el.offsetWidth / 2
     let shift = 0
-    if (r.left < EDGE) shift = EDGE - r.left
-    else if (r.right > window.innerWidth - EDGE) shift = window.innerWidth - EDGE - r.right
-    if (shift !== 0) el.style.left = `${tip.x + shift}px`
+    if (tip.x - half < EDGE) shift = EDGE - (tip.x - half)
+    else if (tip.x + half > window.innerWidth - EDGE) shift = window.innerWidth - EDGE - (tip.x + half)
+    el.style.left = `${tip.x + shift}px`
   }, [tip])
 
   if (!tip) return null

@@ -83,7 +83,7 @@
 
   --tracking-tight: -0.01em;
   --tracking-wide: 0.02em;
-  --tracking-caps: 0.14em; /* for mono uppercase labels */
+  --tracking-caps: 0.08em; /* for uppercase labels (.label-caps) */
 
   /* ---- spacing ---- */
   --s1: 4px;

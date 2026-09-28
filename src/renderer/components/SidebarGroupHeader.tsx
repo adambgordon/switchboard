@@ -15,6 +15,9 @@ interface Props {
   onNew: (root: string) => void
   /** An agent's logo: folder and agent are both known, so the conversation starts at once. */
   onStart: (root: string, agent: AgentKind) => void
+  /** ⇧-click on either: the same, in a new window — the pencil's chooser, or the logo's conversation.
+   *  Absent while new windows are unavailable. */
+  onNewInWindow?: (root: string, agent?: AgentKind) => void
 }
 
 /**
@@ -36,7 +39,8 @@ export default function SidebarGroupHeader({
   onToggle,
   agents,
   onNew,
-  onStart
+  onStart,
+  onNewInWindow
 }: Props) {
   return (
     // The folder's drag handle: the header grabs the whole folder around it (useBlockReorder).
@@ -58,13 +62,15 @@ export default function SidebarGroupHeader({
         </span>
       </button>
       {/* The pencil first, so Tab reaches it before the logos; the logos are placed around it. */}
-      <div className="sb-group-new" data-no-drag="">
+      <div className="sb-group-new" data-no-drag="" data-tip-group="">
         <button
           className="sb-group-pencil"
-          onClick={() => onNew(root)}
+          onClick={(e) => (e.shiftKey && onNewInWindow ? onNewInWindow(root) : onNew(root))}
           // The tooltip leaves the folder implied; the label names it, or every folder's pencil would
           // read the same to a screen reader.
           data-tip="New conversation"
+          {...(onNewInWindow ? { 'data-tip-shift': 'New conversation in new window' } : {})}
+          data-tip-slow=""
           aria-label={`New conversation in ${label}`}
         >
           <Compose size={15} />
@@ -77,8 +83,10 @@ export default function SidebarGroupHeader({
               className="sb-group-agent"
               // Each logo's slot, counted outward from the pencil; the slide distance derives from it.
               style={{ '--slot': i + 1 } as React.CSSProperties}
-              onClick={() => onStart(root, a)}
+              onClick={(e) => (e.shiftKey && onNewInWindow ? onNewInWindow(root, a) : onStart(root, a))}
               data-tip={tip}
+              {...(onNewInWindow ? { 'data-tip-shift': `${tip} in new window` } : {})}
+              data-tip-slow=""
               aria-label={`${tip} in ${label}`}
             >
               <AgentLogo agent={a} size={13} decorative />

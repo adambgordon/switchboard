@@ -11,7 +11,7 @@ import {
 } from 'react'
 import type { ConversationMeta, PtyState, Transcript } from '@shared/types'
 import PaneHeader from './PaneHeader'
-import TabStrip, { type TabDescriptor } from './TabStrip'
+import TabStrip, { type TabConversationCommand, type TabDescriptor } from './TabStrip'
 import TranscriptView, { type TranscriptScrollState } from './TranscriptView'
 import { Play } from './icons'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
@@ -41,6 +41,9 @@ interface Props {
   activeTabIndex: number
   onActivateTab: (pane: number, index: number, focusSurface?: boolean) => void
   onCloseTab: (pane: number, index: number) => void
+  onCloseOneTab: (pane: number, index: number) => void
+  onStopAndCloseTab: (pane: number, index: number) => void
+  onTabCommand: (command: TabConversationCommand, sessionId: string) => void
   onCloseOtherTabs: (pane: number, index: number) => void
   onPromoteTab: (sessionId: string, pane?: number) => void
   /** See TabStrip: whether the tab can create the split, and whether it can cross an existing one. */
@@ -167,6 +170,9 @@ export default function MainPane(props: Props) {
     activeTabIndex,
     onActivateTab,
     onCloseTab,
+    onCloseOneTab,
+    onStopAndCloseTab,
+    onTabCommand,
     onCloseOtherTabs,
     onPromoteTab,
     canSplitRight,
@@ -319,6 +325,9 @@ export default function MainPane(props: Props) {
           focused={paneFocused}
           onActivate={onActivateTab}
           onClose={onCloseTab}
+          onCloseOne={onCloseOneTab}
+          onStopAndClose={onStopAndCloseTab}
+          onCommand={onTabCommand}
           onCloseOthers={onCloseOtherTabs}
           onPromote={onPromoteTab}
           onShowInfo={onShowInfoFor}

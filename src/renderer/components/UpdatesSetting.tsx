@@ -141,7 +141,7 @@ export default function UpdatesSetting({ updates }: Props): ReactNode {
         <div className="sb-update-head">
           {button}
           <div className="sb-update-info">
-            <span className="sb-update-version mono">
+            <span className="sb-update-version">
               {info ? `v${info.version} · ${info.shaShort}` : ''}
             </span>
             <span className="sb-update-status">{displayStatus}</span>

@@ -43,7 +43,7 @@ const api: SwitchboardApi = {
   onMenuNewConversation: (cb) => subscribe(IPC.menuNewConversation, cb as never),
   onMenuNewWindow: (cb) => subscribe(IPC.menuNewWindow, cb as never),
   setTabsMenuEnabled: (enabled) => ipcRenderer.send(IPC.menuSetTabsEnabled, enabled),
-  openNewWindow: (preselect) => ipcRenderer.send(IPC.windowOpenNew, preselect),
+  openNewWindow: (preselect, agent) => ipcRenderer.send(IPC.windowOpenNew, preselect, agent),
   tabDragBegin: (payload) => ipcRenderer.send(IPC.tabDragBegin, payload),
   tabDragHover: () => ipcRenderer.send(IPC.tabDragHover),
   tabDragDrop: () => ipcRenderer.invoke(IPC.tabDragDrop),
@@ -144,7 +144,10 @@ function readWindowInit(): WindowInit {
         ? {
             newConversation: {
               preselect:
-                typeof parsed.newConversation.preselect === 'string' ? parsed.newConversation.preselect : null
+                typeof parsed.newConversation.preselect === 'string' ? parsed.newConversation.preselect : null,
+              ...(parsed.newConversation.agent === 'claude' || parsed.newConversation.agent === 'codex'
+                ? { agent: parsed.newConversation.agent }
+                : {})
             }
           }
         : {})

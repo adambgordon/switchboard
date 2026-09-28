@@ -70,11 +70,20 @@ export function formatDuration(ms: number): string {
   return `${min}m`
 }
 
-/** Compact count with a metric prefix, e.g. 942 -> "942", 5200 -> "5.2K", 324315 -> "324K",
- *  18389031 -> "18.4M". One decimal under 100 of a unit; the exact count belongs in a tooltip. */
+// One formatter for every count, built once: counts render on every rail row. en-US, as the UI is.
+const COUNT = new Intl.NumberFormat('en-US')
+
+/** A count as it is read, grouped by thousands, e.g. 1057 -> "1,057". */
+export function formatCount(n: number): string {
+  return COUNT.format(n)
+}
+
+/** Compact count, e.g. 942 -> "942", 5200 -> "5.2K", 324315 -> "324K", 18389031 -> "18.4M",
+ *  1234567890 -> "1.2B". Counts read in thousands, millions and billions, so billions are B — G is
+ *  for sizes (see formatBytes). One decimal under 100 of a unit; the exact count belongs in a tooltip. */
 export function formatMetric(n: number): string {
   const units: [number, string][] = [
-    [1e9, 'G'],
+    [1e9, 'B'],
     [1e6, 'M'],
     [1e3, 'K']
   ]

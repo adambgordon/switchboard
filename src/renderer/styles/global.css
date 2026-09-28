@@ -138,8 +138,9 @@ input::placeholder {
 }
 
 .label-caps {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: var(--text-2xs);
+  font-weight: 600;
   letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -205,11 +206,13 @@ input::placeholder {
   font-weight: 400;
   opacity: 0.72;
 }
-/* Re-filled while scrubbing down a column (data-tip-scrub): the label glides to the new host rather
-   than jumping, so a sweep reads as one label following the pointer. Only `top` moves — the column's
-   hosts share a right edge. */
+/* Re-filled from a neighbor in its group (data-tip-group) — down the rail's rows, along a toolbar: the
+   label glides to the new host rather than jumping, so a sweep reads as one label following the
+   pointer. */
 .sb-tip-glide {
-  transition: top 90ms var(--ease);
+  transition:
+    top 90ms var(--ease),
+    left 90ms var(--ease);
 }
 /* Three-line variant (data-tip-at / data-tip-meta): a quieter line still — when, and where. */
 .sb-tip-meta {

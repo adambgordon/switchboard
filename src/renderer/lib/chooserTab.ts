@@ -63,3 +63,17 @@ export function strayChoosers(layout: PaneLayout): string[] {
   }
   return out
 }
+
+/**
+ * What a chooser remembers while its view is not mounted — it unmounts whenever its tab is not the
+ * active one, and a move to the other pane mounts it afresh — held above the view, per chooser, so it
+ * comes back as the user left it. `focus` is the last focus request it acted on: a remount must not act
+ * on one again, which would pull the keyboard off the tab strip when arrowing back onto its tab.
+ * `picked` is null until an agent is chosen in it.
+ */
+export interface ChooserMemory {
+  focus: number | null
+  query: string
+  highlight: string | null
+  picked: AgentKind | null
+}

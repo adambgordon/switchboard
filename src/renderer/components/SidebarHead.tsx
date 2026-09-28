@@ -24,6 +24,8 @@ interface Props {
   onSearchToggle: () => void
   /** A new-conversation chooser — the same as ⌘N. */
   onNewConversation: () => void
+  /** ⇧-click: the same, in a new window (⇧⌘N). Absent while new windows are unavailable. */
+  onNewConversationInWindow?: () => void
 }
 
 /**
@@ -43,11 +45,12 @@ export default function SidebarHead({
   searchRef,
   searchOpen,
   onSearchToggle,
-  onNewConversation
+  onNewConversation,
+  onNewConversationInWindow
 }: Props) {
   const needsTip = `${needsYou} ${needsYou === 1 ? 'conversation needs' : 'conversations need'} you — click to go there`
   return (
-    <div className={`sb-rail-head${scrolled ? ' scrolled' : ''}`}>
+    <div className={`sb-rail-head${scrolled ? ' scrolled' : ''}`} data-tip-group="">
       <div className="sb-rail-head-top">
         <div className="sb-seg sb-rail-mode" role="radiogroup" aria-label="Group conversations">
           {MODES.map((m) => (
@@ -100,8 +103,9 @@ export default function SidebarHead({
           </button>
           <button
             className="sb-rail-icon-btn sb-rail-new-btn"
-            onClick={onNewConversation}
+            onClick={(e) => (e.shiftKey && onNewConversationInWindow ? onNewConversationInWindow() : onNewConversation())}
             data-tip="New conversation (⌘N)"
+            {...(onNewConversationInWindow ? { 'data-tip-shift': 'New conversation in new window (⇧⌘N)' } : {})}
             aria-label="New conversation"
           >
             <Compose size={15} />

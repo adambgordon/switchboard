@@ -65,7 +65,15 @@ import {
   snapshotPaneLayout,
   stepTab
 } from './lib/paneModel'
-import { chooserTabId, isChooserTab, newConversationTarget, strayChoosers } from './lib/chooserTab'
+import {
+  chooserTabId,
+  isChooserTab,
+  newConversationTarget,
+  strayChoosers,
+  type ChooserMemory
+} from './lib/chooserTab'
+import { emptyAfterStop, endedStops } from './lib/stopClose'
+import type { SidePlace } from './lib/conversationMenu'
 import {
   NO_SELECTION,
   actionTargets,
@@ -109,7 +117,7 @@ import {
 import { rowTipMeta, rowTipPreview, rowTipTitle } from './lib/rowTip'
 import TitleBar from './components/TitleBar'
 import MainPane from './components/MainPane'
-import type { TabDescriptor } from './components/TabStrip'
+import type { TabConversationCommand, TabDescriptor } from './components/TabStrip'
 import Sidebar from './components/Sidebar'
 import ResizeHandle from './components/ResizeHandle'
 import SettingsModal from './components/SettingsModal'
@@ -276,7 +284,8 @@ export default function App() {
   const choosersRef = useRef(choosers)
   choosersRef.current = choosers
   const nextChooserRef = useRef(1)
-  const chooserFocusRef = useRef(new Map<string, number>())
+  // What each chooser remembers across its view remounting — see ChooserMemory.
+  const chooserMemoryRef = useRef(new Map<string, ChooserMemory>())
   const [settingsPage, setSettingsPage] = useState<
     'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq' | null
   >(null)
@@ -927,11 +936,15 @@ export default function App() {
               tipMeta: null,
               preview: tab.preview,
               dot: null,
-              unlinked: true
+              unlinked: true,
+              running: false,
+              pinned: false,
+              unread: false
             }
           }
           const pty = ptys.bySession.get(tab.sessionId) ?? null
           const meta = metaById.get(tab.sessionId) ?? (pty ? synthMeta(pty) : null)
+          const state = meta ? liveStateFor(pty, meta, tab.sessionId) : null
           return {
             sessionId: tab.sessionId,
             title: rowTipTitle(pty && meta ? displayTitleForRow(pty, meta) : meta?.title ?? 'Conversation'),
@@ -951,12 +964,16 @@ export default function App() {
             preview: tab.preview,
             // Null meta implies null pty (meta falls back to the pty's stand-in whenever one exists),
             // so this resolves to "no dot" for exactly the sessions that have no state to report.
-            dot: meta ? liveDotClass(pty, meta, liveStateFor(pty, meta, tab.sessionId)) : null,
-            unlinked: isUnlinkedId(tab.sessionId)
+            dot: meta ? liveDotClass(pty, meta, state) : null,
+            unlinked: isUnlinkedId(tab.sessionId),
+            running: !!pty,
+            pinned: pinned.has(tab.sessionId),
+            // What the rail row's menu calls unread, so the two menus offer the same toggle.
+            unread: !!pty && (state === 'awaiting' || state === 'asking')
           }
         })
       ),
-    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor, tabTipMeta]
+    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor, tabTipMeta, pinned]
   )
 
   // Activating a tab is a landing like any other: it marks the conversation read and hands the pane
@@ -1267,13 +1284,23 @@ export default function App() {
     [startNew, openChooserTab]
   )
 
-  // A window opened by ⇧⌘N starts on a chooser.
+  // ⇧-click on a pencil or a folder's logo: its new conversation, in a window of its own. A null folder
+  // is the head pencil's, which means where the user is — as ⇧⌘N does.
+  const newInWindow = useCallback(
+    (root: string | null, agent?: AgentKind) => window.api.openNewWindow(root ?? focusedPreselect(), agent),
+    [focusedPreselect]
+  )
+
+  // A window opened by ⇧⌘N or a ⇧-clicked pencil starts on a chooser; one opened from a folder's logo
+  // starts that conversation, falling back to the chooser if it cannot.
   const openedChooserRef = useRef(false)
   useEffect(() => {
-    if (!windowInit.newConversation || openedChooserRef.current) return
+    const init = windowInit.newConversation
+    if (!init || openedChooserRef.current) return
     openedChooserRef.current = true
-    openChooserTab(windowInit.newConversation.preselect)
-  }, [openChooserTab])
+    if (init.agent && init.preselect !== null) startInFolder(init.preselect, init.agent)
+    else openChooserTab(init.preselect)
+  }, [openChooserTab, startInFolder])
 
   // With tabs off a chooser only ever fills the pane, so one that is no longer on screen is dropped —
   // see strayChoosers. A layout effect, so the dropped tab never paints.
@@ -1291,7 +1318,7 @@ export default function App() {
     for (const p of paneLayout.panes) for (const t of p.tabs) if (isChooserTab(t.sessionId)) open.add(t.sessionId)
     const closed = Object.keys(choosers).filter((k) => !open.has(k))
     if (closed.length === 0) return
-    for (const k of closed) chooserFocusRef.current.delete(k)
+    for (const k of closed) chooserMemoryRef.current.delete(k)
     setChoosers((prev) => {
       const next = { ...prev }
       for (const k of closed) delete next[k]
@@ -1416,10 +1443,21 @@ export default function App() {
     },
     [panes.splitPane, land, isUnlinkedId, markRead, requestFocus]
   )
-  const canOpenToSide = useCallback((id: string): boolean => {
+  // What the row menu's where-to commands are called: where openToSide would put the conversation — a
+  // new pane on the right, or the existing pane on one side — and whether they move a tab this window
+  // already holds or open one. See conversationMenu.
+  const placementFor = useCallback((id: string): { side: SidePlace | null; hasTabHere: boolean } => {
     const l = paneLayoutRef.current
-    const target = l.panes.length > 1 ? (l.focusIndex === 0 ? 1 : 0) : 1
-    return canPlaceTabsToSide(l, [id], target)
+    const split = l.panes.length > 1
+    const target = split ? (l.focusIndex === 0 ? 1 : 0) : 1
+    const side: SidePlace | null = !canPlaceTabsToSide(l, [id], target)
+      ? null
+      : !split
+        ? 'right'
+        : target === 1
+          ? 'rightPane'
+          : 'leftPane'
+    return { side, hasTabHere: !!locateTab(l, id) }
   }, [])
   // Send an EXISTING tab to the other pane, creating the split when there is none. Distinct from
   // openToSide, which opens a conversation over there and leaves whatever was here alone: this is a
@@ -1498,12 +1536,15 @@ export default function App() {
   // The tab is what moves; the live TERMINAL does not follow. One xterm per terminal app-wide, and
   // yanking it would blank the session someone may be typing in — so the new window shows the
   // transcript and offers to bring the terminal over through the serialized ownership handoff.
+  //
+  // From a tab this carries the selection it belongs to, which the tab menu's label counts; from a rail
+  // row (`group` false) it is that conversation alone, as the row menu's label says.
   const moveToNewWindow = useCallback(
-    (id: string) => {
+    (id: string, group = true) => {
       beginVisit()
       const at = locateTab(paneLayoutRef.current, id)
       // A group goes to ONE new window holding all of it, not one window each.
-      const ids = at ? targetsFor(at.pane, id) : [id]
+      const ids = at && group ? targetsFor(at.pane, id) : [id]
       const order = at
         ? paneLayoutRef.current.panes[at.pane].tabs.map((tab) => tab.sessionId)
         : [id]
@@ -1670,17 +1711,33 @@ export default function App() {
     const tab = selectedTabIdRef.current
     if (tab !== null && isChooserTab(tab)) requestFocus(tab)
   }, [panes.splitActiveTab, panes.unsplit, beginVisit, requestFocus])
-  const killSession = useCallback((ptyId: string) => window.api.kill(ptyId), [])
-  // Stop a session by its conversation id — the rail's right-click menu works in session ids, while
-  // the PtyManager kills by ptyId, so resolve the live process first (mirrors the pane header's
-  // onKill). A no-op if the conversation isn't live.
+  // The user's Stop, by conversation id — the pane header and the rail's menu both. The PtyManager
+  // kills by ptyId, so the live process is resolved first; a no-op if the conversation isn't live.
+  // Remembered until the process exits, when an empty conversation's tab closes — see stopClose.
+  const stoppedRef = useRef(new Set<string>())
   const stopSession = useCallback(
     (id: string) => {
       const pty = ptys.bySession.get(id)
-      if (pty) killSession(pty.ptyId)
+      if (!pty) return
+      stoppedRef.current.add(id)
+      window.api.kill(pty.ptyId)
     },
-    [ptys.bySession, killSession]
+    [ptys.bySession]
   )
+  useEffect(() => {
+    for (const id of endedStops(stoppedRef.current, ptys.bySession)) {
+      stoppedRef.current.delete(id)
+      if ((metaByIdRef.current.get(id)?.messageCount ?? 0) > 0) continue
+      // A revision of its own, so the read is fresh from disk rather than a parse already in flight.
+      void window.api
+        .getTranscript(id, `stopped:${Date.now()}`)
+        .then((t) => {
+          if (ptysBySessionRef.current.has(id)) return
+          if (emptyAfterStop(metaByIdRef.current.get(id)?.messageCount ?? 0, t)) panes.closeTabs([id])
+        })
+        .catch(() => {})
+    }
+  }, [ptys.bySession, panes.closeTabs])
   // Resume a not-live conversation by id — the rail's right-click menu works in session ids, so
   // resolve id→meta and run the shared resume() (which spawns the process and focuses its terminal,
   // like the pane-header Resume / ⏎). A no-op if the id isn't indexed.
@@ -1842,6 +1899,37 @@ export default function App() {
       else markUnread(id)
     },
     [liveStateOf, markRead, markUnread]
+  )
+
+  // A tab's × and middle-click close that tab alone, even inside a multi-selection; the menu's Close,
+  // which counts the tabs it acts on, is what closes a selection.
+  const closeOneTab = useCallback(
+    (pane: number, index: number) => {
+      beginVisit()
+      panes.closeTab(pane, index)
+    },
+    [panes.closeTab, beginVisit]
+  )
+  // ⌥-× on a running tab: end the session, then close the tab — its own, as the plain × does.
+  const stopAndCloseTab = useCallback(
+    (pane: number, index: number) => {
+      const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
+      if (!id) return
+      stopSession(id)
+      closeOneTab(pane, index)
+    },
+    [stopSession, closeOneTab]
+  )
+  // The conversation commands a tab's menu shares with its rail row, run by the same handlers.
+  const runTabCommand = useCallback(
+    (command: TabConversationCommand, id: string) => {
+      if (command === 'resume') resumeSession(id)
+      else if (command === 'pin' || command === 'unpin') togglePinGated(id)
+      else if (command === 'markRead' || command === 'markUnread') toggleUnread(id)
+      else if (command === 'rename') showInfo(id, true)
+      else stopSession(id)
+    },
+    [resumeSession, togglePinGated, toggleUnread, showInfo, stopSession]
   )
 
   // Clear a manual "unread" mark once the user genuinely engages the open conversation — a click
@@ -2102,8 +2190,8 @@ export default function App() {
             onStick={tabsEnabled ? stickConversation : undefined}
             openElsewhere={openElsewhere}
             onOpenToSide={tabsEnabled ? openToSide : undefined}
-            canOpenToSide={tabsEnabled ? canOpenToSide : undefined}
-            onOpenInNewWindow={tabsEnabled ? moveToNewWindow : undefined}
+            placementFor={tabsEnabled ? placementFor : undefined}
+            onOpenInNewWindow={tabsEnabled ? (id: string) => moveToNewWindow(id, false) : undefined}
             onTogglePin={togglePinGated}
             query={query}
             onQueryChange={setQuery}
@@ -2119,6 +2207,7 @@ export default function App() {
             agents={availableAgents}
             onNewInFolder={newInFolder}
             onStartInFolder={startInFolder}
+            onNewInWindow={tabsEnabled ? newInWindow : undefined}
             onToggleUnread={toggleUnread}
             onMarkUnread={markUnreadGated}
             onResumeSession={resumeSession}
@@ -2205,6 +2294,9 @@ export default function App() {
                   activeTabIndex={pane.activeIndex}
                   onActivateTab={goToTab}
                   onCloseTab={closeTabsFrom}
+                  onCloseOneTab={closeOneTab}
+                  onStopAndCloseTab={stopAndCloseTab}
+                  onTabCommand={runTabCommand}
                   onCloseOtherTabs={panes.closeOtherTabs}
                   onPromoteTab={panes.promoteTab}
                   canSplitRight={(id) => canSplitRightFrom(i, id)}
@@ -2242,7 +2334,7 @@ export default function App() {
                   }}
                   onGoLive={() => goLive(i)}
                   onKill={() => {
-                    if (v.pty) killSession(v.pty.ptyId)
+                    if (v.pty) stopSession(v.pty.sessionId)
                   }}
                   onShowInfo={() => {
                     if (v.id) showInfo(v.id, false)
@@ -2275,7 +2367,7 @@ export default function App() {
                         focusKey={
                           focusReq && focusReq.sessionId === v.chooser && isFocused ? focusReq.n : null
                         }
-                        consumedFocus={chooserFocusRef}
+                        memory={chooserMemoryRef}
                       />
                     )
                   }

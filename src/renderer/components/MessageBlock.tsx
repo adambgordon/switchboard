@@ -21,7 +21,7 @@ import markdown from 'highlight.js/lib/languages/markdown'
 import plaintext from 'highlight.js/lib/languages/plaintext'
 import type { TranscriptBlock } from '@shared/types'
 import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/messageGroups'
-import { clockTime, fullDateTime } from '../lib/format'
+import { clockTime, formatCount, fullDateTime } from '../lib/format'
 import { rowsToMarkdownTable, rowsToPlainText, turnText } from '../lib/clipboard'
 import { isInlineCode, tableRows } from '../lib/mdCopyDom'
 import { langLabelFromClassName } from '../lib/codeLang'
@@ -496,7 +496,7 @@ function ToolCallView({ call }: { call: ToolCall }): ReactNode {
   const hasInput = call.input !== undefined && call.input !== null
   return (
     <div className="tool-call">
-      <div className="tool-head mono">
+      <div className="tool-head">
         <span aria-hidden="true">⚙</span>
         <span className="tool-name">{call.name}</span>
       </div>
@@ -519,7 +519,7 @@ function ToolPairView({ pair }: { pair: ToolPair }): ReactNode {
       {pair.call ? <ToolCallView call={pair.call} /> : null}
       {pair.result ? (
         <div className="tool-result">
-          <div className="tool-head mono result-head">
+          <div className="tool-head result-head">
             <span aria-hidden="true">↳</span>
             <span className={pair.result.isError ? 'tool-name is-error' : 'tool-name'}>
               {pair.result.isError ? 'Error' : 'Result'}
@@ -546,14 +546,14 @@ function ToolRun({ item }: { item: ToolRunItem }): ReactNode {
   const noun = item.count === 1 ? 'tool call' : 'tool calls'
   return (
     <details className="tool-run" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="tool-head tool-toggle mono">
+      <summary className="tool-head tool-toggle">
         {/* No gear on the run header itself — the individual calls inside keep theirs. data-tip rides
             the label cluster (not the full-width summary) so the tooltip anchors beside the cursor. The
             noun matches the count so a single-call run reads "tool call" (label + tooltip). */}
         <span className="disclosure-label" data-tip={`${open ? 'Collapse' : 'Expand'} ${noun}`}>
           <Chevron className="run-chevron" size={13} />
           <span className="tool-name">
-            <span className="tool-count">{item.count}</span>
+            <span className="tool-count">{formatCount(item.count)}</span>
             {` ${noun}`}
           </span>
         </span>

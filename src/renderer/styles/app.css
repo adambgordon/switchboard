@@ -793,12 +793,10 @@ body.sb-resizing .sb-pane {
 /* ---- conversation-info modal (ConversationInfoModal): a compact info card whose heading IS the
    conversation title, edited IN PLACE (an input styled as the heading), plus a list of copyable
    detail rows. Reuses the shared .sb-modal scrim+card. Neutral ink throughout — the lone accent is
-   the static cobalt liveness dot in the Status row, and only when live (two-accent invariant).
-   `.sb-info-label` inherits its color/type from .label-caps; rules here are layout. ---- */
+   the static cobalt liveness dot in the Status row, and only when live (two-accent invariant). Set in
+   the Preferences register — sentence case throughout, a quiet key beside an ink value. ---- */
 .sb-modal-info {
   width: 460px;
-  /* the whole dialog reads in the terminal mono face (IBM Plex Mono) — title, labels, and values */
-  font-family: var(--font-mono);
 }
 /* head holds the editable title (heading-styled input) + auto-generate (rewind) + close */
 .sb-info-head {
@@ -858,16 +856,16 @@ body.sb-resizing .sb-pane {
 }
 .sb-info-row > .sb-info-label {
   flex-shrink: 0;
-  width: 112px; /* fits the longest key ("INPUT + CACHE") on one line */
+  width: 104px; /* fits the longest key ("Agent/Harness") on one line */
   white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
 }
 .sb-info-value {
   flex: 1;
   min-width: 0;
-  /* every value is mono now (terminal face, inherited) and ONE size — so e.g. Session ID and
-     Started read identically. The `.mono` Row prop no longer changes size, only intent. */
-  font-size: var(--text-xs);
-  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  color: var(--ink);
   /* values are selectable (the global body sets user-select:none) — highlight to copy */
   user-select: text;
   cursor: text;
@@ -877,6 +875,10 @@ body.sb-resizing .sb-pane {
   align-items: center;
   gap: 7px;
 }
+/* The Session ID: mono runs wide, so a step down keeps a whole UUID on the line beside its copy button. */
+.sb-info-value.mono {
+  font-size: var(--text-xs);
+}
 /* the per-row copy reveals on row hover (matches the transcript's hover-revealed copies);
    .copy-btn.copied keeps it visible through the check-flash even once the pointer leaves */
 .sb-info-copy {
@@ -885,19 +887,16 @@ body.sb-resizing .sb-pane {
 .sb-info-row:hover .sb-info-copy {
   opacity: 1;
 }
-/* sections — a caps header (mono + faint, via .label-caps) over a group of detail rows, so the
-   dialog reads as grouped blocks (Workspace · Activity · Tokens · Session) rather than one long list */
+/* sections — a header over a group of detail rows, so the dialog reads as grouped blocks
+   (Environment · Activity · Tokens · Session) rather than one long list */
 .sb-info-section + .sb-info-section {
-  margin-top: 14px;
+  margin-top: 18px;
 }
-/* Section headers are the dialog's chrome — UI face (Hanken), not the mono data below them.
-   --tracking-caps (0.14em) is tuned for mono, so loosen-to-tighten for Hanken caps. */
 .sb-info-section-label {
-  padding-bottom: 3px;
-  font-family: var(--font-ui);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--ink-soft);
+  padding-bottom: 4px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
 }
 
 /* live-sessions cap — a compact slider sitting flush-right in the setting head (where the stepper

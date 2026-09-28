@@ -164,34 +164,39 @@ export function placeTipRight(box: SideBox): { left: number; top: number } {
   return { left, top }
 }
 
-/** What the pointer moved onto: no tooltip host, an ordinary one, or a scrub host. */
-export type TipTarget = 'none' | 'plain' | 'scrub'
+/**
+ * What the pointer moved onto: no tooltip host (`null`), or a host and the group it belongs to — the
+ * nearest `data-tip-group` container, or null for a host in none. Groups compare by identity, so any
+ * value that is the same for every host in a container will do.
+ */
+export type TipTarget = { group: unknown } | null
 
 /**
- * Scrubbing: once a SCRUB host's label is on screen (the rail's rows opt in with `data-tip-scrub`),
- * moving onto another scrub host re-fills the label at once instead of waiting out the show delay, so
- * a column can be read by sweeping the pointer down it. What a pointer leaving the active host does:
- * - onto another scrub host — `keep`: the next host re-fills it;
- * - onto no host at all, like the gap between two rows — `grace`: hold it briefly, since the pointer
- *   is most likely crossing to the next row, and hiding for one frame would read as a blink;
- * - anything else, or from a label that is not a scrub host's on screen — `hide`.
+ * Tooltip groups: once a label is on screen for a host in a group — the rail's rows, a toolbar's
+ * buttons — moving onto another host in the SAME group re-fills the label at once instead of waiting
+ * out the show delay, so a row of controls can be read by sweeping the pointer along it. `shown` is the
+ * group of the label on screen, or null when none is (or it belongs to no group). What a pointer
+ * leaving the active host does:
+ * - onto another host in that group — `keep`: that host re-fills it;
+ * - onto no host at all, like the gap between two buttons — `grace`: hold it briefly, since the pointer
+ *   is most likely crossing to the next one, and hiding for one frame would read as a blink;
+ * - anything else, or from a label that belongs to no group — `hide`.
  */
-export function tipOnLeave(scrubShown: boolean, to: TipTarget): 'keep' | 'grace' | 'hide' {
-  if (!scrubShown) return 'hide'
-  if (to === 'scrub') return 'keep'
-  if (to === 'none') return 'grace'
-  return 'hide'
+export function tipOnLeave(shown: unknown, to: TipTarget): 'keep' | 'grace' | 'hide' {
+  if (shown === null) return 'hide'
+  if (to === null) return 'grace'
+  return to.group === shown ? 'keep' : 'hide'
 }
 
 /**
  * What entering a host does:
- * - `refill` — a scrub-host label is on screen and this is another scrub host: re-fill it at once;
- * - `replace` — a scrub-host label is on screen (within its grace) but this host is an ordinary one:
- *   dismiss it now, then wait out the delay. Left up, it would describe a row the pointer has left for
- *   the whole delay, and the new host would inherit its scrub state;
+ * - `refill` — a grouped label is on screen and this host is in its group: re-fill it at once;
+ * - `replace` — a grouped label is on screen (within its grace) but this host is not in its group:
+ *   dismiss it now, then wait out the delay. Left up, it would describe a control the pointer has left
+ *   for the whole delay, and the new host would inherit the old group;
  * - `arm` — otherwise, wait out the delay.
  */
-export function tipOnEnter(scrubShown: boolean, to: Exclude<TipTarget, 'none'>): 'refill' | 'replace' | 'arm' {
-  if (!scrubShown) return 'arm'
-  return to === 'scrub' ? 'refill' : 'replace'
+export function tipOnEnter(shown: unknown, to: NonNullable<TipTarget>): 'refill' | 'replace' | 'arm' {
+  if (shown === null) return 'arm'
+  return to.group === shown ? 'refill' : 'replace'
 }

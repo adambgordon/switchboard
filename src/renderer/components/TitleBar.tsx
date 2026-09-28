@@ -35,7 +35,7 @@ export default function TitleBar({
   onToggleSplit
 }: Props) {
   return (
-    <header className="sb-titlebar">
+    <header className="sb-titlebar" data-tip-group="">
       <button className="sb-brand" onClick={onHome} data-tip="Back to welcome" aria-label="Back to welcome">
         <span className="sb-brand-mark" />
         <span className="sb-brand-name">Switchboard</span>
@@ -64,7 +64,7 @@ export default function TitleBar({
         </button>
       )}
       <div className="sb-titlebar-spacer" />
-      {window.devLabel && <span className="sb-titlebar-devlabel mono">{window.devLabel}</span>}
+      {window.devLabel && <span className="sb-titlebar-devlabel">{window.devLabel}</span>}
       <button
         className="sb-panel-toggle"
         onClick={onToggleTheme}

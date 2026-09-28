@@ -1,5 +1,5 @@
 import type { ConversationMeta, PtyState } from '@shared/types'
-import { relTime, absShort } from '../lib/format'
+import { relTime, absShort, formatCount } from '../lib/format'
 import AgentLogo from './AgentLogo'
 import TranscriptSearch from './TranscriptSearch'
 import { Pin, Play, Search, Stop, Transcript as TranscriptIcon } from './icons'
@@ -68,7 +68,7 @@ export default function PaneHeader({
   const agent = meta?.agent ?? pty?.agent ?? null
 
   return (
-    <header className="sb-pane-header">
+    <header className="sb-pane-header" data-tip-group="">
       <div className="sb-pane-id">
         {unlinked ? (
           // A div, not a span: `.truncate` only clips against a constrained width, which the button
@@ -85,7 +85,7 @@ export default function PaneHeader({
             {title}
           </button>
         )}
-        <div className="sb-pane-meta mono">
+        <div className="sb-pane-meta">
           {agent && <AgentLogo agent={agent} size={13} />}
           {meta ? (
             <>
@@ -93,7 +93,7 @@ export default function PaneHeader({
                 {relTime(meta.lastActivityAt ?? meta.mtime)}
               </span>
               <span className="sb-sep">·</span>
-              <span>{meta.messageCount} msg</span>
+              <span>{formatCount(meta.messageCount)} msg</span>
               {/* Each collapsible item OWNS its leading separator, so hiding it in a narrow pane does
                   not leave a dangling `·` behind. */}
               <span className="sb-pane-meta-part sb-pane-part-cwd">

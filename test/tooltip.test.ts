@@ -210,35 +210,43 @@ describe('placeTipRight', () => {
   })
 })
 
-describe('scrubbing', () => {
-  it('keeps a scrub-host label up moving onto the next scrub host', () => {
-    expect(tipOnLeave(true, 'scrub')).toBe('keep')
+describe('tooltip groups', () => {
+  // Groups compare by identity: two distinct containers, as the rail's rows and a toolbar are.
+  const ROWS = { name: 'rows' }
+  const TOOLBAR = { name: 'toolbar' }
+
+  it('keeps a grouped label up moving onto another host in its group', () => {
+    expect(tipOnLeave(ROWS, { group: ROWS })).toBe('keep')
   })
 
   it('holds it through a gap between hosts rather than blinking', () => {
-    expect(tipOnLeave(true, 'none')).toBe('grace')
+    expect(tipOnLeave(ROWS, null)).toBe('grace')
   })
 
-  it('hides it moving onto an ordinary host, whose own label takes its delay', () => {
-    expect(tipOnLeave(true, 'plain')).toBe('hide')
+  it('hides it moving onto a host in another group, or in none, whose own label takes its delay', () => {
+    expect(tipOnLeave(ROWS, { group: TOOLBAR })).toBe('hide')
+    expect(tipOnLeave(ROWS, { group: null })).toBe('hide')
   })
 
-  it('hides immediately when no scrub-host label is on screen, whatever comes next', () => {
+  it('hides immediately when no grouped label is on screen, whatever comes next', () => {
     // A label still waiting out its delay has nothing to hold: leaving cancels it, as before.
-    for (const to of ['none', 'plain', 'scrub'] as const) expect(tipOnLeave(false, to)).toBe('hide')
+    for (const to of [null, { group: null }, { group: ROWS }]) expect(tipOnLeave(null, to)).toBe('hide')
   })
 
-  it('re-fills a scrub-host label at once on the next scrub host', () => {
-    expect(tipOnEnter(true, 'scrub')).toBe('refill')
+  it('re-fills a grouped label at once on another host in its group', () => {
+    expect(tipOnEnter(ROWS, { group: ROWS })).toBe('refill')
+    expect(tipOnEnter(TOOLBAR, { group: TOOLBAR })).toBe('refill')
   })
 
-  it('dismisses a scrub-host label still in its grace when the pointer reaches an ordinary host', () => {
+  it('dismisses a grouped label still in its grace when the pointer reaches a host outside its group', () => {
     // Row, gap, toolbar button: the row's label must not stay up through the button's delay.
-    expect(tipOnEnter(true, 'plain')).toBe('replace')
+    expect(tipOnEnter(ROWS, { group: TOOLBAR })).toBe('replace')
+    expect(tipOnEnter(ROWS, { group: null })).toBe('replace')
   })
 
-  it('waits out the delay when no scrub-host label is on screen', () => {
-    expect(tipOnEnter(false, 'scrub')).toBe('arm')
-    expect(tipOnEnter(false, 'plain')).toBe('arm')
+  it('waits out the delay when no grouped label is on screen — a host in no group included', () => {
+    // No label and no group are both null; that must never read as "the same group".
+    expect(tipOnEnter(null, { group: null })).toBe('arm')
+    expect(tipOnEnter(null, { group: ROWS })).toBe('arm')
   })
 })

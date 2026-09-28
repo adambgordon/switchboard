@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { AGENTS, type AgentKind } from '@shared/types'
 import { filterChooserFolders, type ChooserFolder } from '../lib/chooserDirs'
-import { chooserAgent } from '../lib/chooserTab'
+import { chooserAgent, type ChooserMemory } from '../lib/chooserTab'
 import { basename, relTime } from '../lib/format'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import AgentLogo from './AgentLogo'
@@ -35,10 +35,8 @@ interface Props {
   onDismiss: () => void
   /** Bumped when this chooser should take the keyboard; null while its pane does not have it. */
   focusKey: number | null
-  /** The last focus request each chooser acted on, held above it: the view unmounts whenever its tab is
-   *  not the active one, and a remount must not act on a request it already took — that would pull the
-   *  keyboard off the tab strip when arrowing back onto the chooser's tab. */
-  consumedFocus: MutableRefObject<Map<string, number>>
+  /** Each chooser's memory, held above the view so a remount picks up where the user left off. */
+  memory: MutableRefObject<Map<string, ChooserMemory>>
 }
 
 const OTHER = '\0other'
@@ -62,17 +60,18 @@ export default function ChooserView({
   onPickOther,
   onDismiss,
   focusKey,
-  consumedFocus
+  memory
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   useAutoHideScrollbar(listRef)
-  const [query, setQuery] = useState('')
-  const [picked, setPicked] = useState<AgentKind>(initialAgent)
-  const agent = chooserAgent(picked, agents, initialAgent)
+  const [saved] = useState(() => memory.current.get(id))
+  const [query, setQuery] = useState(saved?.query ?? '')
+  const [picked, setPicked] = useState(saved?.picked ?? null)
+  const agent = chooserAgent(picked ?? initialAgent, agents, initialAgent)
   // The highlighted folder, by path rather than by position, so a list re-ranked by index activity
   // behind the user keeps the same folder under the cursor. Null means the first row.
-  const [highlight, setHighlight] = useState<string | null>(null)
+  const [highlight, setHighlight] = useState(saved?.highlight ?? null)
   // A start in flight: a second Enter must not spawn a second conversation.
   const [starting, setStarting] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
@@ -82,20 +81,48 @@ export default function ChooserView({
   const index = Math.max(0, highlight === null ? 0 : rows.indexOf(highlight))
   const current = rows[index]
 
+  const remember = (patch: Partial<ChooserMemory>): void => {
+    const prev = memory.current.get(id) ?? { focus: null, query: '', highlight: null, picked: null }
+    memory.current.set(id, { ...prev, ...patch })
+  }
+
+  // Only a change: the pencil re-aims a chooser only while it is on screen, so a remount has nothing to
+  // take, and must not clear what it just restored.
+  const aimSeen = useRef(aim)
   useEffect(() => {
+    if (aimSeen.current === aim) return
+    aimSeen.current = aim
     setQuery('')
     setHighlight(null)
   }, [aim])
 
   useEffect(() => {
-    if (focusKey === null || consumedFocus.current.get(id) === focusKey) return
-    consumedFocus.current.set(id, focusKey)
-    inputRef.current?.focus({ preventScroll: true })
-  }, [focusKey, id, consumedFocus])
+    remember({ query, highlight, picked })
+  }, [query, highlight, picked])
 
   useEffect(() => {
+    if (focusKey === null || memory.current.get(id)?.focus === focusKey) return
+    remember({ focus: focusKey })
+    inputRef.current?.focus({ preventScroll: true })
+  }, [focusKey, id, memory])
+
+  // The highlight is kept in view when the keys or the filter move it — never when the pointer does. A
+  // row the pointer reaches is already under it; scrolling a half-shown one into view would slide the
+  // next row under the pointer, highlight that, and so run the list on by itself.
+  const pointerMoved = useRef(false)
+  useEffect(() => {
+    if (pointerMoved.current) {
+      pointerMoved.current = false
+      return
+    }
     listRef.current?.querySelector<HTMLElement>('[data-highlight]')?.scrollIntoView({ block: 'nearest' })
   }, [current])
+
+  const pointAt = (dir: string): void => {
+    if (dir === current) return
+    pointerMoved.current = true
+    setHighlight(dir)
+  }
 
   const pickAgent = (a: AgentKind): void => {
     setPicked(a)
@@ -227,15 +254,13 @@ export default function ChooserView({
               data-highlight={f.dir === current || undefined}
               className={`sb-chooser-row${f.dir === failed ? ' failed' : ''}`}
               // Mouse-move, not enter: a list scrolling under a still pointer must not move the highlight.
-              onMouseMove={() => {
-                if (f.dir !== current) setHighlight(f.dir)
-              }}
+              onMouseMove={() => pointAt(f.dir)}
               onClick={() => run(f.dir)}
             >
               <Folder size={14} className="sb-chooser-folder" />
               <span className="sb-chooser-name truncate">{basename(f.dir)}</span>
-              <span className="sb-chooser-path mono truncate">{f.dir === failed ? 'Couldn’t start here' : f.dir}</span>
-              <span className="sb-chooser-when mono">{f.startedAt > 0 ? relTime(f.startedAt, now) : ''}</span>
+              <span className="sb-chooser-path truncate">{f.dir === failed ? 'Couldn’t start here' : f.dir}</span>
+              <span className="sb-chooser-when">{f.startedAt > 0 ? relTime(f.startedAt, now) : ''}</span>
             </div>
           ))}
         </div>
@@ -245,9 +270,7 @@ export default function ChooserView({
           aria-selected={current === OTHER}
           data-highlight={current === OTHER || undefined}
           className="sb-chooser-row sb-chooser-other"
-          onMouseMove={() => {
-            if (current !== OTHER) setHighlight(OTHER)
-          }}
+          onMouseMove={() => pointAt(OTHER)}
           onClick={() => run(OTHER)}
         >
           <Plus size={14} className="sb-chooser-folder" />

@@ -502,7 +502,7 @@ kbd {
 }
 .sb-find-count {
   /* Fixed width so the bar never jitters as the readout changes width
-     ("No results" → "1 / 9" → …). Sized for "No results" in the mono face. */
+     ("No results" → "1 / 9" → …). Sized for "No results". */
   width: 80px;
   flex-shrink: 0;
   text-align: right;

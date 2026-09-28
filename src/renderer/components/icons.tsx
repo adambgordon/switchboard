@@ -85,6 +85,15 @@ export const Compose = (p: IconProps) =>
     </>,
     p
   )
+/** A pencil alone — renaming. Compose (the pencil over a page) is reserved for a new conversation. */
+export const Rename = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M16.6 4.4a2.1 2.1 0 0 1 3 3L8.4 18.6l-4 1 1-4z" />
+      <line x1="14.6" y1="6.4" x2="17.6" y2="9.4" />
+    </>,
+    p
+  )
 export const Play = (p: IconProps) => svg(<polygon points="7 5 19 12 7 19 7 5" />, { ...p, strokeWidth: p.strokeWidth ?? 1.4 })
 export const Close = (p: IconProps) =>
   svg(

@@ -1018,8 +1018,6 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   border: 1px solid var(--rule);
   border-radius: var(--r-pill);
   background: var(--paper-sunken);
-  font-family: var(--font-mono);
-  font-variant-ligatures: none;
   font-size: var(--text-xs);
   color: var(--ink-faint);
 }

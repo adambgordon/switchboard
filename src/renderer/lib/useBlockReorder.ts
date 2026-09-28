@@ -144,17 +144,25 @@ function lift(container: HTMLElement, unit: HTMLElement, rect: DOMRect, hostClas
   // it outside the card's top edge. Fold the margin into padding, which keeps its text where it was.
   const head = unit.querySelector<HTMLElement>(':scope > .sb-group-head')
   const cloneHead = clone.querySelector<HTMLElement>(':scope > .sb-group-head')
+  // The header has space above its name and none below, which on a card would seat the name on the
+  // card's bottom edge. Pad the foot to match, growing the card rather than moving the name, which
+  // must stay where it was under the pointer.
+  let grow = 0
   if (head && cloneHead) {
     const cs = getComputedStyle(head)
+    const above = parseFloat(cs.paddingTop) + parseFloat(cs.marginTop)
+    const below = parseFloat(cs.paddingBottom)
+    grow = Math.max(0, above - below)
     cloneHead.style.marginTop = '0'
-    cloneHead.style.paddingTop = `${parseFloat(cs.paddingTop) + parseFloat(cs.marginTop)}px`
+    cloneHead.style.paddingTop = `${above}px`
+    cloneHead.style.paddingBottom = `${below + grow}px`
   }
   clone.classList.add('dragging', 'sb-drag-clone')
   // A row keeps its own padding (the rail's density rules reach it through the host); only a folder's
   // card is widened, and padded back by the same amount so its content does not move.
   const inset = unit.classList.contains('sb-row') ? 0 : FOLDER_CARD_INSET
   const pad = inset ? `padding:0 ${inset}px;` : ''
-  clone.style.cssText = `position:fixed;top:${rect.top}px;left:${rect.left - inset}px;width:${rect.width + 2 * inset}px;height:${rect.height}px;margin:0;${pad}box-sizing:border-box;overflow:hidden;pointer-events:none`
+  clone.style.cssText = `position:fixed;top:${rect.top}px;left:${rect.left - inset}px;width:${rect.width + 2 * inset}px;height:${rect.height + grow}px;margin:0;${pad}box-sizing:border-box;overflow:hidden;pointer-events:none`
   body.appendChild(clone)
   host.appendChild(body)
   document.body.appendChild(host)

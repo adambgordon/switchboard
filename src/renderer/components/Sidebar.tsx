@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import type { AgentKind } from '@shared/types'
 import type { SidebarBlock, SidebarModel, SidebarRow } from '../lib/sidebarModel'
 import { visibleRows } from '../lib/sidebarModel'
 import type { RailDensity, SidebarMode } from '../lib/sidebarPrefs'
 import { rowTipMeta } from '../lib/rowTip'
+import { placeTip } from '../lib/tooltip'
 import { useRailFlip } from '../lib/useRailFlip'
 import { useBlockReorder, type BlockDrop } from '../lib/useBlockReorder'
 import { foldFolder } from '../lib/folderFold'
@@ -13,7 +14,9 @@ import ConversationRow from './ConversationRow'
 import SidebarHead from './SidebarHead'
 import SidebarGroupHeader from './SidebarGroupHeader'
 import { isUnlinkedRow } from '../lib/rowIdentity'
-import { Pin, Info, NewWindow, SplitVertical, Stop, Play } from './icons'
+import { conversationMenu, type SidePlace } from '../lib/conversationMenu'
+import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/types'
+import { Pin, Info, NewWindow, Rename, SplitVertical, Stop, Play } from './icons'
 
 interface Props {
   /** What to draw — built in App by `buildSidebar`, which keyboard navigation walks too. */
@@ -37,7 +40,9 @@ interface Props {
   onStick?: (sessionId: string) => void
   /** The ⋮ menu's Open to the Side — show it in the other pane. */
   onOpenToSide?: (sessionId: string) => void
-  canOpenToSide?: (sessionId: string) => boolean
+  /** Where "to the side" would put the conversation (null when it cannot go), and whether this window
+   *  already holds a tab for it — what the menu needs to name its where-to commands. */
+  placementFor?: (sessionId: string) => { side: SidePlace | null; hasTabHere: boolean }
   /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
   onOpenInNewWindow?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
@@ -60,6 +65,9 @@ interface Props {
   agents: AgentKind[]
   /** A folder's pencil: the new-conversation chooser with that folder preselected. */
   onNewInFolder: (root: string) => void
+  /** ⇧-click on a pencil or an agent logo: its new conversation, in a new window. A null folder is the
+   *  head pencil's — "where I am". Absent while new windows are unavailable. */
+  onNewInWindow?: (root: string | null, agent?: AgentKind) => void
   /** A folder's agent logo: start that agent in the folder straight away. */
   onStartInFolder: (root: string, agent: AgentKind) => void
   /** Toggle a conversation read/unread (from its right-click menu). */
@@ -84,6 +92,36 @@ interface Props {
 /** The drag block holding the folders themselves, in Folders mode — the rail body. */
 const FOLDERS_BLOCK = 'folders'
 
+/** A row-menu command's glyph. The pin and the dot show what the command will make, not what is. */
+function menuIcon(action: ConversationMenuAction): ReactNode {
+  switch (action) {
+    case 'resume':
+      return <Play size={14} />
+    case 'toSide':
+      return <SplitVertical size={14} />
+    case 'newWindow':
+      return <NewWindow size={14} />
+    case 'pin':
+      return <Pin size={13} filled />
+    case 'unpin':
+      return <Pin size={13} />
+    case 'markRead':
+      return <span className="sb-menu-dot hollow" aria-hidden="true" />
+    case 'markUnread':
+      return <span className="sb-menu-dot filled" aria-hidden="true" />
+    case 'rename':
+      return <Rename size={14} />
+    case 'details':
+      return <Info size={14} />
+    case 'stop':
+      return <Stop size={14} />
+    default:
+      return null
+  }
+}
+/** The smallest margin the row menu keeps from the window's edges. */
+const MENU_EDGE = 8
+
 /**
  * The unified conversation pane. A head (grouping mode, the needs-you tag, search, new) above one
  * scrolling list of groups: one headerless group in All mode, one sticky-headed group per project in
@@ -104,7 +142,7 @@ export default function Sidebar({
   onSelect,
   onStick,
   onOpenToSide,
-  canOpenToSide,
+  placementFor,
   onOpenInNewWindow,
   onTogglePin,
   query,
@@ -121,6 +159,7 @@ export default function Sidebar({
   agents,
   onNewInFolder,
   onStartInFolder,
+  onNewInWindow,
   onToggleUnread,
   onMarkUnread,
   onResumeSession,
@@ -193,34 +232,41 @@ export default function Sidebar({
   // Look up a rendered row by id — used by the right-click menu, which only rendered rows can open.
   const entryById = (id: string): SidebarRow | undefined => shown.find((r) => r.sessionId === id)
 
-  // Row actions menu, on any row (live or not): Pin/Unpin, plus — live — mark read/unread + Stop, or —
-  // not-live — Resume, and Session details. One shared instance, opened by CLICKING the ⋮ button
-  // (anchored under it) or right-clicking (at the cursor); dismissed by an outside click, Esc, or scroll.
+  // Row actions menu, on any row (live or not) — the conversation's menu (conversationMenu). One shared
+  // instance, opened by CLICKING the ⋮ button (anchored under it) or right-clicking (at the cursor);
+  // dismissed by an outside click, Esc, or scroll.
   const [ctxMenu, setCtxMenu] = useState<{
     id: string
-    /** viewport coords; `left` for a cursor (right-click) anchor, `right` for the ⋮-button anchor. */
-    top: number
+    /** What it opens against, in viewport coords: the ⋮ button's top and bottom edges, or — for a
+     *  right-click — the cursor, as a zero-height anchor. `gap` is the space kept between the two. */
+    anchorTop: number
+    anchorBottom: number
+    gap: number
+    /** `left` for a cursor (right-click) anchor, `right` for the ⋮-button anchor. */
     left?: number
     right?: number
-    live: boolean
-    unread: boolean
-    pinned: boolean
-    unlinked: boolean
-    side: boolean
+    entries: ConversationMenuEntry[]
   } | null>(null)
-  const menuStateFor = (
-    id: string
-  ): { live: boolean; unread: boolean; pinned: boolean; unlinked: boolean; side: boolean } | null => {
+  // The row's menu — the same list its tab's menu shows (conversationMenu), minus the tab's own Close.
+  const menuStateFor = (id: string): { entries: ConversationMenuEntry[] } | null => {
     const entry = entryById(id)
     if (!entry) return null
+    // A row that stands for no conversation keeps only what its terminal supports: Stop.
+    const linked = !isUnlinkedRow(entry.pty, entry.meta)
+    const place = placementFor?.(id) ?? { side: null, hasTabHere: false }
     return {
-      live: !!entry.pty,
-      unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
-      pinned: entry.pinned,
-      side: canOpenToSide?.(id) ?? false,
-      // Pin, read state, and session details are all keyed to a conversation this row does not have,
-      // so they would silently do nothing. Hide them rather than offer a no-op.
-      unlinked: isUnlinkedRow(entry.pty, entry.meta)
+      entries: conversationMenu({
+        surface: 'row',
+        count: 1,
+        linked,
+        live: !!entry.pty,
+        pinned: entry.pinned,
+        unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
+        side: linked && onOpenToSide ? place.side : null,
+        newWindow: linked && !!onOpenInNewWindow,
+        hasTabHere: place.hasTabHere,
+        closeOthers: false
+      })
     }
   }
   // `closing` drives the fade-out: the menu stays mounted with a `.closing` class for one fade, then
@@ -266,7 +312,7 @@ export default function Sidebar({
   const openRowMenu = (e: MouseEvent, id: string): void => {
     const s = menuStateFor(id)
     if (!s) return
-    openMenu({ id, top: e.clientY, left: e.clientX, ...s })
+    openMenu({ id, anchorTop: e.clientY, anchorBottom: e.clientY, gap: 0, left: e.clientX, ...s })
   }
   // The ⋮ button (click): TOGGLE — close if this row's menu is already open, else open anchored under
   // the button's right edge. Read the rect synchronously — React nulls currentTarget after the handler.
@@ -278,8 +324,36 @@ export default function Sidebar({
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const s = menuStateFor(id)
     if (!s) return
-    openMenu({ id, top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right), ...s })
+    openMenu({
+      id,
+      anchorTop: rect.top,
+      anchorBottom: rect.bottom,
+      gap: 4,
+      right: Math.max(MENU_EDGE, window.innerWidth - rect.right),
+      ...s
+    })
   }
+  // Place the menu once it can be measured, before it paints: below its anchor when it fits, else
+  // above, clamped inside the window — the rule the tooltips follow (placeTip). A row near the foot of
+  // the rail would otherwise open its menu off the bottom of the window.
+  const menuRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = menuRef.current
+    if (!el || !ctxMenu) return
+    const height = el.offsetHeight
+    const { side, top } = placeTip({
+      hostTop: ctxMenu.anchorTop,
+      hostBottom: ctxMenu.anchorBottom,
+      height,
+      viewport: window.innerHeight,
+      gap: ctxMenu.gap,
+      edge: MENU_EDGE
+    })
+    el.style.top = `${side === 'bottom' ? top : top - height}px`
+    if (ctxMenu.left !== undefined) {
+      el.style.left = `${Math.max(MENU_EDGE, Math.min(ctxMenu.left, window.innerWidth - MENU_EDGE - el.offsetWidth))}px`
+    }
+  }, [ctxMenu])
   useEffect(() => {
     if (!ctxMenu) return
     const onKey = (e: KeyboardEvent): void => {
@@ -338,6 +412,17 @@ export default function Sidebar({
     )
   }
 
+  const runMenuAction = (action: ConversationMenuAction, id: string): void => {
+    if (action === 'resume') onResumeSession(id)
+    else if (action === 'toSide') onOpenToSide?.(id)
+    else if (action === 'newWindow') onOpenInNewWindow?.(id)
+    else if (action === 'pin' || action === 'unpin') onTogglePin(id)
+    else if (action === 'markRead' || action === 'markUnread') onToggleUnread(id)
+    else if (action === 'rename') onShowInfo(id, true)
+    else if (action === 'details') onShowInfo(id, false)
+    else if (action === 'stop') onStopSession(id)
+  }
+
   return (
     <aside className={`sb-rail ${density}`}>
       <SidebarHead
@@ -353,11 +438,14 @@ export default function Sidebar({
         searchOpen={searchOpen}
         onSearchToggle={onSearchToggle}
         onNewConversation={onNewConversation}
+        onNewConversationInWindow={onNewInWindow ? () => onNewInWindow(null) : undefined}
       />
 
       <div
         className="sb-rail-body sb-autoscroll"
         ref={listRef}
+        // The rows are one tooltip group (the folder headers' new-conversation clusters are their own).
+        data-tip-group=""
         data-block={mode === 'folders' ? FOLDERS_BLOCK : undefined}
         onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
       >
@@ -395,6 +483,7 @@ export default function Sidebar({
                     agents={agents}
                     onNew={onNewInFolder}
                     onStart={onStartInFolder}
+                    onNewInWindow={onNewInWindow}
                   />
                 )}
                 {g.blocks.map((b) => (
@@ -424,100 +513,30 @@ export default function Sidebar({
 
       {ctxMenu && (
         <div
+          ref={menuRef}
           className={`sb-ctxmenu${closing ? ' closing' : ''}`}
-          style={{ top: ctxMenu.top, left: ctxMenu.left, right: ctxMenu.right }}
+          // A first guess only; the layout effect above places it before paint.
+          style={{ top: ctxMenu.anchorBottom + ctxMenu.gap, left: ctxMenu.left, right: ctxMenu.right }}
           onClick={(e) => e.stopPropagation()}
           onMouseEnter={cancelAutoClose}
           onMouseLeave={armAutoClose}
         >
-          {!ctxMenu.unlinked && (
-            <button
-              className="sb-ctxmenu-item"
-              onClick={() => {
-                onTogglePin(ctxMenu.id)
-                closeMenu()
-              }}
-            >
-              <Pin size={13} filled={!ctxMenu.pinned} />
-              <span>{ctxMenu.pinned ? 'Unpin' : 'Pin'}</span>
-            </button>
-          )}
-          {ctxMenu.live && !ctxMenu.unlinked && (
-            <button
-              className="sb-ctxmenu-item"
-              onClick={() => {
-                onToggleUnread(ctxMenu.id)
-                closeMenu()
-              }}
-            >
-              <span className={`sb-menu-dot ${ctxMenu.unread ? 'hollow' : 'filled'}`} aria-hidden="true" />
-              <span>{ctxMenu.unread ? 'Mark as read' : 'Mark as unread'}</span>
-            </button>
-          )}
-          {!ctxMenu.unlinked && (
-            <button
-              className="sb-ctxmenu-item"
-              onClick={() => {
-                onShowInfo(ctxMenu.id, false)
-                closeMenu()
-              }}
-            >
-              <Info size={14} />
-              <span>Session details…</span>
-            </button>
-          )}
-          {/* Sits with the benign items rather than behind the destructive divider: it opens a view,
-              it does not start or stop anything. Hidden on an unlinked row for the same reason the
-              three above are — a terminal with no conversation has no transcript to show beside one. */}
-          {onOpenToSide && ctxMenu.side && !ctxMenu.unlinked && (
-            <button
-              className="sb-ctxmenu-item"
-              onClick={() => {
-                onOpenToSide(ctxMenu.id)
-                closeMenu()
-              }}
-            >
-              <SplitVertical size={14} />
-              <span>Open to the side</span>
-            </button>
-          )}
-          {onOpenInNewWindow && !ctxMenu.unlinked && (
-            <button
-              className="sb-ctxmenu-item"
-              onClick={() => {
-                onOpenInNewWindow(ctxMenu.id)
-                closeMenu()
-              }}
-            >
-              <NewWindow size={14} />
-              <span>Open in new window</span>
-            </button>
-          )}
-          {/* The session action sits at the bottom behind a divider — **Stop** (live) or **Resume**
-              (not-live) — so the two always occupy the same slot. Separated from the benign items above. */}
-          {!ctxMenu.unlinked && <div className="sb-ctxmenu-sep" />}
-          {ctxMenu.live ? (
-            <button
-              className="sb-ctxmenu-item danger"
-              onClick={() => {
-                onStopSession(ctxMenu.id)
-                closeMenu()
-              }}
-            >
-              <Stop size={14} />
-              <span>Stop session</span>
-            </button>
-          ) : (
-            <button
-              className="sb-ctxmenu-item live"
-              onClick={() => {
-                onResumeSession(ctxMenu.id)
-                closeMenu()
-              }}
-            >
-              <Play size={14} />
-              <span>Resume</span>
-            </button>
+          {ctxMenu.entries.map((e, i) =>
+            'separator' in e ? (
+              <div key={`sep-${i}`} className="sb-ctxmenu-sep" />
+            ) : (
+              <button
+                key={e.action}
+                className={`sb-ctxmenu-item${e.danger ? ' danger' : e.action === 'resume' ? ' live' : ''}`}
+                onClick={() => {
+                  runMenuAction(e.action, ctxMenu.id)
+                  closeMenu()
+                }}
+              >
+                {menuIcon(e.action)}
+                <span>{e.label}</span>
+              </button>
+            )
           )}
         </div>
       )}
