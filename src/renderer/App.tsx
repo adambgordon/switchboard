@@ -118,7 +118,7 @@ import {
 import { rowTipMeta, rowTipPreview, rowTipTitle } from './lib/rowTip'
 import TitleBar from './components/TitleBar'
 import type { AttentionEntry } from './components/AttentionBell'
-import { attentionOrder } from './lib/attention'
+import { attentionAt, attentionOrder } from './lib/attention'
 import MainPane from './components/MainPane'
 import type { TabConversationCommand, TabDescriptor } from './components/TabStrip'
 import Sidebar from './components/Sidebar'
@@ -1992,7 +1992,11 @@ export default function App() {
             {
               sessionId: id,
               state,
-              at: meta.lastActivityAt ?? meta.mtime,
+              at: attentionAt(
+                state,
+                meta.lastActivityAt ?? meta.mtime,
+                currentInputRequestedAt(meta, pty?.inputRequestedAt ?? null)
+              ),
               title: pty ? displayTitleForRow(pty, meta) : meta.title,
               agent: meta.agent,
               folder: (root !== undefined ? sidebarModel.labels.get(root) : undefined) ?? ''

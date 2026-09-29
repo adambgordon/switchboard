@@ -744,25 +744,29 @@ export default function SettingsModal({
                 </div>
               </div>
             ) : page === 'shortcuts' ? (
-              groupsFor(tabsEnabled).map((group) => (
-                <div className="sb-modal-group" key={group.title}>
-                  <div className="sb-modal-group-label">{group.title}</div>
-                  <div className="sb-shortcuts">
-                    {group.items.map((s) => (
-                      <div className="sb-shortcut" key={s.desc}>
-                        <div className="sb-shortcut-keys">
-                          {s.keys.map((k) => (
-                            <kbd className="sb-kbd" key={k}>
-                              {renderKeyLabel(k)}
-                            </kbd>
-                          ))}
+              // Columns on a wrapper, not the page: the page is the scroll container, and columns on a
+              // box of fixed height add columns sideways instead of letting it scroll down.
+              <div className="sb-shortcut-columns">
+                {groupsFor(tabsEnabled).map((group) => (
+                  <div className="sb-modal-group" key={group.title}>
+                    <div className="sb-modal-group-label">{group.title}</div>
+                    <div className="sb-shortcuts">
+                      {group.items.map((s) => (
+                        <div className="sb-shortcut" key={s.desc}>
+                          <div className="sb-shortcut-keys">
+                            {s.keys.map((k) => (
+                              <kbd className="sb-kbd" key={k}>
+                                {renderKeyLabel(k)}
+                              </kbd>
+                            ))}
+                          </div>
+                          <div className="sb-shortcut-desc">{s.desc}</div>
                         </div>
-                        <div className="sb-shortcut-desc">{s.desc}</div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             ) : (
               <div className="sb-faq">
                 {FAQ.map((item) => (

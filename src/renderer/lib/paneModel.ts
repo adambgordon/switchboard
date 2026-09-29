@@ -809,7 +809,9 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
             ? { ...pane, activeIndex: 0 }
             : pane
       )
-      return { ...state, panes, focusIndex }
+      // The pane left after the split collapsed may itself be empty by now; a reopened side does not
+      // bring it back to life.
+      return pruneEmptyPanes({ ...state, panes, focusIndex })
     }
 
     default:

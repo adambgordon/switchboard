@@ -741,11 +741,11 @@ body.sb-resizing .sb-pane {
 }
 /* Shortcuts in two columns, each group kept whole: the list is too long for one column at any height
    the window allows. The columns balance by height, so the groups split evenly with tabs on or off. */
-.sb-page-shortcuts {
+.sb-shortcut-columns {
   columns: 2;
   column-gap: 28px;
 }
-.sb-page-shortcuts .sb-modal-group {
+.sb-shortcut-columns .sb-modal-group {
   break-inside: avoid;
   margin-top: 0;
   padding-bottom: var(--s4);

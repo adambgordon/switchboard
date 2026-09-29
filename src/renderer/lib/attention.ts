@@ -16,6 +16,14 @@ export interface AttentionItem {
   at: number
 }
 
+/**
+ * When it came to need you. A question can arrive with nothing written to the transcript — a runtime
+ * approval request — so it is dated by the request when there is one, not by the last write.
+ */
+export function attentionAt(state: AttentionState, lastActivityAt: number, inputRequestedAt: number | null): number {
+  return state === 'asking' && inputRequestedAt !== null ? inputRequestedAt : lastActivityAt
+}
+
 /** The bell's dot: a question anywhere pulses it; otherwise anything unread fills it; else none. */
 export function bellState(states: readonly AttentionState[]): AttentionState | null {
   if (states.includes('asking')) return 'asking'

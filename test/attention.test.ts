@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attentionOrder, bellState, type AttentionItem } from '../src/renderer/lib/attention'
+import { attentionAt, attentionOrder, bellState, type AttentionItem } from '../src/renderer/lib/attention'
 
 const item = (sessionId: string, state: AttentionItem['state'], at: number): AttentionItem => ({ sessionId, state, at })
 const ids = (items: AttentionItem[]): string[] => items.map((i) => i.sessionId)
@@ -42,3 +42,22 @@ describe('attentionOrder', () => {
   })
 })
 
+
+describe('attentionAt', () => {
+  it('dates a question by its request, which can come after the last transcript write', () => {
+    expect(attentionAt('asking', 100, 250)).toBe(250)
+  })
+
+  it('keeps the request time when the transcript was written to after it', () => {
+    // Waiting on the answer, the agent may still log — the question was still asked at 250.
+    expect(attentionAt('asking', 400, 250)).toBe(250)
+  })
+
+  it('falls back to the last write for a question with no recorded request', () => {
+    expect(attentionAt('asking', 100, null)).toBe(100)
+  })
+
+  it('dates a finished turn by its last write, whatever an earlier request said', () => {
+    expect(attentionAt('awaiting', 300, 250)).toBe(300)
+  })
+})

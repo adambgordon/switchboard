@@ -1001,6 +1001,13 @@ describe('reopen — a closed group comes back where it stood', () => {
     expect(after.focusIndex).toBe(0)
   })
 
+  it('does not open a side next to a pane that is empty, leaving half the window blank', () => {
+    // The right pane survived the split, then its own tab closed too (and was not reopenable).
+    const after = reopen(layout([pane('p1', [], -1)]), [closed('L', 0, 'p0', 'left')])
+    expect(after.panes).toEqual([pane('p9', [t('L')], 0)])
+    expect(after.focusIndex).toBe(0)
+  })
+
   it('goes back to its own pane even when that pane has changed sides', () => {
     // Closed from the right pane p1; the left pane then emptied, and a new split put p1 on the left.
     const split = layout([pane('p1', [t('A')], 0), pane('p5', [t('B')], 0)], 1)
