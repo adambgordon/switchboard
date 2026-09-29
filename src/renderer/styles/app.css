@@ -560,14 +560,23 @@ body.sb-resizing .sb-pane {
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--ink-soft);
-  background: var(--paper-sunken);
-  border: 1px solid var(--rule-strong);
+  /* A cap a step below the page, a quiet border, and the darkest line as its bottom edge — the depth
+     of a real key. Tuned per theme, below. */
+  background: #f2f2f2;
+  border: 1px solid #e0e0e0;
   border-radius: var(--r-sm);
-  box-shadow: 0 1px 0 var(--rule-strong);
+  box-shadow: 0 1px 0 #c4c4c4;
 }
 /* ⌘0: a bare zero in --font-keys (SF Pro) is nearly an "O". Render just the digit in IBM Plex Mono
    (--font-mono, already loaded for the terminal), whose zero is disambiguated by design — a real
    glyph, so it stays centered at any zoom (unlike a CSS overlay, which subpixel-drifts). */
+/* Dark: the same rule, so the edge is black. A gray edge under a dark cap reads as lit from below —
+   depth drawn upside down. */
+:root[data-theme='dark'] .sb-kbd {
+  background: #151515;
+  border-color: #333333;
+  box-shadow: 0 1px 0 #000000;
+}
 .sb-kbd-zero {
   font-family: var(--font-mono);
   /* Plex Mono's digit renders a touch smaller than the SF keycap text at the same px — nudge it up
@@ -577,7 +586,7 @@ body.sb-resizing .sb-pane {
 
 /* ---- settings modal: left nav + page (selection is INK, never cobalt — two-accent invariant) ---- */
 .sb-modal-settings {
-  width: 820px;
+  width: 852px;
 }
 /* Mirror the main app's three surfaces so the modal reads as a little Switchboard: the head takes
    the title-bar's slightly-off-white (--paper), the nav takes the rail's sunken gray
@@ -589,17 +598,17 @@ body.sb-resizing .sb-pane {
   padding: 7px 18px 7px 20px;
 }
 /* Fixed height, so the modal keeps one size and shape across its pages (no resize when switching).
-   Sized so every page fits, Shortcuts in its two columns; the shorter ones top-align in the extra
-   room, and a page that outgrows it scrolls within it. The viewport cap lets any page scroll on a
-   short window. */
+   Sized so every page fits, the FAQ included and Shortcuts in its two columns; the shorter ones
+   top-align in the extra room, and a page that outgrows it scrolls within it. The viewport cap lets
+   any page scroll on a short window. */
 .sb-settings-body {
   display: flex;
-  height: 700px;
+  height: 800px;
   max-height: calc(100vh - 128px);
 }
 .sb-settings-nav {
   flex-shrink: 0;
-  width: 152px;
+  width: 184px;
   padding: 12px 10px;
   display: flex;
   flex-direction: column;
@@ -610,11 +619,16 @@ body.sb-resizing .sb-pane {
 }
 .sb-settings-nav-item {
   position: relative; /* anchors the Application row's attention dot (.sb-attn-dot-nav) */
+  display: flex;
+  align-items: center;
+  gap: 9px;
   width: 100%;
   padding: 7px 10px;
   border-radius: var(--r-sm);
   text-align: left;
-  font-size: var(--text-sm);
+  white-space: nowrap;
+  /* The rail's row-title size, so the modal's sidebar reads like the app's. */
+  font-size: var(--text-base);
   font-weight: 500;
   color: var(--ink-faint);
   transition: all var(--dur-fast) var(--ease);
@@ -822,6 +836,94 @@ body.sb-resizing .sb-pane {
 .sb-setting-btn:disabled {
   color: var(--ink-faint);
   cursor: default;
+}
+
+/* A lone button in a setting sits at its natural width, like the segmented controls. */
+.sb-setting-btn-start {
+  align-self: flex-start;
+}
+
+/* --- What's new (WhatsNewModal.tsx): an icon column beside each section, one ink button to leave --- */
+.sb-modal-whatsnew {
+  width: 560px;
+}
+.sb-whatsnew-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  padding: var(--s5) 22px var(--s2);
+}
+.sb-whatsnew-item {
+  display: flex;
+  gap: 14px;
+}
+.sb-whatsnew-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-md);
+  background: var(--paper-sunken);
+  color: var(--ink-soft);
+}
+.sb-whatsnew-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sb-whatsnew-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+.sb-whatsnew-desc {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+/* A link in running text, drawn like a transcript link. */
+.sb-whatsnew-link {
+  padding: 0;
+  font: inherit;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--rule-strong);
+  transition: text-decoration-color var(--dur-fast) var(--ease);
+}
+.sb-whatsnew-link:hover {
+  text-decoration-color: var(--ink);
+}
+.sb-whatsnew-action {
+  display: block;
+  margin-top: var(--s2);
+}
+.sb-whatsnew-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--s4) 22px 18px;
+}
+/* Closer to the head and the first section than the sections are to each other: an aside, not an item. */
+.sb-whatsnew-again {
+  margin: calc(-1 * var(--s2)) 0;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+/* Ink, not cobalt: cobalt means alive, and closing a dialog is not. */
+.sb-whatsnew-done {
+  padding: 6px 16px;
+  border-radius: var(--r-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--paper-raised);
+  background: var(--ink);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.sb-whatsnew-done:hover {
+  opacity: 0.85;
 }
 
 /* --- Updates (self-update control on the App page; see UpdatesSetting.tsx) --- */
@@ -1072,8 +1174,8 @@ body.sb-resizing .sb-pane {
   margin: var(--s2) 0;
 }
 .sb-dotcolor-input {
-  width: 26px;
-  height: 26px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 1px solid var(--rule-strong);
   border-radius: var(--r-sm);
@@ -1247,8 +1349,5 @@ body.sb-resizing .sb-pane {
 .sb-ctxmenu-sep {
   height: 1px;
   margin: 4px 6px;
-  /* --rule-raised, not --rule: on the raised menu surface a plain --rule hairline is ~invisible in
-     dark (--rule #2b2b2b vs --paper-raised #2a2a2a), while --rule-strong would over-darken light; the
-     token splits the two — see tokens.css. */
-  background: var(--rule-raised);
+  background: var(--rule);
 }

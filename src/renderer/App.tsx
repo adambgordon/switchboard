@@ -40,7 +40,7 @@ import {
   type SidebarModel
 } from './lib/sidebarModel'
 import { absorbBind, absorbBindFolder, dropWrites } from './lib/rowRank'
-import { FOLDER_SEED_TASK, ONCE_TASKS_KEY, parseOnceTasks, withOnceTask } from './lib/onceTasks'
+import { FOLDER_SEED_TASK, ONCE_TASKS_KEY, WHATS_NEW_TASK, parseOnceTasks, withOnceTask } from './lib/onceTasks'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
 import { viewToggleAction } from './lib/viewToggle'
@@ -117,6 +117,7 @@ import {
 } from './lib/rowIdentity'
 import { rowTipMeta, rowTipPreview, rowTipTitle } from './lib/rowTip'
 import TitleBar from './components/TitleBar'
+import WhatsNewModal from './components/WhatsNewModal'
 import type { AttentionEntry } from './components/AttentionBell'
 import { attentionAt, attentionOrder } from './lib/attention'
 import MainPane from './components/MainPane'
@@ -132,6 +133,8 @@ import TerminalDeck from './components/TerminalDeck'
 import ChooserView from './components/ChooserView'
 
 const NO_FOLDERS: readonly ChooserFolder[] = []
+/** Past AppVeil's launch fade (one frame, then 500ms), so What's new opens onto the app, not under the veil. */
+const WHATS_NEW_DELAY_MS = 600
 
 export default function App() {
   const { groups, hiddenSessionIds, loading } = useSessions()
@@ -966,7 +969,34 @@ export default function App() {
     setActiveCollapsed((prev) => withoutFolders(prev, entered))
   }, [activePlacesKey])
 
-  overlayOpenRef.current = settingsPage !== null || infoModal !== null
+  // What's new: once per profile, in the main window, after the launch fade (AppVeil) so it does not
+  // rise under it. Marked done as it opens, not as it closes — a second window, or a relaunch before it
+  // is dismissed, must not show it again.
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
+  useEffect(() => {
+    if (detached) return
+    let done: string[]
+    try {
+      done = parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY))
+    } catch {
+      return
+    }
+    if (done.includes(WHATS_NEW_TASK)) return
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(
+          ONCE_TASKS_KEY,
+          JSON.stringify(withOnceTask(parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY)), WHATS_NEW_TASK))
+        )
+      } catch {
+        return
+      }
+      setWhatsNewOpen(true)
+    }, WHATS_NEW_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [detached])
+
+  overlayOpenRef.current = settingsPage !== null || infoModal !== null || whatsNewOpen
 
   // "This row stands for no conversation" (see rowIdentity), by id — the ONE place that resolution
   // lives. Every consumer of the gate routes through here rather than re-deriving it: an unlinked
@@ -2108,6 +2138,14 @@ export default function App() {
       // While the Preferences modal is open it owns the keyboard: Esc closes it; ⌘, and ⌘?
       // toggle between (or out of) the App / Shortcuts pages; everything else is
       // inert (no list-nav behind the scrim).
+      // What's new owns the keyboard the same way: Esc closes it, the rest is inert.
+      if (whatsNewOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setWhatsNewOpen(false)
+        }
+        return
+      }
       if (settingsPage !== null) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -2248,6 +2286,7 @@ export default function App() {
     query,
     settingsPage,
     infoModal,
+    whatsNewOpen,
     findOpen,
     closeFind,
     selectedId,
@@ -2432,6 +2471,7 @@ export default function App() {
                   onCloseTab={closeTabsFrom}
                   onCloseOneTab={closeOneTab}
                   onStopAndCloseTab={stopAndCloseTab}
+                  onMarkTabUnread={markUnreadGated}
                   onTabCommand={runTabCommand}
                   onCloseOtherTabs={closeOtherTabs}
                   reopenCount={reopenCount}
@@ -2549,6 +2589,10 @@ export default function App() {
         onSetMarkdownCopy={setMarkdownCopy}
         tabsEnabled={tabsEnabled}
         onSetTabsEnabled={setTabsEnabled}
+        onShowWhatsNew={() => {
+          setSettingsPage(null)
+          setWhatsNewOpen(true)
+        }}
         tabLayout={tabLayout}
         onSetTabLayout={setTabLayout}
         dotColor={dotColor}
@@ -2563,6 +2607,16 @@ export default function App() {
         onClose={() => setInfoModal(null)}
         onRename={(t) => {
           if (infoModal) renameConversation(infoModal.sessionId, t)
+        }}
+      />
+      <WhatsNewModal
+        open={whatsNewOpen}
+        onClose={() => setWhatsNewOpen(false)}
+        tabsEnabled={tabsEnabled}
+        onEnableTabs={() => setTabsEnabled(true)}
+        onShowShortcuts={() => {
+          setWhatsNewOpen(false)
+          setSettingsPage('shortcuts')
         }}
       />
       <TooltipLayer />

@@ -123,6 +123,43 @@ export const Help = (p: IconProps) =>
     </>,
     p
   )
+export const Rows = (p: IconProps) =>
+  svg(<path d="M4 6h16M4 10h16M4 14h16M4 18h16" />, p)
+export const Palette = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" />
+      <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+      <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+      <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+      <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+    </>,
+    p
+  )
+export const AppWindow = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M2 8h20M6 4v4M10 4v4" />
+    </>,
+    p
+  )
+export const Flask = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2" />
+      <path d="M6.453 15h11.094M8.5 2h7" />
+    </>,
+    p
+  )
+export const Keyboard = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10" />
+    </>,
+    p
+  )
 export const Info = (p: IconProps) =>
   svg(
     <>

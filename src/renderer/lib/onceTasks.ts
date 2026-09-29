@@ -10,6 +10,10 @@ export const ONCE_TASKS_KEY = 'switchboard.once'
 /** The rail's folder order frozen newest-first, the first time a profile runs the new rail. */
 export const FOLDER_SEED_TASK = 'folderSeed'
 
+/** The What's new dialog for tabs, the compact and folder sidebar, and the bell. A later What's new
+ *  takes a new id, so it shows once too; a release that adds nothing to it reuses this one. */
+export const WHATS_NEW_TASK = 'whatsNew:1'
+
 export function parseOnceTasks(raw: string | null): string[] {
   if (!raw) return []
   try {

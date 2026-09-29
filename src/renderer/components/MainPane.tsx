@@ -43,6 +43,7 @@ interface Props {
   onCloseTab: (pane: number, index: number) => void
   onCloseOneTab: (pane: number, index: number) => void
   onStopAndCloseTab: (pane: number, index: number) => void
+  onMarkTabUnread: (sessionId: string) => void
   onTabCommand: (command: TabConversationCommand, sessionId: string) => void
   onCloseOtherTabs: (pane: number, index: number) => void
   /** See TabStrip: what Reopen would bring back, read when a tab's menu opens. */
@@ -175,6 +176,7 @@ export default function MainPane(props: Props) {
     onCloseTab,
     onCloseOneTab,
     onStopAndCloseTab,
+    onMarkTabUnread,
     onTabCommand,
     onCloseOtherTabs,
     reopenCount,
@@ -303,10 +305,14 @@ export default function MainPane(props: Props) {
   // TerminalView is portalled into this pane from a sibling React subtree, so React's synthetic
   // events follow TerminalDeck rather than this component. A native capture listener follows the
   // physical DOM instead, keeping pane ownership aligned with the terminal that actually took focus.
+  // A ⌥-press is the mark-unread gesture (on a tab or in a terminal), which, as on a rail row,
+  // changes nothing but the mark — so it leaves pane focus where it was.
   useEffect(() => {
     const el = paneRef.current
     if (!el) return
-    const onDown = (): void => onPaneFocusRef.current?.()
+    const onDown = (e: PointerEvent): void => {
+      if (!e.altKey) onPaneFocusRef.current?.()
+    }
     el.addEventListener('pointerdown', onDown, true)
     return () => el.removeEventListener('pointerdown', onDown, true)
   }, [paneRef])
@@ -332,6 +338,7 @@ export default function MainPane(props: Props) {
           onClose={onCloseTab}
           onCloseOne={onCloseOneTab}
           onStopAndClose={onStopAndCloseTab}
+          onMarkUnread={onMarkTabUnread}
           onCommand={onTabCommand}
           onCloseOthers={onCloseOtherTabs}
           reopenCount={reopenCount}

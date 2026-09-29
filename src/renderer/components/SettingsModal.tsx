@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Close, Info, Reset, Warning } from './icons'
+import { AppWindow, Close, Flask, Help, Info, Keyboard, Palette, Reset, Warning } from './icons'
 import { DOT_COLOR_COMMIT_MS, DOT_COLOR_PLACEHOLDER, shouldCommit } from '../lib/dotColor'
 import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
 import { AGENTS, type AgentKind } from '@shared/types'
@@ -28,6 +28,14 @@ const CAP_TIP =
   "Each live session is a real agent process with its own terminal. At the limit, starting another reclaims whichever session has been idle longest — sessions still working are never stopped, and you're never blocked from starting a new one. Raising the limit means a higher cap on resource consumption: more memory, CPU, and GPU per live terminal. This is intended to prevent agent processes from overwhelming your machine. Increase at your own risk."
 
 type Page = 'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq'
+
+const NAV: { page: Page; label: string; Icon: (p: { size?: number }) => ReactNode }[] = [
+  { page: 'appearance', label: 'Appearance', Icon: Palette },
+  { page: 'application', label: 'Application', Icon: AppWindow },
+  { page: 'beta', label: 'Beta Features', Icon: Flask },
+  { page: 'shortcuts', label: 'Keyboard Shortcuts', Icon: Keyboard },
+  { page: 'faq', label: 'FAQ', Icon: Help }
+]
 
 interface Shortcut {
   keys: string[]
@@ -178,6 +186,16 @@ const FAQ: Faq[] = [
     )
   },
   {
+    q: 'Do my tabs come back after quitting or updating?',
+    a: (
+      <>
+        Yes, Switchboard automatically preserves all tabs across all windows. Quitting or updating the
+        app will never get rid of your tabs. Conversations that were running come back showing their
+        transcript, since quitting ends live sessions; press <strong>Resume</strong> to pick one up.
+      </>
+    )
+  },
+  {
     q: 'What do the dots next to live conversations mean?',
     a: (
       <>
@@ -268,13 +286,15 @@ interface Props {
   onPreviewDotColor: (hex: string | null) => void
   /** Toggle the Markdown-copy behavior (an On / Off segmented control, like Theme). */
   onSetMarkdownCopy: (value: boolean) => void
+  /** Reopen the What's new dialog (Application page). */
+  onShowWhatsNew: () => void
 }
 
 /**
  * The Preferences modal — a left nav (Appearance / Application / Beta Features / Shortcuts / FAQ)
  * over the shared
  * scrim+card. Appearance holds theme, dock icon, sidebar density and the tabs / split / windows setting
- * with its tab layout; Application holds Updates (first), the live-session cap, and the
+ * with its tab layout; Application holds Updates (first), What's new, the live-session cap, and the
  * new-conversation default agent; Beta Features holds the liveness dot color;
  * Shortcuts / FAQ are reference. Open it to a specific page via
  * `page` (⌘, / title-bar gear → appearance; ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is
@@ -308,7 +328,8 @@ export default function SettingsModal({
   dotColor,
   onSetDotColor,
   onPreviewDotColor,
-  onSetMarkdownCopy
+  onSetMarkdownCopy,
+  onShowWhatsNew
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -408,39 +429,19 @@ export default function SettingsModal({
         </div>
         <div className="sb-settings-body">
           <nav className="sb-settings-nav">
-            <button
-              className={`sb-settings-nav-item${page === 'appearance' ? ' active' : ''}`}
-              onClick={() => onChangePage('appearance')}
-            >
-              Appearance
-            </button>
-            <button
-              className={`sb-settings-nav-item${page === 'application' ? ' active' : ''}`}
-              onClick={() => onChangePage('application')}
-            >
-              Application
-              {updates.needsAttention && (
-                <span className="sb-attn-dot sb-attn-dot-nav" aria-hidden="true" />
-              )}
-            </button>
-            <button
-              className={`sb-settings-nav-item${page === 'beta' ? ' active' : ''}`}
-              onClick={() => onChangePage('beta')}
-            >
-              Beta Features
-            </button>
-            <button
-              className={`sb-settings-nav-item${page === 'shortcuts' ? ' active' : ''}`}
-              onClick={() => onChangePage('shortcuts')}
-            >
-              Shortcuts
-            </button>
-            <button
-              className={`sb-settings-nav-item${page === 'faq' ? ' active' : ''}`}
-              onClick={() => onChangePage('faq')}
-            >
-              FAQ
-            </button>
+            {NAV.map(({ page: p, label, Icon }) => (
+              <button
+                key={p}
+                className={`sb-settings-nav-item${page === p ? ' active' : ''}`}
+                onClick={() => onChangePage(p)}
+              >
+                <Icon size={15} />
+                {label}
+                {p === 'application' && updates.needsAttention && (
+                  <span className="sb-attn-dot sb-attn-dot-nav" aria-hidden="true" />
+                )}
+              </button>
+            ))}
           </nav>
 
           <div className={`sb-settings-page sb-page-${page}`}>
@@ -540,11 +541,11 @@ export default function SettingsModal({
                     </div>
                   </div>
                   <div className="sb-setting" aria-disabled={!tabsEnabled}>
-                    <div className="sb-setting-title">Tab layout</div>
+                    <div className="sb-setting-title">Tab overflow</div>
                     <div
                       className="sb-seg"
                       role="radiogroup"
-                      aria-label="Tab layout"
+                      aria-label="Tab overflow"
                       aria-disabled={!tabsEnabled}
                       aria-describedby="tab-layout-description"
                     >
@@ -573,6 +574,17 @@ export default function SettingsModal({
               <>
                 <div className="sb-modal-group">
                   <UpdatesSetting updates={updates} />
+                </div>
+                <div className="sb-modal-group">
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">What’s new</div>
+                    <button className="sb-setting-btn sb-setting-btn-start" onClick={onShowWhatsNew}>
+                      Show what’s new
+                    </button>
+                    <div className="sb-setting-desc">
+                      Tabs and split view, the compact and folder sidebar, and the bell.
+                    </div>
+                  </div>
                 </div>
                 <div className="sb-modal-group">
                   <div className="sb-setting">

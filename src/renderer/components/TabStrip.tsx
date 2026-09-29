@@ -64,6 +64,8 @@ interface Props {
   onCloseOne: (paneIndex: number, index: number) => void
   /** ⌥-× on a live tab: stop its session, then close it. */
   onStopAndClose: (paneIndex: number, index: number) => void
+  /** ⌥-click on a running tab, as on its rail row: mark it unread. */
+  onMarkUnread: (sessionId: string) => void
   onCommand: (command: TabConversationCommand, sessionId: string) => void
   onCloseOthers: (paneIndex: number, index: number) => void
   /** How many tabs Reopen would bring back right now, or 0. A function, so the count is read when the
@@ -111,6 +113,7 @@ interface ItemProps {
   onPromote: () => void
   onClose: () => void
   onStopAndClose: () => void
+  onMarkUnread: () => void
   onContextMenu: (e: MouseEvent) => void
 }
 
@@ -130,6 +133,7 @@ function Tab({
   onPromote,
   onClose,
   onStopAndClose,
+  onMarkUnread,
   onContextMenu
 }: ItemProps) {
   // Phase-lock the breathing / ripple forms to the app-wide beat, exactly as a rail row does. Without
@@ -138,7 +142,7 @@ function Tab({
   const dotRef = useSyncedAnimation<HTMLSpanElement>(tab.dot)
   return (
     <div
-      className={`sb-tab${active ? ' active' : ''}${active && focused ? ' focused' : ''}${tab.preview ? ' preview' : ''}${selected ? ' picked' : ''}${tab.running ? ' running' : ''}`}
+      className={`sb-tab${active ? ' active' : ''}${active && focused ? ' focused' : ''}${tab.preview ? ' preview' : ''}${selected ? ' picked' : ''}${tab.running ? ' running' : ''}${tab.unread ? ' attention' : ''}`}
       role="tab"
       // `aria-selected` stays the ACTIVE tab — it is what the tablist role means by selected, and the
       // scroll-into-view effect keys off it. Multi-selection is a different idea, so it gets its own
@@ -163,9 +167,20 @@ function Tab({
       onPointerDown={(e) => {
         if (onModifierPress(e)) e.preventDefault()
       }}
+      // A ⌥-press must not focus the tab: nothing activates it to move focus on, so it would keep
+      // :focus-within — pinning its × visible and hiding the dot the mark is meant to show.
+      onMouseDown={(e) => {
+        if (e.altKey) e.preventDefault()
+      }}
       // The plain case only: a modified click was already handled above, and acting again here would
       // undo the selection that press just made.
       onClick={(e) => {
+        // ⌥-click marks unread, as on a rail row, and never activates: landing on the tab would mark
+        // it read again at once.
+        if (e.altKey) {
+          if (tab.running) onMarkUnread()
+          return
+        }
         if (!e.metaKey && !e.shiftKey) onActivate()
       }}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
@@ -181,8 +196,11 @@ function Tab({
       // A ⌘- or ⇧-click must not also start a drag-reorder; the hook checks the same modifiers.
       // Double-click is the editor gesture for "keep this one". The two ordinary clicks that precede
       // it only activate an already-open tab, which is idempotent, so no dedupe is needed here —
-      // unlike the same gesture on a rail row, which records history stops.
-      onDoubleClick={onPromote}
+      // unlike the same gesture on a rail row, which records history stops. ⌥ is excluded, as on the
+      // row: a ⌥-click means mark unread, and must not also keep the tab.
+      onDoubleClick={(e) => {
+        if (!e.altKey) onPromote()
+      }}
       // Middle-click closes, as in a browser. Nothing else in the app claims button 1.
       onAuxClick={(e) => {
         if (e.button === 1) {
@@ -192,7 +210,13 @@ function Tab({
       }}
       onContextMenu={onContextMenu}
     >
-      <span className="sb-tab-title truncate">{tab.title}</span>
+      {/* The hidden copy holds the tab at its bold width, so needing attention never resizes it. */}
+      <span className="sb-tab-label">
+        <span className="sb-tab-title truncate">{tab.title}</span>
+        <span className="sb-tab-sizer" aria-hidden="true">
+          {tab.title}
+        </span>
+      </span>
       <span className="sb-tab-gutter">
         {tab.dot && (
           <span ref={dotRef} className={`sb-dot ${tab.dot}`} aria-label="live" role="img" />
@@ -252,6 +276,7 @@ export default function TabStrip({
   onClose,
   onCloseOne,
   onStopAndClose,
+  onMarkUnread,
   onCommand,
   onCloseOthers,
   reopenCount,
@@ -385,6 +410,7 @@ export default function TabStrip({
             onPromote={() => onPromote(tab.sessionId, paneIndex)}
             onClose={() => onCloseOne(paneIndex, i)}
             onStopAndClose={() => onStopAndClose(paneIndex, i)}
+            onMarkUnread={() => onMarkUnread(tab.sessionId)}
             onContextMenu={(e) => void contextMenu(e, i)}
           />
         ))}

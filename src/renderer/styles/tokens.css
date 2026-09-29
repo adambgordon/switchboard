@@ -24,12 +24,6 @@
   --rule: #e6e6e6; /* hairline */
   --rule-soft: #efefef;
   --rule-strong: #d6d6d6;
-  /* Hairline ON a --paper-raised surface (menus, modals, cards). A theme-aware token rather than one
-     shared value, for the reason design.md gives: a token carries hue across themes but NOT
-     perceptual strength. Light raised is #ffffff, so plain --rule reads fine; dark raised is #2a2a2a
-     against --rule #2b2b2b — a one-value difference, invisible — so dark needs the stronger step.
-     Same shape as --shadow-sel-hover. */
-  --rule-raised: #e6e6e6;
   /* The rail's hover fill (rows, folder headers). Its own token because it must stay QUIETER than the
      white row (--paper-raised): in light the two already part ways (hover darkens, the selection goes
      white), but dark's shared --paper-hover is brighter than --paper-raised. */
@@ -183,8 +177,6 @@
   --rule: #2b2b2b; /* hairline */
   --rule-soft: #272727; /* softer = closer to the surface (nudged up to stay just above the lightened paper) */
   --rule-strong: #3f3f3f; /* stronger = more contrast */
-  --rule-raised: #3f3f3f; /* hairline on --paper-raised — see the light-mode note; dark needs the
-     stronger value because --rule (#2b2b2b) is one step off --paper-raised (#2a2a2a) */
   --rail-hover: #232323; /* a step above the rail, and below the rows on screen — see the light note */
   --rail-selected-hover: #323232; /* a step lighter than the white row at rest (--paper-raised) */
 
@@ -222,10 +214,23 @@
   --shadow-sel-hover: 0 4px 10px -4px rgba(0, 0, 0, 1), 0 2px 7px -2px rgba(0, 0, 0, 0.85);
   --scrim: rgba(0, 0, 0, 0.6);
 }
-/* A hairline's strength is its step off the surface under it, and the pane sits above the chrome in
-   dark. So inside the pane the rules step up to match — table lines, code borders, the header's
-   bottom rule — while the chrome keeps the quieter values it is tuned against. */
-:root[data-theme='dark'] .sb-pane {
+/* --rule and --rule-soft mean "a hairline on the surface it is drawn on". A hairline's strength is
+   its lightness step off that surface, and a token carries hue across themes but not that step:
+   light's surfaces all sit within a few steps of white, while dark's climb from the chrome to the pane
+   to the raised modals and menus, so one dark value is visible on one and gone on the next (--rule on
+   --paper-raised is one step off it). So each dark surface above the chrome sets the values it needs,
+   and a rule just names the token. A new dark surface fill with hairlines inside it belongs here too.
+   The values match light's step on white: ≈ 8.7 L* for --rule, ≈ 5.6 for --rule-soft. */
+:root[data-theme='dark'] :is(.sb-pane, .sb-settings-page) {
   --rule: #353535;
   --rule-soft: #2e2e2e;
+}
+:root[data-theme='dark'] :is(.sb-modal, .sb-ctxmenu) {
+  --rule: #3d3d3d;
+  --rule-soft: #363636;
+}
+/* Chrome inside a modal (the Preferences head and nav) goes back to the chrome's own values. */
+:root[data-theme='dark'] :is(.sb-modal-settings .sb-modal-head, .sb-settings-nav) {
+  --rule: #2b2b2b;
+  --rule-soft: #272727;
 }
