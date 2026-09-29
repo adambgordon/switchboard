@@ -72,7 +72,7 @@ function states(map: Record<string, LiveState | null>): SidebarInput['liveState'
 }
 
 /** Deliberately NOT the shipped limits, so a hardcoded constant in the model fails these tests. */
-const LIMITS = { folderCap: 2, allCap: 3, autoExpand: 2 }
+const LIMITS = { folderCap: 2, allCap: 3, minUnpinned: 1, autoExpand: 2 }
 
 function input(over: Partial<SidebarInput> = {}): SidebarInput {
   return {
@@ -156,7 +156,9 @@ describe('All mode', () => {
           group('/w/one', [conv('a', T - 10), conv('b', T - 40)]),
           group('/w/two', [conv('c', T - 20), conv('d', T - 30), conv('p1', T - 1), conv('p2', T - 90)])
         ],
-        pinned: ['p2', 'p1']
+        pinned: ['p2', 'p1'],
+        // Five rows, the two pins among them: three unpinned show, and the fourth is past the cap.
+        limits: { ...LIMITS, allCap: 5 }
       })
     )
     expect(model.groups.map((g) => [g.key, g.header, g.label])).toEqual([['', false, '']])
@@ -383,9 +385,19 @@ describe('caps', () => {
     ])
   })
 
-  it('never caps pinned rows', () => {
-    expect(rowsOf({ pinned: ['r3', 'r4', 'r5'] })).toEqual([
+  it('never caps pinned rows, and keeps the unpinned floor past a full cap of pins', () => {
+    // Three pins against a cap of 2: every pin shows, and the floor of 2 still leaves both unpinned
+    // rows. A floor of 2, not the default 1: cap − pins is −1 here, and slicing to −1 happens to leave
+    // one row, so with a floor of 1 a missing floor would pass.
+    expect(rowsOf({ pinned: ['r3', 'r4', 'r5'], limits: { ...LIMITS, minUnpinned: 2 } })).toEqual([
       { key: '/w/a', collapsed: false, hidden: 0, blocks: [['pin:/w/a', 'r3', 'r4', 'r5'], ['un:/w/a', 'r1', 'r2']] }
+    ])
+  })
+
+  it('counts pinned rows toward the cap', () => {
+    // One pin and a cap of 2 leave room for one unpinned row, not two.
+    expect(rowsOf({ pinned: ['r5'] })).toEqual([
+      { key: '/w/a', collapsed: false, hidden: 3, blocks: [['pin:/w/a', 'r5'], ['un:/w/a', 'r1']] }
     ])
   })
 

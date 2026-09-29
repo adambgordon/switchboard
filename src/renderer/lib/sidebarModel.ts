@@ -75,15 +75,18 @@ export interface SidebarModel {
 }
 
 export interface SidebarLimits {
-  /** Unpinned rows shown per folder before Show more. */
+  /** Rows shown per folder before Show more, pinned ones included. */
   folderCap: number
-  /** Unpinned rows shown in All mode before Show more. */
+  /** Rows shown in All mode before Show more, pinned ones included. */
   allCap: number
+  /** Unpinned rows a group shows however many are pinned — pins always show, so they cannot crowd
+   *  the rest out entirely. */
+  minUnpinned: number
   /** Folders past this index start collapsed unless something says otherwise. */
   autoExpand: number
 }
 
-export const DEFAULT_SIDEBAR_LIMITS: SidebarLimits = { folderCap: 5, allCap: 40, autoExpand: 8 }
+export const DEFAULT_SIDEBAR_LIMITS: SidebarLimits = { folderCap: 5, allCap: 40, minUnpinned: 3, autoExpand: 8 }
 
 export interface SidebarInput {
   mode: SidebarMode
@@ -281,8 +284,9 @@ function buildGroup(
   let shown = unpinned
   if (!input.search) {
     // Capped by POSITION, so whether an idle row shows never depends on another row's liveness. Rows
-    // past the cap that are live or on screen still render, after the rest, in their own order.
-    const limit = cap + (input.revealed[key] ?? 0)
+    // past the cap that are live or on screen still render, after the rest, in their own order. Pins
+    // always show and count toward the cap, down to the unpinned floor.
+    const limit = Math.max(input.limits.minUnpinned, cap - pinned.length) + (input.revealed[key] ?? 0)
     shown = [
       ...unpinned.slice(0, limit),
       ...unpinned.slice(limit).filter((r) => r.pty !== null || input.active.has(r.sessionId))

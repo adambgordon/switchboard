@@ -278,11 +278,9 @@
   display: flex;
   align-items: center;
   gap: var(--s2);
-  /* Top padding is most of the space between folders: the leader rule running out of each name does the
-     separating, so the break stays tight. */
-  /* No space below: the group's own gap is all that separates the name from its first row, so the name
-     sits about as close to its rows as the previous folder's Show more line sits above it. The painted
-     box — and so the stuck fade below it — ends at the name's hover pill. */
+  /* Top padding is most of the space between folders. None below: the group's own gap is all that
+     separates the name from its first row. The painted box — and so the stuck fade below it — ends at
+     the name's hover pill. */
   padding: 6px 0 0;
   background: var(--paper-sunken);
   /* The paper reaches out across the body's side padding (14px leading, 7px trailing), past the
@@ -291,6 +289,11 @@
   box-shadow:
     -14px 0 0 var(--paper-sunken),
     7px 0 0 var(--paper-sunken);
+}
+/* Compact already has its break: the previous folder's reserved Show more line (Sidebar.tsx), which
+   ends where this box begins. Padding on top of it would only widen the break. */
+.sb-rail.compact .sb-group-head {
+  padding-top: 0;
 }
 /* While a header is STUCK, a fade hangs under it so the rows scrolling beneath dissolve instead of
    being sliced mid-letter. Only while stuck (a scroll-state container query, no scroll listener): at
@@ -556,10 +559,11 @@
   display: flex;
   gap: var(--s3);
   padding: 0 8px;
-  /* A little air from the last row above it, and tucked well into the group gap below, so it reads as
-     the folder's closing line rather than the next folder's opener. */
-  margin-top: -1px;
-  margin-bottom: -4px;
+  /* Nearer the last row above it than the next folder's header below, so it reads as the folder's
+     closing line rather than the next folder's opener — and clear of that header, whose paper would
+     otherwise cover it. */
+  margin-top: -4px;
+  margin-bottom: -1px;
   /* The button's line box, so an empty reserved line (Compact's folder break) is as tall as a full one. */
   min-height: calc(var(--text-2xs) * 1.1);
   opacity: 0;

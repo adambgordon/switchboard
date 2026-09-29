@@ -25,6 +25,7 @@
     "test:tabs-ui": "node scripts/tab-rendering/check-tab-rendering.cjs",
     "test:rail-ui": "node scripts/rail-rendering/check-rail-rendering.cjs",
     "test:watch": "vitest",
+    "screenshots:readme": "electron-vite build && node scripts/readme-screenshots/launch.cjs",
     "rebuild": "node scripts/rebuild-native.mjs",
     "package": "electron-vite build && electron-builder --dir",
     "setup": "node scripts/setup.mjs"
