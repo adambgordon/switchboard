@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Bell, Close, Folder, Rows, SplitVertical } from './icons'
 
 interface Props {
@@ -16,10 +16,23 @@ interface Props {
  * picture of someone's conversations.
  */
 export default function WhatsNewModal({ open, onClose, tabsEnabled, onEnableTabs, onShowShortcuts }: Props) {
+  // Take focus on open, as the other modals do, so keys reach the dialog rather than whatever was
+  // focused behind it — a field there would keep Esc and whatever is typed.
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (open) panelRef.current?.focus()
+  }, [open])
   if (!open) return null
   return (
     <div className="sb-modal-scrim" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="sb-modal sb-modal-whatsnew" role="dialog" aria-modal="true" aria-label="What's new">
+      <div
+        className="sb-modal sb-modal-whatsnew"
+        role="dialog"
+        aria-modal="true"
+        aria-label="What's new"
+        tabIndex={-1}
+        ref={panelRef}
+      >
         <div className="sb-modal-head">
           <h2 className="sb-modal-title">What’s new in Switchboard</h2>
           <button className="sb-modal-close" onClick={onClose} aria-label="Close">
