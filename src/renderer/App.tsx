@@ -72,7 +72,7 @@ import {
   strayChoosers,
   type ChooserMemory
 } from './lib/chooserTab'
-import { emptyAfterStop, endedStops } from './lib/stopClose'
+import { confirmedEmpty, endedStops, stopsOnClose } from './lib/stopClose'
 import type { SidePlace } from './lib/conversationMenu'
 import {
   NO_SELECTION,
@@ -440,6 +440,26 @@ export default function App() {
     []
   )
 
+  // The user closed these tabs: a running conversation among them that has written nothing is stopped,
+  // so it leaves the rail rather than lingering there with nothing showing it — see stopClose. Every
+  // close the user makes goes through here; a tab that moves elsewhere does not. Decided after a fresh
+  // read from disk, and only if the tab is still closed by then: reopening it is changing one's mind.
+  const stopEmptyOnClose = useCallback((ids: readonly string[]) => {
+    const countOf = (id: string) => metaByIdRef.current.get(id)?.messageCount ?? 0
+    for (const id of ids) {
+      if (!stopsOnClose(ptysBySessionRef.current.get(id), countOf(id))) continue
+      // A revision of its own, so the read is fresh from disk rather than a parse already in flight.
+      void window.api
+        .getTranscript(id, `closed:${Date.now()}`)
+        .then((t) => {
+          const pty = ptysBySessionRef.current.get(id)
+          if (!pty || locateTab(paneLayoutRef.current, id)) return
+          if (stopsOnClose(pty, countOf(id)) && confirmedEmpty(countOf(id), t)) window.api.kill(pty.ptyId)
+        })
+        .catch(() => {})
+    }
+  }, [])
+
   // Controls invoked on a tab close its group only when that tab belongs to it. Keyboard close
   // resolves the focused group independently, since the active tab can be outside the selection.
   const closeTabsFrom = useCallback(
@@ -450,8 +470,17 @@ export default function App() {
       const ids = targetsFor(pane, id)
       if (ids.length > 1) panes.closeTabs(ids)
       else panes.closeTab(pane, index)
+      stopEmptyOnClose(ids)
     },
-    [panes.closeTab, panes.closeTabs, targetsFor, beginVisit]
+    [panes.closeTab, panes.closeTabs, targetsFor, beginVisit, stopEmptyOnClose]
+  )
+  const closeOtherTabs = useCallback(
+    (pane: number, index: number) => {
+      const tabs = paneLayoutRef.current.panes[pane]?.tabs ?? []
+      panes.closeOtherTabs(pane, index)
+      stopEmptyOnClose(tabs.filter((_, i) => i !== index).map((tab) => tab.sessionId))
+    },
+    [panes.closeOtherTabs, stopEmptyOnClose]
   )
   const tabsEnabledRef = useRef(tabsEnabled)
   tabsEnabledRef.current = tabsEnabled
@@ -485,11 +514,13 @@ export default function App() {
       // A chooser closes like a tab even with tabs off, where it is the one thing ⌘W should not
       // mistake for the whole window: it is a question on top of what was showing.
       const closesTab = tabsEnabledRef.current || (active !== null && isChooserTab(active))
-      if (closesTab && ids.length > 0) panes.closeTabs(ids)
-      else window.api.closeWindow()
+      if (closesTab && ids.length > 0) {
+        panes.closeTabs(ids)
+        stopEmptyOnClose(ids)
+      } else window.api.closeWindow()
     })
     return off
-  }, [panes.closeTabs, beginVisit])
+  }, [panes.closeTabs, beginVisit, stopEmptyOnClose])
 
   // A Codex PTY's sessionId changed — an initial bind off a placeholder, or a correction between two
   // real conversations. The two need OPPOSITE handling of session-keyed state, and getting it wrong
@@ -1733,7 +1764,7 @@ export default function App() {
         .getTranscript(id, `stopped:${Date.now()}`)
         .then((t) => {
           if (ptysBySessionRef.current.has(id)) return
-          if (emptyAfterStop(metaByIdRef.current.get(id)?.messageCount ?? 0, t)) panes.closeTabs([id])
+          if (confirmedEmpty(metaByIdRef.current.get(id)?.messageCount ?? 0, t)) panes.closeTabs([id])
         })
         .catch(() => {})
     }
@@ -1749,13 +1780,29 @@ export default function App() {
     [metaById, resume]
   )
 
+  // Working with a conversation keeps its tab: sending its terminal anything, pinning it, renaming it.
+  // A preview tab becomes an ordinary one; reading it — scrolling, selecting, Find — does not. Tabs
+  // off, the one tab is always the preview each open replaces, so keeping it would strand a second.
+  // Reads the layout through its ref: this runs on every keystroke and must cost nothing.
+  const keepTab = useCallback(
+    (id: string) => {
+      if (!tabsEnabledRef.current) return
+      const l = paneLayoutRef.current
+      const at = locateTab(l, id)
+      if (at && l.panes[at.pane].tabs[at.index].preview) panes.promoteTab(id, at.pane)
+    },
+    [panes.promoteTab]
+  )
+
   // Pin/unpin, gated so a provisional row (no persisted identity yet) can't enter the persisted pin
   // store under a placeholder id that would orphan once it binds to its real id.
   const togglePinGated = useCallback(
     (id: string) => {
-      if (!isProvisional(id)) togglePin(id)
+      if (isProvisional(id)) return
+      if (!pinned.has(id)) keepTab(id)
+      togglePin(id)
     },
-    [isProvisional, togglePin]
+    [isProvisional, togglePin, pinned, keepTab]
   )
 
   // Option+click marks a live row unread. Gated for the same reason pins are: `useSeen` persists to
@@ -1784,9 +1831,13 @@ export default function App() {
   // Set/clear a conversation's title. Fire-and-forget: main appends Claude Code's own custom-title
   // line then re-indexes + broadcasts, so the new title flows back through useSessions to the rail,
   // pane header, and the (still-open) info modal. An empty title resets to the auto-generated one.
-  const renameConversation = useCallback((id: string, title: string) => {
-    void window.api.renameConversation(id, title)
-  }, [])
+  const renameConversation = useCallback(
+    (id: string, title: string) => {
+      keepTab(id)
+      void window.api.renameConversation(id, title)
+    },
+    [keepTab]
+  )
 
   // Toggle the search box; closing it clears the query so filtering ends with it.
   const toggleSearch = useCallback(() => {
@@ -1906,9 +1957,11 @@ export default function App() {
   const closeOneTab = useCallback(
     (pane: number, index: number) => {
       beginVisit()
+      const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
       panes.closeTab(pane, index)
+      if (id) stopEmptyOnClose([id])
     },
-    [panes.closeTab, beginVisit]
+    [panes.closeTab, beginVisit, stopEmptyOnClose]
   )
   // ⌥-× on a running tab: end the session, then close the tab — its own, as the plain × does.
   const stopAndCloseTab = useCallback(
@@ -2297,7 +2350,7 @@ export default function App() {
                   onCloseOneTab={closeOneTab}
                   onStopAndCloseTab={stopAndCloseTab}
                   onTabCommand={runTabCommand}
-                  onCloseOtherTabs={panes.closeOtherTabs}
+                  onCloseOtherTabs={closeOtherTabs}
                   onPromoteTab={panes.promoteTab}
                   canSplitRight={(id) => canSplitRightFrom(i, id)}
                   canMoveToOtherPane={paneLayout.panes.length === 2}
@@ -2384,6 +2437,7 @@ export default function App() {
           focusReq={focusReq}
           theme={themeResolved}
           onMarkUnread={markUnreadGated}
+          onUserInput={keepTab}
         />
       </div>
       <SettingsModal

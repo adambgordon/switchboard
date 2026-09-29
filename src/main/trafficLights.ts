@@ -17,19 +17,19 @@ import { BrowserWindow } from 'electron'
 // our bar (a 2px up-left nudge), carried as the constants below.
 const REST_X = 14
 // How far ABOVE the vertical center the lights rest — the 2px of the up-nudge (the center at 100%
-// is (TITLEBAR_H - BUTTON_D)/2 = 14; resting at 12 means 2px higher). Kept as a constant offset so
+// is (TITLEBAR_H - BUTTON_D)/2 = 12; resting at 10 means 2px higher). Kept as a constant offset so
 // the nudge stays "a tiny bit" at any zoom instead of being amplified by the factor.
 const REST_NUDGE_UP = 2
 // Mirror tokens.css --titlebar-h; the macOS traffic-light cluster is ~12pt tall. At zoom f the bar
 // renders TITLEBAR_H*f tall while the buttons stay BUTTON_D, so center them in the scaled bar.
-const TITLEBAR_H = 40
+const TITLEBAR_H = 36
 const BUTTON_D = 12
 
 /**
  * The traffic-light inset for a given page-zoom factor (1 = 100%, 1.2 = 120%, …). x scales the
  * resting inset (the wordmark's left padding scales by the same factor, so the gap stays
  * proportional); y centers the fixed-height buttons in the scaled bar, then lifts them by the
- * constant resting nudge. Reduces to {14,12} at factor 1 — the resting position.
+ * constant resting nudge. Reduces to {14,10} at factor 1 — the resting position.
  */
 export function trafficLightPositionFor(factor: number): { x: number; y: number } {
   return {

@@ -6,7 +6,7 @@
  * That only holds because the preference is written when the user changes it and never merely
  * because a window mounted — see `useTabsEnabled`.
  */
-export const DEFAULT_TABS_ENABLED = false
+export const DEFAULT_TABS_ENABLED = true
 
 /**
  * Read the stored preference, falling back to the default for anything that is not an explicit
@@ -16,9 +16,9 @@ export const DEFAULT_TABS_ENABLED = false
  * test-imported. Same split as `storageSync` and `theme`.
  *
  * `fallback` is a parameter rather than a closed-over constant for one reason: the rule is "absence
- * follows the default", and while the default is `false` that is indistinguishable from a function
- * that simply returns `false`. Passing the fallback in lets a test pin the rule at BOTH values, so
- * the day the default flips it is already covered instead of newly untested.
+ * follows the default", and at any one default that is indistinguishable from a function that
+ * simply returns that value. Passing the fallback in lets a test pin the rule at BOTH values, so a
+ * flip of the default is covered rather than newly untested.
  */
 export function parseTabsEnabled(
   raw: string | null,

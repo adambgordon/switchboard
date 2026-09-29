@@ -34,7 +34,7 @@ interface Props {
   terminalAt?: 'here' | 'other-pane' | 'claimable' | null
   /** Bring the terminal into this window and show it here. */
   onClaimTerminal?: () => void
-  /** Preferences → Beta Features → Tabs and split view. False renders no strip at all. */
+  /** Preferences → Appearance → Tabs and split view. False renders no strip at all. */
   showTabs: boolean
   tabLayout: TabLayout
   tabs: TabDescriptor[]

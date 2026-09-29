@@ -30,6 +30,8 @@ interface Props {
   theme: ResolvedTheme
   /** Option+click in the terminal — always mark the conversation unread (never toggles). */
   onMarkUnread: (id: string) => void
+  /** A person sent this terminal input — see markUsed. Called on every use, unthrottled. */
+  onUserInput: (id: string) => void
 }
 
 // xterm color themes, one per app theme. claude draws its own ANSI-colored TUI, so a theme sets
@@ -137,7 +139,8 @@ export default function TerminalView({
   visible,
   focusKey,
   theme,
-  onMarkUnread
+  onMarkUnread,
+  onUserInput
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -167,10 +170,19 @@ export default function TerminalView({
    * pasted text and an IME composition commit both reach the process without a key event. Missing
    * one means a terminal holding a real draft is ranked as empty and discarded first.
    *
+   * It is also what keeps a preview tab: sending the agent anything is working in the conversation,
+   * so the same input, and only it, reaches `onUserInput` — before the throttle, so the first key
+   * counts. Read through refs, since a new callback or a late-bound Codex id must not rebuild xterm.
+   *
    * Throttled because the cap orders by recency in minutes: per-keystroke precision buys nothing and
    * this sits on the typing path.
    */
+  const onUserInputRef = useRef(onUserInput)
+  onUserInputRef.current = onUserInput
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
   const markUsed = useCallback((): void => {
+    onUserInputRef.current(sessionIdRef.current)
     const now = performance.now()
     if (now - lastUsedReportRef.current < 5000) return
     lastUsedReportRef.current = now

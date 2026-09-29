@@ -115,7 +115,7 @@
 
   /* ---- layout ---- */
   --pane-w: 320px;
-  --titlebar-h: 40px; /* mirrored in main/trafficLights.ts, which centers the native lights in it */
+  --titlebar-h: 36px; /* mirrored in main/trafficLights.ts, which centers the native lights in it */
 
   /* ---- rail insets ----
      Horizontal room between a rail row and the scrollport edge, and the dial for how much side space the

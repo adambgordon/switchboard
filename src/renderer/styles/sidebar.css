@@ -19,12 +19,17 @@
 .sb-row.selected:hover {
   background: var(--paper-raised);
 }
-/* Compact: one line. Logo, title, then the elsewhere glyph and the dot/⋮ slot, all centered. The
-   trailing padding is short of the leading: the dot/⋮ slot is wider than the mark it holds, and this
-   centers that mark under its folder's pencil, with its edge about as far in as the logo's. */
+/* Compact: one line. Logo, title, then the elsewhere glyph and the dot/⋮ slot, all centered. Both
+   paddings are short of the spacious row's, because each end's slot is wider than the mark it holds:
+   the trailing one centers the dot/⋮ under its folder's pencil, and the leading one brings the logo's
+   edge about as far in as that mark's. The title sits closer to the logo than the row's gap: the
+   logo column is wider than the logo, so the gap alone reads as a hole. */
 .sb-row.compact {
   align-items: center;
-  padding: 3px 3px 3px 8px;
+  padding: 3px 3px 3px 5px;
+}
+.sb-row.compact .sb-row-lead {
+  margin-right: -2px;
 }
 /* Asking or unread: the title goes as heavy as its folder's name does for the same reason (needsYou). */
 .sb-row.attention .sb-row-title {

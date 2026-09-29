@@ -3,7 +3,7 @@ import { useStorageSync } from './useStorageSync'
 import { DEFAULT_TABS_ENABLED, parseTabsEnabled } from './tabsPreference'
 
 /**
- * The "tabs and split view" preference, persisted in localStorage. Off by default.
+ * The "tabs and split view" preference, persisted in localStorage. On by default.
  *
  * One switch governs the whole family — the tab strip, the vertical split, and opening a
  * conversation in its own window — because they are one model, not three features.
@@ -34,7 +34,7 @@ export interface TabsEnabled {
   setEnabled: (value: boolean) => void
 }
 
-/** Persisted tabs-and-split preference (default off). */
+/** Persisted tabs-and-split preference (default on). */
 export function useTabsEnabled(): TabsEnabled {
   const [enabled, setEnabledState] = useState<boolean>(load)
 

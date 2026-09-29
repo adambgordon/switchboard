@@ -136,16 +136,14 @@ export default function UpdatesSetting({ updates }: Props): ReactNode {
 
   return (
     <div className="sb-setting">
-      <div className="sb-setting-title">Updates</div>
+      <div className="sb-setting-title sb-update-title">
+        <span>Updates</span>
+        <span className="sb-update-version">{info ? `v${info.version} · ${info.shaShort}` : ''}</span>
+      </div>
       <div className="sb-update">
         <div className="sb-update-head">
           {button}
-          <div className="sb-update-info">
-            <span className="sb-update-version">
-              {info ? `v${info.version} · ${info.shaShort}` : ''}
-            </span>
-            <span className="sb-update-status">{displayStatus}</span>
-          </div>
+          <span className="sb-update-status">{displayStatus}</span>
         </div>
 
         {detached ? (

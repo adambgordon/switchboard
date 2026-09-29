@@ -272,8 +272,9 @@ interface Props {
 /**
  * The Preferences modal — a left nav (Appearance / Application / Beta Features / Shortcuts / FAQ)
  * over the shared
- * scrim+card. Appearance holds theme + dock icon; Application holds Updates (first), the live-session
- * cap, and the new-conversation default agent; Beta Features holds the tabs / split / windows flag;
+ * scrim+card. Appearance holds theme, dock icon, sidebar density and the tabs / split / windows setting
+ * with its tab layout; Application holds Updates (first), the live-session cap, and the
+ * new-conversation default agent; Beta Features holds the liveness dot color;
  * Shortcuts / FAQ are reference. Open it to a specific page via
  * `page` (⌘, / title-bar gear → appearance; ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is
  * handled by App's global key handler, which also makes the rest of the keyboard inert while open.
@@ -508,6 +509,63 @@ export default function SettingsModal({
                       Spacious rows show the preview and details inline.
                     </div>
                   </div>
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">Tabs and split view</div>
+                    <div className="sb-seg" role="radiogroup" aria-label="Tabs and split view">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={tabsEnabled}
+                        className={`sb-seg-btn${tabsEnabled ? ' active' : ''}`}
+                        onClick={() => onSetTabsEnabled(true)}
+                      >
+                        On
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={!tabsEnabled}
+                        className={`sb-seg-btn${!tabsEnabled ? ' active' : ''}`}
+                        onClick={() => onSetTabsEnabled(false)}
+                      >
+                        Off
+                      </button>
+                    </div>
+                    <div className="sb-setting-desc">
+                      Keep several conversations open at once in a tab strip, split the view into two
+                      panes, and open conversations in their own windows. Clicking a conversation
+                      previews it in a replaceable tab; double-clicking, resuming or typing in it keeps
+                      that tab. Turn this off to show one conversation at a time.
+                    </div>
+                  </div>
+                  <div className="sb-setting" aria-disabled={!tabsEnabled}>
+                    <div className="sb-setting-title">Tab layout</div>
+                    <div
+                      className="sb-seg"
+                      role="radiogroup"
+                      aria-label="Tab layout"
+                      aria-disabled={!tabsEnabled}
+                      aria-describedby="tab-layout-description"
+                    >
+                      {(['wrap', 'scroll'] as const).map((layout) => (
+                        <button
+                          key={layout}
+                          type="button"
+                          role="radio"
+                          aria-checked={tabLayout === layout}
+                          disabled={!tabsEnabled}
+                          className={`sb-seg-btn${tabLayout === layout ? ' active' : ''}`}
+                          onClick={() => onSetTabLayout(layout)}
+                        >
+                          {layout === 'wrap' ? 'Wrap' : 'Scroll'}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="sb-setting-desc" id="tab-layout-description">
+                      Wrap tabs onto multiple rows, or scroll horizontally in a single row.
+                      {!tabsEnabled && ' Enable Tabs and split view to change this setting.'}
+                    </div>
+                  </div>
                 </div>
               </>
             ) : page === 'application' ? (
@@ -651,63 +709,6 @@ export default function SettingsModal({
                     <Warning size={16} />
                     <span>Beta features are experimental and subject to change.</span>
                   </div>
-                  <div className="sb-setting-title">Tabs and split view</div>
-                  <div className="sb-seg" role="radiogroup" aria-label="Tabs and split view">
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={tabsEnabled}
-                      className={`sb-seg-btn${tabsEnabled ? ' active' : ''}`}
-                      onClick={() => onSetTabsEnabled(true)}
-                    >
-                      On
-                    </button>
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={!tabsEnabled}
-                      className={`sb-seg-btn${!tabsEnabled ? ' active' : ''}`}
-                      onClick={() => onSetTabsEnabled(false)}
-                    >
-                      Off
-                    </button>
-                  </div>
-                  <div className="sb-setting-desc">
-                    Keep several conversations open at once in a tab strip, split the view into two
-                    panes, and open conversations in their own windows. Clicking a conversation
-                    previews it in a replaceable tab; double-clicking or resuming it keeps that tab.
-                    Turn this off to show one conversation at a time.
-                  </div>
-                </div>
-                <div className="sb-setting" aria-disabled={!tabsEnabled}>
-                  <div className="sb-setting-title">Tab layout</div>
-                  <div
-                    className="sb-seg"
-                    role="radiogroup"
-                    aria-label="Tab layout"
-                    aria-disabled={!tabsEnabled}
-                    aria-describedby="tab-layout-description"
-                  >
-                    {(['wrap', 'scroll'] as const).map((layout) => (
-                      <button
-                        key={layout}
-                        type="button"
-                        role="radio"
-                        aria-checked={tabLayout === layout}
-                        disabled={!tabsEnabled}
-                        className={`sb-seg-btn${tabLayout === layout ? ' active' : ''}`}
-                        onClick={() => onSetTabLayout(layout)}
-                      >
-                        {layout === 'wrap' ? 'Wrap' : 'Scroll'}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="sb-setting-desc" id="tab-layout-description">
-                    Wrap tabs onto multiple rows, or scroll horizontally in a single row.
-                    {!tabsEnabled && ' Enable Tabs and split view to change this setting.'}
-                  </div>
-                </div>
-                <div className="sb-setting">
                   <div className="sb-setting-title">Liveness dot color</div>
                   <div className="sb-dotcolor-control">
                     <input

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emptyAfterStop, endedStops } from '../src/renderer/lib/stopClose'
+import { confirmedEmpty, endedStops, stopsOnClose } from '../src/renderer/lib/stopClose'
 
 describe('endedStops', () => {
   it('names the stopped conversations whose terminals are gone, and only those', () => {
@@ -17,21 +17,41 @@ describe('endedStops', () => {
   })
 })
 
-describe('emptyAfterStop', () => {
-  it('closes a conversation with no messages in the index and no transcript on disk', () => {
-    expect(emptyAfterStop(0, null)).toBe(true)
+describe('confirmedEmpty', () => {
+  it('is empty with no messages in the index and no transcript on disk', () => {
+    expect(confirmedEmpty(0, null)).toBe(true)
   })
 
-  it('closes one whose transcript exists but holds no messages', () => {
-    expect(emptyAfterStop(0, { messages: [] })).toBe(true)
+  it('is empty when the transcript exists but holds no messages', () => {
+    expect(confirmedEmpty(0, { messages: [] })).toBe(true)
   })
 
-  it('keeps one the index already counts messages for', () => {
-    expect(emptyAfterStop(3, null)).toBe(false)
+  it('is not empty when the index already counts messages', () => {
+    expect(confirmedEmpty(3, null)).toBe(false)
   })
 
-  it('keeps one whose first message is on disk but not yet indexed', () => {
-    // Stopped within a second of the first message: the index still says 0.
-    expect(emptyAfterStop(0, { messages: [{}] })).toBe(false)
+  it('is not empty when the first message is on disk but not yet indexed', () => {
+    // Ended within a second of the first message: the index still says 0.
+    expect(confirmedEmpty(0, { messages: [{}] })).toBe(false)
+  })
+})
+
+describe('stopsOnClose', () => {
+  const running = { parkedJob: null }
+
+  it('stops a running terminal with nothing indexed — a new Claude session, or an unlinked Codex one', () => {
+    expect(stopsOnClose(running, 0)).toBe(true)
+  })
+
+  it('leaves a conversation that has messages running', () => {
+    expect(stopsOnClose(running, 1)).toBe(false)
+  })
+
+  it('has nothing to stop when no terminal is running', () => {
+    expect(stopsOnClose(undefined, 0)).toBe(false)
+  })
+
+  it('leaves a terminal whose work went into a background agent running, though it looks empty', () => {
+    expect(stopsOnClose({ parkedJob: { shortId: 'j1', name: 'Refactor the parser' } }, 0)).toBe(false)
   })
 })
