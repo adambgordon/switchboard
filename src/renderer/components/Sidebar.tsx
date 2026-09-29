@@ -24,8 +24,6 @@ interface Props {
   mode: SidebarMode
   onModeChange: (mode: SidebarMode) => void
   density: RailDensity
-  /** Focus the next session that needs you (the head tag), cycling. */
-  onNeedsYou: () => void
   /** Collapse all / Expand all. */
   onSetAllCollapsed: (collapsed: boolean) => void
   /** True during the initial conversation index, before the model is populated. */
@@ -123,7 +121,7 @@ function menuIcon(action: ConversationMenuAction): ReactNode {
 const MENU_EDGE = 8
 
 /**
- * The unified conversation pane. A head (grouping mode, the needs-you tag, search, new) above one
+ * The unified conversation pane. A head (grouping mode, search, new) above one
  * scrolling list of groups: one headerless group in All mode, one sticky-headed group per project in
  * Folders mode. Every group holds its pinned rows, then its unpinned ones; liveness is the dot, never
  * a grouping.
@@ -133,7 +131,6 @@ export default function Sidebar({
   mode,
   onModeChange,
   density,
-  onNeedsYou,
   onSetAllCollapsed,
   loading,
   openElsewhere,
@@ -265,7 +262,8 @@ export default function Sidebar({
         side: linked && onOpenToSide ? place.side : null,
         newWindow: linked && !!onOpenInNewWindow,
         hasTabHere: place.hasTabHere,
-        closeOthers: false
+        closeOthers: false,
+        reopen: 0
       })
     }
   }
@@ -429,8 +427,6 @@ export default function Sidebar({
         scrolled={scrolled}
         mode={mode}
         onModeChange={onModeChange}
-        needsYou={model.needsYou.length}
-        onNeedsYou={onNeedsYou}
         onSetAllCollapsed={onSetAllCollapsed}
         query={query}
         onQueryChange={onQueryChange}

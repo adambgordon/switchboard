@@ -73,6 +73,7 @@ import {
   type ChooserMemory
 } from './lib/chooserTab'
 import { confirmedEmpty, endedStops, stopsOnClose } from './lib/stopClose'
+import { captureClosed, pushClosed, takeReopenable, type ClosedGroup } from './lib/closedTabs'
 import type { SidePlace } from './lib/conversationMenu'
 import {
   NO_SELECTION,
@@ -116,6 +117,8 @@ import {
 } from './lib/rowIdentity'
 import { rowTipMeta, rowTipPreview, rowTipTitle } from './lib/rowTip'
 import TitleBar from './components/TitleBar'
+import type { AttentionEntry } from './components/AttentionBell'
+import { attentionOrder } from './lib/attention'
 import MainPane from './components/MainPane'
 import type { TabConversationCommand, TabDescriptor } from './components/TabStrip'
 import Sidebar from './components/Sidebar'
@@ -460,6 +463,14 @@ export default function App() {
     }
   }, [])
 
+  // What the user closed, for ⇧⌘T — see closedTabs. Recorded by the same closes that go through
+  // stopEmptyOnClose, from the layout as it stood BEFORE the close. A ref: closing costs no render.
+  const closedTabsRef = useRef<ClosedGroup[]>([])
+  const recordClosed = useCallback((ids: readonly string[]) => {
+    const group = captureClosed(paneLayoutRef.current, ids)
+    if (group) closedTabsRef.current = pushClosed(closedTabsRef.current, group)
+  }, [])
+
   // Controls invoked on a tab close its group only when that tab belongs to it. Keyboard close
   // resolves the focused group independently, since the active tab can be outside the selection.
   const closeTabsFrom = useCallback(
@@ -468,19 +479,22 @@ export default function App() {
       const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
       if (!id) return
       const ids = targetsFor(pane, id)
+      recordClosed(ids)
       if (ids.length > 1) panes.closeTabs(ids)
       else panes.closeTab(pane, index)
       stopEmptyOnClose(ids)
     },
-    [panes.closeTab, panes.closeTabs, targetsFor, beginVisit, stopEmptyOnClose]
+    [panes.closeTab, panes.closeTabs, targetsFor, beginVisit, stopEmptyOnClose, recordClosed]
   )
   const closeOtherTabs = useCallback(
     (pane: number, index: number) => {
       const tabs = paneLayoutRef.current.panes[pane]?.tabs ?? []
+      const ids = tabs.filter((_, i) => i !== index).map((tab) => tab.sessionId)
+      recordClosed(ids)
       panes.closeOtherTabs(pane, index)
-      stopEmptyOnClose(tabs.filter((_, i) => i !== index).map((tab) => tab.sessionId))
+      stopEmptyOnClose(ids)
     },
-    [panes.closeOtherTabs, stopEmptyOnClose]
+    [panes.closeOtherTabs, stopEmptyOnClose, recordClosed]
   )
   const tabsEnabledRef = useRef(tabsEnabled)
   tabsEnabledRef.current = tabsEnabled
@@ -515,12 +529,45 @@ export default function App() {
       // mistake for the whole window: it is a question on top of what was showing.
       const closesTab = tabsEnabledRef.current || (active !== null && isChooserTab(active))
       if (closesTab && ids.length > 0) {
+        recordClosed(ids)
         panes.closeTabs(ids)
         stopEmptyOnClose(ids)
       } else window.api.closeWindow()
     })
     return off
-  }, [panes.closeTabs, beginVisit, stopEmptyOnClose])
+  }, [panes.closeTabs, beginVisit, stopEmptyOnClose, recordClosed])
+
+  // ⇧⌘T, and a tab menu's Reopen: bring back the newest close that still has something to bring back.
+  // A conversation can come back if it has no tab — here or in another window — is not hidden, and is
+  // still there: running, or with something written. An empty one stopped on its close is gone.
+  const canReopen = useCallback(
+    (id: string) =>
+      !hiddenSessionIdsRef.current.has(id) &&
+      !locateTab(paneLayoutRef.current, id) &&
+      !openElsewhereRef.current.has(id) &&
+      (ptysBySessionRef.current.has(id) || (metaByIdRef.current.get(id)?.messageCount ?? 0) > 0),
+    []
+  )
+  const reopenClosed = useCallback(() => {
+    if (!tabsEnabledRef.current) return
+    const { group, rest } = takeReopenable(closedTabsRef.current, canReopen)
+    closedTabsRef.current = rest
+    if (!group) return
+    beginVisit()
+    panes.reopenTabs(group)
+  }, [canReopen, beginVisit, panes.reopenTabs])
+  const reopenCount = useCallback(
+    () => (tabsEnabledRef.current ? takeReopenable(closedTabsRef.current, canReopen).group?.tabs.length ?? 0 : 0),
+    [canReopen]
+  )
+  // A menu accelerator, like ⌘W — and inert behind a modal, like it.
+  useEffect(
+    () =>
+      window.api.onMenuReopenTab(() => {
+        if (!overlayOpenRef.current) reopenClosed()
+      }),
+    [reopenClosed]
+  )
 
   // A Codex PTY's sessionId changed — an initial bind off a placeholder, or a correction between two
   // real conversations. The two need OPPOSITE handling of session-keyed state, and getting it wrong
@@ -1441,15 +1488,6 @@ export default function App() {
   const clickLive = useCallback((id: string) => openRemembered(id), [openRemembered])
   const clickConversation = useCallback((id: string) => openRemembered(id), [openRemembered])
   const switchTo = useCallback((id: string) => openRemembered(id), [openRemembered])
-  // The head's needs-you tag: open the next session asking or unread, after the one you are on, in
-  // rail order. Opening makes it active — which expands its folder — and opening an unread one marks
-  // it read, so the count falls as you work through them.
-  const openNextNeedingYou = useCallback(() => {
-    const list = sidebarModelRef.current?.needsYou ?? []
-    if (list.length === 0) return
-    const at = selectedIdRef.current ? list.indexOf(selectedIdRef.current) : -1
-    openRemembered(list[(at + 1) % list.length])
-  }, [openRemembered])
   // Double-click a row: keep it. The editor gesture for promoting a preview tab, and the reason it
   // needs no click-count dedupe is that the two ordinary clicks preceding it are idempotent here —
   // they open (or re-activate) the same conversation, and re-opening the current history stop is an
@@ -1939,6 +1977,43 @@ export default function App() {
     [ptys.bySession, metaById, liveStateFor]
   )
 
+  // The title bar's bell: the rail's needs-you set, in triage order — see attention.ts. Built from the
+  // same model and liveness the rail draws, so the bell and the rows cannot disagree.
+  const attention = useMemo(
+    () =>
+      attentionOrder(
+        sidebarModel.needsYou.flatMap((id): AttentionEntry[] => {
+          const state = liveStateOf(id)
+          const pty = ptys.bySession.get(id) ?? null
+          const meta = metaById.get(id) ?? (pty ? synthMeta(pty) : null)
+          if ((state !== 'asking' && state !== 'awaiting') || !meta) return []
+          const root = sidebarModel.rows.get(id)?.root
+          return [
+            {
+              sessionId: id,
+              state,
+              at: meta.lastActivityAt ?? meta.mtime,
+              title: pty ? displayTitleForRow(pty, meta) : meta.title,
+              agent: meta.agent,
+              folder: (root !== undefined ? sidebarModel.labels.get(root) : undefined) ?? ''
+            }
+          ]
+        })
+      ),
+    [sidebarModel, liveStateOf, ptys.bySession, metaById]
+  )
+  const attentionRef = useRef(attention)
+  attentionRef.current = attention
+  const markAttentionRead = useCallback(
+    (id: string) => {
+      if (!isUnlinkedId(id)) markRead(id)
+    },
+    [isUnlinkedId, markRead]
+  )
+  const markAllAttentionRead = useCallback(() => {
+    for (const e of attentionRef.current) markAttentionRead(e.sessionId)
+  }, [markAttentionRead])
+
   // Toggle a live conversation read/unread: a solid (awaiting) OR pulsing (asking) dot → read;
   // anything else → unread (which restores the pulse on a question state — see resolveLiveState).
   // Non-live rows have no dot, so it's a no-op there.
@@ -1958,10 +2033,11 @@ export default function App() {
     (pane: number, index: number) => {
       beginVisit()
       const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
+      if (id) recordClosed([id])
       panes.closeTab(pane, index)
       if (id) stopEmptyOnClose([id])
     },
-    [panes.closeTab, beginVisit, stopEmptyOnClose]
+    [panes.closeTab, beginVisit, stopEmptyOnClose, recordClosed]
   )
   // ⌥-× on a running tab: end the session, then close the tab — its own, as the plain × does.
   const stopAndCloseTab = useCallback(
@@ -2222,6 +2298,10 @@ export default function App() {
         split={paneLayout.panes.length > 1}
         splitDisabled={paneLayout.panes.length < 2 && !canSplitActiveTab(paneLayout)}
         onToggleSplit={tabsEnabled ? toggleSplit : undefined}
+        attention={attention}
+        onOpenAttention={openRemembered}
+        onMarkRead={markAttentionRead}
+        onMarkAllRead={markAllAttentionRead}
       />
       <div
         className="sb-body"
@@ -2234,7 +2314,6 @@ export default function App() {
             mode={sidebarMode}
             onModeChange={setSidebarMode}
             density={railDensity}
-            onNeedsYou={openNextNeedingYou}
             onSetAllCollapsed={setAllCollapsed}
             loading={loading}
             selectedSessionId={selectedId}
@@ -2351,6 +2430,8 @@ export default function App() {
                   onStopAndCloseTab={stopAndCloseTab}
                   onTabCommand={runTabCommand}
                   onCloseOtherTabs={closeOtherTabs}
+                  reopenCount={reopenCount}
+                  onReopenClosed={reopenClosed}
                   onPromoteTab={panes.promoteTab}
                   canSplitRight={(id) => canSplitRightFrom(i, id)}
                   canMoveToOtherPane={paneLayout.panes.length === 2}

@@ -371,6 +371,7 @@ export const IPC = {
   codeContextMenu: 'shell:codeContextMenu', // renderer -> main: pop the native right-click menu for inline code
   tabContextMenu: 'shell:tabContextMenu', // renderer -> main: pop the native right-click menu for a tab; resolves with the chosen action
   menuCloseTab: 'menu:closeTab', // push: ⌘W — the renderer closes the active tab, or asks main to close the window when there is none
+  menuReopenTab: 'menu:reopenTab', // push: ⇧⌘T — the renderer reopens its most recently closed tab(s)
   windowClose: 'window:close', // renderer -> main: close the sender's window (⌘W with no tab to close)
   windowOpenConversation: 'window:openConversation', // renderer -> main: open a NEW window with an ordered tab group
   menuNewConversation: 'menu:newConversation', // push: ⌘N / ⌘T — open (or focus) a new-conversation chooser
@@ -476,6 +477,7 @@ export const CONVERSATION_MENU_ACTIONS = [
   'details',
   'close',
   'closeOthers',
+  'reopenClosed',
   'stop'
 ] as const
 export type ConversationMenuAction = (typeof CONVERSATION_MENU_ACTIONS)[number]
@@ -626,6 +628,9 @@ export interface SwitchboardApi {
    *  `closeWindow()` when it has none, so the shortcut still behaves like macOS expects. Returns an
    *  unsubscribe fn. */
   onMenuCloseTab(cb: () => void): () => void
+  /** ⇧⌘T: main pushes this to the focused window, which reopens what it last closed. Returns an
+   *  unsubscribe fn. */
+  onMenuReopenTab(cb: () => void): () => void
   /** Close the window this renderer belongs to. The ⌘W fallback, and what makes a detached window
    *  closable from inside. */
   closeWindow(): void

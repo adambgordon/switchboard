@@ -17,7 +17,8 @@ const base: ConversationMenuState = {
   side: 'right',
   newWindow: true,
   hasTabHere: false,
-  closeOthers: false
+  closeOthers: false,
+  reopen: 0
 }
 const menu = (over: Partial<ConversationMenuState>): ConversationMenuEntry[] => conversationMenu({ ...base, ...over })
 // '—' for a divider, a trailing '!' for a destructive command: the whole shape in one comparable line.
@@ -127,8 +128,29 @@ describe('the tab menu', () => {
     ])
   })
 
+  it('offers Reopen last in its Close group, counting what it would bring back — not the selection', () => {
+    // A selection of 2 and a reopen of 3, so a label built from the wrong count cannot pass.
+    expect(shape(menu({ surface: 'tab', count: 2, closeOthers: true, reopen: 3 }))).toEqual([
+      'Move 2 tabs to the right',
+      'Move 2 tabs to new window',
+      '—',
+      'Close 2 tabs',
+      'Close other tabs',
+      'Reopen 3 closed tabs'
+    ])
+    expect(shape(menu({ surface: 'tab', side: null, newWindow: false, linked: false, reopen: 1 }))).toEqual([
+      'Close tab',
+      'Reopen closed tab'
+    ])
+  })
+
+  it('offers no Reopen with nothing to reopen, nor on a rail row', () => {
+    expect(shape(menu({ surface: 'tab', side: null, newWindow: false, linked: false, reopen: 0 }))).toEqual(['Close tab'])
+    expect(shape(menu({ reopen: 2 }))).toEqual(shape(menu({})))
+  })
+
   it('names each command for what it does', () => {
-    const actions = menu({ surface: 'tab', live: true, closeOthers: true }).flatMap((e) => ('separator' in e ? [] : [e.action]))
-    expect(actions).toEqual(['toSide', 'newWindow', 'pin', 'markUnread', 'rename', 'details', 'close', 'closeOthers', 'stop'])
+    const actions = menu({ surface: 'tab', live: true, closeOthers: true, reopen: 1 }).flatMap((e) => ('separator' in e ? [] : [e.action]))
+    expect(actions).toEqual(['toSide', 'newWindow', 'pin', 'markUnread', 'rename', 'details', 'close', 'closeOthers', 'reopenClosed', 'stop'])
   })
 })

@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useReducer, useRef } from 'react'
 import type { PersistedTabLayout, TabOpenMode } from '@shared/types'
+import type { ClosedGroup } from './closedTabs'
 import { visibleTabDrag, visibleTabLayout } from '@shared/sessionVisibility'
 import {
   activeTabId,
@@ -51,6 +52,8 @@ export interface PaneLayoutApi {
   retargetTabs: (from: string, to: string) => void
   restoreLayout: (saved: PersistedTabLayout) => void
   collapseToSingle: () => void
+  /** Bring back a closed group where it stood (⇧⌘T). */
+  reopenTabs: (group: ClosedGroup) => void
 }
 
 export function usePaneLayout(restored: PersistedTabLayout | null, hidden: ReadonlySet<string>): PaneLayoutApi {
@@ -152,6 +155,12 @@ export function usePaneLayout(restored: PersistedTabLayout | null, hidden: Reado
     dispatch({ type: 'restore', saved, paneIds })
   }, [])
   const collapseToSingle = useCallback(() => dispatch({ type: 'collapseToSingle' }), [])
+  // Minted whether or not the reopen needs a pane, like `split`: an unused id costs nothing, and
+  // deciding here would mean repeating the reducer's placement rule outside it.
+  const reopenTabs = useCallback((group: ClosedGroup) => {
+    dispatch({ type: 'reopen', group, paneId: `p${nextPaneId.current}` })
+    nextPaneId.current += 1
+  }, [])
 
   const selectedId = useMemo(() => activeTabId(layout), [layout])
 
@@ -176,6 +185,7 @@ export function usePaneLayout(restored: PersistedTabLayout | null, hidden: Reado
     rekeyTabs,
     retargetTabs,
     restoreLayout,
-    collapseToSingle
+    collapseToSingle,
+    reopenTabs
   }
 }

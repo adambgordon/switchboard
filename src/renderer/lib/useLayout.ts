@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 
 /**
- * Width bounds + default (px) for the unified left pane. The minimum is the rail head's one row in
- * Folders mode with a two-digit needs-you tag (296px measured), plus a few px of slack — the head never
- * wraps, so this bound is what keeps it on one line. Re-measure if the head gains anything.
+ * Width bounds + default (px) for the unified left pane. The minimum keeps the rail head's one row in
+ * Folders mode, where its tools are widest, on one line with room to spare — the head never wraps, so
+ * this bound is what holds it there. Re-measure if the head gains anything.
  */
 export const PANE_LIMITS = { min: 300, default: 320, max: 480 } as const
 

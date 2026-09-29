@@ -125,6 +125,7 @@ function groupsFor(tabsEnabled: boolean): Group[] {
             title: 'Tabs & panes',
             items: [
               { keys: ['⌘W'], desc: 'Close tab' },
+              { keys: ['⇧⌘T'], desc: 'Reopen closed tab' },
               { keys: ['⌘\\'], desc: 'Split / unsplit the view' },
               { keys: ['⇧⌘N'], desc: 'New window' }
             ]

@@ -66,6 +66,10 @@ interface Props {
   onStopAndClose: (paneIndex: number, index: number) => void
   onCommand: (command: TabConversationCommand, sessionId: string) => void
   onCloseOthers: (paneIndex: number, index: number) => void
+  /** How many tabs Reopen would bring back right now, or 0. A function, so the count is read when the
+   *  menu opens rather than rerendering every strip on each close. */
+  reopenCount: () => number
+  onReopenClosed: () => void
   onPromote: (sessionId: string, paneIndex: number) => void
   onShowInfo: (sessionId: string) => void
   /** Create the split and put this tab in the new right-hand pane. */
@@ -250,6 +254,8 @@ export default function TabStrip({
   onStopAndClose,
   onCommand,
   onCloseOthers,
+  reopenCount,
+  onReopenClosed,
   onPromote,
   onShowInfo,
   onSplitRight,
@@ -321,12 +327,14 @@ export default function TabStrip({
         // An unlinked terminal has no conversation to reopen elsewhere by id.
         newWindow: !tab.unlinked,
         hasTabHere: true,
-        closeOthers: tabs.length > 1
+        closeOthers: tabs.length > 1,
+        reopen: reopenCount()
       })
     )
     if (choice === null) return
     if (choice === 'close') onClose(paneIndex, index)
     else if (choice === 'closeOthers') onCloseOthers(paneIndex, index)
+    else if (choice === 'reopenClosed') onReopenClosed()
     else if (choice === 'details') onShowInfo(tab.sessionId)
     else if (choice === 'toSide') {
       if (canSplitRight(tab.sessionId)) onSplitRight(tab.sessionId, paneIndex)

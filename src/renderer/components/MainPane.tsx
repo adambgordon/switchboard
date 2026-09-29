@@ -45,6 +45,9 @@ interface Props {
   onStopAndCloseTab: (pane: number, index: number) => void
   onTabCommand: (command: TabConversationCommand, sessionId: string) => void
   onCloseOtherTabs: (pane: number, index: number) => void
+  /** See TabStrip: what Reopen would bring back, read when a tab's menu opens. */
+  reopenCount: () => number
+  onReopenClosed: () => void
   onPromoteTab: (sessionId: string, pane?: number) => void
   /** See TabStrip: whether the tab can create the split, and whether it can cross an existing one. */
   canSplitRight: (sessionId: string) => boolean
@@ -174,6 +177,8 @@ export default function MainPane(props: Props) {
     onStopAndCloseTab,
     onTabCommand,
     onCloseOtherTabs,
+    reopenCount,
+    onReopenClosed,
     onPromoteTab,
     canSplitRight,
     canMoveToOtherPane,
@@ -329,6 +334,8 @@ export default function MainPane(props: Props) {
           onStopAndClose={onStopAndCloseTab}
           onCommand={onTabCommand}
           onCloseOthers={onCloseOtherTabs}
+          reopenCount={reopenCount}
+          onReopenClosed={onReopenClosed}
           onPromote={onPromoteTab}
           onShowInfo={onShowInfoFor}
           canSplitRight={canSplitRight}

@@ -56,10 +56,9 @@
 .sb-rail-head.scrolled {
   box-shadow: inset 0 -1px 0 0 var(--rule);
 }
-/* The head's one row: the grouping toggle and the needs-you tag on the left, the tools on the right.
-   It never wraps — the pane's minimum width (PANE_LIMITS.min) is set so this row fits, with a
-   two-digit tag, in Folders mode, where the tools are widest. Adding anything here means re-measuring
-   that bound. The search field, while open, is a row of its own beneath. */
+/* The head's one row: the grouping toggle on the left, the tools on the right. It never wraps — the
+   pane's minimum width (PANE_LIMITS.min) is set so this row fits in Folders mode, where the tools are
+   widest. Adding anything here means re-measuring that bound. The search field, while open, is a row of its own beneath. */
 .sb-rail-head-top {
   display: flex;
   align-items: center;
@@ -81,29 +80,6 @@
 .sb-rail-mode .sb-seg-btn {
   padding: 3px 10px;
   font-size: var(--text-xs);
-}
-/* The needs-you tag: how many sessions are asking or unread. Ink, not cobalt — it reports attention,
-   not aliveness — and absent at zero, so its appearance is the signal. Tabular digits keep its width
-   from jittering as the count changes. */
-.sb-rail-needs {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: var(--r-pill);
-  background: var(--paper-active);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--text-2xs);
-  font-weight: 500;
-  font-feature-settings: 'tnum';
-  flex-shrink: 0;
-  transition: background-color var(--dur-fast) var(--ease);
-}
-.sb-rail-needs:hover {
-  background: var(--rule-strong);
 }
 .sb-rail-sub-row {
   display: flex;

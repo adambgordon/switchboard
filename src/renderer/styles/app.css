@@ -330,6 +330,120 @@ body.sb-resizing .sb-pane {
   transform: translateY(-50%);
 }
 
+/* ---- the needs-you bell ---- */
+/* Its dot is a row's dot, class for class (rippling = asking, solid = unread), shrunk and pinned to the
+   bell's corner where the gear carries its update dot. */
+.sb-bell .sb-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  pointer-events: none;
+}
+/* The rail's surface, not the pane's: it lists rows from the rail, so it wears the rail's paper and
+   the rail's hover. */
+.sb-ctxmenu.sb-bell-panel {
+  -webkit-app-region: no-drag; /* its top edge overlaps the title bar's drag region */
+  width: 320px;
+  padding: 0 4px 4px;
+  background: var(--paper-sunken);
+}
+/* All caught up: the same width as a list, greyed, and with nothing to press. */
+.sb-bell-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 22px 0 18px;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+.sb-bell-empty svg {
+  color: var(--ink-ghost);
+}
+.sb-bell-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: 9px 10px 7px;
+}
+.sb-bell-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink);
+}
+.sb-bell-allread {
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  transition: color var(--dur-fast) var(--ease);
+}
+.sb-bell-allread:hover {
+  color: var(--ink);
+}
+.sb-bell-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.sb-bell-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast);
+}
+.sb-bell-item:hover {
+  background: var(--rail-hover);
+}
+.sb-bell-open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px 6px 10px;
+  text-align: left;
+}
+.sb-bell-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sb-bell-name,
+.sb-bell-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Everything listed here needs you, so every title carries the rail's attention weight (.sb-row.attention). */
+.sb-bell-name {
+  font-size: var(--text-sm);
+  font-weight: 800;
+  color: var(--ink);
+}
+.sb-bell-meta {
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+/* Mark read without going there: hidden until its row is hovered, so the list reads as a list. */
+.sb-bell-read {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: 6px;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast);
+}
+.sb-bell-item:hover .sb-bell-read {
+  opacity: 1;
+}
+.sb-bell-read:hover {
+  color: var(--ink);
+  background: var(--paper-active);
+}
+
 /* ---- keyboard-shortcuts modal ---- */
 .sb-modal-scrim {
   position: fixed;

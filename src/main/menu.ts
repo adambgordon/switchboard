@@ -114,6 +114,10 @@ export function installAppMenu(): void {
   // Conversation and New Tab are one action: with tabs on it lands in a new tab, with tabs off it fills
   // the pane. So New Tab is hidden, not removed, while tabs are off — its chord still works — and New
   // Window, which needs tabs, is disabled. `setTabsMenuEnabled` keeps both in step with the preference.
+  //
+  // Reopen Closed Tab is hidden with tabs off too, but unlike New Tab its chord goes with it: there are
+  // no closed tabs to bring back. It stays enabled when there are none, because the history belongs to
+  // each window and this menu to the whole app — the window that receives it does nothing then.
   const toFocused = (channel: string) => (): void => {
     const win = BrowserWindow.getFocusedWindow()
     if (win && !win.isDestroyed()) win.webContents.send(channel)
@@ -139,6 +143,14 @@ export function installAppMenu(): void {
       },
       { type: 'separator' },
       { label: 'Close Tab', accelerator: 'Cmd+W', click: toFocused(IPC.menuCloseTab) },
+      {
+        id: REOPEN_TAB_ID,
+        label: 'Reopen Closed Tab',
+        accelerator: 'Cmd+Shift+T',
+        acceleratorWorksWhenHidden: false,
+        visible: tabsMenuEnabled,
+        click: toFocused(IPC.menuReopenTab)
+      },
       { role: 'close', label: 'Close Window', accelerator: 'Cmd+Shift+W' },
       { type: 'separator' },
       { role: 'quit' }
@@ -158,6 +170,7 @@ export function installAppMenu(): void {
 
 const NEW_TAB_ID = 'file.newTab'
 const NEW_WINDOW_ID = 'file.newWindow'
+const REOPEN_TAB_ID = 'file.reopenTab'
 // The preference lives in the renderer (every window shares one localStorage), so each window reports it
 // and the last report wins — they can only disagree for the instant a change takes to reach them all.
 let tabsMenuEnabled = false
@@ -168,5 +181,7 @@ export function setTabsMenuEnabled(enabled: boolean): void {
   const newTab = menu?.getMenuItemById(NEW_TAB_ID)
   const newWindow = menu?.getMenuItemById(NEW_WINDOW_ID)
   if (newTab) newTab.visible = enabled
+  const reopenTab = menu?.getMenuItemById(REOPEN_TAB_ID)
+  if (reopenTab) reopenTab.visible = enabled
   if (newWindow) newWindow.enabled = enabled
 }

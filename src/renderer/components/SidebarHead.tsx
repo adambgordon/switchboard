@@ -11,10 +11,6 @@ interface Props {
   scrolled: boolean
   mode: SidebarMode
   onModeChange: (mode: SidebarMode) => void
-  /** Sessions asking or unread, app-wide. The tag exists only while this is above zero. */
-  needsYou: number
-  /** Focus the next session that needs you, cycling. */
-  onNeedsYou: () => void
   /** Collapse or expand every folder (Folders mode only). */
   onSetAllCollapsed: (collapsed: boolean) => void
   query: string
@@ -29,16 +25,14 @@ interface Props {
 }
 
 /**
- * The band above the conversation list: how the list is grouped, whether anything needs you, search,
- * and new conversation. It deliberately carries no totals — the tag is the one number, and it exists
- * only while there is something to go and look at.
+ * The band above the conversation list: how the list is grouped, search, and new conversation. It
+ * carries no totals, and nothing about what needs you — that is the title bar's bell, which a window
+ * with its rail hidden still shows.
  */
 export default function SidebarHead({
   scrolled,
   mode,
   onModeChange,
-  needsYou,
-  onNeedsYou,
   onSetAllCollapsed,
   query,
   onQueryChange,
@@ -48,7 +42,6 @@ export default function SidebarHead({
   onNewConversation,
   onNewConversationInWindow
 }: Props) {
-  const needsTip = `${needsYou} ${needsYou === 1 ? 'conversation needs' : 'conversations need'} you — click to go there`
   return (
     <div className={`sb-rail-head${scrolled ? ' scrolled' : ''}`} data-tip-group="">
       <div className="sb-rail-head-top">
@@ -66,11 +59,6 @@ export default function SidebarHead({
             </button>
           ))}
         </div>
-        {needsYou > 0 && (
-          <button className="sb-rail-needs" onClick={onNeedsYou} data-tip={needsTip} aria-label={needsTip}>
-            {needsYou}
-          </button>
-        )}
         <div className="sb-rail-head-tools">
           {mode === 'folders' && (
             <>

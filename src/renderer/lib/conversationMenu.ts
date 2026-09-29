@@ -4,7 +4,7 @@ import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/type
  * The menu for a conversation — ONE list, however it is reached. The rail row's ⋮ menu renders it and
  * the tab's right-click menu hands it to main to build natively, so the two cannot drift: the same
  * conversation offers the same commands, under the same words, in the same order, from either place.
- * A tab adds only what is about tabs (closing them).
+ * A tab adds only what is about tabs (closing them, and reopening what was closed).
  *
  * The groups, top to bottom: start it · where it shows · filing and naming · (tabs) closing · end it.
  * Resume heads the menu because it is the command a finished conversation's menu is most often opened
@@ -31,6 +31,8 @@ export interface ConversationMenuState {
   hasTabHere: boolean
   /** Tab only: other tabs exist to close. */
   closeOthers: boolean
+  /** Tab only: how many tabs Reopen would bring back — the window's newest reopenable close — or 0. */
+  reopen: number
 }
 
 const SIDE_TARGET: Record<SidePlace, { open: string; move: string }> = {
@@ -67,6 +69,11 @@ export function conversationMenu(s: ConversationMenuState): ConversationMenuEntr
   if (s.surface === 'tab') {
     const close = [item('close', many ? `Close${what}` : 'Close tab')]
     if (s.closeOthers) close.push(item('closeOthers', 'Close other tabs'))
+    // It acts on the window's history, not on this tab, so it counts what it would bring back rather
+    // than the selection.
+    if (s.reopen > 0) {
+      close.push(item('reopenClosed', s.reopen > 1 ? `Reopen ${s.reopen} closed tabs` : 'Reopen closed tab'))
+    }
     groups.push(close)
   }
 

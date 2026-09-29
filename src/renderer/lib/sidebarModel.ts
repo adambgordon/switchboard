@@ -68,8 +68,9 @@ export interface SidebarModel {
   /** Every folder's display label, disambiguated across all of them, in both modes — a row's tooltip
    *  names its folder even in All mode, where no header does. */
   labels: ReadonlyMap<string, string>
-  /** Every session that needs the user, in fully-expanded display order: the head tag's count and its
-   *  cycle order. Unaffected by search, collapse and caps, so nothing can hide one from it. */
+  /** Every session that needs the user, in fully-expanded display order: the title bar bell's set,
+   *  which reorders it for triage. Unaffected by search, collapse and caps, so nothing can hide one
+   *  from it. */
   needsYou: string[]
 }
 
@@ -155,8 +156,8 @@ interface Placed {
 }
 
 /**
- * A session that needs the user: asking, or finished and unread. The one predicate behind the needs-you
- * tag, a folder name going bold, and a row's title going bold — so the three always agree. Working
+ * A session that needs the user: asking, or finished and unread. The one predicate behind the title bar's
+ * bell, a folder name going bold, and a row's title going bold — so the three always agree. Working
  * alone does not count: bold means "go look", and an agent working in the background is not a reason.
  */
 export function needsYou(state: LiveState | null): boolean {
@@ -385,7 +386,7 @@ export type ActivePlace = readonly [sessionId: string, root: string]
 /**
  * The folders navigation just ENTERED: the folder of every conversation that became active. Keyed by
  * conversation, not folder, so moving to another conversation in a folder that was already active
- * still counts — the needs-you tag opening a row in a folder the user collapsed must show it. A folder
+ * still counts — the bell opening a row in a folder the user collapsed must show it. A folder
  * that merely stays active is not entered, so navigating the OTHER split pane leaves it alone.
  */
 export function enteredFolders(before: readonly ActivePlace[], after: readonly ActivePlace[]): string[] {

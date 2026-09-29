@@ -38,6 +38,7 @@ const api: SwitchboardApi = {
   codeContextMenu: (code) => ipcRenderer.send(IPC.codeContextMenu, code),
   tabContextMenu: (opts) => ipcRenderer.invoke(IPC.tabContextMenu, opts),
   onMenuCloseTab: (cb) => subscribe(IPC.menuCloseTab, cb as never),
+  onMenuReopenTab: (cb) => subscribe(IPC.menuReopenTab, cb as never),
   closeWindow: () => ipcRenderer.send(IPC.windowClose),
   openConversationWindow: (payload) => ipcRenderer.send(IPC.windowOpenConversation, payload),
   onMenuNewConversation: (cb) => subscribe(IPC.menuNewConversation, cb as never),
