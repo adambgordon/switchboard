@@ -77,18 +77,16 @@ function resolveGitFile(fs: RootFs, dir: string, gitFile: string): ProjectRoot {
   const gitdir = path.resolve(dir, match[1])
   if (path.basename(path.dirname(gitdir)) !== 'worktrees') return { root: dir, worktree: false }
   const common = path.dirname(path.dirname(gitdir))
-  // Only two layouts fold. A normal repository keeps its common dir at `<repo>/.git`, so the project
-  // is the directory around it; a bare repository IS its common dir (`proj.git`), with no work tree
-  // of its own. Anything else — a worktree of a submodule, whose common dir sits inside the
-  // superproject's `.git/modules/`, or a submodule whose name merely ends in `worktrees/<x>` — would
-  // name git's internal metadata as the project, so the checkout stands as its own.
+  // Only one layout folds: a normal repository, whose common dir is `<repo>/.git`, so the project is
+  // the directory around it. Anything else stands as its own project — a bare repository's common dir
+  // has no work tree to start a conversation in, and a worktree of a submodule (common dir inside the
+  // superproject's `.git/modules/`) or a submodule whose name merely ends in `worktrees/<x>` would
+  // name git's internal metadata as the project.
   // Deliberately not canonicalized: `root` can live on another volume than the worktree, and this
   // runs synchronously on the main process, so resolution never touches a path outside the cwd's own
   // ancestry — one that stopped responding would freeze the app. The cost is a split folder if the
   // recorded gitdir goes through a symlink the main checkout's own path does not.
   if (path.basename(common) === '.git') return { root: path.dirname(common), worktree: true }
-  const insideGitDir = common.split(path.sep).includes('.git')
-  if (common.endsWith('.git') && !insideGitDir) return { root: common, worktree: true }
   return { root: dir, worktree: false }
 }
 

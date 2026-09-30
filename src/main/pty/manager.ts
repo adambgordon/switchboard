@@ -328,7 +328,7 @@ export class PtyManager extends EventEmitter {
     const entry = this.live.get(ptyId)
     if (!entry) return
     const hadRequest = entry.inputRequestedAt != null
-    const firstProvisionalUse = entry.provisional && !entry.usedByUser
+    const firstUse = !entry.usedByUser
     entry.inputRequestedAt = null
     entry.lastInputAt = Date.now()
     entry.usedByUser = true
@@ -341,9 +341,9 @@ export class PtyManager extends EventEmitter {
     // Gated on there having BEEN a request, so ordinary use stays silent. This arrives on the typing
     // path (throttled, but still every few seconds), and an unconditional emit would rebroadcast the
     // whole active set to every window while someone types, for a value no consumer reads. The one
-    // other announcement is a provisional terminal's FIRST use, once: closing its tab must not stop a
-    // prompt the placeholder id cannot show (see `PtySession.usedByUser`).
-    if (hadRequest || firstProvisionalUse) this.emitActive()
+    // other announcement is a terminal's FIRST use, once: closing its tab must no longer stop it, in
+    // whichever window holds the tab (see `PtySession.usedByUser`).
+    if (hadRequest || firstUse) this.emitActive()
   }
 
   resize(ptyId: string, cols: number, rows: number): void {

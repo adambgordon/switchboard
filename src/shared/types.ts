@@ -287,9 +287,9 @@ export interface PtySession {
   provisional: boolean
   /**
    * Whether a person has used this terminal — typed, pasted or dropped into it, in any window. Its
-   * first use is announced at once only while `provisional`, the one time a reader needs it promptly:
-   * a prompt sent to a provisional terminal may have started a conversation its placeholder id cannot
-   * show, so closing its tab must not stop it. Otherwise it rides the next snapshot.
+   * first use is announced at once, because closing the tab of a used terminal must not stop it: it
+   * may hold an unsent draft, or — unlinked — a prompt that started a conversation its placeholder id
+   * cannot show. See `stopsOnClose`.
    */
   usedByUser: boolean
   /**

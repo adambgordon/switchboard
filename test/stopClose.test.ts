@@ -37,20 +37,14 @@ describe('confirmedEmpty', () => {
 })
 
 describe('stopsOnClose', () => {
-  const running = { parkedJob: null, provisional: false, usedByUser: false }
-  const unlinked = { parkedJob: null, provisional: true, usedByUser: false }
+  const running = { parkedJob: null, usedByUser: false }
 
-  it('stops a running terminal with nothing indexed — a new Claude session, or an unlinked Codex one', () => {
+  it('stops a running terminal nobody has used with nothing indexed — a new session of either agent', () => {
     expect(stopsOnClose(running, 0)).toBe(true)
-    expect(stopsOnClose(unlinked, 0)).toBe(true)
   })
 
-  it('stops a used terminal whose id is its own, since its transcript read can prove it empty', () => {
-    expect(stopsOnClose({ ...running, usedByUser: true }, 0)).toBe(true)
-  })
-
-  it('leaves a used unlinked terminal running: its prompt may have started a rollout it is not bound to', () => {
-    expect(stopsOnClose({ ...unlinked, usedByUser: true }, 0)).toBe(false)
+  it('leaves a used terminal running: it may hold an unsent draft, or a prompt its id cannot show yet', () => {
+    expect(stopsOnClose({ ...running, usedByUser: true }, 0)).toBe(false)
   })
 
   it('leaves a conversation that has messages running', () => {

@@ -75,13 +75,14 @@ describe('resolveProjectRoot', () => {
     expect(resolveProjectRoot(wt, home)).toEqual({ root: r, worktree: true })
   })
 
-  it('resolves a worktree of a bare repository to the bare repository itself', () => {
+  it('leaves a worktree of a bare repository as its own project', () => {
+    // A bare repository has no work tree: folding into it would start new conversations inside git's
+    // metadata, and its parent directory is unrelated to it.
     const bare = dir('store', 'proj.git')
     dir('store', 'proj.git', 'worktrees', 'wt')
     const wt = dir('work', 'wt')
     gitFile(wt, path.join(bare, 'worktrees', 'wt'))
-    // Not dirname(bare): a bare repository has no work tree around it, so its parent is unrelated.
-    expect(resolveProjectRoot(wt, home)).toEqual({ root: bare, worktree: true })
+    expect(resolveProjectRoot(wt, home)).toEqual({ root: wt, worktree: false })
   })
 
   it('never touches the repository a worktree points at', () => {
