@@ -18,6 +18,7 @@ import {
   type PaneLayout,
   type Tab
 } from '../src/renderer/lib/paneModel'
+import type { ClosedTab } from '../src/renderer/lib/closedTabs'
 import { historyReducer } from '../src/main/navigationHistory'
 
 /**
@@ -944,6 +945,122 @@ describe('collapseToSingle — the feature switched off', () => {
     const after = step(before, { type: 'collapseToSingle' })
     expect(after.panes).toEqual([{ id: 'p0', tabs: [], activeIndex: -1 }])
     expect(activeTabId(after)).toBeNull()
+  })
+})
+
+describe('reopen — a closed group comes back where it stood', () => {
+  const closed = (
+    sessionId: string,
+    index: number,
+    paneId = 'p0',
+    side: ClosedTab['side'] = 'only',
+    emptiedPane = true
+  ): ClosedTab => ({ sessionId, paneId, side, index, emptiedPane })
+  const reopen = (l: PaneLayout, tabs: ClosedTab[], activeId = tabs[0].sessionId): PaneLayout =>
+    step(l, { type: 'reopen', group: { tabs, activeId }, paneId: 'p9' })
+
+  it('puts each tab back in its slot among its old neighbors, and shows the one that was showing', () => {
+    // B and D closed out of A B C D E. Putting D back first would land it after E.
+    const after = reopen(layout([pane('p0', [t('A'), t('C'), t('E')], 1)]), [closed('D', 3), closed('B', 1)], 'D')
+    expect(after.panes).toEqual([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 3)])
+    expect(after.focusIndex).toBe(0)
+  })
+
+  it('always comes back kept, leaving the pane’s own preview tab alone', () => {
+    const after = reopen(layout([pane('p0', [t('A'), t('P', true)], 1)]), [closed('B', 1)])
+    expect(after.panes[0].tabs).toEqual([t('A'), t('B'), t('P', true)])
+    expect(after.panes[0].activeIndex).toBe(1)
+  })
+
+  it('lands a slot past the end of what is there now at the end', () => {
+    const after = reopen(layout([pane('p0', [t('A')], 0)]), [closed('B', 4)])
+    expect(after.panes[0].tabs).toEqual([t('A'), t('B')])
+  })
+
+  it('keeps showing what another receiving pane was showing, and focuses the pane it shows', () => {
+    // Q lands in the very slot of the left pane's showing tab B, so B's slot shifts; without the
+    // shift Q would take over the left pane.
+    const before = layout([pane('p0', [t('A'), t('B')], 1), pane('p1', [t('X')], 0)], 0)
+    const after = reopen(before, [closed('Q', 1, 'p0', 'left'), closed('Y', 0, 'p1', 'right')], 'Y')
+    expect(after.panes).toEqual([
+      pane('p0', [t('A'), t('Q'), t('B')], 2),
+      pane('p1', [t('Y'), t('X')], 0)
+    ])
+    expect(after.focusIndex).toBe(1)
+  })
+
+  it('opens the right side of the split again when it has collapsed', () => {
+    const after = reopen(layout([pane('p0', [t('A')], 0)]), [closed('R', 0, 'p1', 'right')])
+    expect(after.panes).toEqual([pane('p0', [t('A')], 0), pane('p9', [t('R')], 0)])
+    expect(after.focusIndex).toBe(1)
+  })
+
+  it('leaves a split closed that the user closed after the tab, landing it in the single pane', () => {
+    // R closed from a right pane that kept other tabs; the user then removed the split themselves.
+    const after = reopen(layout([pane('p0', [t('A'), t('B')], 0)]), [closed('R', 0, 'p1', 'right', false)])
+    expect(after.panes).toEqual([pane('p0', [t('R'), t('A'), t('B')], 0)])
+  })
+
+  it('…and the left side, ahead of the pane that survived', () => {
+    // The right pane (p1) is all that was left after the left one emptied.
+    const after = reopen(layout([pane('p1', [t('R')], 0)]), [closed('L', 0, 'p0', 'left')])
+    expect(after.panes).toEqual([pane('p9', [t('L')], 0), pane('p1', [t('R')], 0)])
+    expect(after.focusIndex).toBe(0)
+  })
+
+  it('does not open a side next to a pane that is empty, leaving half the window blank', () => {
+    // The right pane survived the split, then its own tab closed too (and was not reopenable).
+    const after = reopen(layout([pane('p1', [], -1)]), [closed('L', 0, 'p0', 'left')])
+    expect(after.panes).toEqual([pane('p9', [t('L')], 0)])
+    expect(after.focusIndex).toBe(0)
+  })
+
+  it('goes back to its own pane even when that pane has changed sides', () => {
+    // Closed from the right pane p1; the left pane then emptied, and a new split put p1 on the left.
+    const split = layout([pane('p1', [t('A')], 0), pane('p5', [t('B')], 0)], 1)
+    const after = reopen(split, [closed('R', 1, 'p1', 'right')])
+    expect(after.panes.map((p) => p.tabs)).toEqual([[t('A'), t('R')], [t('B')]])
+    expect(after.focusIndex).toBe(0)
+  })
+
+  it('goes to the pane on its side when its own pane is gone but a split is open again', () => {
+    const split = layout([pane('p0', [t('A')], 0), pane('p5', [t('B')], 0)], 0)
+    expect(reopen(split, [closed('R', 1, 'p1', 'right')]).panes[1].tabs).toEqual([t('B'), t('R')])
+    expect(reopen(split, [closed('L', 0, 'p2', 'left')]).panes[0].tabs).toEqual([t('L'), t('A')])
+  })
+
+  it('a tab from a single pane goes to the focused pane when its pane is gone and there are two now', () => {
+    const split = layout([pane('p2', [t('A')], 0), pane('p3', [t('B')], 0)], 1)
+    const after = reopen(split, [closed('C', 0, 'p0', 'only')])
+    expect(after.panes.map((p) => p.tabs)).toEqual([[t('A')], [t('C'), t('B')]])
+  })
+
+  it('a tab from a single pane goes to the single pane, whatever its id — it never opens a split', () => {
+    const after = reopen(layout([pane('p4', [t('A')], 0)]), [closed('C', 1, 'p0', 'only')])
+    expect(after.panes).toEqual([pane('p4', [t('A'), t('C')], 1)])
+  })
+
+  it('leaves a conversation that has a tab again where it is, and shows one that came back instead', () => {
+    // B was the showing tab and has since been opened again; showing B would be showing nothing new.
+    const after = reopen(layout([pane('p0', [t('A'), t('B')], 0)]), [closed('B', 0), closed('C', 2)], 'B')
+    expect(after.panes).toEqual([pane('p0', [t('A'), t('B'), t('C')], 2)])
+  })
+
+  it('changes nothing when everything in the group has a tab again', () => {
+    const before = layout([pane('p0', [t('A'), t('B')], 0)])
+    expect(paneReducer(before, { type: 'reopen', group: { tabs: [closed('B', 0)], activeId: 'B' }, paneId: 'p9' })).toBe(before)
+  })
+
+  it('a reopened pane that is not the one shown still shows its tab rather than the welcome screen', () => {
+    // A group from both sides of a split whose left side has closed: R2 is shown on the right, and
+    // the recreated left pane shows L.
+    const after = reopen(
+      layout([pane('p1', [t('R')], 0)]),
+      [closed('L', 0, 'p0', 'left'), closed('R2', 1, 'p1', 'right')],
+      'R2'
+    )
+    expect(after.panes).toEqual([pane('p9', [t('L')], 0), pane('p1', [t('R'), t('R2')], 1)])
+    expect(after.focusIndex).toBe(1)
   })
 })
 

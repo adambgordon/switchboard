@@ -12,7 +12,7 @@ import { initialLayout, paneReducer } from '../src/renderer/lib/paneModel'
  * `correction` migrates no CONVERSATION-owned state — persisted seen/unread markers and earlier
  * history stops stay with the id that owns them, because both ids name conversations that continue to
  * exist. Terminal-owned state still follows the terminal: the selection, the current history stop,
- * the surface it is showing, and the row's Live slot.
+ * and the surface it is showing. A rail position is conversation-owned too.
  *
  * The whole-object `toEqual` assertions below are deliberate rather than lazy: every session-keyed
  * store this policy has to reach is a field of the return, so adding a store without deciding what a
@@ -27,7 +27,7 @@ describe('bindActions', () => {
     expect(bindActions(initial, 'placeholder', true)).toEqual({
       rekeySeen: true,
       view: 'move',
-      retargetLiveOrder: true,
+      retargetRowOrder: true,
       focus: true,
       tabs: 'rekey',
       tabSelection: 'rekey'
@@ -55,7 +55,7 @@ describe('bindActions', () => {
     expect(bindActions(correction, 'S1', true)).toEqual({
       rekeySeen: false,
       view: 'copy',
-      retargetLiveOrder: true,
+      retargetRowOrder: false,
       focus: true,
       tabs: 'retarget',
       tabSelection: 'retarget'
@@ -63,7 +63,7 @@ describe('bindActions', () => {
     expect(bindActions(correction, 'other', true)).toEqual({
       rekeySeen: false,
       view: 'none',
-      retargetLiveOrder: true,
+      retargetRowOrder: false,
       focus: false,
       tabs: 'none',
       tabSelection: 'none'
@@ -76,11 +76,18 @@ describe('bindActions', () => {
     expect(away.view).toBe('none')
   })
 
-  it('both kinds keep the Live row in its slot', () => {
-    // Rows are keyed by sessionId, so without this the same terminal reads as newly live and is
-    // yanked to the top of Live. Initial binds are usually already at the top — but not if dragged.
-    expect(bindActions(initial, null, false).retargetLiveOrder).toBe(true)
-    expect(bindActions(correction, null, false).retargetLiveOrder).toBe(true)
+  it('only an initial bind hands the row position to the new id', () => {
+    // A placeholder names nothing, so its position is the terminal's and must follow it — otherwise
+    // the row jumps to the real conversation's own seed. A correction moves between two durable
+    // conversations, each at a position of its own: transferring would overwrite one of them. Checked
+    // with the user on the terminal AND away from it, owning AND not, so no branch of the correction
+    // path can turn it back on.
+    for (const [selected, owned] of [['placeholder', true], [null, false]] as const) {
+      expect(bindActions(initial, selected, owned).retargetRowOrder).toBe(true)
+    }
+    for (const [selected, owned] of [['S1', true], ['S1', false], [null, true], ['other', false]] as const) {
+      expect(bindActions(correction, selected, owned).retargetRowOrder).toBe(false)
+    }
   })
 
   it('tabs rekey globally on initial bind and retarget only with the selected owned terminal', () => {
@@ -97,7 +104,7 @@ describe('bindActions', () => {
     expect(bindActions(correction, 'S1', false)).toEqual({
       rekeySeen: false,
       view: 'none',
-      retargetLiveOrder: true,
+      retargetRowOrder: false,
       focus: false,
       tabs: 'none',
       tabSelection: 'none'
@@ -109,7 +116,7 @@ describe('bindActions', () => {
       expect(bindActions({ oldId: 'X', newId: 'X', kind }, 'X', true)).toEqual({
         rekeySeen: false,
         view: 'none',
-        retargetLiveOrder: false,
+        retargetRowOrder: false,
         focus: false,
         tabs: 'none',
         tabSelection: 'none'

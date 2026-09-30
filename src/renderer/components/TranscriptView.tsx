@@ -4,6 +4,7 @@ import CopyButton from './CopyButton'
 import MessageBlock from './MessageBlock'
 import { Arrow } from './icons'
 import { conversationText } from '../lib/clipboard'
+import { formatCount } from '../lib/format'
 import { copySelection } from '../lib/mdCopyDom'
 import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
 import { attachAutoHideWithin } from '../lib/useAutoHideScrollbar'
@@ -626,7 +627,7 @@ export default function TranscriptView({
               <span className="transcript-foot-rule" aria-hidden="true" />
               <span className="transcript-foot-meta">
                 <span className="transcript-foot-label label-caps">
-                  End of transcript · {count} {count === 1 ? 'message' : 'messages'}
+                  End of transcript · {formatCount(count)} {count === 1 ? 'message' : 'messages'}
                 </span>
                 <span className="transcript-foot-copy-tip" data-tip="Copy entire conversation">
                   <CopyButton

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { AGENTS } from '@shared/types'
 import type { ConversationMeta, PtyState } from '@shared/types'
-import { absShort, formatBytes, formatDuration, formatMetric } from '../lib/format'
+import { absShort, formatBytes, formatCount, formatDuration, formatMetric } from '../lib/format'
 import AgentLogo from './AgentLogo'
 import CopyButton from './CopyButton'
 import { Close } from './icons'
@@ -40,20 +40,20 @@ function Row({
     <div className="sb-info-row">
       {/* The tooltip rides an inline span hugging the label text — the label cell is a fixed width,
           so a data-tip on it would center the tooltip off to the side of the text. */}
-      <span className="sb-info-label label-caps">
+      <span className="sb-info-label">
         {labelTip ? <span data-tip={labelTip}>{label}</span> : label}
       </span>
-      <span className={`sb-info-value${mono ? ' mono truncate' : ''}`}>{children}</span>
+      <span className={`sb-info-value truncate${mono ? ' mono' : ''}`}>{children}</span>
       {copy ? <CopyButton className="sb-info-copy" tip={`Copy ${label.toLowerCase()}`} getText={() => copy} /> : null}
     </div>
   )
 }
 
-/** A titled group of detail rows — a caps section header above a `.sb-info-grid`. */
+/** A titled group of detail rows — a section header above a `.sb-info-grid`. */
 function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="sb-info-section">
-      <div className="sb-info-section-label label-caps">{label}</div>
+      <div className="sb-info-section-label">{label}</div>
       <div className="sb-info-grid">{children}</div>
     </div>
   )
@@ -196,29 +196,29 @@ export default function ConversationInfoModal({ open, meta, pty, startInEdit, on
 
         <div className="sb-info-body">
           <Section label="Environment">
-            <Row label="Agent">
+            <Row label="Agent/Harness">
               <span className="sb-info-agent">
                 <AgentLogo agent={agent} size={14} />
                 {AGENTS[agent].label}
               </span>
             </Row>
             {model && (
-              <Row label="Model" mono>
+              <Row label="Model">
                 {model}
               </Row>
             )}
-            <Row label="Directory" mono>
+            <Row label="Directory">
               {cwd || '—'}
             </Row>
             {branch && (
-              <Row label="Branch" mono>
+              <Row label="Branch">
                 {branch}
               </Row>
             )}
           </Section>
 
           <Section label="Activity">
-            <Row label="Messages">{meta?.messageCount ?? 0}</Row>
+            <Row label="Messages">{formatCount(meta?.messageCount ?? 0)}</Row>
             {sizeBytes > 0 && <Row label="Size">{formatBytes(sizeBytes)}</Row>}
             {durationMs != null && <Row label="Duration">{formatDuration(durationMs)}</Row>}
           </Section>

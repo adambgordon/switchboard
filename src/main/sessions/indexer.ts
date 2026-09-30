@@ -2,7 +2,10 @@
  * Build the sidebar's grouped conversation index by scanning every session file from BOTH agents —
  * Claude Code (`~/.claude/projects`) and Codex (`~/.codex/sessions`) — and grouping the parsed
  * metadata by the absolute cwd each session ran in. Grouping by cwd unifies the agents: a repo's
- * Claude and Codex conversations land in the same group.
+ * Claude and Codex conversations land in the same group. Each group also carries the project its cwd
+ * belongs to (`root` / `worktree`, see projectRoot.ts) so the rail can fold a repository's
+ * subdirectories and worktrees together, and whether the cwd and that project still exist (`exists`,
+ * `rootExists`).
  *
  * Pure Node — no Electron, no DOM. Resilient: a single unreadable file or
  * directory must never crash the whole index.
@@ -16,6 +19,7 @@ import { extractMeta } from './parser'
 import { defaultCodexRoot, extractCodexMeta, listCodexRollouts } from './codexParser'
 import { readCodexThreads } from './codexThreadsDb'
 import { readCodexSessionNames, resolveCodexTitle } from './codexSessionIndex'
+import { ProjectRoots, type ProjectRoot } from './projectRoot'
 
 /** Default projects root: `~/.claude/projects`. */
 function defaultProjectsRoot(): string {
@@ -225,6 +229,113 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<{
   return { metas: out, hiddenSessionIds }
 }
 
+/** Resolve a batch of cwds to their projects in one call (see {@link ProjectRoots.resolveAll}). */
+export type ProjectRootsResolver = (
+  cwds: readonly string[],
+  missing: ReadonlySet<string>
+) => ReadonlyMap<string, ProjectRoot>
+
+export interface IndexOptions {
+  /**
+   * Project-root resolver. The caller owns it so its memo and persisted cache span re-index passes;
+   * omit for a one-shot index (a fresh, unpersisted resolver, i.e. no reuse).
+   */
+  resolveRoots?: ProjectRootsResolver
+  /** Which cwds exist. Defaults to one process-wide {@link existenceProbe} over the real filesystem. */
+  existing?: ExistenceProbe
+}
+
+/**
+ * Which of `cwds` exist as directories. `exists` is the best answer available — this pass's, else
+ * the last one — and is what the rail and chooser show. `verified` holds only cwds whose check
+ * answered yes THIS pass, and is the only licence to walk a cwd synchronously: a last-known answer
+ * says nothing about whether the volume responds now.
+ */
+export interface Existence {
+  exists: Set<string>
+  verified: Set<string>
+}
+
+export type ExistenceProbe = (cwds: readonly string[]) => Promise<Existence>
+
+/** How long a pass waits for existence checks before publishing without them. */
+export const EXISTENCE_DEADLINE_MS = 200
+
+/**
+ * Existence checks allowed unsettled at once. Node runs asynchronous filesystem calls on a small
+ * shared thread pool (four threads by default), and a check against an unresponsive volume holds its
+ * thread until the volume answers — cancelling the wait does not cancel the call. Capping the checks
+ * leaves the rest of the pool for the transcript reads the app actually needs.
+ */
+export const EXISTENCE_MAX_INFLIGHT = 2
+
+/**
+ * Whether each distinct cwd exists right now — checked every pass, deliberately not memoized like the
+ * project root: a directory deleted mid-launch must drop out of the new-conversation chooser on the
+ * next pass, not the next launch.
+ *
+ * Bounded three ways, because existence is optional metadata and a historical cwd on an unresponsive
+ * volume can leave its check pending indefinitely:
+ * - a pass waits at most `deadlineMs`, so no check can withhold the index;
+ * - at most `maxInflight` checks are unsettled at once, so hung ones cannot starve the thread pool;
+ * - a cwd whose check is still pending is not checked or subscribed to again, so a hung check costs
+ *   one call and one handler however many passes it outlives;
+ * - a cwd whose check has outlived its pass is checked after every other from then on, so slow volumes
+ *   cannot take the slots from the fast ones pass after pass.
+ * A cwd with no answer this pass reads as its last known answer, or missing if it never had one —
+ * but only for display: it is never `verified`, so the resolver does not walk it on that answer.
+ */
+export function existenceProbe(
+  isDirectory: (cwd: string) => Promise<boolean>,
+  deadlineMs = EXISTENCE_DEADLINE_MS,
+  maxInflight = EXISTENCE_MAX_INFLIGHT
+): ExistenceProbe {
+  const pending = new Set<string>()
+  const lastKnown = new Map<string, boolean>()
+  const late = new Set<string>()
+  let inflight = 0
+  return (cwds) =>
+    new Promise<Existence>((resolve) => {
+      const fresh = [...new Set(cwds)].filter((cwd) => !pending.has(cwd))
+      const queue = [...fresh.filter((cwd) => !late.has(cwd)), ...fresh.filter((cwd) => late.has(cwd))]
+      const verified = new Set<string>()
+      let running = 0
+      let done = false
+      const finish = (): void => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        resolve({ exists: new Set(cwds.filter((cwd) => lastKnown.get(cwd) === true)), verified: new Set(verified) })
+      }
+      const pump = (): void => {
+        while (!done && inflight < maxInflight && queue.length > 0) {
+          const cwd = queue.shift()!
+          inflight++
+          running++
+          pending.add(cwd)
+          isDirectory(cwd)
+            .catch(() => false)
+            .then((exists) => {
+              lastKnown.set(cwd, exists)
+              if (done) late.add(cwd)
+              if (exists) verified.add(cwd)
+              inflight--
+              running--
+              pending.delete(cwd)
+              pump()
+            })
+        }
+        // Nothing of ours outstanding: either every check answered, or the remaining slots are held by
+        // checks from earlier passes, which this pass must not wait on.
+        if (running === 0) finish()
+      }
+      const timer = setTimeout(finish, deadlineMs)
+      pump()
+    })
+}
+
+const defaultExistence = existenceProbe(async (cwd) => (await stat(cwd)).isDirectory())
+
 /**
  * Scan both agents' roots and return conversations grouped by exact cwd. Groups are sorted by
  * `latestMtime` desc; conversations within each group are sorted by `mtime` desc. Conversations with
@@ -233,11 +344,13 @@ async function indexCodexMetas(root: string, cache: MetaCache): Promise<{
 export async function indexConversations(
   projectsRoot?: string,
   codexRoot?: string,
-  cache?: MetaCache
+  cache?: MetaCache,
+  options: IndexOptions = {}
 ): Promise<ConversationIndexSnapshot> {
   const claudeRoot = projectsRoot ?? defaultProjectsRoot()
   const codexSessionsRoot = codexRoot ?? defaultCodexRoot()
   const fileCache = cache ?? new Map()
+  const resolveRoots = options.resolveRoots ?? ((cwds, missing) => new ProjectRoots().resolveAll(cwds, missing))
 
   const [claudeMetas, codex] = await Promise.all([
     indexClaudeMetas(claudeRoot, fileCache),
@@ -251,11 +364,32 @@ export async function indexConversations(
     else groups.set(meta.cwd, [meta])
   }
 
+  const cwds = [...groups.keys()]
+  const probe = options.existing ?? defaultExistence
+  const { exists, verified } = await probe(cwds)
+  const roots = resolveRoots(cwds, new Set(cwds.filter((c) => !verified.has(c))))
+  // A root no conversation runs in directly — typically a repository used only through worktrees — has
+  // no answer from the check above, so it gets one of its own under the same bounds. Usually there is
+  // none: most roots are some group's cwd.
+  const cwdSet = new Set(cwds)
+  const unchecked = [...new Set([...roots.values()].map((r) => r.root))].filter((r) => !cwdSet.has(r))
+  const { exists: rootsExisting } = await probe(unchecked)
+
   const result: ConversationGroup[] = []
   for (const [cwd, conversations] of groups) {
     conversations.sort((a, b) => b.mtime - a.mtime)
     const latestMtime = conversations.reduce((max, c) => (c.mtime > max ? c.mtime : max), 0)
-    result.push({ cwd, label: labelForCwd(cwd), conversations, latestMtime })
+    const { root, worktree } = roots.get(cwd) ?? { root: cwd, worktree: false }
+    result.push({
+      cwd,
+      root,
+      worktree,
+      exists: exists.has(cwd),
+      rootExists: exists.has(root) || rootsExisting.has(root),
+      label: labelForCwd(cwd),
+      conversations,
+      latestMtime
+    })
   }
 
   result.sort((a, b) => b.latestMtime - a.latestMtime)

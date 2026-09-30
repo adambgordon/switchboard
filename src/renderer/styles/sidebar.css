@@ -5,18 +5,49 @@
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  padding: 8px;
+  padding: 6px 8px;
   border-radius: var(--r-md);
   cursor: pointer;
   position: relative;
   transition: background var(--dur-fast);
 }
 .sb-row:hover {
-  background: var(--paper-hover);
+  background: var(--rail-hover);
 }
-.sb-row.selected {
+/* The focused pane's conversation is white, hovered or not (rail.css shifts it a step on hover). */
+.sb-row.selected,
+.sb-row.selected:hover {
   background: var(--paper-raised);
-  box-shadow: 0 1px 2px rgba(var(--shadow-color), 0.05);
+}
+/* Compact: one line. Logo, title, then the elsewhere glyph and the dot/⋮ slot, all centered. Both
+   paddings are short of the spacious row's, because each end's slot is wider than the mark it holds:
+   the trailing one centers the dot/⋮ under its folder's pencil, and the leading one brings the logo's
+   edge about as far in as that mark's. The title sits closer to the logo than the row's gap: the
+   logo column is wider than the logo, so the gap alone reads as a hole. */
+.sb-row.compact {
+  align-items: center;
+  padding: 3px 3px 3px 5px;
+}
+.sb-row.compact .sb-row-lead {
+  margin-right: -2px;
+}
+/* Asking or unread: the title goes as heavy as its folder's name does for the same reason (needsYou). */
+.sb-row.attention .sb-row-title {
+  font-weight: 800;
+}
+.sb-row.compact .sb-row-title {
+  flex: 1;
+  min-width: 0;
+}
+/* The logo column is as wide as its widest occupant, the background-session ring, so titles line up
+   whichever mark a row carries. Ghost ink, as on the spacious meta line: many rows, a quiet tag. */
+.sb-row-lead {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+  color: var(--ink-ghost);
 }
 /* Rows are clicked, not tabbed (tabIndex -1), and selection is shown by .selected
    above — so suppress the global cobalt :focus-visible ring, which otherwise flashes
@@ -26,8 +57,8 @@
 .sb-row:focus-visible {
   outline: none;
 }
-/* right-hand gutter: the liveness dot at rest, the ⋮ actions button on hover — the two
-   share one slot (the menu button overlays the dot, which fades out on hover) */
+/* right-hand gutter: the liveness dot at rest, the ⋮ actions button while the row is hovered — the
+   two share one reserved slot on every row, so liveness never changes a row's geometry. */
 .sb-row-gutter {
   position: relative;
   width: 18px;
@@ -43,16 +74,16 @@
 .sb-row-elsewhere {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   color: var(--ink-ghost);
 }
 
 .sb-row .sb-dot {
   transition: opacity var(--dur-fast);
 }
-/* The dot exists only on live rows. Fade it (revealing the ⋮ menu button beneath) only when the
-   gutter itself is hovered — not the whole row — so a live row's cobalt dot holds steady unless you
-   reach for its actions slot. */
-.sb-row-gutter:hover .sb-dot {
+/* Hovering anywhere on the row swaps the dot for ⋮. The dot is never drawn on the hover fill: its
+   color is solved for contrast against the rail's resting surfaces, and the hover fill is not one. */
+.sb-row:hover .sb-dot {
   opacity: 0;
 }
 .sb-row-main {
@@ -63,14 +94,26 @@
   gap: 2px;
 }
 .sb-row-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
+  /* The Formatted view's body size, so a title reads at the size its conversation does. */
+  font-size: var(--text-base);
+  /* A light resting weight is what lets a folder needing attention (800) stand out. */
+  font-weight: 400;
   color: var(--ink);
   line-height: 1.35;
 }
+/* A pinned conversation carries a small filled pin ahead of its title — an indicator, not a control
+   (pin and unpin live on the ⋮ menu). Soft ink rather than faint, so it still reads in dark. */
+.sb-row-pin {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: -1px;
+  margin-right: 5px;
+  color: var(--ink-soft);
+}
 .sb-row-preview {
   font-size: var(--text-xs);
-  color: var(--ink-faint);
+  /* A hair past --ink-faint toward --ink-ghost, so the preview recedes under the title in both themes. */
+  color: color-mix(in srgb, var(--ink-faint) 85%, var(--ink-ghost));
   line-height: 1.3;
 }
 /* placeholder shown when a row has no preview yet (a just-spawned session) — lighter and
@@ -95,6 +138,8 @@
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+}
+.sb-row-meta .sb-bg-agent-mark {
   margin-right: 0.5ch;
 }
 .sb-bg-agent-ring {
@@ -108,13 +153,9 @@
 .sb-row-meta .sb-bg-agent-mark .sb-agent-logo {
   margin-right: 0;
 }
-.sb-row-cwd {
-  max-width: 130px;
-}
-/* the ⋮ actions button: hidden at rest, revealed on hover — across the whole row when it's not live,
-   but only over the gutter when it IS live (so hovering a live row's body never disturbs its liveness
-   dot). Absolutely placed so it overlays the gutter's dot rather than taking its own column; hovering
-   it (or clicking) opens the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume). */
+/* the ⋮ actions button: hidden at rest, revealed while the row is hovered. Absolutely placed so it
+   overlays the gutter's dot rather than taking its own column; clicking it opens the conversation's
+   menu (lib/conversationMenu). */
 .sb-row-menu-btn {
   position: absolute;
   inset: 0;
@@ -130,8 +171,7 @@
     color var(--dur-fast),
     background var(--dur-fast);
 }
-.sb-row:not(.live):hover .sb-row-menu-btn,
-.sb-row.live .sb-row-gutter:hover .sb-row-menu-btn {
+.sb-row:hover .sb-row-menu-btn {
   opacity: 1;
   pointer-events: auto;
 }
@@ -143,28 +183,27 @@
   opacity: 0 !important;
   pointer-events: none !important;
 }
-/* Same stuck-:hover problem, for the row body: a compositor transform doesn't re-run :hover, so a
-   row that begins its slide under the cursor would carry its hovered look (flat: the darker
-   background; card: the border/shadow lift) the whole glide and only shed it on arrival. Revert
-   both to the resting look while .sb-flipping. Selected rows are skipped — their selected styling
-   already wins over :hover, so nothing is stuck to revert. */
-.sb-row.sb-flipping:not(.selected):not(.card) {
+/* Same stuck-:hover problem, for the row body and its dot: a compositor transform doesn't re-run
+   :hover, so a row that begins its slide under the cursor would carry the hover fill, with its dot
+   swapped out, the whole glide. Revert both to the resting look while .sb-flipping. The white row's
+   own revert is in rail.css. */
+.sb-row.sb-flipping:not(.selected) {
   background: transparent;
 }
-.sb-rail-body .sb-row.sb-flipping.card:not(.selected) {
-  border-color: var(--rule);
-  box-shadow: none;
+.sb-row.sb-flipping .sb-dot {
+  opacity: 1 !important;
 }
 .sb-row-menu-btn:hover {
   color: var(--ink);
   background: var(--paper-active);
 }
 
-/* ---- gesture affordances (useRowReorder) ---- */
-/* Drag-to-reorder (pinned rows): the moving card is a `position:fixed` CLONE on <body> (useRowReorder)
-   so it escapes the rail body's overflow clip and floats over the live-sessions head; this `.dragging`
-   look (white + hairline ring + shadow, via box-shadow so no border reflow) styles that clone. The
-   real row is hidden in place as the gap; siblings glide as the gap relocates; commits on drop. */
+/* ---- gesture affordances (useBlockReorder) ---- */
+/* Drag-to-reorder: the moving unit is a `position:fixed` CLONE on <body> (useBlockReorder), so it
+   escapes the rail body's overflow clip and floats over the head and the sticky folder headers; this
+   `.dragging` look (white + hairline ring + shadow, via box-shadow so no border reflow) styles that
+   clone. The real unit is hidden in place as the gap; siblings glide as the gap relocates; commits on
+   drop. */
 .sb-row.dragging {
   cursor: grabbing;
   background: var(--paper-raised) !important;
@@ -172,11 +211,31 @@
     0 0 0 1px var(--rule-strong),
     var(--shadow-pane) !important;
 }
+/* The whole window shows the grab cursor for the duration, not just the dragged row: the pointer is
+   captured and passes over rows and buttons whose own `cursor: pointer` would otherwise win. */
+body.sb-dragging-row,
+body.sb-dragging-row * {
+  cursor: grabbing !important;
+}
 body.sb-dragging-row {
-  cursor: grabbing;
   user-select: none;
 }
+/* A folder lifts on the rail's own surface, so its rows read as they did in place. */
+.sb-group.dragging {
+  border-radius: var(--r-md);
+  background: var(--paper-sunken);
+  box-shadow:
+    0 0 0 1px var(--rule-strong),
+    var(--shadow-pane);
+}
+/* In place, the header's paper reaches past it to cover rows scrolling beneath; on the card it would
+   paint over the card's edge instead. */
+.sb-group.dragging > .sb-group-head {
+  box-shadow: none;
+  background: transparent;
+}
 /* Siblings glide as the gap relocates. */
-body.sb-dragging-row .sb-rail-body .sb-row:not(.dragging) {
+body.sb-dragging-row .sb-rail-body .sb-row:not(.dragging),
+body.sb-dragging-row .sb-rail-body > .sb-group {
   transition: transform 0.18s var(--ease);
 }

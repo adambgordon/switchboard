@@ -149,6 +149,29 @@ describe('PtyManager Codex identity probing', () => {
     expect(events).toEqual(['owner', 'active'])
   })
 
+  it('carries the resolved project root from the first announcement on, resolving it once', () => {
+    const asked: string[] = []
+    const m = new PtyManager({
+      resolveBindings: resolver,
+      resolveProjectRoot: (cwd) => {
+        asked.push(cwd)
+        return '/project'
+      }
+    })
+    const firstBroadcast: string[] = []
+    m.once('active-changed', (sessions: { projectRoot: string }[]) => {
+      firstBroadcast.push(...sessions.map((s) => s.projectRoot))
+    })
+    let announced: string | null = null
+    const live = m.startNew(CWD, 'codex', (session) => (announced = session.projectRoot))
+    expect(announced).toBe('/project')
+    expect(firstBroadcast).toEqual(['/project'])
+    expect(live.projectRoot).toBe('/project')
+    expect(m.list().map((s) => [s.cwd, s.projectRoot])).toEqual([[CWD, '/project']])
+    expect(asked).toEqual([CWD])
+    m.killAll()
+  })
+
   describe('repaint', () => {
     it('nudges a sized PTY one column and restores its exact geometry', () => {
       const live = mgr.startNew(CWD, 'claude')

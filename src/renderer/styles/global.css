@@ -92,7 +92,7 @@ input::placeholder {
 /* ---- shared auto-hiding scrollbar (see attachAutoHide / useAutoHideScrollbar) ----
    Hidden at rest; revealed while the element scrolls (JS toggles .is-scrolling) and on hover so it
    can be grabbed, then disappears a beat after scrolling stops. ONE mechanic for the rail, the
-   New-conversation menu, and the transcript. (No opacity fade — Chromium doesn't animate scrollbar
+   new-conversation chooser, and the transcript. (No opacity fade — Chromium doesn't animate scrollbar
    pseudo-elements, so a transition would just snap; the show/hide is intentionally instant.) */
 .sb-autoscroll::-webkit-scrollbar {
   width: var(--bar-thin);
@@ -138,8 +138,9 @@ input::placeholder {
 }
 
 .label-caps {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: var(--text-2xs);
+  font-weight: 600;
   letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -204,6 +205,20 @@ input::placeholder {
   margin-top: 3px;
   font-weight: 400;
   opacity: 0.72;
+}
+/* Re-filled from a neighbor in its group (data-tip-group) — down the rail's rows, along a toolbar: the
+   label glides to the new host rather than jumping, so a sweep reads as one label following the
+   pointer. */
+.sb-tip-glide {
+  transition:
+    top 90ms var(--ease),
+    left 90ms var(--ease);
+}
+/* Three-line variant (data-tip-at / data-tip-meta): a quieter line still — when, and where. */
+.sb-tip-meta {
+  margin-top: 4px;
+  font-weight: 400;
+  opacity: 0.5;
 }
 
 .sb-tip-compact {

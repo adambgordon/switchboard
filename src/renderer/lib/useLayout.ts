@@ -1,23 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 
-/** Width bounds + default (px) for the unified left pane. */
-export const PANE_LIMITS = { min: 240, default: 320, max: 480 } as const
-
-/** The three collapsible sections of the pane. */
-export type SectionKey = 'pinned' | 'live' | 'recent'
+/**
+ * Width bounds + default (px) for the unified left pane. The minimum keeps the rail head's one row in
+ * Folders mode, where its tools are widest, on one line with room to spare — the head never wraps, so
+ * this bound is what holds it there. Re-measure if the head gains anything.
+ */
+export const PANE_LIMITS = { min: 300, default: 320, max: 480 } as const
 
 interface LayoutState {
   paneWidth: number
   paneCollapsed: boolean
-  /** Per-section COLLAPSED flags (true = collapsed). */
-  sections: Record<SectionKey, boolean>
 }
 
 const KEY = 'switchboard.layout'
 const DEFAULTS: LayoutState = {
   paneWidth: PANE_LIMITS.default,
-  paneCollapsed: false,
-  sections: { pinned: false, live: false, recent: false }
+  paneCollapsed: false
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -28,22 +26,16 @@ function load(): LayoutState {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return DEFAULTS
-    // Tolerate older shapes (sidebarWidth/railWidth/recentMode/…): unknown fields are
+    // Tolerate older shapes (sidebarWidth/railWidth/recentMode/sections/…): unknown fields are
     // ignored and missing ones fall back to DEFAULTS, so old layouts degrade cleanly.
     const o = JSON.parse(raw) as Partial<LayoutState>
-    const s = (o.sections ?? {}) as Partial<Record<SectionKey, boolean>>
     return {
       paneWidth: clamp(
         typeof o.paneWidth === 'number' ? o.paneWidth : DEFAULTS.paneWidth,
         PANE_LIMITS.min,
         PANE_LIMITS.max
       ),
-      paneCollapsed: o.paneCollapsed === true,
-      sections: {
-        pinned: s.pinned === true,
-        live: s.live === true,
-        recent: s.recent === true
-      }
+      paneCollapsed: o.paneCollapsed === true
     }
   } catch {
     return DEFAULTS
@@ -54,7 +46,6 @@ export interface Layout extends LayoutState {
   setPaneWidth: (w: number) => void
   togglePane: () => void
   resetPane: () => void
-  toggleSection: (key: SectionKey) => void
 }
 
 export interface LayoutOptions {
@@ -71,7 +62,7 @@ export interface LayoutOptions {
   persist?: boolean
 }
 
-/** Persisted, clamped layout: pane width + collapsed state, and per-section collapse. */
+/** Persisted, clamped layout: pane width + collapsed state. */
 export function useLayout(opts?: LayoutOptions): Layout {
   const [state, setState] = useState<LayoutState>(() => {
     const loaded = load()
@@ -93,9 +84,5 @@ export function useLayout(opts?: LayoutOptions): Layout {
   }, [])
   const togglePane = useCallback(() => setState((s) => ({ ...s, paneCollapsed: !s.paneCollapsed })), [])
   const resetPane = useCallback(() => setState((s) => ({ ...s, paneWidth: PANE_LIMITS.default })), [])
-  const toggleSection = useCallback((key: SectionKey) => {
-    setState((s) => ({ ...s, sections: { ...s.sections, [key]: !s.sections[key] } }))
-  }, [])
-
-  return { ...state, setPaneWidth, togglePane, resetPane, toggleSection }
+  return { ...state, setPaneWidth, togglePane, resetPane }
 }

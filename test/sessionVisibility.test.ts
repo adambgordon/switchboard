@@ -10,7 +10,7 @@ describe('session visibility', () => {
     const empty = retainHiddenSessions({ groups: [], hiddenSessionIds: [] }, hidden)
     expect(empty.hiddenSessionIds).toEqual(['H', 'J'])
     const group = {
-      cwd: '/project', label: 'project', latestMtime: 3,
+      cwd: '/project', root: '/project', worktree: false, exists: true, rootExists: true, label: 'project', latestMtime: 3,
       conversations: [
         { sessionId: 'H', mtime: 3 }, { sessionId: 'unknown', mtime: 2 }
       ] as ConversationMeta[]

@@ -233,8 +233,7 @@ body.sb-window-drop-target .sb-tabstrip {
   background: var(--paper-hover);
 }
 /* The active tab is lifted onto the surface of the content directly beneath it, so the tab and the
-   pane read as one sheet. In dark this makes it DARKER than the strip rather than lighter — the same
-   inverted elevation the pane already has against the rail, and correct for the same reason. */
+   pane read as one sheet — lighter than the strip in both themes. */
 .sb-tab.active {
   --tab-close-surface: var(--paper-pane);
   background: var(--paper-pane);
@@ -244,9 +243,14 @@ body.sb-window-drop-target .sb-tabstrip {
   background: var(--paper-pane);
 }
 /* Only the FOCUSED pane's active tab reads fully selected, so a split never shows two equally
-   selected tabs. Ink weight alone carries it — the marker is deliberately not a bar along the tab's
-   edge: at the width of a tab that bar is a slab, and it read as a piece of chrome in its own right
-   rather than as an attribute of the tab. */
+   selected tabs. Ink weight alone carries it: full ink here, and the other pane's active tab drops to
+   faint ink like any tab at rest — the same one-conversation-at-a-time answer the rail gives, where
+   only the focused pane's row is white. The marker is deliberately not a bar along the tab's edge: at
+   the width of a tab that bar is a slab, and reads as a piece of chrome in its own right rather than
+   as an attribute of the tab. */
+.sb-tab.active:not(.focused) {
+  color: var(--ink-faint);
+}
 .sb-tab.active.focused {
   color: var(--ink);
 }
@@ -280,15 +284,38 @@ body.sb-window-drop-target .sb-tabstrip {
 /* A preview tab is the one the next ordinary click replaces. Italic is the editor convention for it
    and costs no width — which matters, because a tab is already the most width-starved thing here.
    The padding is not cosmetic: a tab sizes to its content, so the title's box ends exactly where the
-   upright glyphs do, and an italic's lean past that edge is clipped by `.truncate`'s overflow. */
-.sb-tab.preview .sb-tab-title {
+   upright glyphs do, and an italic's lean past that edge is clipped by `.truncate`'s overflow. The
+   sizer takes the same padding, so the two stay the same width. */
+.sb-tab.preview .sb-tab-label {
   font-style: italic;
+}
+.sb-tab.preview .sb-tab-label > * {
   padding-right: 3px;
 }
 
-.sb-tab-title {
+/* The title and a hidden bold copy share one grid cell, so the tab is always as wide as its title
+   would be in bold: a conversation that needs you turns bold (as its rail row does) without the tab,
+   or any tab after it, moving. Both can shrink to nothing, so a capped tab still truncates. */
+.sb-tab-label {
   flex: 1;
   min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.sb-tab-label > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+.sb-tab-sizer {
+  font-weight: 800;
+  visibility: hidden;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* Asking or unread: the rail row's attention weight (.sb-row.attention). Weight is the one cue a tab
+   has free — the surface says active, the ink says which pane has focus — so it never hides focus. */
+.sb-tab.attention .sb-tab-title {
+  font-weight: 800;
 }
 
 /* A compact, permanent slot keeps liveness from changing the title or tab width. */
@@ -335,4 +362,11 @@ body.sb-window-drop-target .sb-tabstrip {
 .sb-tab-close:hover {
   background: var(--paper-active);
   color: var(--ink);
+}
+/* With ⌥ held, a running tab's × stops the session as well as closing the tab — destructive, so it
+   takes the danger colors on hover, as the menus' Stop session does. The held key is a root
+   attribute (heldKeys), so pressing ⌥ re-renders nothing. */
+:root[data-alt-held] .sb-tab.running .sb-tab-close:hover {
+  background: var(--danger-wash);
+  color: var(--danger-ink);
 }

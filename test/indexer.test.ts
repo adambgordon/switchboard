@@ -1,9 +1,11 @@
-import { access, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { indexConversations } from '../src/main/sessions/indexer'
+import { existenceProbe, indexConversations } from '../src/main/sessions/indexer'
+import { nodeRootFs, ProjectRoots } from '../src/main/sessions/projectRoot'
+import { listCodexRollouts } from '../src/main/sessions/codexParser'
 
 /** Base for test temp dirs. */
 const TMP_BASE = tmpdir()
@@ -349,6 +351,287 @@ describe('indexConversations Codex subagent filtering', () => {
       expect(groups[0].conversations.map((conversation) => conversation.sessionId)).toEqual([parent])
     } finally {
       await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('indexConversations project roots and existence', () => {
+  it('tags each group with its project, whether it is a worktree, and whether its cwd exists', async () => {
+    const base = await realpath(await mkdtemp(path.join(TMP_BASE, 'indexer-roots-')))
+    const root = path.join(base, 'claude')
+    try {
+      const repo = path.join(base, 'repo')
+      const sub = path.join(repo, 'src')
+      const wt = path.join(base, 'work', 'wt')
+      const gone = path.join(base, 'deleted')
+      await mkdir(path.join(repo, '.git'), { recursive: true })
+      await mkdir(sub, { recursive: true })
+      await mkdir(wt, { recursive: true })
+      await writeFile(path.join(wt, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 'wt')}\n`)
+      let t = 1_000_000_000_000
+      for (const cwd of [repo, sub, wt, gone]) {
+        await writeSession(root, cwd.replace(/[/.]/g, '-'), [msgLine('user', cwd, 'hello')], (t += 1000))
+      }
+
+      const roots = new ProjectRoots({ home: path.join(base, 'home') })
+      let told: string[] = []
+      const { groups } = await indexConversations(root, NO_CODEX, undefined, {
+        resolveRoots: (cwds, missing) => {
+          told = [...missing]
+          return roots.resolveAll(cwds, missing)
+        }
+      })
+      // The resolver is told which cwds are gone, so it never walks them synchronously.
+      expect(told).toEqual([gone])
+      const byCwd = new Map(groups.map((g) => [g.cwd, g]))
+      const pick = (cwd: string) => {
+        const g = byCwd.get(cwd)!
+        return { root: g.root, worktree: g.worktree, exists: g.exists }
+      }
+      // Grouping stays by exact cwd: the repo, its subdirectory and its worktree remain three groups.
+      expect(groups).toHaveLength(4)
+      expect(pick(repo)).toEqual({ root: repo, worktree: false, exists: true })
+      expect(pick(sub)).toEqual({ root: repo, worktree: false, exists: true })
+      expect(pick(wt)).toEqual({ root: repo, worktree: true, exists: true })
+      expect(pick(gone)).toEqual({ root: gone, worktree: false, exists: false })
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  it('reports whether each group’s project root exists, including one no conversation runs in', async () => {
+    const base = await realpath(await mkdtemp(path.join(TMP_BASE, 'indexer-root-exists-')))
+    const root = path.join(base, 'claude')
+    try {
+      // repoA is itself a cwd; repoB is reached only through its worktree; the third worktree's
+      // repository was deleted, leaving the worktree behind.
+      const repoA = path.join(base, 'repo-a')
+      const repoB = path.join(base, 'repo-b')
+      const goneRepo = path.join(base, 'repo-gone')
+      const wtA = path.join(base, 'work', 'a')
+      const wtB = path.join(base, 'work', 'b')
+      const orphan = path.join(base, 'work', 'orphan')
+      await mkdir(path.join(repoA, '.git'), { recursive: true })
+      await mkdir(path.join(repoB, '.git'), { recursive: true })
+      for (const [wt, repo] of [[wtA, repoA], [wtB, repoB], [orphan, goneRepo]]) {
+        await mkdir(wt, { recursive: true })
+        await writeFile(path.join(wt, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', path.basename(wt))}\n`)
+      }
+      let t = 1_000_000_000_000
+      for (const cwd of [repoA, wtA, wtB, orphan]) {
+        await writeSession(root, cwd.replace(/[/.]/g, '-'), [msgLine('user', cwd, 'hello')], (t += 1000))
+      }
+
+      const roots = new ProjectRoots({ home: path.join(base, 'home') })
+      let checks = 0
+      const existing = existenceProbe(async (p) => (checks++, (await stat(p)).isDirectory()))
+      const { groups } = await indexConversations(root, NO_CODEX, undefined, {
+        resolveRoots: (cwds, missing) => roots.resolveAll(cwds, missing),
+        existing
+      })
+      // One check per cwd, and one per root no cwd already answered for (repoB, the deleted repo).
+      expect(checks).toBe(6)
+      const byCwd = new Map(groups.map((g) => [g.cwd, { root: g.root, rootExists: g.rootExists }]))
+      expect(byCwd.get(repoA)).toEqual({ root: repoA, rootExists: true })
+      expect(byCwd.get(wtA)).toEqual({ root: repoA, rootExists: true })
+      expect(byCwd.get(wtB)).toEqual({ root: repoB, rootExists: true })
+      expect(byCwd.get(orphan)).toEqual({ root: goneRepo, rootExists: false })
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  it('reports existence fresh on every pass', async () => {
+    const base = await realpath(await mkdtemp(path.join(TMP_BASE, 'indexer-exists-')))
+    const root = path.join(base, 'claude')
+    try {
+      const repo = path.join(base, 'repo')
+      const cwd = path.join(base, 'wt')
+      await mkdir(path.join(repo, '.git'), { recursive: true })
+      await mkdir(cwd)
+      await writeFile(path.join(cwd, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 'wt')}\n`)
+      await writeSession(root, '-wt', [msgLine('user', cwd, 'hello')], 1_000_000_000_000)
+      const roots = new ProjectRoots({ home: path.join(base, 'home') })
+      const resolveRoots = (cwds: readonly string[], missing: ReadonlySet<string>) => roots.resolveAll(cwds, missing)
+      const cache = new Map()
+      const first = await indexConversations(root, NO_CODEX, cache, { resolveRoots })
+      expect(first.groups[0].exists).toBe(true)
+      await rm(cwd, { recursive: true })
+      const second = await indexConversations(root, NO_CODEX, cache, { resolveRoots })
+      expect(second.groups[0].exists).toBe(false)
+      // The project was resolved while the worktree existed; it must not revert to the bare cwd.
+      expect(second.groups[0].root).toBe(repo)
+      expect(second.groups[0].worktree).toBe(true)
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to the cwd itself for a path that never existed', async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-never-'))
+    try {
+      await writeSession(dir, '-home-user-project-one', [msgLine('user', CWD_A, 'hello')], 1_000_000_000_000)
+      const { groups } = await indexConversations(dir, NO_CODEX)
+      expect(groups.map((g) => ({ root: g.root, worktree: g.worktree, exists: g.exists }))).toEqual([
+        { root: CWD_A, worktree: false, exists: false }
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("records each session file's creation time, for both agents", async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-birth-'))
+    const codexRoot = path.join(dir, 'sessions')
+    try {
+      // An mtime in the FUTURE, so birth time cannot coincide with it: moving mtime earlier than
+      // creation drags the reported birth time back with it on some filesystems.
+      const later = Date.now() + 365 * 86_400_000
+      const claude = await writeSession(dir, '-home-user-project-one', [msgLine('user', CWD_A, 'hi')], later)
+      const codexId = await writeCodexRollout(codexRoot, CWD_B, 'user', later)
+      const { groups } = await indexConversations(dir, codexRoot)
+      const metas = groups.flatMap((g) => g.conversations)
+      const codexFile = (await listCodexRollouts(codexRoot)).find((f) => f.includes(codexId))!
+      const files = new Map([
+        [claude.id, claude.file],
+        [codexId, codexFile]
+      ])
+      expect(metas.map((m) => m.sessionId).sort()).toEqual([...files.keys()].sort())
+      for (const meta of metas) {
+        const { birthtimeMs } = await stat(files.get(meta.sessionId)!)
+        expect(meta.birthtimeMs).not.toBe(meta.mtime)
+        // A filesystem that does not report creation time yields 0, which must stay absent.
+        expect(meta.birthtimeMs).toBe(birthtimeMs > 0 ? birthtimeMs : undefined)
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('existenceProbe', () => {
+  const never = new Promise<boolean>(() => {})
+
+  it('answers by the deadline even when one check never settles', async () => {
+    const probe = existenceProbe(async (cwd) => (cwd === '/hung' ? never : cwd === '/here'), 20)
+    const started = Date.now()
+    expect((await probe(['/here', '/gone', '/hung'])).exists).toEqual(new Set(['/here']))
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('reuses a check still in flight instead of issuing another', async () => {
+    const calls: string[] = []
+    const probe = existenceProbe(async (cwd) => {
+      calls.push(cwd)
+      return cwd === '/hung' ? never : true
+    }, 10)
+    await probe(['/hung', '/ok'])
+    await probe(['/hung', '/ok'])
+    // The settled check runs again on the next pass; the hung one is joined, not repeated.
+    expect(calls).toEqual(['/hung', '/ok', '/ok'])
+  })
+
+  it('never has more checks unsettled than its cap, across passes', async () => {
+    const calls: string[] = []
+    const probe = existenceProbe(async (cwd) => {
+      calls.push(cwd)
+      return never
+    }, 10, 2)
+    for (let i = 0; i < 5; i++) await probe(['/h1', '/h2', '/h3', '/h4'])
+    // Two hung checks hold both slots for good; the other cwds are never checked while they do.
+    expect(calls).toEqual(['/h1', '/h2'])
+  })
+
+  it('checks a cwd that answered late after the others, so slow volumes cannot hold the slots', async () => {
+    const calls: string[] = []
+    const probe = existenceProbe(
+      async (cwd) => {
+        calls.push(cwd)
+        if (cwd === '/fast') return true
+        await new Promise((r) => setTimeout(r, 40))
+        return true
+      },
+      10,
+      2
+    )
+    expect((await probe(['/slow1', '/slow2', '/fast'])).exists).toEqual(new Set())
+    await new Promise((r) => setTimeout(r, 60))
+    // Both slow checks answered after their pass gave up, so the next pass starts with the fast one.
+    expect((await probe(['/slow1', '/slow2', '/fast'])).exists).toEqual(new Set(['/slow1', '/slow2', '/fast']))
+    expect(calls.slice(0, 3)).toEqual(['/slow1', '/slow2', '/fast'])
+  })
+
+  it('does not wait again on a check still pending from an earlier pass', async () => {
+    // Joining a hung check each pass would cost every later pass the full deadline (and a handler).
+    const probe = existenceProbe(async (cwd) => (cwd === '/hung' ? never : true), 300)
+    await probe(['/hung', '/ok'])
+    const started = Date.now()
+    expect((await probe(['/hung', '/ok'])).exists).toEqual(new Set(['/ok']))
+    expect(Date.now() - started).toBeLessThan(150)
+  })
+
+  it('reports a cwd with no answer this pass by its last known answer', async () => {
+    let calls = 0
+    const probe = existenceProbe(async () => (++calls === 1 ? true : never), 10)
+    expect((await probe(['/was-here'])).exists).toEqual(new Set(['/was-here']))
+    expect((await probe(['/was-here'])).exists).toEqual(new Set(['/was-here']))
+    expect(calls).toBe(2)
+  })
+
+  it('never licenses a walk on a last-known answer', async () => {
+    // A flaky volume: the first check answers late (after its pass gave up), the next one hangs. The
+    // second pass may SHOW the cwd as existing from memory, but must not let the resolver walk it.
+    let calls = 0
+    const isDirectory = (): Promise<boolean> =>
+      ++calls === 1 ? new Promise((r) => setTimeout(() => r(true), 30)) : never
+    const probe = existenceProbe(isDirectory, 10)
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-flaky-'))
+    try {
+      await writeSession(dir, '-flaky', [msgLine('user', '/w/flaky', 'hello')], 1_000_000_000_000)
+      let walks = 0
+      const counting = { ...nodeRootFs, realpath: (p: string) => (walks++, nodeRootFs.realpath(p)) }
+      const roots = new ProjectRoots({ home: path.join(dir, 'home'), fs: counting })
+      const options = { existing: probe, resolveRoots: (c: readonly string[], m: ReadonlySet<string>) => roots.resolveAll(c, m) }
+      await indexConversations(dir, NO_CODEX, undefined, options)
+      await new Promise((r) => setTimeout(r, 60))
+      const { groups } = await indexConversations(dir, NO_CODEX, undefined, options)
+      expect(groups[0].exists).toBe(true)
+      expect(walks).toBe(0)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('treats a failed check as missing', async () => {
+    const probe = existenceProbe(async (cwd) => {
+      if (cwd === '/err') throw new Error('EIO')
+      return true
+    }, 50)
+    expect((await probe(['/err', '/ok'])).exists).toEqual(new Set(['/ok']))
+  })
+
+  it('does not change a returned snapshot when a late check settles', async () => {
+    let release: (v: boolean) => void = () => {}
+    const late = new Promise<boolean>((r) => (release = r))
+    const probe = existenceProbe(async (cwd) => (cwd === '/late' ? late : true), 10)
+    const snapshot = await probe(['/late', '/ok'])
+    release(true)
+    await late
+    await new Promise((r) => setTimeout(r, 0))
+    expect(snapshot).toEqual({ exists: new Set(['/ok']), verified: new Set(['/ok']) })
+  })
+
+  it('never withholds the index behind a hung check', async () => {
+    const dir = await mkdtemp(path.join(TMP_BASE, 'indexer-hung-'))
+    try {
+      await writeSession(dir, '-a', [msgLine('user', '/w/a', 'hello')], 1_000_000_000_000)
+      await writeSession(dir, '-hung', [msgLine('user', '/w/hung', 'hello')], 1_000_000_001_000)
+      const existing = existenceProbe(async (cwd) => (cwd === '/w/hung' ? never : true), 20)
+      const { groups } = await indexConversations(dir, NO_CODEX, undefined, { existing })
+      const byCwd = new Map(groups.map((g) => [g.cwd, g.exists]))
+      expect(byCwd).toEqual(new Map([['/w/hung', false], ['/w/a', true]]))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
     }
   })
 })

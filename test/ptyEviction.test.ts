@@ -195,10 +195,31 @@ describe('PtyManager live-session cap', () => {
     // cost for a value no consumer reads.
     const plain = mgr.resume('s1', CWD, 'codex')
     indexed({ s1: { turnState: 'awaiting', lastActivityAt: plain.startedAt - 60_000 } })
+    mgr.markUsed(plain.ptyId) // its first use, announced once — see the next test
     announced = 0
     mgr.markUsed(plain.ptyId)
     mgr.markUsed(plain.ptyId)
     expect(announced).toBe(0)
+  })
+
+  it("announces a terminal's first use once, so every window sees it is no longer untouched", () => {
+    // Stop-on-close reads this: a used terminal may hold an unsent draft, or — unlinked — a prompt that
+    // started a rollout its placeholder cannot show, and the window closing the tab may not be the one
+    // that was typed in. Both agents: a new Claude terminal is never provisional.
+    for (const agent of ['claude', 'codex'] as const) {
+      const fresh = mgr.startNew(CWD, agent)
+      let last: { ptyId: string; usedByUser: boolean }[] = []
+      const listen = (s: { ptyId: string; usedByUser: boolean }[]): void => {
+        last = s
+      }
+      mgr.on('active-changed', listen)
+      announced = 0
+      mgr.markUsed(fresh.ptyId)
+      mgr.markUsed(fresh.ptyId)
+      mgr.off('active-changed', listen)
+      expect(announced).toBe(1)
+      expect(last.find((s) => s.ptyId === fresh.ptyId)?.usedByUser).toBe(true)
+    }
   })
 
   it('stops protecting a question once the user has responded to it', () => {

@@ -21,7 +21,27 @@ import { visibleTabLayout } from '@shared/sessionVisibility'
 import { useSessions } from './lib/useSessions'
 import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
-import { useLiveOrder } from './lib/useLiveOrder'
+import { useRowRank } from './lib/useRowRank'
+import { useSidebarPrefs } from './lib/useSidebarPrefs'
+import {
+  DEFAULT_SIDEBAR_LIMITS,
+  buildSidebarHeld,
+  dropNeighbors,
+  freezeFoldersByNewest,
+  folderRankSpace,
+  rankSpace,
+  resumeWrites,
+  synthMeta,
+  visibleRows,
+  enteredFolders,
+  withFolders,
+  withoutFolders,
+  type ActivePlace,
+  type SidebarBlock,
+  type SidebarModel
+} from './lib/sidebarModel'
+import { absorbBind, absorbBindFolder, dropWrites, holdRank, type RankOverrides } from './lib/rowRank'
+import { FOLDER_SEED_TASK, ONCE_TASKS_KEY, WHATS_NEW_TASK, parseOnceTasks, withOnceTask } from './lib/onceTasks'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
 import { viewToggleAction } from './lib/viewToggle'
@@ -36,6 +56,7 @@ import { usePaneLayout } from './lib/usePaneLayout'
 import { useTabsEnabled } from './lib/useTabsEnabled'
 import {
   SPLIT_LIMITS,
+  activeTabId,
   canPlaceTabsToSide,
   canSplitActiveTab,
   effectiveTabOpenMode,
@@ -45,6 +66,16 @@ import {
   snapshotPaneLayout,
   stepTab
 } from './lib/paneModel'
+import {
+  chooserTabId,
+  isChooserTab,
+  newConversationTarget,
+  strayChoosers,
+  type ChooserMemory
+} from './lib/chooserTab'
+import { confirmedEmpty, endedStops, stopsOnClose } from './lib/stopClose'
+import { captureClosed, pushClosed, rekeyClosed, takeReopenable, type ClosedGroup } from './lib/closedTabs'
+import type { SidePlace } from './lib/conversationMenu'
 import {
   NO_SELECTION,
   actionTargets,
@@ -60,7 +91,7 @@ import {
 } from './lib/tabSelection'
 import { nextPtyHomes } from './lib/ptyHome'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
-import { useNewConvoDefault } from './lib/useNewConvoDefault'
+import { chooserDirs, chooserPreselect, type ChooserFolder } from './lib/chooserDirs'
 import { useNewConvoDefaultAgent } from './lib/useNewConvoDefaultAgent'
 import { useAgentAvailability } from './lib/useAgentAvailability'
 import { useMaxLiveSessions } from './lib/useMaxLiveSessions'
@@ -85,10 +116,14 @@ import {
   liveDotClass,
   resolveRowLiveState
 } from './lib/rowIdentity'
+import { rowTipMeta, rowTipPreview, rowTipTitle } from './lib/rowTip'
 import TitleBar from './components/TitleBar'
+import WhatsNewModal from './components/WhatsNewModal'
+import type { AttentionEntry } from './components/AttentionBell'
+import { attentionAt, attentionOrder } from './lib/attention'
 import MainPane from './components/MainPane'
-import type { TabDescriptor } from './components/TabStrip'
-import TallyRail, { visibleEntries, type RailEntry, type RailSection } from './components/TallyRail'
+import type { TabConversationCommand, TabDescriptor } from './components/TabStrip'
+import Sidebar from './components/Sidebar'
 import ResizeHandle from './components/ResizeHandle'
 import SettingsModal from './components/SettingsModal'
 import ConversationInfoModal from './components/ConversationInfoModal'
@@ -96,73 +131,38 @@ import TooltipLayer from './components/TooltipLayer'
 import AppVeil from './components/AppVeil'
 import type { TranscriptScrollState } from './components/TranscriptView'
 import TerminalDeck from './components/TerminalDeck'
+import ChooserView from './components/ChooserView'
 
-/** Recent section: rows shown in 'recent' mode before toggling to 'all'. */
-const RECENT_CAP = 30
-
-/** Display-only meta for a live session the index hasn't caught yet (no preview until its JSONL is written). */
-function synthMeta(p: PtyState): ConversationMeta {
-  return {
-    sessionId: p.sessionId,
-    agent: p.agent,
-    cwd: p.cwd,
-    title: p.title,
-    preview: '',
-    gitBranch: null,
-    mtime: p.lastActivity,
-    messageCount: 0,
-    version: null,
-    sizeBytes: 0,
-    model: null,
-    outputTokens: 0,
-    inputTokens: 0,
-    inputBaseTokens: 0,
-    cacheWriteTokens: 0,
-    cacheReadTokens: 0,
-    contextTokens: 0,
-    firstActivityAt: null,
-    provisional: true
-  }
-}
+const NO_FOLDERS: readonly ChooserFolder[] = []
+/** Past AppVeil's launch fade (one frame, then 500ms), so What's new opens onto the app, not under the veil. */
+const WHATS_NEW_DELAY_MS = 600
 
 export default function App() {
   const { groups, hiddenSessionIds, loading } = useSessions()
   const hiddenSessionIdsRef = useRef(hiddenSessionIds)
   hiddenSessionIdsRef.current = hiddenSessionIds
   const ptys = usePtys()
-  const { pinned, order: pinnedOrder, toggle: togglePin, reorder: reorderPins } = usePins()
+  const { pinned, order: pinnedOrder, toggle: togglePin, move: movePin } = usePins()
   // A nonce bumped on each drag-reorder commit, folded into the rail's FLIP controlSig so the commit
   // settles instantly (the drag already showed the arrangement); pin/unpin toggles don't bump it, so
   // they still glide.
   const [reorderTick, setReorderTick] = useState(0)
-  const commitReorder = useCallback(
-    (from: number, to: number) => {
-      reorderPins(from, to)
-      setReorderTick((t) => t + 1)
-    },
-    [reorderPins]
-  )
-  // The Live section's manual order — ephemeral (live PTYs don't outlive the app). Like the pinned
-  // order it makes Live rows drag-reorderable AND immune to any activity-driven re-sort: a row holds
-  // its slot until you drag it. Every newly-live session (new or resumed) lands on top.
-  const liveUnpinnedIds = useMemo(
-    () => ptys.active.filter((p) => !pinned.has(p.sessionId) && !hiddenSessionIds.has(p.sessionId)).map((p) => p.sessionId),
-    [ptys.active, pinned, hiddenSessionIds]
-  )
+  // Row and folder order: sparse overrides over each row's seed, shared by every window. Written only
+  // by a drop, a Resume and an initial bind — never by a render — see rowRank.
+  const { rows: rowRanks, folders: folderRanks, mutateRows, mutateFolders } = useRowRank()
   const {
-    order: liveOrder,
-    reorder: reorderLive,
-    retarget: retargetLiveOrder
-  } = useLiveOrder(liveUnpinnedIds)
-  const commitLiveReorder = useCallback(
-    (from: number, to: number) => {
-      reorderLive(from, to)
-      setReorderTick((t) => t + 1)
-    },
-    [reorderLive]
-  )
+    mode: sidebarMode,
+    setMode: setSidebarMode,
+    density: railDensity,
+    setDensity: setRailDensity,
+    collapsed: folderCollapse,
+    setFolderCollapsed,
+    setFoldersCollapsed
+  } = useSidebarPrefs()
+  // The last rendered sidebar, for handlers that write positions: a drop, a Resume and a bind all
+  // need to know where rows are NOW, and must not re-subscribe on every render to find out.
+  const sidebarModelRef = useRef<SidebarModel | null>(null)
   const { seen, unread, markSeen, markUnread, markRead, rekey: rekeySeen } = useSeen()
-  const { dir: defaultDir, setDir: setDefaultDir } = useNewConvoDefault()
   const { enabled: markdownCopy, setEnabled: setMarkdownCopy } = useMarkdownCopy()
   const {
     agent: defaultAgent,
@@ -171,9 +171,9 @@ export default function App() {
     setEnabled: setDefaultAgentEnabled
   } = useNewConvoDefaultAgent()
   const agents = useAgentAvailability()
-  // The agent the New menu shows selected — sticky within a session (the last one picked or started),
-  // so reopening the menu remembers your choice. Ephemeral on purpose: the persisted default-agent
-  // preference is the cross-restart mechanism; this is just menu stickiness.
+  // The agent a new-conversation chooser opens on — sticky within a session (the last one picked or
+  // started), so the next chooser remembers your choice. Ephemeral on purpose: the persisted default-agent
+  // preference is the cross-restart mechanism; this is just stickiness.
   const [lastAgent, setLastAgent] = useState<AgentKind | null>(null)
   const {
     value: maxLive,
@@ -217,11 +217,9 @@ export default function App() {
   const {
     paneWidth,
     paneCollapsed,
-    sections: collapsedSections,
     setPaneWidth,
     togglePane,
-    resetPane,
-    toggleSection
+    resetPane
   } = useLayout({ collapseRail: windowInit.collapseRail, persist: !detached })
   const dragStartRef = useRef(0)
   const bodyElRef = useRef<HTMLDivElement>(null)
@@ -246,8 +244,13 @@ export default function App() {
   )
   const pendingWorkspaceKeyRef = useRef<string | null>(null)
   const pendingBoundClaimsRef = useRef(new Map<string, PendingBoundTab>())
-  // THE selection: the active tab of the focused pane. Derived, never stored twice.
-  const selectedId = panes.selectedId
+  // THE selection: the active tab of the focused pane. Derived, never stored twice. `selectedId` is the
+  // CONVERSATION selected — null while the tab is a new-conversation chooser, which holds none — and is
+  // what everything conversation-keyed reads; only focus and tab bookkeeping read the tab itself.
+  const selectedTabId = panes.selectedId
+  const selectedId = selectedTabId !== null && isChooserTab(selectedTabId) ? null : selectedTabId
+  const selectedTabIdRef = useRef(selectedTabId)
+  selectedTabIdRef.current = selectedTabId
 
   const navigationApplyRef = useRef<((command: NavigationCommand) => void) | null>(null)
   const {
@@ -278,7 +281,18 @@ export default function App() {
   const [viewBySession, setViewBySession] = useState<Record<string, ConversationView>>({})
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
+  // Per open new-conversation chooser tab: the folder it opens on — fixed at open, so the list does not
+  // reshuffle as the focused conversation changes behind it — and the tab it was opened from, where Esc
+  // returns, and `aim`, bumped each time a folder's pencil re-aims it. Ids are minted per window and never
+  // reused.
+  const [choosers, setChoosers] = useState<
+    Readonly<Record<string, { preselect: string | null; from: string | null; aim: number }>>
+  >({})
+  const choosersRef = useRef(choosers)
+  choosersRef.current = choosers
+  const nextChooserRef = useRef(1)
+  // What each chooser remembers across its view remounting — see ChooserMemory.
+  const chooserMemoryRef = useRef(new Map<string, ChooserMemory>())
   const [settingsPage, setSettingsPage] = useState<
     'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq' | null
   >(null)
@@ -289,8 +303,15 @@ export default function App() {
     if (infoModal && hiddenSessionIds.has(infoModal.sessionId)) setInfoModal(null)
   }, [infoModal, hiddenSessionIds])
   const overlayOpenRef = useRef(false)
-  // Section keys revealed past their cap via "Show more" (ephemeral — resets on reload).
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
+  // Extra rows revealed past a group's cap via "Show more", per group key (ephemeral — resets on reload).
+  const [revealed, setRevealed] = useState<Record<string, number>>({})
+  // Folders the active conversation has been in this session. They stay open after focus moves on:
+  // collapsing one the moment you click elsewhere would slide every row below it under the pointer.
+  // Only a chevron click closes one again. Never persisted.
+  const [navExpanded, setNavExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  // Folders collapsed by hand while a conversation in them was on screen — the only way that folder
+  // closes, since otherwise being active opens it. Navigation into the folder clears its entry.
+  const [activeCollapsed, setActiveCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const searchRef = useRef<HTMLInputElement>(null)
   // Find-in-conversation (main pane). App owns the open/close toggle — ⌘F opens it when focus is
   // in the main pane, Esc closes it; the query + match state live in MainPane. `paneRef` lets the
@@ -395,15 +416,26 @@ export default function App() {
   // Declared HERE, beside the state, rather than beside the drag handlers where they are used — the
   // group-capable actions further down all call `targetsFor`, and a `const` defined after them is not
   // hoisted, so it would be a temporal-dead-zone error at the first one.
-  const toggleTabSelected = useCallback((pane: number, sessionId: string) => {
+  //
+  // A chooser tab is never part of a selection: every group action — a move to another window above all
+  // — carries conversations, and a chooser is not one. It is left out of both the gesture and the run.
+  const selectableActive = (pane: number): string | null => {
     const p = paneLayoutRef.current.panes[pane]
-    setTabSelection((s) => toggleSelected(s, pane, p ? paneActiveId(p) : null, sessionId))
+    const id = p ? paneActiveId(p) : null
+    return id !== null && isChooserTab(id) ? null : id
+  }
+  const toggleTabSelected = useCallback((pane: number, sessionId: string) => {
+    if (isChooserTab(sessionId)) return
+    const active = selectableActive(pane)
+    setTabSelection((s) => toggleSelected(s, pane, active, sessionId))
   }, [])
   const extendTabSelection = useCallback((pane: number, sessionId: string) => {
+    if (isChooserTab(sessionId)) return
     const p = paneLayoutRef.current.panes[pane]
-    const order = p?.tabs.map((t) => t.sessionId) ?? []
+    const order = p?.tabs.map((t) => t.sessionId).filter((id) => !isChooserTab(id)) ?? []
     // The active tab is the fallback anchor, so a first ⇧-click takes the run from where the user is.
-    setTabSelection((s) => extendSelection(s, pane, order, sessionId, p ? paneActiveId(p) : null))
+    const active = selectableActive(pane)
+    setTabSelection((s) => extendSelection(s, pane, order, sessionId, active))
   }, [])
 
   // What a command invoked on ONE tab should actually act on: the group when that tab belongs to one,
@@ -415,6 +447,34 @@ export default function App() {
     []
   )
 
+  // The user closed these tabs: a running conversation among them that has written nothing is stopped,
+  // so it leaves the rail rather than lingering there with nothing showing it — see stopClose. Every
+  // close the user makes goes through here; a tab that moves elsewhere does not. Decided after a fresh
+  // read from disk, and only if the tab is still closed by then: reopening it is changing one's mind.
+  const stopEmptyOnClose = useCallback((ids: readonly string[]) => {
+    const countOf = (id: string) => metaByIdRef.current.get(id)?.messageCount ?? 0
+    for (const id of ids) {
+      if (!stopsOnClose(ptysBySessionRef.current.get(id), countOf(id))) continue
+      // A revision of its own, so the read is fresh from disk rather than a parse already in flight.
+      void window.api
+        .getTranscript(id, `closed:${Date.now()}`)
+        .then((t) => {
+          const pty = ptysBySessionRef.current.get(id)
+          if (!pty || locateTab(paneLayoutRef.current, id)) return
+          if (stopsOnClose(pty, countOf(id)) && confirmedEmpty(countOf(id), t)) window.api.kill(pty.ptyId)
+        })
+        .catch(() => {})
+    }
+  }, [])
+
+  // What the user closed, for ⇧⌘T — see closedTabs. Recorded by the same closes that go through
+  // stopEmptyOnClose, from the layout as it stood BEFORE the close. A ref: closing costs no render.
+  const closedTabsRef = useRef<ClosedGroup[]>([])
+  const recordClosed = useCallback((ids: readonly string[]) => {
+    const group = captureClosed(paneLayoutRef.current, ids)
+    if (group) closedTabsRef.current = pushClosed(closedTabsRef.current, group)
+  }, [])
+
   // Controls invoked on a tab close its group only when that tab belongs to it. Keyboard close
   // resolves the focused group independently, since the active tab can be outside the selection.
   const closeTabsFrom = useCallback(
@@ -423,10 +483,22 @@ export default function App() {
       const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
       if (!id) return
       const ids = targetsFor(pane, id)
+      recordClosed(ids)
       if (ids.length > 1) panes.closeTabs(ids)
       else panes.closeTab(pane, index)
+      stopEmptyOnClose(ids)
     },
-    [panes.closeTab, panes.closeTabs, targetsFor, beginVisit]
+    [panes.closeTab, panes.closeTabs, targetsFor, beginVisit, stopEmptyOnClose, recordClosed]
+  )
+  const closeOtherTabs = useCallback(
+    (pane: number, index: number) => {
+      const tabs = paneLayoutRef.current.panes[pane]?.tabs ?? []
+      const ids = tabs.filter((_, i) => i !== index).map((tab) => tab.sessionId)
+      recordClosed(ids)
+      panes.closeOtherTabs(pane, index)
+      stopEmptyOnClose(ids)
+    },
+    [panes.closeOtherTabs, stopEmptyOnClose, recordClosed]
   )
   const tabsEnabledRef = useRef(tabsEnabled)
   tabsEnabledRef.current = tabsEnabled
@@ -455,16 +527,51 @@ export default function App() {
       if (overlayOpenRef.current) return
       beginVisit()
       const l = paneLayoutRef.current
-      const ids = keyboardCloseTargets(
-        tabSelectionRef.current,
-        l.focusIndex,
-        paneActiveId(l.panes[l.focusIndex])
-      )
-      if (tabsEnabledRef.current && ids.length > 0) panes.closeTabs(ids)
-      else window.api.closeWindow()
+      const active = paneActiveId(l.panes[l.focusIndex])
+      const ids = keyboardCloseTargets(tabSelectionRef.current, l.focusIndex, active)
+      // A chooser closes like a tab even with tabs off, where it is the one thing ⌘W should not
+      // mistake for the whole window: it is a question on top of what was showing.
+      const closesTab = tabsEnabledRef.current || (active !== null && isChooserTab(active))
+      if (closesTab && ids.length > 0) {
+        recordClosed(ids)
+        panes.closeTabs(ids)
+        stopEmptyOnClose(ids)
+      } else window.api.closeWindow()
     })
     return off
-  }, [panes.closeTabs, beginVisit])
+  }, [panes.closeTabs, beginVisit, stopEmptyOnClose, recordClosed])
+
+  // ⇧⌘T, and a tab menu's Reopen: bring back the newest close that still has something to bring back.
+  // A conversation can come back if it has no tab — here or in another window — is not hidden, and is
+  // still there: running, or with something written. An empty one stopped on its close is gone.
+  const canReopen = useCallback(
+    (id: string) =>
+      !hiddenSessionIdsRef.current.has(id) &&
+      !locateTab(paneLayoutRef.current, id) &&
+      !openElsewhereRef.current.has(id) &&
+      (ptysBySessionRef.current.has(id) || (metaByIdRef.current.get(id)?.messageCount ?? 0) > 0),
+    []
+  )
+  const reopenClosed = useCallback(() => {
+    if (!tabsEnabledRef.current) return
+    const { group, rest } = takeReopenable(closedTabsRef.current, canReopen)
+    closedTabsRef.current = rest
+    if (!group) return
+    beginVisit()
+    panes.reopenTabs(group)
+  }, [canReopen, beginVisit, panes.reopenTabs])
+  const reopenCount = useCallback(
+    () => (tabsEnabledRef.current ? takeReopenable(closedTabsRef.current, canReopen).group?.tabs.length ?? 0 : 0),
+    [canReopen]
+  )
+  // A menu accelerator, like ⌘W — and inert behind a modal, like it.
+  useEffect(
+    () =>
+      window.api.onMenuReopenTab(() => {
+        if (!overlayOpenRef.current) reopenClosed()
+      }),
+    [reopenClosed]
+  )
 
   // A Codex PTY's sessionId changed — an initial bind off a placeholder, or a correction between two
   // real conversations. The two need OPPOSITE handling of session-keyed state, and getting it wrong
@@ -484,11 +591,28 @@ export default function App() {
     })
     const off = window.api.onPtyBound((ptyId, oldId, newId, kind, ownedHere, adoptionToken) => {
       cancelPending(ptyId)
-      if (kind === 'initial') rekeyPendingNavigation(oldId, newId)
+      if (kind === 'initial') {
+        rekeyPendingNavigation(oldId, newId)
+        closedTabsRef.current = rekeyClosed(closedTabsRef.current, oldId, newId)
+        setChoosers((prev) => {
+          const opened = Object.entries(prev).filter(([, c]) => c.from === oldId)
+          if (opened.length === 0) return prev
+          const next = { ...prev }
+          for (const [k, c] of opened) next[k] = { ...c, from: newId }
+          return next
+        })
+      }
       const ev = { oldId, newId, kind }
       latestBinds.set(ptyId, ev)
       const act = bindActions(ev, selectedIdRef.current, ownedHere)
-      if (act.retargetLiveOrder) retargetLiveOrder(oldId, newId)
+      // Read before `active-changed` renders the new id: `bindCodex` emits `bound` first, so the last
+      // rendered model still holds the placeholder's row, its rank and its folder.
+      const place = act.retargetRowOrder ? sidebarModelRef.current?.rows.get(oldId) : undefined
+      if (place) {
+        mutateRows((stored) => absorbBind(stored, place.rank, oldId, newId))
+        const folder = sidebarModelRef.current?.folders.get(place.root)
+        if (folder) mutateFolders((stored) => absorbBindFolder(stored, place.root, folder, place.seed))
+      }
       const apply = (): void => {
         if (act.view !== 'none' && findPriorTerminalIdsRef.current.delete(oldId)) {
           findPriorTerminalIdsRef.current.add(newId)
@@ -552,7 +676,8 @@ export default function App() {
     rekeyPendingNavigation,
     rekeySeen,
     requestFocus,
-    retargetLiveOrder,
+    mutateRows,
+    mutateFolders,
     panes.rekeyTabs,
     panes.retargetTabs
   ])
@@ -582,14 +707,15 @@ export default function App() {
 
   // A selection change normally hands the conversation surface the keyboard. Roving through the tab
   // strip is the one exception: keep focus on its newly-active tab so another arrow can continue.
+  // Keyed on the TAB, so landing on a chooser hands its filter the keyboard too.
   useEffect(() => {
-    if (!selectedId) return
+    if (!selectedTabId) return
     if (keepTabFocusRef.current) {
       keepTabFocusRef.current = false
       return
     }
-    requestFocus(selectedId)
-  }, [selectedId, requestFocus])
+    requestFocus(selectedTabId)
+  }, [selectedTabId, requestFocus])
 
   // Keep the main-process LRU cap in lockstep with the persisted preference — on mount and on each
   // change. Fire-and-forget, and runs after commit, so it never touches the render/paint path.
@@ -627,24 +753,14 @@ export default function App() {
     [ptys.bySession, metaById]
   )
 
-  // The set of sessions matching the active search, or null when not searching. The
-  // query filters entries *within* every section (Pinned/Live/Recent) — it does not
-  // replace them with a separate flat list.
+  // The set of sessions matching the active search, or null when not searching. The rail filters its
+  // folders to them rather than replacing them with a separate flat list.
   const matchIds = useMemo(
     () => (query.trim() ? new Set(searchConversations(allConversations, query).map((c) => c.sessionId)) : null),
     [allConversations, query]
   )
   const searching = matchIds !== null
 
-  // The pane's three sections. Ordering is stable w.r.t. activity — positions key off
-  // pin order and a manual Live order, never lastActivity/startedAt — so a session emitting
-  // output never makes a row jump (see git ce407fa). The lone exception is the not-live
-  // "Recent" history, which sorts by mtime because it IS a recency list. Live rows are
-  // joined to their indexed meta so they carry a preview and a fresh (renamed/aiTitle) title.
-  //   1. Pinned — pinned convos (live or not), most-recently-pinned on top.
-  //   2. Live   — live & unpinned, in manual order (newest on top; drag to reorder).
-  //   3. Recent — everything else (not live, not pinned), most-recent first.
-  // When a search is active, each section is filtered to the matching sessions.
   // --- terminal ownership + per-pane resolution ---
   //
   // Which pane each live terminal is mounted in. A window holds one stable xterm per terminal in the
@@ -677,7 +793,10 @@ export default function App() {
    */
   const paneView = (index: number) => {
     const pane = paneLayout.panes[index] ?? null
-    const id = pane ? paneActiveId(pane) : null
+    const tabId = pane ? paneActiveId(pane) : null
+    // A chooser shows no conversation: everything below resolves as for an empty pane.
+    const chooser = tabId !== null && isChooserTab(tabId) ? tabId : null
+    const id = chooser ? null : tabId
     const meta = id ? metaById.get(id) ?? null : null
     const pty = id ? ptys.bySession.get(id) ?? null : null
     // A terminal renders here only if this WINDOW owns it (main decides, one owner app-wide) and this
@@ -697,6 +816,7 @@ export default function App() {
     return {
       pane,
       id,
+      chooser,
       meta,
       pty,
       terminalAt,
@@ -739,12 +859,10 @@ export default function App() {
   }, [view0.id, view1.id])
 
   // THE composition of liveness for one session, hoisted so every surface reading it reads the same
-  // value: the rail's sections, the Live tally, both tab strips, and the read/unread toggle. It was
-  // previously hand-copied at each site, and `resolveRowLiveState` exists because one of those copies
-  // was written without the unlinked gate. The tab strip then repeated the mistake one level up —
-  // deriving `live: !!pty` and drawing a solid "finished, unseen" dot next to a rail row showing the
-  // hollow "idle" one, for the same session at the same moment. Two derivations of one fact are two
-  // claims about it, so there is one.
+  // value: the rail's rows, the bell, both tab strips, and the read/unread toggle. A second derivation
+  // — `live: !!pty` in a tab strip, say — would draw a solid "finished, unseen" dot beside a row
+  // showing the hollow "idle" one for the same session at the same moment, and skip the unlinked gate
+  // `resolveRowLiveState` applies. Two derivations of one fact are two claims about it, so there is one.
   const liveStateFor = useCallback(
     (pty: PtyState | null, meta: ConversationMeta, id: string): LiveState | null =>
       resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && visibleIds.has(id), unread[id]),
@@ -766,93 +884,170 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- visiblePtyIds folded into the signature
   }, [visiblePtySig])
 
-  const railSections = useMemo<RailSection[]>(() => {
-    const pinnedEntries: RailEntry[] = pinnedOrder
-      .filter((id) => !hiddenSessionIds.has(id))
-      .map((id) => {
-        const pty = ptys.bySession.get(id) ?? null
-        // Prefer indexed meta; fall back to the live process so a pinned-but-
-        // unindexed session still renders a full row. Drop truly stale pins.
-        const meta = metaById.get(id) ?? (pty ? synthMeta(pty) : null)
-        return meta
-          ? { sessionId: id, pty, meta, pinned: true, liveState: liveStateFor(pty, meta, id) }
-          : null
-      })
-      .filter((e): e is RailEntry => e !== null)
-
-    // Live & unpinned, in the manual order (newest on top; drag to reorder). Iterating liveOrder —
-    // not a startedAt sort — is what keeps rows from ever jumping on their own. The guards are
-    // defensive against the one-frame window before useLiveOrder's sync prunes a just-pinned /
-    // just-ended id from the order.
-    const liveEntries: RailEntry[] = liveOrder
-      .map((id): RailEntry | null => {
-        const pty = ptys.bySession.get(id)
-        if (!pty || pinned.has(id) || hiddenSessionIds.has(id)) return null
-        const meta = metaById.get(id) ?? synthMeta(pty)
-        return { sessionId: id, pty, meta, pinned: false, liveState: liveStateFor(pty, meta, id) }
-      })
-      .filter((e): e is RailEntry => e !== null)
-
-    const recentEntries: RailEntry[] = allConversations
-      .filter((c) => !pinned.has(c.sessionId) && !ptys.bySession.has(c.sessionId))
-      .sort((a, b) => b.mtime - a.mtime)
-      .map((c) => ({ sessionId: c.sessionId, pty: null, meta: c, pinned: false, liveState: null }))
-
-    const all: RailSection[] = [
-      { key: 'pinned', label: 'Pinned', variant: 'card', entries: pinnedEntries },
-      { key: 'live', label: 'Live', variant: 'card', entries: liveEntries },
-      { key: 'recent', label: 'Recent', variant: 'row', entries: recentEntries, cap: RECENT_CAP }
+  // THE rail: every row, its folder, its order, and which rows render. One pure build, read by the
+  // rail AND by keyboard navigation, so the two cannot disagree about what is on screen. Built against
+  // the last model shown, so a row the index has just re-seeded keeps its place (`buildSidebarHeld`);
+  // not while loading, when the first load re-seeds every live row at its real start.
+  const shownModelRef = useRef<SidebarModel | null>(null)
+  // The folders that start collapsed, fixed once the launch order is (below). A ref: the build that
+  // fixes it already used exactly this set, so nothing needs rebuilding when it is set.
+  const autoCollapsedRef = useRef<ReadonlySet<string> | null>(null)
+  const sidebar = useMemo(
+    () =>
+      buildSidebarHeld(loading ? null : shownModelRef.current, {
+        mode: sidebarMode,
+        groups,
+        ptys: ptys.active,
+        pinned: pinnedOrder,
+        hidden: hiddenSessionIds,
+        rowRanks,
+        folderRanks,
+        liveState: liveStateFor,
+        active: visibleIds,
+        collapsed: folderCollapse,
+        autoCollapsed: autoCollapsedRef.current,
+        navExpanded,
+        activeCollapsed,
+        revealed,
+        search: matchIds,
+        limits: DEFAULT_SIDEBAR_LIMITS
+      }),
+    [
+      loading,
+      sidebarMode,
+      groups,
+      ptys.active,
+      pinnedOrder,
+      hiddenSessionIds,
+      rowRanks,
+      folderRanks,
+      liveStateFor,
+      visibleIds,
+      folderCollapse,
+      navExpanded,
+      activeCollapsed,
+      revealed,
+      matchIds
     ]
-    const scoped = matchIds
-      ? all.map((s) => ({ ...s, entries: s.entries.filter((e) => matchIds.has(e.sessionId)) }))
-      : all
-    return scoped.filter((s) => s.entries.length > 0)
-  }, [pinned, pinnedOrder, liveOrder, metaById, ptys.bySession, allConversations, matchIds, liveStateFor, hiddenSessionIds])
+  )
+  const sidebarModel = sidebar.model
+  sidebarModelRef.current = sidebarModel
+  // Persist what the build held — only the entries the store lacks, folded into a fresh read, so a hold
+  // never overwrites a position written meanwhile (by a drag, or another window's identical hold).
+  useLayoutEffect(() => {
+    shownModelRef.current = loading ? null : sidebar.model
+    const holds = (held: RankOverrides, from: RankOverrides) => (stored: RankOverrides) =>
+      Object.entries(held).reduce((s, [id, rank]) => (Object.hasOwn(from, id) ? s : holdRank(s, id, rank)), stored)
+    if (sidebar.rowRanks !== rowRanks) mutateRows(holds(sidebar.rowRanks, rowRanks))
+    if (sidebar.folderRanks !== folderRanks) mutateFolders(holds(sidebar.folderRanks, folderRanks))
+  }, [sidebar, loading, rowRanks, folderRanks, mutateRows, mutateFolders])
 
-  // Live-session tally over ALL live sessions — never the search-filtered rail set, so the rail's
-  // count + status line reflect everything running even while a query narrows the visible rows.
-  const liveTally = useMemo(() => {
-    let working = 0
-    let asking = 0
-    // Named `unreadCount` (not `unread`) to avoid shadowing the `unread` seen-map from useSeen,
-    // referenced as `unread[p.sessionId]` just below. Surfaced as the tally's `unread` field.
-    let unreadCount = 0
-    let idle = 0
-    // Terminals with no proven conversation identity get their OWN count rather than being folded
-    // into `idle`. Calling an unlinked terminal idle would be a claim about a conversation we can't
-    // identify — and "1 idle" over a terminal the user is actively typing in is exactly the kind of
-    // wrong-dot report this work exists to fix. Sharing the hollow visual does not fold it into idle.
-    let unlinked = 0
-    let count = 0
-    for (const p of ptys.active) {
-      if (hiddenSessionIds.has(p.sessionId)) continue
-      count++
-      const st = liveStateFor(p, metaById.get(p.sessionId) ?? synthMeta(p), p.sessionId)
-      // Every `p` here is live by construction, so the only way to get no state is the unlinked
-      // gate — which makes this bucket definitionally "the rows that were given no dot" rather
-      // than a second reading of the predicate that could drift from the first.
-      if (st === null) unlinked++
-      else if (st === 'working') working++
-      else if (st === 'asking') asking++
-      else if (st === 'awaiting') unreadCount++
-      else idle++
+  // Once per profile, ever: the first time this rail runs, freeze the folders newest-first. Waits for a
+  // load with indexed conversations — the index arrives whole, and a failed one arrives empty, which
+  // must not count as "done" even while a live terminal gives the rail a row of its own. A layout effect, so the frozen order is what first paints. The marker is folded into a
+  // fresh read, and every window checks it first, so a later window finds it done and skips.
+  // Then — on the build after a freeze, which carries the frozen order — the folders that start
+  // collapsed are fixed for the launch.
+  const catalogReady = !loading && groups.some((g) => g.conversations.length > 0)
+  const frozeRef = useRef(false)
+  useLayoutEffect(() => {
+    if (!catalogReady || autoCollapsedRef.current) return
+    let done: string[] | null
+    try {
+      done = parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY))
+    } catch {
+      done = null
     }
-    return { count, working, asking, unread: unreadCount, idle, unlinked }
-  }, [ptys.active, metaById, liveStateFor, hiddenSessionIds])
+    if (done && !done.includes(FOLDER_SEED_TASK) && !frozeRef.current) {
+      frozeRef.current = true
+      mutateFolders((stored) => freezeFoldersByNewest(sidebarModel, stored))
+      try {
+        localStorage.setItem(ONCE_TASKS_KEY, JSON.stringify(withOnceTask(done, FOLDER_SEED_TASK)))
+      } catch {
+        /* storage unavailable — the freeze simply runs again next launch */
+      }
+      return
+    }
+    autoCollapsedRef.current = sidebarModel.autoCollapsed
+  }, [catalogReady, sidebarModel, mutateFolders])
 
-  overlayOpenRef.current = settingsPage !== null || infoModal !== null
+  // Navigation entering a folder opens it: remembered so it stays open once focus moves on, and any
+  // collapse made while it was active is forgotten. Keyed on the (conversation, folder) pairs, not the
+  // model, which is rebuilt on every liveness change. A layout effect, so a conversation opened in a
+  // folder the user collapsed never paints with its folder shut.
+  const activePlacesKey = JSON.stringify(
+    [...visibleIds].flatMap((id): ActivePlace[] => {
+      const root = sidebarModel.rows.get(id)?.root
+      return root === undefined ? [] : [[id, root]]
+    })
+  )
+  const activePlacesRef = useRef<ActivePlace[]>([])
+  useLayoutEffect(() => {
+    const places = JSON.parse(activePlacesKey) as ActivePlace[]
+    const entered = enteredFolders(activePlacesRef.current, places)
+    activePlacesRef.current = places
+    if (entered.length === 0) return
+    setNavExpanded((prev) => withFolders(prev, entered))
+    setActiveCollapsed((prev) => withoutFolders(prev, entered))
+  }, [activePlacesKey])
+
+  // What's new: once per profile, in the main window, after the launch fade (AppVeil) so it does not
+  // rise under it. Marked done as it opens, not as it closes — a second window, or a relaunch before it
+  // is dismissed, must not show it again.
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
+  useEffect(() => {
+    if (detached) return
+    let done: string[]
+    try {
+      done = parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY))
+    } catch {
+      return
+    }
+    if (done.includes(WHATS_NEW_TASK)) return
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(
+          ONCE_TASKS_KEY,
+          JSON.stringify(withOnceTask(parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY)), WHATS_NEW_TASK))
+        )
+      } catch {
+        return
+      }
+      setWhatsNewOpen(true)
+    }, WHATS_NEW_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [detached])
+
+  overlayOpenRef.current = settingsPage !== null || infoModal !== null || whatsNewOpen
 
   // "This row stands for no conversation" (see rowIdentity), by id — the ONE place that resolution
   // lives. Every consumer of the gate routes through here rather than re-deriving it: an unlinked
   // row must not persist read state or a pin under an id that may never bind, and a gate copied per
   // call site is how one copy ends up missing (which is what put a stranger's liveness dot on a
   // background-agent row).
+  //
+  // A chooser tab stands for no conversation either, so it answers here too — which is what keeps it out
+  // of read marks and pins, and its tab menu free of conversation items.
   const isUnlinkedId = useCallback(
     (id: string): boolean => {
+      if (isChooserTab(id)) return true
       const pty = ptys.bySession.get(id) ?? null
       return !!pty && isUnlinkedRow(pty, metaById.get(id) ?? synthMeta(pty))
     },
     [ptys.bySession, metaById]
+  )
+
+  // A tab's when-and-where line, from the same folder and label the rail row uses. A conversation the
+  // rail does not hold (hidden) falls back to its terminal's project, else its own directory.
+  const tabTipMeta = useCallback(
+    (meta: ConversationMeta, pty: PtyState | null): string => {
+      const root = sidebarModel.rows.get(meta.sessionId)?.root ?? pty?.projectRoot ?? meta.cwd
+      return rowTipMeta(sidebarModel.labels.get(root) ?? basename(root), meta.cwd, root, {
+        background: meta.agent === 'claude' && meta.sessionKind === 'bg',
+        elsewhere: false
+      })
+    },
+    [sidebarModel]
   )
 
   // Per-pane tab descriptors for the strips. Resolved here rather than in TabStrip so the strip stays
@@ -862,28 +1057,55 @@ export default function App() {
     () =>
       paneLayout.panes.map((p) =>
         p.tabs.map((tab) => {
+          if (isChooserTab(tab.sessionId)) {
+            return {
+              sessionId: tab.sessionId,
+              title: 'New conversation',
+              subtitle: null,
+              lastActiveAt: null,
+              tipMeta: null,
+              preview: tab.preview,
+              dot: null,
+              unlinked: true,
+              indexed: false,
+              running: false,
+              pinned: false,
+              unread: false
+            }
+          }
           const pty = ptys.bySession.get(tab.sessionId) ?? null
           const meta = metaById.get(tab.sessionId) ?? (pty ? synthMeta(pty) : null)
+          const state = meta ? liveStateFor(pty, meta, tab.sessionId) : null
           return {
             sessionId: tab.sessionId,
-            title: pty && meta ? displayTitleForRow(pty, meta) : meta?.title ?? 'Conversation',
+            title: rowTipTitle(pty && meta ? displayTitleForRow(pty, meta) : meta?.title ?? 'Conversation'),
             // The hover carries the rail row's preview line, since a tab truncates far harder than a
             // row does. A row falls back to a "No preview" placeholder to hold its height; a tooltip
             // has no height to hold, so absent a real preview the second line is simply omitted
             // rather than spending it saying there is nothing to say.
-            subtitle:
+            subtitle: rowTipPreview(
               meta && pty && isParkedOnlyRow(pty, meta)
                 ? 'Terminal only — work is in a background agent'
-                : meta?.preview ?? null,
+                : meta?.preview ?? null
+            ),
+            // The same when-and-where line as the rail row. A tab is in this window by definition, so
+            // it never says "In another window".
+            lastActiveAt: meta ? meta.lastActivityAt ?? meta.mtime : null,
+            tipMeta: meta ? tabTipMeta(meta, pty) : null,
             preview: tab.preview,
             // Null meta implies null pty (meta falls back to the pty's stand-in whenever one exists),
             // so this resolves to "no dot" for exactly the sessions that have no state to report.
-            dot: meta ? liveDotClass(pty, meta, liveStateFor(pty, meta, tab.sessionId)) : null,
-            unlinked: isUnlinkedId(tab.sessionId)
+            dot: meta ? liveDotClass(pty, meta, state) : null,
+            unlinked: isUnlinkedId(tab.sessionId),
+            indexed: metaById.has(tab.sessionId),
+            running: !!pty,
+            pinned: pinned.has(tab.sessionId),
+            // What the rail row's menu calls unread, so the two menus offer the same toggle.
+            unread: !!pty && (state === 'awaiting' || state === 'asking')
           }
         })
       ),
-    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor]
+    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor, tabTipMeta, pinned]
   )
 
   // Activating a tab is a landing like any other: it marks the conversation read and hands the pane
@@ -895,7 +1117,7 @@ export default function App() {
       if (!id) return
       // A plain click means "just this one", so it is also the way out of a multi-selection.
       setTabSelection(selectOnly())
-      if (!focusSurface && id !== selectedIdRef.current) keepTabFocusRef.current = true
+      if (!focusSurface && id !== selectedTabIdRef.current) keepTabFocusRef.current = true
       panes.activateTab(pane, index)
       if (!isUnlinkedId(id)) markRead(id)
       if (focusSurface) requestFocus(id)
@@ -907,10 +1129,9 @@ export default function App() {
   const selectedMeta = focusedView.meta
   const selectedPty = focusedView.pty
   const effectiveView = focusedView.view
+  // An unlinked row shows no read state, so it must not persist one either — see rowIdentity.
   const view0Unlinked = view0.id ? isUnlinkedId(view0.id) : false
   const view1Unlinked = view1.id ? isUnlinkedId(view1.id) : false
-  // An unlinked row shows no read state, so it must not persist one either — see rowIdentity.
-  const selectedUnlinked = paneLayout.focusIndex === 1 ? view1Unlinked : view0Unlinked
 
   const view0InputRequestedAt = view0.pty
     ? currentInputRequestedAt(view0.meta ?? synthMeta(view0.pty), view0.pty.inputRequestedAt)
@@ -935,50 +1156,35 @@ export default function App() {
     if (view1.id && focused && !view1Unlinked) markSeen(view1.id, Date.now())
   }, [view1.id, focused, view1Unlinked, view1.meta?.turnEndedAt, view1InputRequestedAt, markSeen])
 
-  // Arrow-key order follows what's actually visible — the same visibility rule the pane
-  // renders with (collapse + Recent cap + search override) — so nav never lands on a hidden row.
-  const orderedIds = useMemo(
-    () =>
-      railSections.flatMap((s) =>
-        visibleEntries(s, {
-          collapsed: collapsedSections[s.key],
-          expanded: expandedSections.has(s.key),
-          searching
-        }).map((e) => e.sessionId)
-      ),
-    [railSections, collapsedSections, expandedSections, searching]
+  // Arrow-key order follows what's actually visible — the model the rail renders — so nav never lands
+  // on a hidden row.
+  const orderedIds = useMemo(() => visibleRows(sidebarModel).map((r) => r.sessionId), [sidebarModel])
+  // Each pane's chooser list, computed only while that pane shows a chooser: the list is otherwise
+  // unused, and `groups` changes on every index pass of a live session.
+  const preselect0 = view0.chooser ? choosers[view0.chooser]?.preselect ?? null : null
+  const preselect1 = view1.chooser ? choosers[view1.chooser]?.preselect ?? null : null
+  const showsChooser0 = view0.chooser !== null
+  const showsChooser1 = view1.chooser !== null
+  const folders0 = useMemo(
+    () => (showsChooser0 ? chooserDirs(groups, preselect0) : NO_FOLDERS),
+    [showsChooser0, groups, preselect0]
   )
-  // The new-conversation menu orders by when each repo's newest conversation was STARTED, not by
-  // last activity. `groups` arrives sorted by `latestMtime` desc, which answers "where was I last?" —
-  // a different question from "where am I likely to start something new?". Sort a COPY so the rail
-  // keeps its own order. `firstActivityAt` is the first real message, so a session that was opened
-  // but never typed in scores 0 and sinks — deliberate: an empty session isn't evidence you work there.
-  const recentDirs = useMemo(() => {
-    const startedAt = (g: (typeof groups)[number]): number =>
-      g.conversations.reduce((max, c) => Math.max(max, c.firstActivityAt ?? 0), 0)
-    return [...groups].sort((a, b) => startedAt(b) - startedAt(a)).map((g) => g.cwd)
-  }, [groups])
+  const folders1 = useMemo(
+    () => (showsChooser1 ? chooserDirs(groups, preselect1) : NO_FOLDERS),
+    [showsChooser1, groups, preselect1]
+  )
   const metaByIdRef = useRef(metaById)
   metaByIdRef.current = metaById
 
-  // Agent axis for "new conversation". `availableAgents` are the launchable CLIs. The agent is
-  // RESOLVED (no choice to present) when a usable default is set, or when only one agent exists;
-  // otherwise it's an open choice the menu must surface. Mirrors the directory axis (`resolvedDir`).
+  // Agent axis for "new conversation". `availableAgents` are the launchable CLIs: the chooser's agent
+  // choice, and each folder header's logos.
   const availableAgents = useMemo<AgentKind[]>(
     () => (['claude', 'codex'] as AgentKind[]).filter((a) => agents[a]),
     [agents]
   )
-  const resolvedAgent = useMemo<AgentKind | null>(() => {
-    if (defaultAgentEnabled && agents[defaultAgent]) return defaultAgent
-    if (availableAgents.length === 1) return availableAgents[0]
-    return null
-  }, [defaultAgentEnabled, defaultAgent, agents, availableAgents])
-  const resolvedDir = defaultDir || null
-  // Which agent the New menu shows selected (and commits with when its segment is hidden): the sticky
-  // last-picked agent if still available, else the resolved one, else the saved default, else the
-  // first available.
-  const menuAgent = useMemo<AgentKind>(() => {
-    // An explicit, enabled default agent wins over the sticky last pick; otherwise the menu remembers
+  // Which agent a chooser opens on (and starts with when it shows no choice).
+  const chooserAgent = useMemo<AgentKind>(() => {
+    // An explicit, enabled default agent wins over the sticky last pick; otherwise the chooser remembers
     // your last selection, falling back to the first available agent.
     if (defaultAgentEnabled && agents[defaultAgent]) return defaultAgent
     if (lastAgent && availableAgents.includes(lastAgent)) return lastAgent
@@ -1066,6 +1272,11 @@ export default function App() {
       window.api.resumeConversationElsewhere(meta.sessionId)
       return
     }
+    // A Resume lifts its row to the top — the one motion that is not a drag, and always a deliberate
+    // click. Written here, in the window that spawns: a Resume forwarded to another window returned
+    // above, and that window's own `resume` does the write, into the store every window shares.
+    const writes = sidebarModelRef.current ? resumeWrites(sidebarModelRef.current, meta.sessionId, Date.now()) : {}
+    if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
     land(meta.sessionId, 'persistent', { pane })
     chooseSessionView(meta.sessionId, 'terminal')
     requestFocus(meta.sessionId)
@@ -1074,53 +1285,198 @@ export default function App() {
     } catch (error) {
       if (!hiddenSessionIdsRef.current.has(meta.sessionId)) throw error
     }
-  }, [land, requestFocus, chooseSessionView, beginVisit])
+  }, [land, requestFocus, chooseSessionView, beginVisit, mutateRows])
   const resumeRef = useRef(resume)
   resumeRef.current = resume
 
-  const startNew = useCallback(async (cwd: string, agent: AgentKind) => {
+  /**
+   * Start a conversation, from a chooser tab when `chooser` names one. The spawn takes a moment, and what
+   * the user did meanwhile decides where it lands:
+   *  - The chooser is still open: with tabs on it BECOMES the conversation, in place — `rekey`, since a
+   *    chooser id is a placeholder that names nothing — shown only if it is still what the user is on.
+   *    With tabs off it gives way and the conversation opens as the pane's one tab.
+   *  - The chooser was closed: with tabs on the conversation still gets a tab, in the background, so
+   *    closing a chooser mid-start never quietly strands a session the user asked for.
+   *  - No chooser (a folder's logo), or tabs off: shown only if nothing else was navigated to meanwhile.
+   */
+  const startNew = useCallback(async (cwd: string, agent: AgentKind, chooser?: string) => {
     const current = beginVisit()
-    setMenuOpen(false)
-    setLastAgent(agent) // starting an agent makes it the sticky menu default too
+    setLastAgent(agent) // starting an agent makes it the sticky chooser default too
     const st = await window.api.startNew(cwd, agent)
+    const l = paneLayoutRef.current
+    if (chooser && locateTab(l, chooser)) {
+      const shown = activeTabId(l) === chooser
+      if (tabsEnabledRef.current) panes.rekeyTabs(chooser, st.sessionId)
+      else {
+        panes.closeTabs([chooser])
+        if (shown) land(st.sessionId, 'persistent')
+      }
+      if (shown) {
+        chooseSessionView(st.sessionId, 'terminal')
+        requestFocus(st.sessionId)
+      }
+      return
+    }
+    if (chooser && tabsEnabledRef.current) {
+      land(st.sessionId, 'persistent', { focus: false })
+      return
+    }
     if (!current()) return
     land(st.sessionId, 'persistent')
     chooseSessionView(st.sessionId, 'terminal')
     requestFocus(st.sessionId)
-  }, [land, requestFocus, chooseSessionView, beginVisit])
+  }, [land, requestFocus, chooseSessionView, beginVisit, panes.rekeyTabs, panes.closeTabs])
 
   const pickOther = useCallback(
-    async (agent: AgentKind) => {
+    async (agent: AgentKind, chooser?: string) => {
       const dir = await window.api.pickDirectory()
-      if (dir) await startNew(dir, agent)
+      if (dir) await startNew(dir, agent, chooser)
     },
     [startNew]
   )
 
-  // The "+" / ⌘N primary action. Spawn straight away only when BOTH axes are settled — a usable
-  // default directory AND a resolved agent (a usable default-agent, or the sole installed one). A
-  // failed spawn (e.g. a stale default dir) falls back to the menu. Otherwise
-  // toggle the menu, which presents exactly the unresolved choice(s): the agent segment and/or the
-  // directory list.
+  // Read through refs, so the new-conversation handlers — and the window key handler holding them —
+  // are not rebuilt on every index pass.
+  const groupsRef = useRef(groups)
+  groupsRef.current = groups
+  const ptysBySessionRef = useRef(ptys.bySession)
+  ptysBySessionRef.current = ptys.bySession
+
+  // A new chooser tab after the active one, in the focused pane. Persistent, so a preview open does not
+  // replace it — and with tabs off it sits beside the one preview tab, which Esc returns to.
+  const openChooserTab = useCallback(
+    (preselect: string | null) => {
+      beginVisit()
+      const id = chooserTabId(nextChooserRef.current++)
+      // Read NOW, not inside the updater: React runs the updater during the next render, by which time
+      // the selected tab is this chooser.
+      const from = selectedTabIdRef.current
+      setChoosers((prev) => ({ ...prev, [id]: { preselect, from, aim: 0 } }))
+      // Landing on it is a landing like a tab click, which ends a multi-selection — else ⌘W, which
+      // closes the focused pane's group, would close the tabs left behind rather than the chooser.
+      setTabSelection(NO_SELECTION)
+      panes.openTab(id, 'persistent')
+    },
+    [beginVisit, panes.openTab]
+  )
+
+  // Esc on a chooser: close it and go back to the tab it was opened from, not to whichever neighbor
+  // slid into its slot. Revealed where it stands — a 'preview' open of a tab that exists moves nothing.
+  const dismissChooser = useCallback(
+    (id: string) => {
+      beginVisit()
+      const from = choosersRef.current[id]?.from ?? null
+      panes.closeTabs([id])
+      if (from !== null && from !== id && locateTab(paneLayoutRef.current, from)) panes.openTab(from, 'preview')
+    },
+    [beginVisit, panes.closeTabs, panes.openTab]
+  )
+
+  // "A new conversation where I am": the focused conversation's folder, per chooserPreselect.
+  // On a chooser, the folder it is aimed at.
+  const focusedPreselect = useCallback((): string | null => {
+    const tab = selectedTabIdRef.current
+    if (tab !== null && isChooserTab(tab)) return choosersRef.current[tab]?.preselect ?? null
+    const id = selectedIdRef.current
+    if (!id) return null
+    const root = sidebarModelRef.current?.rows.get(id)?.root
+    const cwd = metaByIdRef.current.get(id)?.cwd ?? ptysBySessionRef.current.get(id)?.cwd
+    return root && cwd ? chooserPreselect(groupsRef.current, cwd, root) : null
+  }, [])
+
+  // ⌘N, ⌘T and the head pencil. Standing on a chooser already, they hand it the keyboard rather than
+  // stack a second empty one beside it.
   const newConversation = useCallback(() => {
-    if (resolvedDir && resolvedAgent) {
-      void startNew(resolvedDir, resolvedAgent).catch(() => setMenuOpen(true))
-    } else {
-      setMenuOpen((o) => !o)
-    }
-  }, [resolvedDir, resolvedAgent, startNew])
+    const target = newConversationTarget(paneLayoutRef.current)
+    if (target.kind === 'focus') requestFocus(target.id)
+    else openChooserTab(focusedPreselect())
+  }, [openChooserTab, focusedPreselect, requestFocus])
 
-  // Right-clicking the "+" always opens the chooser, even when a default is set — the escape hatch to
-  // start somewhere else once without clearing the default in Preferences.
-  const openNewMenu = useCallback(() => setMenuOpen(true), [])
+  // A folder's pencil: the same, aimed at that folder — re-aiming the chooser the user is on, if any.
+  const newInFolder = useCallback(
+    (root: string) => {
+      const target = newConversationTarget(paneLayoutRef.current)
+      if (target.kind === 'open') {
+        openChooserTab(root)
+        return
+      }
+      setChoosers((prev) => ({
+        ...prev,
+        [target.id]: { from: prev[target.id]?.from ?? null, preselect: root, aim: (prev[target.id]?.aim ?? 0) + 1 }
+      }))
+      requestFocus(target.id)
+    },
+    [openChooserTab, requestFocus]
+  )
 
-  // Preferences (App page) handlers for the default folder. A chosen folder is always active (no
-  // on/off toggle), so choosing sets it and clearing forgets it.
-  const chooseDefaultDir = useCallback(async () => {
-    const dir = await window.api.pickDirectory()
-    if (dir) setDefaultDir(dir)
-  }, [setDefaultDir])
-  const clearDefaultDir = useCallback(() => setDefaultDir(''), [setDefaultDir])
+  // A folder's logo names both the folder and the agent, so it starts straight away; a failed start
+  // (the folder is gone) falls back to a chooser on that folder.
+  const startInFolder = useCallback(
+    (root: string, agent: AgentKind) => void startNew(root, agent).catch(() => openChooserTab(root)),
+    [startNew, openChooserTab]
+  )
+
+  // ⇧-click on a pencil or a folder's logo: its new conversation, in a window of its own. A null folder
+  // is the head pencil's, which means where the user is — as ⇧⌘N does.
+  const newInWindow = useCallback(
+    (root: string | null, agent?: AgentKind) => window.api.openNewWindow(root ?? focusedPreselect(), agent),
+    [focusedPreselect]
+  )
+
+  // A window opened by ⇧⌘N or a ⇧-clicked pencil starts on a chooser; one opened from a folder's logo
+  // starts that conversation, falling back to the chooser if it cannot.
+  const openedChooserRef = useRef(false)
+  useEffect(() => {
+    const init = windowInit.newConversation
+    if (!init || openedChooserRef.current) return
+    openedChooserRef.current = true
+    if (init.agent && init.preselect !== null) startInFolder(init.preselect, init.agent)
+    else openChooserTab(init.preselect)
+  }, [openChooserTab, startInFolder])
+
+  // With tabs off a chooser only ever fills the pane, so one that is no longer on screen is dropped —
+  // see strayChoosers. A layout effect, so the dropped tab never paints.
+  useLayoutEffect(() => {
+    if (tabsEnabled) return
+    const stray = strayChoosers(paneLayout)
+    if (stray.length > 0) panes.closeTabs(stray)
+  }, [tabsEnabled, paneLayout, panes.closeTabs])
+
+  // Forget closed choosers. Judged against this render's committed pair — the records it held and the
+  // layout it drew — and only those go: a chooser opened by an effect in this same commit has its record
+  // queued but not yet its tab, and must not be mistaken for a closed one.
+  useEffect(() => {
+    const open = new Set<string>()
+    for (const p of paneLayout.panes) for (const t of p.tabs) if (isChooserTab(t.sessionId)) open.add(t.sessionId)
+    const closed = Object.keys(choosers).filter((k) => !open.has(k))
+    if (closed.length === 0) return
+    for (const k of closed) chooserMemoryRef.current.delete(k)
+    setChoosers((prev) => {
+      const next = { ...prev }
+      for (const k of closed) delete next[k]
+      return next
+    })
+  }, [paneLayout, choosers])
+
+  // File → New Conversation / New Tab / New Window arrive as pushes: menu accelerators never reach the
+  // page as keydowns. Inert behind a modal, like ⌘W.
+  useEffect(
+    () =>
+      window.api.onMenuNewConversation(() => {
+        if (!overlayOpenRef.current) newConversation()
+      }),
+    [newConversation]
+  )
+  useEffect(
+    () =>
+      window.api.onMenuNewWindow(() => {
+        if (!overlayOpenRef.current && tabsEnabledRef.current) window.api.openNewWindow(focusedPreselect())
+      }),
+    [focusedPreselect]
+  )
+  useEffect(() => {
+    window.api.setTabsMenuEnabled(tabsEnabled)
+  }, [tabsEnabled])
 
   // The default-agent setting is a single tri-state (None / Claude Code / Codex), like Theme — no
   // separate on/off toggle. 'none' just disables it (keeping the last agent value, unused).
@@ -1210,10 +1566,21 @@ export default function App() {
     },
     [panes.splitPane, land, isUnlinkedId, markRead, requestFocus]
   )
-  const canOpenToSide = useCallback((id: string): boolean => {
+  // What the row menu's where-to commands are called: where openToSide would put the conversation — a
+  // new pane on the right, or the existing pane on one side — and whether they move a tab this window
+  // already holds or open one. See conversationMenu.
+  const placementFor = useCallback((id: string): { side: SidePlace | null; hasTabHere: boolean } => {
     const l = paneLayoutRef.current
-    const target = l.panes.length > 1 ? (l.focusIndex === 0 ? 1 : 0) : 1
-    return canPlaceTabsToSide(l, [id], target)
+    const split = l.panes.length > 1
+    const target = split ? (l.focusIndex === 0 ? 1 : 0) : 1
+    const side: SidePlace | null = !canPlaceTabsToSide(l, [id], target)
+      ? null
+      : !split
+        ? 'right'
+        : target === 1
+          ? 'rightPane'
+          : 'leftPane'
+    return { side, hasTabHere: !!locateTab(l, id) }
   }, [])
   // Send an EXISTING tab to the other pane, creating the split when there is none. Distinct from
   // openToSide, which opens a conversation over there and leaves whatever was here alone: this is a
@@ -1292,12 +1659,15 @@ export default function App() {
   // The tab is what moves; the live TERMINAL does not follow. One xterm per terminal app-wide, and
   // yanking it would blank the session someone may be typing in — so the new window shows the
   // transcript and offers to bring the terminal over through the serialized ownership handoff.
+  //
+  // From a tab this carries the selection it belongs to, which the tab menu's label counts; from a rail
+  // row (`group` false) it is that conversation alone, as the row menu's label says.
   const moveToNewWindow = useCallback(
-    (id: string) => {
+    (id: string, group = true) => {
       beginVisit()
       const at = locateTab(paneLayoutRef.current, id)
       // A group goes to ONE new window holding all of it, not one window each.
-      const ids = at ? targetsFor(at.pane, id) : [id]
+      const ids = at && group ? targetsFor(at.pane, id) : [id]
       const order = at
         ? paneLayoutRef.current.panes[at.pane].tabs.map((tab) => tab.sessionId)
         : [id]
@@ -1458,18 +1828,39 @@ export default function App() {
     beginVisit()
     if (paneLayoutRef.current.panes.length > 1) panes.unsplit()
     else panes.splitActiveTab()
-  }, [panes.splitActiveTab, panes.unsplit, beginVisit])
-  const killSession = useCallback((ptyId: string) => window.api.kill(ptyId), [])
-  // Stop a session by its conversation id — the rail's right-click menu works in session ids, while
-  // the PtyManager kills by ptyId, so resolve the live process first (mirrors the pane header's
-  // onKill). A no-op if the conversation isn't live.
+    // Either way the selected tab changes pane, so a chooser remounts there — with its last focus request
+    // already spent, since a chooser acts on each request once. Hand it a fresh one so typing still
+    // filters. (Split Right and Move Right/Left already request focus for the tab they move.)
+    const tab = selectedTabIdRef.current
+    if (tab !== null && isChooserTab(tab)) requestFocus(tab)
+  }, [panes.splitActiveTab, panes.unsplit, beginVisit, requestFocus])
+  // The user's Stop, by conversation id — the pane header and the rail's menu both. The PtyManager
+  // kills by ptyId, so the live process is resolved first; a no-op if the conversation isn't live.
+  // Remembered until the process exits, when an empty conversation's tab closes — see stopClose.
+  const stoppedRef = useRef(new Set<string>())
   const stopSession = useCallback(
     (id: string) => {
       const pty = ptys.bySession.get(id)
-      if (pty) killSession(pty.ptyId)
+      if (!pty) return
+      stoppedRef.current.add(id)
+      window.api.kill(pty.ptyId)
     },
-    [ptys.bySession, killSession]
+    [ptys.bySession]
   )
+  useEffect(() => {
+    for (const id of endedStops(stoppedRef.current, ptys.bySession)) {
+      stoppedRef.current.delete(id)
+      if ((metaByIdRef.current.get(id)?.messageCount ?? 0) > 0) continue
+      // A revision of its own, so the read is fresh from disk rather than a parse already in flight.
+      void window.api
+        .getTranscript(id, `stopped:${Date.now()}`)
+        .then((t) => {
+          if (ptysBySessionRef.current.has(id)) return
+          if (confirmedEmpty(metaByIdRef.current.get(id)?.messageCount ?? 0, t)) panes.closeTabs([id])
+        })
+        .catch(() => {})
+    }
+  }, [ptys.bySession, panes.closeTabs])
   // Resume a not-live conversation by id — the rail's right-click menu works in session ids, so
   // resolve id→meta and run the shared resume() (which spawns the process and focuses its terminal,
   // like the pane-header Resume / ⏎). A no-op if the id isn't indexed.
@@ -1481,13 +1872,29 @@ export default function App() {
     [metaById, resume]
   )
 
+  // Working with a conversation keeps its tab: sending its terminal anything, pinning it, renaming it.
+  // A preview tab becomes an ordinary one; reading it — scrolling, selecting, Find — does not. Tabs
+  // off, the one tab is always the preview each open replaces, so keeping it would strand a second.
+  // Reads the layout through its ref: this runs on every keystroke and must cost nothing.
+  const keepTab = useCallback(
+    (id: string) => {
+      if (!tabsEnabledRef.current) return
+      const l = paneLayoutRef.current
+      const at = locateTab(l, id)
+      if (at && l.panes[at.pane].tabs[at.index].preview) panes.promoteTab(id, at.pane)
+    },
+    [panes.promoteTab]
+  )
+
   // Pin/unpin, gated so a provisional row (no persisted identity yet) can't enter the persisted pin
   // store under a placeholder id that would orphan once it binds to its real id.
   const togglePinGated = useCallback(
     (id: string) => {
-      if (!isProvisional(id)) togglePin(id)
+      if (isProvisional(id)) return
+      if (!pinned.has(id)) keepTab(id)
+      togglePin(id)
     },
-    [isProvisional, togglePin]
+    [isProvisional, togglePin, pinned, keepTab]
   )
 
   // Option+click marks a live row unread. Gated for the same reason pins are: `useSeen` persists to
@@ -1516,9 +1923,13 @@ export default function App() {
   // Set/clear a conversation's title. Fire-and-forget: main appends Claude Code's own custom-title
   // line then re-indexes + broadcasts, so the new title flows back through useSessions to the rail,
   // pane header, and the (still-open) info modal. An empty title resets to the auto-generated one.
-  const renameConversation = useCallback((id: string, title: string) => {
-    void window.api.renameConversation(id, title)
-  }, [])
+  const renameConversation = useCallback(
+    (id: string, title: string) => {
+      keepTab(id)
+      void window.api.renameConversation(id, title)
+    },
+    [keepTab]
+  )
 
   // Toggle the search box; closing it clears the query so filtering ends with it.
   const toggleSearch = useCallback(() => {
@@ -1528,10 +1939,88 @@ export default function App() {
     })
   }, [])
 
-  // Reveal the rest of a capped section (the Recent "Show more").
-  const showMore = useCallback((key: string) => {
-    setExpandedSections((s) => new Set(s).add(key))
+  // Reveal a group's next step of rows past its cap, or return it to the cap. The step is the cap.
+  const showMore = useCallback(
+    (key: string) => {
+      const step = sidebarMode === 'all' ? DEFAULT_SIDEBAR_LIMITS.allCap : DEFAULT_SIDEBAR_LIMITS.folderCap
+      setRevealed((r) => ({ ...r, [key]: (r[key] ?? 0) + step }))
+    },
+    [sidebarMode]
+  )
+  const showLess = useCallback((key: string) => {
+    setRevealed((r) => {
+      if (!Object.hasOwn(r, key)) return r
+      const next = { ...r }
+      delete next[key]
+      return next
+    })
   }, [])
+
+  // A header click writes the folder's preference — the opposite of what it shows. Collapsing also
+  // forgets that navigation opened it and closes it even over an active conversation in it; expanding
+  // lifts that. Both hold until navigation next enters the folder. Inert while searching: every folder
+  // shows open then, so a click would save a collapse nobody sees until the search is cleared.
+  const toggleFolder = useCallback(
+    (root: string) => {
+      if (searching) return
+      const group = sidebarModelRef.current?.groups.find((g) => g.key === root)
+      if (!group) return
+      const collapse = !group.collapsed
+      setFolderCollapsed(root, collapse)
+      if (collapse) {
+        setNavExpanded((prev) => withoutFolders(prev, [root]))
+        setActiveCollapsed((prev) => withFolders(prev, [root]))
+      } else {
+        setActiveCollapsed((prev) => withoutFolders(prev, [root]))
+      }
+    },
+    [setFolderCollapsed, searching]
+  )
+
+  // Collapse all / Expand all: the preference for every folder, rendered or not, and the navigation
+  // expansions with it — otherwise every folder visited this session would stay open. Collapse all
+  // closes the active conversation's folder too, like a header click would.
+  const setAllCollapsed = useCallback(
+    (collapsed: boolean) => {
+      const model = sidebarModelRef.current
+      if (!model) return
+      const roots = [...model.folders.keys()]
+      setFoldersCollapsed(roots, collapsed)
+      setNavExpanded((prev) => (prev.size === 0 ? prev : new Set()))
+      setActiveCollapsed((prev) => (collapsed ? withFolders(prev, roots) : prev.size === 0 ? prev : new Set()))
+    },
+    [setFoldersCollapsed]
+  )
+
+  // A drop between two neighbors of one block. Pins move within the one app-wide pin list; every
+  // other row writes a rank into the global space, so the drop holds in both modes.
+  const dropRow = useCallback(
+    (block: SidebarBlock, draggedId: string, higherId: string | null, lowerId: string | null) => {
+      if (block.kind === 'pinned') movePin(draggedId, higherId, lowerId)
+      else {
+        const model = sidebarModelRef.current
+        if (!model) return
+        const [higher, lower] = dropNeighbors(model, block, draggedId, higherId, lowerId)
+        const writes = dropWrites(rankSpace(model), draggedId, higher, lower, Date.now())
+        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+      }
+      setReorderTick((t) => t + 1)
+    },
+    [movePin, mutateRows]
+  )
+
+  // A folder dropped between two neighboring folders: one key in the folder rank space, the same
+  // arithmetic as a row.
+  const dropFolder = useCallback(
+    (root: string, higherRoot: string | null, lowerRoot: string | null) => {
+      const model = sidebarModelRef.current
+      if (!model) return
+      const writes = dropWrites(folderRankSpace(model), root, higherRoot, lowerRoot, Date.now())
+      if (Object.keys(writes).length > 0) mutateFolders((stored) => ({ ...stored, ...writes }))
+      setReorderTick((t) => t + 1)
+    },
+    [mutateFolders]
+  )
 
   // Resolve the current dot state for any session id (used by the read/unread toggle). Null for any
   // unlinked row — it has no dot to toggle, and ⇧⌘U would otherwise persist an override for a
@@ -1545,6 +2034,47 @@ export default function App() {
     [ptys.bySession, metaById, liveStateFor]
   )
 
+  // The title bar's bell: the rail's needs-you set, in triage order — see attention.ts. Built from the
+  // same model and liveness the rail draws, so the bell and the rows cannot disagree.
+  const attention = useMemo(
+    () =>
+      attentionOrder(
+        sidebarModel.needsYou.flatMap((id): AttentionEntry[] => {
+          const state = liveStateOf(id)
+          const pty = ptys.bySession.get(id) ?? null
+          const meta = metaById.get(id) ?? (pty ? synthMeta(pty) : null)
+          if ((state !== 'asking' && state !== 'awaiting') || !meta) return []
+          const root = sidebarModel.rows.get(id)?.root
+          return [
+            {
+              sessionId: id,
+              state,
+              at: attentionAt(
+                state,
+                meta.lastActivityAt ?? meta.mtime,
+                currentInputRequestedAt(meta, pty?.inputRequestedAt ?? null)
+              ),
+              title: pty ? displayTitleForRow(pty, meta) : meta.title,
+              agent: meta.agent,
+              folder: (root !== undefined ? sidebarModel.labels.get(root) : undefined) ?? ''
+            }
+          ]
+        })
+      ),
+    [sidebarModel, liveStateOf, ptys.bySession, metaById]
+  )
+  const attentionRef = useRef(attention)
+  attentionRef.current = attention
+  const markAttentionRead = useCallback(
+    (id: string) => {
+      if (!isUnlinkedId(id)) markRead(id)
+    },
+    [isUnlinkedId, markRead]
+  )
+  const markAllAttentionRead = useCallback(() => {
+    for (const e of attentionRef.current) markAttentionRead(e.sessionId)
+  }, [markAttentionRead])
+
   // Toggle a live conversation read/unread: a solid (awaiting) OR pulsing (asking) dot → read;
   // anything else → unread (which restores the pulse on a question state — see resolveLiveState).
   // Non-live rows have no dot, so it's a no-op there.
@@ -1556,6 +2086,40 @@ export default function App() {
       else markUnread(id)
     },
     [liveStateOf, markRead, markUnread]
+  )
+
+  // A tab's × and middle-click close that tab alone, even inside a multi-selection; the menu's Close,
+  // which counts the tabs it acts on, is what closes a selection.
+  const closeOneTab = useCallback(
+    (pane: number, index: number) => {
+      beginVisit()
+      const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
+      if (id) recordClosed([id])
+      panes.closeTab(pane, index)
+      if (id) stopEmptyOnClose([id])
+    },
+    [panes.closeTab, beginVisit, stopEmptyOnClose, recordClosed]
+  )
+  // ⌥-× on a running tab: end the session, then close the tab — its own, as the plain × does.
+  const stopAndCloseTab = useCallback(
+    (pane: number, index: number) => {
+      const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
+      if (!id) return
+      stopSession(id)
+      closeOneTab(pane, index)
+    },
+    [stopSession, closeOneTab]
+  )
+  // The conversation commands a tab's menu shares with its rail row, run by the same handlers.
+  const runTabCommand = useCallback(
+    (command: TabConversationCommand, id: string) => {
+      if (command === 'resume') resumeSession(id)
+      else if (command === 'pin' || command === 'unpin') togglePinGated(id)
+      else if (command === 'markRead' || command === 'markUnread') toggleUnread(id)
+      else if (command === 'rename') showInfo(id, true)
+      else stopSession(id)
+    },
+    [resumeSession, togglePinGated, toggleUnread, showInfo, stopSession]
   )
 
   // Clear a manual "unread" mark once the user genuinely engages the open conversation — a click
@@ -1581,6 +2145,8 @@ export default function App() {
   }, [findOpen, closeFind])
 
   // --- keyboard ---
+  // ⌘N / ⌘T / ⇧⌘N and ⌘W are File-menu accelerators and never arrive here as keydowns — see the
+  // onMenu* subscriptions.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.metaKey || e.ctrlKey
@@ -1599,6 +2165,14 @@ export default function App() {
       // While the Preferences modal is open it owns the keyboard: Esc closes it; ⌘, and ⌘?
       // toggle between (or out of) the App / Shortcuts pages; everything else is
       // inert (no list-nav behind the scrim).
+      // What's new owns the keyboard the same way: Esc closes it, the rest is inert.
+      if (whatsNewOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setWhatsNewOpen(false)
+        }
+        return
+      }
       if (settingsPage !== null) {
         if (e.key === 'Escape') {
           e.preventDefault()
@@ -1637,17 +2211,8 @@ export default function App() {
           chooseSessionView(selectedId, viewAction)
           requestFocus(selectedId)
         }
-      } else if (tabsEnabled && e.metaKey && e.shiftKey && !e.altKey && e.code === 'KeyN') {
-        // ⇧⌘N — open the selected conversation in its own window. Must come BEFORE the ⌘N branch:
-        // that one matches on `e.key.toLowerCase()`, so Shift+N lowercases to 'n' and it would
-        // otherwise swallow this chord and start a new conversation instead. (The same shadowing
-        // still applies to ⇧⌘F and ⇧⌘B, which nothing binds.)
-        e.preventDefault()
-        if (selectedId && !selectedUnlinked) moveToNewWindow(selectedId)
-      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault()
-        newConversation()
       } else if (mod && e.key.toLowerCase() === 'f') {
+        // Matched on the lowercased key, so ⇧⌘F lands here too.
         e.preventDefault()
         if (inMain && selectedId) {
           // Focus is in the main pane → find within the open conversation. Also bump the focus
@@ -1732,7 +2297,6 @@ export default function App() {
         if (findOpen) closeFind()
         else if (query) setQuery('')
         else setSearchOpen(false)
-        setMenuOpen(false)
       } else if (e.key === 'Enter' && !inInput && selectedId && inTranscript) {
         // ⏎ from the read-only Formatted transcript: a not-live conversation resumes; a live one
         // (shown in Formatted) jumps into its terminal — so you can read history and hit Enter to
@@ -1749,6 +2313,7 @@ export default function App() {
     query,
     settingsPage,
     infoModal,
+    whatsNewOpen,
     findOpen,
     closeFind,
     selectedId,
@@ -1766,13 +2331,10 @@ export default function App() {
     goHistory,
     togglePane,
     toggleUnread,
-    newConversation,
     tabsEnabled,
     paneLayout,
     goToTab,
-    toggleSplit,
-    moveToNewWindow,
-    selectedUnlinked
+    toggleSplit
   ])
 
   // Find belongs to whichever pane has the keyboard. Moving to the other pane closes it rather than
@@ -1806,6 +2368,10 @@ export default function App() {
         split={paneLayout.panes.length > 1}
         splitDisabled={paneLayout.panes.length < 2 && !canSplitActiveTab(paneLayout)}
         onToggleSplit={tabsEnabled ? toggleSplit : undefined}
+        attention={attention}
+        onOpenAttention={openRemembered}
+        onMarkRead={markAttentionRead}
+        onMarkAllRead={markAllAttentionRead}
       />
       <div
         className="sb-body"
@@ -1813,9 +2379,12 @@ export default function App() {
         style={{ '--pane-w': `${paneWidth}px` } as CSSProperties}
       >
         {!paneCollapsed && (
-          <TallyRail
-            sections={railSections}
-            live={liveTally}
+          <Sidebar
+            model={sidebarModel}
+            mode={sidebarMode}
+            onModeChange={setSidebarMode}
+            density={railDensity}
+            onSetAllCollapsed={setAllCollapsed}
             loading={loading}
             selectedSessionId={selectedId}
             onJump={clickLive}
@@ -1823,8 +2392,8 @@ export default function App() {
             onStick={tabsEnabled ? stickConversation : undefined}
             openElsewhere={openElsewhere}
             onOpenToSide={tabsEnabled ? openToSide : undefined}
-            canOpenToSide={tabsEnabled ? canOpenToSide : undefined}
-            onOpenInNewWindow={tabsEnabled ? moveToNewWindow : undefined}
+            placementFor={tabsEnabled ? placementFor : undefined}
+            onOpenInNewWindow={tabsEnabled ? (id: string) => moveToNewWindow(id, false) : undefined}
             onTogglePin={togglePinGated}
             query={query}
             onQueryChange={setQuery}
@@ -1832,32 +2401,22 @@ export default function App() {
             searchOpen={searchOpen}
             onSearchToggle={toggleSearch}
             searching={searching}
-            collapsedSections={collapsedSections}
-            onToggleSection={toggleSection}
-            expandedSections={expandedSections}
+            onToggleFolder={toggleFolder}
+            revealed={revealed}
             onShowMore={showMore}
-            menuOpen={menuOpen}
-            onMenuToggle={newConversation}
-            onNewContextMenu={openNewMenu}
-            onMenuClose={() => setMenuOpen(false)}
-            recentDirs={recentDirs}
-            menuDefaultDir={defaultDir}
-            menuAgents={availableAgents}
-            menuAgent={menuAgent}
-            onMenuAgentChange={setLastAgent}
-            onChoose={startNew}
-            onPickOther={pickOther}
-            defaultDirActive={!!defaultDir}
-            defaultDirLabel={defaultDir ? basename(defaultDir) : ''}
+            onShowLess={showLess}
+            onNewConversation={newConversation}
+            agents={availableAgents}
+            onNewInFolder={newInFolder}
+            onStartInFolder={startInFolder}
+            onNewInWindow={tabsEnabled ? newInWindow : undefined}
             onToggleUnread={toggleUnread}
             onMarkUnread={markUnreadGated}
             onResumeSession={resumeSession}
             onStopSession={stopSession}
             onShowInfo={showInfo}
-            onReorderPins={commitReorder}
-            pinnedOrder={pinnedOrder}
-            onReorderLive={commitLiveReorder}
-            liveOrder={liveOrder}
+            onDropRow={dropRow}
+            onDropFolder={dropFolder}
             reorderTick={reorderTick}
           />
         )}
@@ -1937,7 +2496,13 @@ export default function App() {
                   activeTabIndex={pane.activeIndex}
                   onActivateTab={goToTab}
                   onCloseTab={closeTabsFrom}
-                  onCloseOtherTabs={panes.closeOtherTabs}
+                  onCloseOneTab={closeOneTab}
+                  onStopAndCloseTab={stopAndCloseTab}
+                  onMarkTabUnread={markUnreadGated}
+                  onTabCommand={runTabCommand}
+                  onCloseOtherTabs={closeOtherTabs}
+                  reopenCount={reopenCount}
+                  onReopenClosed={reopenClosed}
                   onPromoteTab={panes.promoteTab}
                   canSplitRight={(id) => canSplitRightFrom(i, id)}
                   canMoveToOtherPane={paneLayout.panes.length === 2}
@@ -1974,7 +2539,7 @@ export default function App() {
                   }}
                   onGoLive={() => goLive(i)}
                   onKill={() => {
-                    if (v.pty) killSession(v.pty.ptyId)
+                    if (v.pty) stopSession(v.pty.sessionId)
                   }}
                   onShowInfo={() => {
                     if (v.id) showInfo(v.id, false)
@@ -1989,6 +2554,28 @@ export default function App() {
                   onFindActivate={onFindActivate}
                   onFindToggle={toggleFind}
                   markdownCopy={markdownCopy}
+                  chooser={
+                    v.chooser && (
+                      <ChooserView
+                        key={v.chooser}
+                        id={v.chooser}
+                        folders={i === 1 ? folders1 : folders0}
+                        aim={choosers[v.chooser]?.aim ?? 0}
+                        agents={availableAgents}
+                        initialAgent={chooserAgent}
+                        onAgentChange={setLastAgent}
+                        onStart={(dir, agent) => startNew(dir, agent, v.chooser ?? undefined)}
+                        onPickOther={(agent) => pickOther(agent, v.chooser ?? undefined)}
+                        onDismiss={() => {
+                          if (v.chooser) dismissChooser(v.chooser)
+                        }}
+                        focusKey={
+                          focusReq && focusReq.sessionId === v.chooser && isFocused ? focusReq.n : null
+                        }
+                        memory={chooserMemoryRef}
+                      />
+                    )
+                  }
                 />
               </Fragment>
             )
@@ -2002,6 +2589,7 @@ export default function App() {
           focusReq={focusReq}
           theme={themeResolved}
           onMarkUnread={markUnreadGated}
+          onUserInput={keepTab}
         />
       </div>
       <SettingsModal
@@ -2013,9 +2601,8 @@ export default function App() {
         onSetThemeMode={setThemeMode}
         darkIcon={darkIcon.value}
         onSetDarkIcon={darkIcon.set}
-        defaultDir={defaultDir}
-        onChooseDefaultDir={chooseDefaultDir}
-        onClearDefaultDir={clearDefaultDir}
+        railDensity={railDensity}
+        onSetRailDensity={setRailDensity}
         defaultAgentChoice={defaultAgentChoice}
         defaultAgentDisabled={defaultAgentDisabled}
         onSetDefaultAgentChoice={setDefaultAgentChoice}
@@ -2029,6 +2616,10 @@ export default function App() {
         onSetMarkdownCopy={setMarkdownCopy}
         tabsEnabled={tabsEnabled}
         onSetTabsEnabled={setTabsEnabled}
+        onShowWhatsNew={() => {
+          setSettingsPage(null)
+          setWhatsNewOpen(true)
+        }}
         tabLayout={tabLayout}
         onSetTabLayout={setTabLayout}
         dotColor={dotColor}
@@ -2043,6 +2634,16 @@ export default function App() {
         onClose={() => setInfoModal(null)}
         onRename={(t) => {
           if (infoModal) renameConversation(infoModal.sessionId, t)
+        }}
+      />
+      <WhatsNewModal
+        open={whatsNewOpen}
+        onClose={() => setWhatsNewOpen(false)}
+        tabsEnabled={tabsEnabled}
+        onEnableTabs={() => setTabsEnabled(true)}
+        onShowShortcuts={() => {
+          setWhatsNewOpen(false)
+          setSettingsPage('shortcuts')
         }}
       />
       <TooltipLayer />

@@ -64,6 +64,8 @@ interface Live {
   sessionId: string
   agent: AgentKind
   cwd: string
+  /** Resolved once at spawn: the terminal's shell can `cd` anywhere, but the row it backs cannot move. */
+  projectRoot: string
   title: string
   origin: 'resume' | 'new'
   proc: pty.IPty
@@ -158,11 +160,19 @@ export class PtyManager extends EventEmitter {
    * cannot be produced on demand, leaving a row nobody can review before it ships. Inert unless set.
    */
   private readonly fakeParkedJob: ParkedJob | null
+  /** Maps a cwd to its project (see projectRoot.ts). Must be synchronous: spawn announces its session
+   *  before returning, and that first broadcast already carries `projectRoot`. */
+  private readonly resolveProjectRoot: (cwd: string, origin: 'resume' | 'new') => string
 
   constructor(
-    opts: { resolveBindings?: CodexBindingResolver; claudeParkedJobs?: ParkedJobOptions } = {}
+    opts: {
+      resolveBindings?: CodexBindingResolver
+      claudeParkedJobs?: ParkedJobOptions
+      resolveProjectRoot?: (cwd: string, origin: 'resume' | 'new') => string
+    } = {}
   ) {
     super()
+    this.resolveProjectRoot = opts.resolveProjectRoot ?? ((cwd) => cwd)
     this.fakeParkedJob =
       process.env.SWITCHBOARD_FAKE_PARKED === '1'
         ? { shortId: 'fa4e0000', name: 'Example background agent (fake)' }
@@ -318,6 +328,7 @@ export class PtyManager extends EventEmitter {
     const entry = this.live.get(ptyId)
     if (!entry) return
     const hadRequest = entry.inputRequestedAt != null
+    const firstUse = !entry.usedByUser
     entry.inputRequestedAt = null
     entry.lastInputAt = Date.now()
     entry.usedByUser = true
@@ -329,8 +340,10 @@ export class PtyManager extends EventEmitter {
     //
     // Gated on there having BEEN a request, so ordinary use stays silent. This arrives on the typing
     // path (throttled, but still every few seconds), and an unconditional emit would rebroadcast the
-    // whole active set to every window while someone types, for a value no consumer reads.
-    if (hadRequest) this.emitActive()
+    // whole active set to every window while someone types, for a value no consumer reads. The one
+    // other announcement is a terminal's FIRST use, once: closing its tab must no longer stop it, in
+    // whichever window holds the tab (see `PtySession.usedByUser`).
+    if (hadRequest || firstUse) this.emitActive()
   }
 
   resize(ptyId: string, cols: number, rows: number): void {
@@ -581,10 +594,10 @@ export class PtyManager extends EventEmitter {
    * for the renderer to infer: an initial bind migrates everything off a placeholder that is ceasing
    * to exist, while a correction leaves CONVERSATION-owned state (persisted seen/unread, earlier
    * history stops) on the id that owns it and moves only terminal-owned state — the selection, the
-   * current history stop, its surface, the Live slot. See PtyBindKind and lib/bindPolicy.ts.
+   * current history stop, its surface, its rail position. See PtyBindKind and lib/bindPolicy.ts.
    *
    * Event ORDER is load-bearing: `bound` must precede `active-changed`, because the renderer uses
-   * `bound` to keep the Live row in its slot before the new id arrives in the active list and the
+   * `bound` to keep the rail row in its slot before the new id arrives in the active list and the
    * order sync would otherwise read the same terminal as newly live.
    *
    * The caller supplies only Codex PTYs it probed, and only when the observed id differs from the
@@ -662,6 +675,7 @@ export class PtyManager extends EventEmitter {
       sessionId: o.sessionId,
       agent: o.agent,
       cwd: o.cwd,
+      projectRoot: this.resolveProjectRoot(o.cwd, o.origin),
       title: o.title,
       origin: o.origin,
       proc,
@@ -797,6 +811,7 @@ export class PtyManager extends EventEmitter {
       sessionId: e.sessionId,
       agent: e.agent,
       cwd: e.cwd,
+      projectRoot: e.projectRoot,
       title: e.title,
       status: e.status,
       lastActivity: e.lastActivity,
@@ -804,6 +819,7 @@ export class PtyManager extends EventEmitter {
       inputRequestedAt: e.inputRequestedAt,
       origin: e.origin,
       provisional: e.provisional,
+      usedByUser: e.usedByUser,
       parkedJob: e.parkedJob,
       registryStatus: e.registryStatus,
       exitCode: e.exitCode

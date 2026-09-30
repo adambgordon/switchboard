@@ -1018,8 +1018,6 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   border: 1px solid var(--rule);
   border-radius: var(--r-pill);
   background: var(--paper-sunken);
-  font-family: var(--font-mono);
-  font-variant-ligatures: none;
   font-size: var(--text-xs);
   color: var(--ink-faint);
 }
@@ -1115,8 +1113,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   background: var(--paper-hover);
 }
 
-/* ---- copy affordances — hover-revealed icon buttons that flash a check on click (the
-   TallyRail.copySessionId pattern). Neutral ink only (two-accent invariant). Absent at rest; the
+/* ---- copy affordances — hover-revealed icon buttons that flash a check on click. Neutral ink only
+   (two-accent invariant). Absent at rest; the
    `.copied` flag keeps the check visible even if the pointer leaves mid-flash. ---- */
 .copy-btn {
   display: inline-flex;

@@ -1,5 +1,6 @@
 import { Gear, Moon, PanelLeft, SplitVertical, Sun } from './icons'
 import type { ResolvedTheme } from '../lib/theme'
+import AttentionBell, { type AttentionEntry } from './AttentionBell'
 
 interface Props {
   paneCollapsed: boolean
@@ -20,6 +21,11 @@ interface Props {
   /** An unsplit window needs another tab to move right before it can create a second pane. */
   splitDisabled?: boolean
   onToggleSplit?: () => void
+  /** Everything that needs you, app-wide and in triage order — the bell's dot and its list. */
+  attention: AttentionEntry[]
+  onOpenAttention: (sessionId: string) => void
+  onMarkRead: (sessionId: string) => void
+  onMarkAllRead: () => void
 }
 
 export default function TitleBar({
@@ -32,10 +38,14 @@ export default function TitleBar({
   updatesNeedAttention,
   split,
   splitDisabled,
-  onToggleSplit
+  onToggleSplit,
+  attention,
+  onOpenAttention,
+  onMarkRead,
+  onMarkAllRead
 }: Props) {
   return (
-    <header className="sb-titlebar">
+    <header className="sb-titlebar" data-tip-group="">
       <button className="sb-brand" onClick={onHome} data-tip="Back to welcome" aria-label="Back to welcome">
         <span className="sb-brand-mark" />
         <span className="sb-brand-name">Switchboard</span>
@@ -64,7 +74,13 @@ export default function TitleBar({
         </button>
       )}
       <div className="sb-titlebar-spacer" />
-      {window.devLabel && <span className="sb-titlebar-devlabel mono">{window.devLabel}</span>}
+      {window.devLabel && <span className="sb-titlebar-devlabel">{window.devLabel}</span>}
+      <AttentionBell
+        entries={attention}
+        onOpen={onOpenAttention}
+        onMarkRead={onMarkRead}
+        onMarkAllRead={onMarkAllRead}
+      />
       <button
         className="sb-panel-toggle"
         onClick={onToggleTheme}

@@ -14,6 +14,7 @@ function pty(over: Partial<PtyState> = {}): PtyState {
     sessionId: 'a',
     agent: 'claude',
     cwd: '/repo',
+    projectRoot: '/repo',
     title: 'Conversation',
     status: 'idle',
     lastActivity: 20,
@@ -21,6 +22,7 @@ function pty(over: Partial<PtyState> = {}): PtyState {
     inputRequestedAt: null,
     origin: 'new',
     provisional: false,
+    usedByUser: false,
     parkedJob: null,
     registryStatus: null,
     // Row identity is about the conversation, not about which window renders the terminal — so the

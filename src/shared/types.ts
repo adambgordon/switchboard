@@ -120,6 +120,12 @@ export interface ConversationMeta {
   /** ms epoch of the first user/assistant message (for the elapsed-duration span). Null when none. */
   firstActivityAt: number | null
   /**
+   * ms epoch the session file was created, or undefined/0 when the filesystem does not report it.
+   * A conversation's position in the rail is derived from its start, so the start must never move:
+   * this stands in for `firstActivityAt` when that is null, because `mtime` advances on every write.
+   */
+  birthtimeMs?: number
+  /**
    * Coarse state of the latest turn, derived from the transcript tail (main chain only):
    * 'awaiting' = the last assistant turn ended (awaiting the user); 'in_progress' = a turn
    * is mid-flight (a dangling tool_use, or a trailing user / tool_result); 'awaiting_input' =
@@ -186,10 +192,22 @@ export interface ConversationIndexSnapshot {
 export interface ConversationGroup {
   /** Absolute cwd; the grouping key. */
   cwd: string
+  /**
+   * The project this cwd belongs to: the nearest enclosing git work tree, with a linked worktree
+   * folded into its main repository, or the cwd itself outside any repository. See `projectRoot.ts`.
+   */
+  root: string
+  /** True when `root` was reached through a linked worktree's `gitdir`, so `cwd` is not the repo. */
+  worktree: boolean
+  /** Whether `cwd` still exists on disk. A conversation outlives its directory. */
+  exists: boolean
+  /** Whether `root` still exists on disk — checked directly, since a worktree can outlive its repository
+   *  and a repository its worktrees. */
+  rootExists: boolean
   /** Display label (typically the basename, with full path available on hover). */
   label: string
   conversations: ConversationMeta[]
-  /** Most recent mtime in the group, for ordering sections by recency. */
+  /** Most recent mtime in the group, for ordering groups by recency. */
   latestMtime: number
 }
 
@@ -204,7 +222,7 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  *  - conversation-owned — persisted seen/unread markers, and EARLIER history stops — belongs to the
  *    id itself. Earlier stops were genuine visits to a conversation that still exists.
  *  - terminal-owned — the current selection, the CURRENT history stop, the surface that selection is
- *    showing, and the row's Live slot — describes the terminal in front of the user, and follows it.
+ *    showing, and the row's rail position — describes the terminal in front of the user, and follows it.
  *    Main retargets the current app-wide visit after the focused corrected tab's adoption commits;
  *    earlier visits retain their original conversation.
  *
@@ -212,7 +230,7 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  *   placeholder names no conversation and is about to cease existing, so there is no conversation-owned
  *   state to protect: EVERYTHING keyed to it migrates, or it is orphaned.
  * - `correction`: a bound PTY was proven to be running a DIFFERENT conversation than the one it
- *   claimed. Both ids name durable conversations — the old one still exists and reappears in Recent,
+ *   claimed. Both ids name durable conversations — the old one still exists and keeps its own row,
  *   the new one may already carry its own state — so conversation-owned state does NOT move; moving it
  *   would delete one conversation's read state and overwrite the other's. Terminal-owned state still
  *   follows, and the selection and its surface do so only when the user is actually on that terminal.
@@ -242,6 +260,8 @@ export interface PtySession {
   /** Which agent this PTY is running (drives the boot command). */
   agent: AgentKind
   cwd: string
+  /** The project `cwd` belongs to, resolved at spawn — see `ConversationGroup.root`. */
+  projectRoot: string
   title: string
   status: PtyStatus
   /** ms epoch of last output byte. */
@@ -265,6 +285,13 @@ export interface PtySession {
    * new Claude session in the ~1s before its JSONL indexes.
    */
   provisional: boolean
+  /**
+   * Whether a person has used this terminal — typed, pasted or dropped into it, in any window. Its
+   * first use is announced at once, because closing the tab of a used terminal must not stop it: it
+   * may hold an unsent draft, or — unlinked — a prompt that started a conversation its placeholder id
+   * cannot show. See `stopsOnClose`.
+   */
+  usedByUser: boolean
   /**
    * [Claude] The background agent this session has launched, or null. Its presence means ONLY that —
    * Claude writes the marker on spawn and never clears it, so it says nothing about whether the
@@ -351,8 +378,13 @@ export const IPC = {
   codeContextMenu: 'shell:codeContextMenu', // renderer -> main: pop the native right-click menu for inline code
   tabContextMenu: 'shell:tabContextMenu', // renderer -> main: pop the native right-click menu for a tab; resolves with the chosen action
   menuCloseTab: 'menu:closeTab', // push: ⌘W — the renderer closes the active tab, or asks main to close the window when there is none
+  menuReopenTab: 'menu:reopenTab', // push: ⇧⌘T — the renderer reopens its most recently closed tab(s)
   windowClose: 'window:close', // renderer -> main: close the sender's window (⌘W with no tab to close)
   windowOpenConversation: 'window:openConversation', // renderer -> main: open a NEW window with an ordered tab group
+  menuNewConversation: 'menu:newConversation', // push: ⌘N / ⌘T — open (or focus) a new-conversation chooser
+  menuNewWindow: 'menu:newWindow', // push: ⇧⌘N — the renderer asks for a new window if tabs are on
+  menuSetTabsEnabled: 'menu:setTabsEnabled', // renderer -> main: show/enable the tab-only File items
+  windowOpenNew: 'window:openNew', // renderer -> main: open a NEW window onto a chooser (preselect)
   // Dragging a tab between windows. While a mouse button is held the OS routes every move to the
   // window the drag STARTED in, so the window under the cursor never learns the pointer is there —
   // main is the only party that can see all the windows, so it referees. It reads the cursor on
@@ -438,15 +470,29 @@ export interface UpdateCheckState {
   checking: boolean
 }
 
-/** What the native tab context menu resolved to. */
-export type TabMenuAction =
-  | 'close'
-  | 'closeOthers'
-  | 'details'
-  | 'splitRight'
-  | 'moveRight'
-  | 'moveLeft'
-  | 'newWindow'
+/** The commands in a conversation's menu — the rail row's and the tab's are one list
+ *  (conversationMenu). A value list, so main can check what a renderer asks it to show. */
+export const CONVERSATION_MENU_ACTIONS = [
+  'resume',
+  'toSide',
+  'newWindow',
+  'pin',
+  'unpin',
+  'markRead',
+  'markUnread',
+  'rename',
+  'details',
+  'close',
+  'closeOthers',
+  'reopenClosed',
+  'stop'
+] as const
+export type ConversationMenuAction = (typeof CONVERSATION_MENU_ACTIONS)[number]
+
+/** One line of that menu: a command, or a divider between its groups. */
+export type ConversationMenuEntry =
+  | { action: ConversationMenuAction; label: string; danger?: boolean }
+  | { separator: true }
 
 /** What became of a tab group released outside its own window's strips. See `tabDragDrop`. */
 export type TabDropOutcome = 'moved' | 'detached' | 'cancelled'
@@ -493,6 +539,9 @@ export interface WindowInit {
    * shared by every window of the app.
    */
   collapseRail: boolean
+  /** Opened for a new conversation: onto the chooser with `preselect` focused, or — with an `agent` —
+   *  starting one with it in `preselect`. */
+  newConversation?: { preselect: string | null; agent?: AgentKind }
 }
 
 
@@ -576,37 +625,32 @@ export interface SwitchboardApi {
   /** Pop the NATIVE macOS context menu for an inline code span (Copy Code). Same reasoning as above,
    *  and the same one-gesture-one-payload intent: the code, without its backticks. */
   codeContextMenu(code: string): void
-  /** Pop the NATIVE macOS context menu for a tab and resolve with the chosen action (null if
-   *  dismissed). Native for the same reasons as the two above, plus one specific to a strip: an OS
-   *  menu is not anchored to a DOM node, so the strip scrolling out from under it cannot close it.
-   *  `closeOthers` / `details` gate the items that would otherwise be offered as no-ops. */
-  tabContextMenu(opts: {
-    /** How many tabs the chosen command will act on — 1 unless a multi-selection is in effect and the
-     *  right-clicked tab belongs to it. Labels are pluralised from this, so a group action cannot read
-     *  as a single-tab one. */
-    count: number
-    closeOthers: boolean
-    details: boolean
-    /**
-     * Sending the tab sideways, as three mutually exclusive offers. Which one applies is the
-     * renderer's call, since only it knows the layout — and they are named for what actually happens:
-     * `splitRight` CREATES the second pane, while `moveRight` / `moveLeft` move between panes that
-     * already exist. Calling the latter "Split" would promise a split that is already there.
-     */
-    splitRight: boolean
-    moveRight: boolean
-    moveLeft: boolean
-    newWindow: boolean
-  }): Promise<TabMenuAction | null>
+  /** Pop the NATIVE macOS context menu for a tab, built from the renderer's list (conversationMenu),
+   *  and resolve with the chosen action (null if dismissed). Native for the same reasons as the two
+   *  above, plus one specific to a strip: an OS menu is not anchored to a DOM node, so the strip
+   *  scrolling out from under it cannot close it. */
+  tabContextMenu(entries: ConversationMenuEntry[]): Promise<ConversationMenuAction | null>
   /** ⌘W: main pushes this to the focused window, which closes its active tab — or calls
    *  `closeWindow()` when it has none, so the shortcut still behaves like macOS expects. Returns an
    *  unsubscribe fn. */
   onMenuCloseTab(cb: () => void): () => void
+  /** ⇧⌘T: main pushes this to the focused window, which reopens what it last closed. Returns an
+   *  unsubscribe fn. */
+  onMenuReopenTab(cb: () => void): () => void
   /** Close the window this renderer belongs to. The ⌘W fallback, and what makes a detached window
    *  closable from inside. */
   closeWindow(): void
   /** Open a NEW window showing this ordered tab group, with the rail hidden. Fire-and-forget. */
   openConversationWindow(payload: TabDragPayload): void
+  /** File → New Conversation (⌘N) and New Tab (⌘T), pushed to the focused window. */
+  onMenuNewConversation(cb: () => void): () => void
+  /** File → New Window (⇧⌘N), pushed to the focused window. */
+  onMenuNewWindow(cb: () => void): () => void
+  /** Whether tabs are on, so the File menu offers only the items that do something. */
+  setTabsMenuEnabled(enabled: boolean): void
+  /** Open a NEW window, rail hidden, onto the new-conversation chooser with `preselect` focused — or,
+   *  given an `agent`, straight onto a new conversation with it in `preselect`. */
+  openNewWindow(preselect: string | null, agent?: AgentKind): void
 
   // ---- dragging a tab between windows ----
   /** Tell main a tab-group drag started here, so it can referee where the cursor goes. */

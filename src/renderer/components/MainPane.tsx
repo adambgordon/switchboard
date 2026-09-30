@@ -6,11 +6,12 @@ import {
   useState,
   type CSSProperties,
   type MutableRefObject,
+  type ReactNode,
   type RefObject
 } from 'react'
 import type { ConversationMeta, PtyState, Transcript } from '@shared/types'
 import PaneHeader from './PaneHeader'
-import TabStrip, { type TabDescriptor } from './TabStrip'
+import TabStrip, { type TabConversationCommand, type TabDescriptor } from './TabStrip'
 import TranscriptView, { type TranscriptScrollState } from './TranscriptView'
 import { Play } from './icons'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
@@ -33,14 +34,21 @@ interface Props {
   terminalAt?: 'here' | 'other-pane' | 'claimable' | null
   /** Bring the terminal into this window and show it here. */
   onClaimTerminal?: () => void
-  /** Preferences → Beta Features → Tabs and split view. False renders no strip at all. */
+  /** Preferences → Appearance → Tabs and split view. False renders no strip at all. */
   showTabs: boolean
   tabLayout: TabLayout
   tabs: TabDescriptor[]
   activeTabIndex: number
   onActivateTab: (pane: number, index: number, focusSurface?: boolean) => void
   onCloseTab: (pane: number, index: number) => void
+  onCloseOneTab: (pane: number, index: number) => void
+  onStopAndCloseTab: (pane: number, index: number) => void
+  onMarkTabUnread: (sessionId: string) => void
+  onTabCommand: (command: TabConversationCommand, sessionId: string) => void
   onCloseOtherTabs: (pane: number, index: number) => void
+  /** See TabStrip: what Reopen would bring back, read when a tab's menu opens. */
+  reopenCount: () => number
+  onReopenClosed: () => void
   onPromoteTab: (sessionId: string, pane?: number) => void
   /** See TabStrip: whether the tab can create the split, and whether it can cross an existing one. */
   canSplitRight: (sessionId: string) => boolean
@@ -104,6 +112,8 @@ interface Props {
   onFindToggle: () => void
   /** Preferences → Application: copy Formatted-view selections as Markdown rather than rendered text. */
   markdownCopy: boolean
+  /** The active tab is a new-conversation chooser: it fills the pane, with no conversation header. */
+  chooser?: ReactNode
 }
 
 function EmptyState() {
@@ -164,7 +174,13 @@ export default function MainPane(props: Props) {
     activeTabIndex,
     onActivateTab,
     onCloseTab,
+    onCloseOneTab,
+    onStopAndCloseTab,
+    onMarkTabUnread,
+    onTabCommand,
     onCloseOtherTabs,
+    reopenCount,
+    onReopenClosed,
     onPromoteTab,
     canSplitRight,
     canMoveToOtherPane,
@@ -204,7 +220,8 @@ export default function MainPane(props: Props) {
     onFindClose,
     onFindActivate,
     onFindToggle,
-    markdownCopy
+    markdownCopy,
+    chooser
   } = props
   const onPaneFocusRef = useRef(onPaneFocus)
   onPaneFocusRef.current = onPaneFocus
@@ -288,10 +305,15 @@ export default function MainPane(props: Props) {
   // TerminalView is portalled into this pane from a sibling React subtree, so React's synthetic
   // events follow TerminalDeck rather than this component. A native capture listener follows the
   // physical DOM instead, keeping pane ownership aligned with the terminal that actually took focus.
+  // A ⌥-press is the mark-unread gesture (on a tab or in a terminal), which, as on a rail row,
+  // changes nothing but the mark — so it leaves pane focus where it was.
   useEffect(() => {
     const el = paneRef.current
     if (!el) return
-    const onDown = (): void => onPaneFocusRef.current?.()
+    const onDown = (e: PointerEvent): void => {
+      if (e.altKey && e.target instanceof Element && e.target.closest('.sb-tab, .sb-term')) return
+      onPaneFocusRef.current?.()
+    }
     el.addEventListener('pointerdown', onDown, true)
     return () => el.removeEventListener('pointerdown', onDown, true)
   }, [paneRef])
@@ -315,7 +337,13 @@ export default function MainPane(props: Props) {
           focused={paneFocused}
           onActivate={onActivateTab}
           onClose={onCloseTab}
+          onCloseOne={onCloseOneTab}
+          onStopAndClose={onStopAndCloseTab}
+          onMarkUnread={onMarkTabUnread}
+          onCommand={onTabCommand}
           onCloseOthers={onCloseOtherTabs}
+          reopenCount={reopenCount}
+          onReopenClosed={onReopenClosed}
           onPromote={onPromoteTab}
           onShowInfo={onShowInfoFor}
           canSplitRight={canSplitRight}
@@ -364,7 +392,7 @@ export default function MainPane(props: Props) {
         />
       )}
       <div className="sb-pane-body" ref={bodyRef}>
-        {!selectedId && <EmptyState />}
+        {!selectedId && (chooser ?? <EmptyState />)}
         {showTranscript &&
           (transcript || transcriptLoading ? (
             <div className="sb-pane-layer">

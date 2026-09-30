@@ -1,10 +1,13 @@
 import { useRef, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
 import { useTabStripScroll } from '../lib/useTabStripScroll'
-import { TAB_SCROLL_EDGE } from '../lib/tabScroll'
+import { SCROLL_EDGE } from '../lib/edgeScroll'
 import type { TabLayout } from '../lib/tabLayoutPreference'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { useTabReorder } from '../lib/useTabReorder'
 import type { LiveDotClass } from '../lib/rowIdentity'
+import { conversationMenu } from '../lib/conversationMenu'
+import { isChooserTab } from '../lib/chooserTab'
+import type { ConversationMenuAction } from '@shared/types'
 import { Close } from './icons'
 
 /** Everything the strip needs about one tab. Resolved by App, so the strip stays presentational. */
@@ -15,6 +18,10 @@ export interface TabDescriptor {
    *  tooltip. A tab truncates far harder than a row, so without it hovering the tab tells you less
    *  than glancing at the sidebar does. Null when the conversation has no preview. */
   subtitle: string | null
+  /** The hover's quiet last line, as a rail row's: when the conversation was last active (aged at
+   *  reveal) and the folder half from `rowTipMeta`. Null for a tab with nothing to say there. */
+  lastActiveAt: number | null
+  tipMeta: string | null
   /** This is the pane's replaceable tab — the one the next ordinary open takes over. Shown italic,
    *  the way an editor marks it. */
   preview: boolean
@@ -23,7 +30,22 @@ export interface TabDescriptor {
   dot: LiveDotClass | null
   /** No conversation is known to belong to this terminal, so it has no details to show. */
   unlinked: boolean
+  /** Its conversation is in the index — what Resume, Pin, Rename and Session details act on. A new
+   *  conversation has none until its first message is written. */
+  indexed: boolean
+  /** Its terminal is running — what decides Stop or Resume in its menu. Not its liveness: that is
+   *  `dot`, derived with the rail row's rules. */
+  running: boolean
+  pinned: boolean
+  /** Marked as needing a look, as its rail row's dot shows. */
+  unread: boolean
 }
+
+/** The conversation commands a tab's menu shares with its rail row, resolved by App. */
+export type TabConversationCommand = Extract<
+  ConversationMenuAction,
+  'resume' | 'pin' | 'unpin' | 'markRead' | 'markUnread' | 'rename' | 'stop'
+>
 
 interface Props {
   layout: TabLayout
@@ -39,8 +61,20 @@ interface Props {
    *  "the other pane" is unambiguous — only the LABEL differs by side. */
   canMoveToOtherPane: boolean
   onActivate: (paneIndex: number, index: number, focusSurface?: boolean) => void
+  /** Close this tab, or the selection it belongs to — the menu's Close, whose label counts them. */
   onClose: (paneIndex: number, index: number) => void
+  /** Close this tab alone — its ×, and a middle-click. A selection it belongs to is left open. */
+  onCloseOne: (paneIndex: number, index: number) => void
+  /** ⌥-× on a live tab: stop its session, then close it. */
+  onStopAndClose: (paneIndex: number, index: number) => void
+  /** ⌥-click on a running tab, as on its rail row: mark it unread. */
+  onMarkUnread: (sessionId: string) => void
+  onCommand: (command: TabConversationCommand, sessionId: string) => void
   onCloseOthers: (paneIndex: number, index: number) => void
+  /** How many tabs Reopen would bring back right now, or 0. A function, so the count is read when the
+   *  menu opens rather than rerendering every strip on each close. */
+  reopenCount: () => number
+  onReopenClosed: () => void
   onPromote: (sessionId: string, paneIndex: number) => void
   onShowInfo: (sessionId: string) => void
   /** Create the split and put this tab in the new right-hand pane. */
@@ -81,6 +115,8 @@ interface ItemProps {
   onNavigate: (delta: number) => void
   onPromote: () => void
   onClose: () => void
+  onStopAndClose: () => void
+  onMarkUnread: () => void
   onContextMenu: (e: MouseEvent) => void
 }
 
@@ -99,6 +135,8 @@ function Tab({
   onNavigate,
   onPromote,
   onClose,
+  onStopAndClose,
+  onMarkUnread,
   onContextMenu
 }: ItemProps) {
   // Phase-lock the breathing / ripple forms to the app-wide beat, exactly as a rail row does. Without
@@ -107,7 +145,7 @@ function Tab({
   const dotRef = useSyncedAnimation<HTMLSpanElement>(tab.dot)
   return (
     <div
-      className={`sb-tab${active ? ' active' : ''}${active && focused ? ' focused' : ''}${tab.preview ? ' preview' : ''}${selected ? ' picked' : ''}`}
+      className={`sb-tab${active ? ' active' : ''}${active && focused ? ' focused' : ''}${tab.preview ? ' preview' : ''}${selected ? ' picked' : ''}${tab.running ? ' running' : ''}${tab.unread ? ' attention' : ''}`}
       role="tab"
       // `aria-selected` stays the ACTIVE tab — it is what the tablist role means by selected, and the
       // scroll-into-view effect keys off it. Multi-selection is a different idea, so it gets its own
@@ -118,9 +156,12 @@ function Tab({
       tabIndex={active ? 0 : -1}
       // A tab truncates aggressively, so the full title lives in the shared tooltip layer — never a
       // native `title`, which lags and resets on the slightest pointer move. `data-tip-sub` adds the
-      // preview line beneath it, giving the hover the same content as a rail row.
+      // preview line beneath it and `data-tip-at` / `data-tip-meta` the when-and-where line, giving the
+      // hover the same content as a rail row.
       data-tip={tab.title}
       {...(tab.subtitle ? { 'data-tip-sub': tab.subtitle } : {})}
+      {...(tab.lastActiveAt !== null ? { 'data-tip-at': tab.lastActiveAt } : {})}
+      {...(tab.tipMeta ? { 'data-tip-meta': tab.tipMeta } : {})}
       // Selection is decided on PRESS, not on click. A press is the moment the user commits to a tab,
       // it is what every list of this kind responds to, and it does not depend on a `click` arriving
       // afterwards — which is the fragile part, since a press begins a drag, moves focus, and can
@@ -129,9 +170,20 @@ function Tab({
       onPointerDown={(e) => {
         if (onModifierPress(e)) e.preventDefault()
       }}
+      // A ⌥-press must not focus the tab: nothing activates it to move focus on, so it would keep
+      // :focus-within — pinning its × visible and hiding the dot the mark is meant to show.
+      onMouseDown={(e) => {
+        if (e.altKey) e.preventDefault()
+      }}
       // The plain case only: a modified click was already handled above, and acting again here would
       // undo the selection that press just made.
       onClick={(e) => {
+        // ⌥-click marks unread, as on a rail row, and never activates: landing on the tab would mark
+        // it read again at once.
+        if (e.altKey) {
+          if (tab.running) onMarkUnread()
+          return
+        }
         if (!e.metaKey && !e.shiftKey) onActivate()
       }}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
@@ -147,8 +199,11 @@ function Tab({
       // A ⌘- or ⇧-click must not also start a drag-reorder; the hook checks the same modifiers.
       // Double-click is the editor gesture for "keep this one". The two ordinary clicks that precede
       // it only activate an already-open tab, which is idempotent, so no dedupe is needed here —
-      // unlike the same gesture on a rail row, which records history stops.
-      onDoubleClick={onPromote}
+      // unlike the same gesture on a rail row, which records history stops. ⌥ is excluded, as on the
+      // row: a ⌥-click means mark unread, and must not also keep the tab.
+      onDoubleClick={(e) => {
+        if (!e.altKey) onPromote()
+      }}
       // Middle-click closes, as in a browser. Nothing else in the app claims button 1.
       onAuxClick={(e) => {
         if (e.button === 1) {
@@ -158,7 +213,13 @@ function Tab({
       }}
       onContextMenu={onContextMenu}
     >
-      <span className="sb-tab-title truncate">{tab.title}</span>
+      {/* The hidden copy holds the tab at its bold width, so needing attention never resizes it. */}
+      <span className="sb-tab-label">
+        <span className="sb-tab-title truncate">{tab.title}</span>
+        <span className="sb-tab-sizer" aria-hidden="true">
+          {tab.title}
+        </span>
+      </span>
       <span className="sb-tab-gutter">
         {tab.dot && (
           <span ref={dotRef} className={`sb-dot ${tab.dot}`} aria-label="live" role="img" />
@@ -168,12 +229,15 @@ function Tab({
         className="sb-tab-close"
         // The tooltip is generic while the accessible name is specific: the tip appears under the
         // pointer, where which tab is meant is already obvious, whereas a screen reader announces the
-        // button with no such context.
+        // button with no such context. On a running tab ⌥ turns it into stop-and-close: the tooltip's ⌥
+        // variant says so, and the × turns red (app.css, off the held-key attribute on the root).
         data-tip="Close tab"
+        {...(tab.running ? { 'data-tip-alt': 'Stop session and close tab' } : {})}
         aria-label={`Close ${tab.title}`}
         onClick={(e) => {
           e.stopPropagation()
-          onClose()
+          if (e.altKey && tab.running) onStopAndClose()
+          else onClose()
         }}
       >
         <Close size={12} />
@@ -213,7 +277,13 @@ export default function TabStrip({
   canMoveToOtherPane,
   onActivate,
   onClose,
+  onCloseOne,
+  onStopAndClose,
+  onMarkUnread,
+  onCommand,
   onCloseOthers,
+  reopenCount,
+  onReopenClosed,
   onPromote,
   onShowInfo,
   onSplitRight,
@@ -262,35 +332,54 @@ export default function TabStrip({
     // How many tabs the chosen command will act on, so the menu can say so rather than quietly
     // closing five conversations under a label that reads like it means one.
     const groupSize = selectedIds.has(tab.sessionId) && selectedIds.size > 1 ? selectedIds.size : 1
-    const choice = await window.api.tabContextMenu({
-      count: groupSize,
-      closeOthers: tabs.length > 1,
-      // An unlinked terminal has no conversation, so there are no details to show and nothing to
-      // reopen elsewhere by id — hide both rather than offer controls that silently do nothing.
-      details: !tab.unlinked,
-      splitRight: canSplitRight(tab.sessionId),
-      // Same action either way; the side this pane is on decides which direction to name it.
-      moveRight: canMoveToOtherPane && paneIndex === 0,
-      moveLeft: canMoveToOtherPane && paneIndex === 1,
-      newWindow: !tab.unlinked
-    })
+    // A chooser stands for no conversation yet, so it can only be closed.
+    const chooser = isChooserTab(tab.sessionId)
+    const choice = await window.api.tabContextMenu(
+      conversationMenu({
+        surface: 'tab',
+        count: groupSize,
+        linked: tab.indexed,
+        live: tab.running,
+        pinned: tab.pinned,
+        unread: tab.unread,
+        // Same command either way; the layout decides what it is called — see conversationMenu.
+        side: chooser
+          ? null
+          : canSplitRight(tab.sessionId)
+            ? 'right'
+            : canMoveToOtherPane
+              ? paneIndex === 0
+                ? 'rightPane'
+                : 'leftPane'
+              : null,
+        // An unlinked terminal has no conversation to reopen elsewhere by id.
+        newWindow: !tab.unlinked,
+        hasTabHere: true,
+        closeOthers: tabs.length > 1,
+        reopen: reopenCount()
+      })
+    )
+    if (choice === null) return
     if (choice === 'close') onClose(paneIndex, index)
     else if (choice === 'closeOthers') onCloseOthers(paneIndex, index)
+    else if (choice === 'reopenClosed') onReopenClosed()
     else if (choice === 'details') onShowInfo(tab.sessionId)
-    else if (choice === 'splitRight') onSplitRight(tab.sessionId, paneIndex)
-    else if (choice === 'moveRight' || choice === 'moveLeft') {
-      onMoveToOtherPane(tab.sessionId, paneIndex)
+    else if (choice === 'toSide') {
+      if (canSplitRight(tab.sessionId)) onSplitRight(tab.sessionId, paneIndex)
+      else onMoveToOtherPane(tab.sessionId, paneIndex)
     } else if (choice === 'newWindow') onOpenInNewWindow(tab.sessionId)
+    else onCommand(choice, tab.sessionId)
   }
 
   return (
     <div
       className={`sb-tabstrip-frame${layout === 'scroll' ? ' horizontal' : ''}`}
-      style={{ '--tab-edge': `${TAB_SCROLL_EDGE}px` } as CSSProperties}
+      style={{ '--tab-edge': `${SCROLL_EDGE}px` } as CSSProperties}
     >
       <div
         className={`sb-tabstrip${layout === 'scroll' ? ' horizontal' : ''}`}
         data-layout={layout}
+        data-tip-group=""
         ref={stripRef}
         role="tablist"
         // Read by the drag hook when it hit-tests every strip in the window: a drop has to resolve to a
@@ -322,7 +411,9 @@ export default function TabStrip({
             onKeyboardActivate={() => onActivate(paneIndex, i, false)}
             onNavigate={(delta) => navigateFrom(i, delta)}
             onPromote={() => onPromote(tab.sessionId, paneIndex)}
-            onClose={() => onClose(paneIndex, i)}
+            onClose={() => onCloseOne(paneIndex, i)}
+            onStopAndClose={() => onStopAndClose(paneIndex, i)}
+            onMarkUnread={() => onMarkUnread(tab.sessionId)}
             onContextMenu={(e) => void contextMenu(e, i)}
           />
         ))}

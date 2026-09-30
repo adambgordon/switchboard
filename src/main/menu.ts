@@ -108,16 +108,48 @@ export function installAppMenu(): void {
   // never reaches the page, so the item pushes to the focused window instead and the renderer decides
   // whether it has a tab to close. When it does not — no tabs open, or the feature switched off — it
   // calls back through `IPC.windowClose`, so ⌘W still closes the window exactly as macOS expects.
+  //
+  // The New items are menu accelerators for the same reason, and because an accelerator fires whatever
+  // holds focus — a terminal included, where a renderer key handler would compete with the TUI. New
+  // Conversation and New Tab are one action: with tabs on it lands in a new tab, with tabs off it fills
+  // the pane. So New Tab is hidden, not removed, while tabs are off — its chord still works — and New
+  // Window, which needs tabs, is disabled. `setTabsMenuEnabled` keeps both in step with the preference.
+  //
+  // Reopen Closed Tab is hidden with tabs off too, but unlike New Tab its chord goes with it: there are
+  // no closed tabs to bring back. It stays enabled when there are none, because the history belongs to
+  // each window and this menu to the whole app — the window that receives it does nothing then.
+  const toFocused = (channel: string) => (): void => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (win && !win.isDestroyed()) win.webContents.send(channel)
+  }
   const file: MenuItemConstructorOptions = {
     label: 'File',
     submenu: [
+      { label: 'New Conversation', accelerator: 'Cmd+N', click: toFocused(IPC.menuNewConversation) },
       {
-        label: 'Close Tab',
-        accelerator: 'Cmd+W',
-        click: () => {
-          const win = BrowserWindow.getFocusedWindow()
-          if (win && !win.isDestroyed()) win.webContents.send(IPC.menuCloseTab)
-        }
+        id: NEW_TAB_ID,
+        label: 'New Tab',
+        accelerator: 'Cmd+T',
+        acceleratorWorksWhenHidden: true,
+        visible: tabsMenuEnabled,
+        click: toFocused(IPC.menuNewConversation)
+      },
+      {
+        id: NEW_WINDOW_ID,
+        label: 'New Window',
+        accelerator: 'Cmd+Shift+N',
+        enabled: tabsMenuEnabled,
+        click: toFocused(IPC.menuNewWindow)
+      },
+      { type: 'separator' },
+      { label: 'Close Tab', accelerator: 'Cmd+W', click: toFocused(IPC.menuCloseTab) },
+      {
+        id: REOPEN_TAB_ID,
+        label: 'Reopen Closed Tab',
+        accelerator: 'Cmd+Shift+T',
+        acceleratorWorksWhenHidden: false,
+        visible: tabsMenuEnabled,
+        click: toFocused(IPC.menuReopenTab)
       },
       { role: 'close', label: 'Close Window', accelerator: 'Cmd+Shift+W' },
       { type: 'separator' },
@@ -134,4 +166,22 @@ export function installAppMenu(): void {
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+const NEW_TAB_ID = 'file.newTab'
+const NEW_WINDOW_ID = 'file.newWindow'
+const REOPEN_TAB_ID = 'file.reopenTab'
+// The preference lives in the renderer (every window shares one localStorage), so each window reports it
+// and the last report wins — they can only disagree for the instant a change takes to reach them all.
+let tabsMenuEnabled = false
+
+export function setTabsMenuEnabled(enabled: boolean): void {
+  tabsMenuEnabled = enabled
+  const menu = Menu.getApplicationMenu()
+  const newTab = menu?.getMenuItemById(NEW_TAB_ID)
+  const newWindow = menu?.getMenuItemById(NEW_WINDOW_ID)
+  if (newTab) newTab.visible = enabled
+  const reopenTab = menu?.getMenuItemById(REOPEN_TAB_ID)
+  if (reopenTab) reopenTab.visible = enabled
+  if (newWindow) newWindow.enabled = enabled
 }

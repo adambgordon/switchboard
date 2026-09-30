@@ -3,14 +3,14 @@ import type { AgentKind } from '@shared/types'
 import { useStorageSync } from './useStorageSync'
 
 /**
- * The "default agent for new conversations" preference, persisted in localStorage. Mirrors
- * useNewConvoDefault (the default-DIRECTORY setting), and is a SEPARATE axis: the default directory
- * stays universal (one dir for both agents). Two independent fields so the user can turn it off
- * without losing the choice:
- *   - `agent`   — which agent ⌘N / + should start ('claude' | 'codex').
- *   - `enabled` — when true AND that agent is available, ⌘N / + skip the agent picker.
+ * The "default agent for new conversations" preference, persisted in localStorage — the one
+ * new-conversation default. Two independent fields so the user can turn it off without losing the
+ * choice:
+ *   - `agent`   — which agent a new conversation preselects ('claude' | 'codex').
+ *   - `enabled` — when true AND that agent is available, the new-conversation chooser preselects it.
  *
- * Owned once in App (like useNewConvoDefault) — both the ⌘N handler and the Preferences UI read it.
+ * Owned once in App (like useLayout / useMarkdownCopy) — both the new-conversation chooser and the
+ * Preferences UI read this one copy, so a second useState(load) elsewhere can't desync from its writes.
  */
 interface DefaultAgentState {
   agent: AgentKind

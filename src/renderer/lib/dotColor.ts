@@ -3,8 +3,8 @@ import type { ResolvedTheme } from './theme'
 /**
  * The liveness dot's color: the value behind `--dot`, which defaults to the shipped `--live`.
  *
- * Scoped to the dot alone. Every other cobalt mark — a live card's ring, the Live tally, Resume,
- * the brand marks — stays on `--live`, so this changes one signal rather than the palette.
+ * Scoped to the dot alone. Every other cobalt mark — the selected row's edge, Resume, the brand
+ * marks — stays on `--live`, so this changes one signal rather than the palette.
  *
  * Pure and DOM-free so the test suite can import it under the node tsconfig — no `window`, and no
  * `localStorage` either (which `@types/node` declares, so it would compile and still belong in the
@@ -45,7 +45,8 @@ export function shouldCommit(pending: string | null, stored: string | null): boo
 }
 
 /**
- * Surfaces the dot is held to: the rail's flat rows in light, a live card in dark. Each is the
+ * Surfaces the dot is held to: the rail's rows in light, the selected row (on `--paper-raised`) in
+ * dark. Each is the
  * least favorable of the resting surfaces the dot sits on in that theme, since a dark-on-light dot
  * is worst on the darker surface and a light-on-dark dot on the lighter one. Both are calibrated
  * so the shipped cobalt clears the floor exactly as it does today.

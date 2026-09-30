@@ -21,6 +21,8 @@
 
 import type { PersistedTabLayout, TabOpenMode } from '@shared/types'
 import { sanitizeTabLayout } from '../../shared/tabWorkspace'
+import { isChooserTab } from './chooserTab'
+import type { ClosedGroup, ClosedTab } from './closedTabs'
 
 /** A conversation occupying a slot in a pane. */
 export interface Tab {
@@ -105,6 +107,11 @@ export type PaneAction =
   | { type: 'restore'; saved: PersistedTabLayout; paneIds: string[] }
   /** Tabs were switched off: keep what is on screen, drop the rest. */
   | { type: 'collapseToSingle' }
+  /**
+   * Bring back one closed group (⇧⌘T) where it stood. `paneId` names the pane to create should the
+   * group's side of a split have collapsed since.
+   */
+  | { type: 'reopen'; group: ClosedGroup; paneId: string }
 
 export function initialLayout(paneId: string): PaneLayout {
   return {
@@ -133,12 +140,21 @@ export function restorePaneLayout(
   return { panes, focusIndex: 0, splitFraction: SPLIT_LIMITS.default }
 }
 
+/**
+ * The layout as it should come back after a restart: conversations only. A chooser tab is a moment's
+ * question, not something to reopen onto, so it is left out — and a pane standing on one restores onto
+ * the neighbor that closing it would have selected.
+ */
 export function snapshotPaneLayout(layout: PaneLayout): PersistedTabLayout | null {
   const panes = layout.panes
-    .map((pane) => ({
-      sessionIds: pane.tabs.map((tab) => tab.sessionId),
-      activeSessionId: paneActiveId(pane)
-    }))
+    .map((pane) => {
+      const keep = pane.tabs.filter((tab) => !isChooserTab(tab.sessionId))
+      const active = activeAfterKeep(pane, keep)
+      return {
+        sessionIds: keep.map((tab) => tab.sessionId),
+        activeSessionId: active >= 0 ? keep[active].sessionId : null
+      }
+    })
     .filter((pane) => pane.sessionIds.length > 0)
   return panes.length > 0 ? { panes } : null
 }
@@ -182,10 +198,10 @@ export function canPlaceTabsToSide(
   return true
 }
 
-/** Every conversation with a tab anywhere in the window. */
+/** Every conversation with a tab anywhere in the window. A chooser tab holds none. */
 export function openSessionIds(layout: PaneLayout): Set<string> {
   const out = new Set<string>()
-  for (const p of layout.panes) for (const t of p.tabs) out.add(t.sessionId)
+  for (const p of layout.panes) for (const t of p.tabs) if (!isChooserTab(t.sessionId)) out.add(t.sessionId)
   return out
 }
 
@@ -755,7 +771,63 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       }
     }
 
+    case 'reopen': {
+      // One conversation, one tab: one that has a tab again since it closed stays where it is now.
+      const returning = action.group.tabs.filter((tab) => !locateTab(state, tab.sessionId))
+      if (returning.length === 0) return state
+      let panes = state.panes
+      // Lowest slot first. Each tab then lands where it stood among the ones that were beside it:
+      // closing slots 1 and 3 of A B C D E leaves A C E, and putting back 1 then 3 is A B C D E again,
+      // where the other order would leave D at the far end.
+      for (const tab of [...returning].sort((a, b) => a.index - b.index)) {
+        let p = reopenTarget(panes, tab, state.focusIndex)
+        if (p < 0) {
+          // Its side of the split has closed. Open that side again, rather than folding it into the
+          // pane left — undoing the close should undo its effect on the layout too.
+          const fresh: Pane = { id: action.paneId, tabs: [], activeIndex: -1 }
+          panes = tab.side === 'left' ? [fresh, ...panes] : [...panes, fresh]
+          p = tab.side === 'left' ? 0 : panes.length - 1
+        }
+        const home = panes[p]
+        const tabs = [...home.tabs]
+        // Always kept: reopening is deliberate, and a preview arriving where one already is would
+        // break the one-preview rule. A slot past the end of what is there now lands at the end.
+        tabs.splice(tab.index, 0, { sessionId: tab.sessionId, preview: false })
+        const activeIndex = home.activeIndex >= tab.index ? home.activeIndex + 1 : home.activeIndex
+        panes = panes.map((pane, i) => (i === p ? { ...pane, tabs, activeIndex } : pane))
+      }
+      // Show the tab that was showing, if it is among those coming back — not merely present: one that
+      // kept a tab elsewhere since is not what this reopen brought back.
+      const showId = returning.some((tab) => tab.sessionId === action.group.activeId)
+        ? action.group.activeId
+        : returning[0].sessionId
+      const focusIndex = panes.findIndex((pane) => pane.tabs.some((tab) => tab.sessionId === showId))
+      panes = panes.map((pane, i) =>
+        i === focusIndex
+          ? { ...pane, activeIndex: pane.tabs.findIndex((tab) => tab.sessionId === showId) }
+          : pane.activeIndex < 0 && pane.id === action.paneId
+            ? { ...pane, activeIndex: 0 }
+            : pane
+      )
+      // The pane left after the split collapsed may itself be empty by now; a reopened side does not
+      // bring it back to life.
+      return pruneEmptyPanes({ ...state, panes, focusIndex })
+    }
+
     default:
       return state
   }
+}
+
+/**
+ * The pane a reopened tab goes back to, or -1 when its side of a split has to be opened again: the
+ * same pane if it is still here; else, with two panes, the one on its side; else the single pane,
+ * unless the tab's own close is what collapsed the split — a split the user closed afterward stays
+ * closed.
+ */
+function reopenTarget(panes: Pane[], tab: ClosedTab, focusIndex: number): number {
+  const same = panes.findIndex((pane) => pane.id === tab.paneId)
+  if (same >= 0) return same
+  if (panes.length === 2) return tab.side === 'left' ? 0 : tab.side === 'right' ? 1 : focusIndex
+  return tab.side !== 'only' && tab.emptiedPane ? -1 : 0
 }

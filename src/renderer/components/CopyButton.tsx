@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type R
 import { Check, Copy } from './icons'
 
 /**
- * Copy affordance — a hover-revealed icon button that flashes a check for ~700ms on click (the
- * TallyRail.copySessionId pattern). Neutral ink only (copy isn't an accent action). `getText` is
- * read lazily on click, so callers pull from a ref / the DOM / props at that moment.
+ * Copy affordance — a hover-revealed icon button that flashes a check for ~700ms on click.
+ * Neutral ink only (copy isn't an accent action). `getText` is read lazily on click, so callers
+ * pull from a ref / the DOM / props at that moment.
  *
  * Shared by the transcript's per-block / per-turn copies (MessageBlock) and the conversation-info
  * modal's session-id copy. Styling is `.copy-btn` (+ any `className`) in transcript.css; the base

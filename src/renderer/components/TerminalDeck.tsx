@@ -14,6 +14,8 @@ interface Props {
   theme: ResolvedTheme
   /** Option+click in a terminal — always mark that conversation unread (never toggles). */
   onMarkUnread: (id: string) => void
+  /** A person sent a terminal input — its conversation's preview tab becomes an ordinary one. */
+  onUserInput: (id: string) => void
 }
 
 /**
@@ -29,7 +31,8 @@ export default function TerminalDeck({
   visiblePtyIds,
   focusReq,
   theme,
-  onMarkUnread
+  onMarkUnread,
+  onUserInput
 }: Props) {
   return (
     <>
@@ -53,6 +56,7 @@ export default function TerminalDeck({
             focusKey={focusKey}
             theme={theme}
             onMarkUnread={onMarkUnread}
+            onUserInput={onUserInput}
           />
         )
       })}

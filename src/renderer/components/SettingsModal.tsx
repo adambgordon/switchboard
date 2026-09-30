@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Close, Folder, Info, Reset, Warning } from './icons'
+import { AppWindow, Close, Flask, Help, Info, Keyboard, Palette, Reset, Warning } from './icons'
 import { DOT_COLOR_COMMIT_MS, DOT_COLOR_PLACEHOLDER, shouldCommit } from '../lib/dotColor'
-import { basename } from '../lib/format'
 import { SLIDER_STEPS, positionForValue, valueForPosition } from '../lib/maxLiveScale'
 import { AGENTS, type AgentKind } from '@shared/types'
 import type { ThemeMode } from '../lib/theme'
 import type { TabLayout } from '../lib/tabLayoutPreference'
+import type { RailDensity } from '../lib/sidebarPrefs'
 import type { Updates } from '../lib/useUpdates'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import AgentLogo from './AgentLogo'
@@ -17,12 +17,25 @@ const THEME_MODES: { value: ThemeMode; label: string }[] = [
   { value: 'dark', label: 'Dark' }
 ]
 
+const RAIL_DENSITIES: { value: RailDensity; label: string }[] = [
+  { value: 'compact', label: 'Compact' },
+  { value: 'spacious', label: 'Spacious' }
+]
+
 // The info-tooltip copy for the live-sessions cap — mirrors the capacity modal, plus the
 // raise-it-at-your-own-risk note the modal omits. Shown via a wide (wrapping) tooltip.
 const CAP_TIP =
   "Each live session is a real agent process with its own terminal. At the limit, starting another reclaims whichever session has been idle longest — sessions still working are never stopped, and you're never blocked from starting a new one. Raising the limit means a higher cap on resource consumption: more memory, CPU, and GPU per live terminal. This is intended to prevent agent processes from overwhelming your machine. Increase at your own risk."
 
 type Page = 'appearance' | 'application' | 'beta' | 'shortcuts' | 'faq'
+
+const NAV: { page: Page; label: string; Icon: (p: { size?: number }) => ReactNode }[] = [
+  { page: 'appearance', label: 'Appearance', Icon: Palette },
+  { page: 'application', label: 'Application', Icon: AppWindow },
+  { page: 'beta', label: 'Beta Features', Icon: Flask },
+  { page: 'shortcuts', label: 'Keyboard Shortcuts', Icon: Keyboard },
+  { page: 'faq', label: 'FAQ', Icon: Help }
+]
 
 interface Shortcut {
   keys: string[]
@@ -103,14 +116,14 @@ function groupsFor(tabsEnabled: boolean): Group[] {
     {
       title: 'Conversations',
       items: [
-        { keys: ['⌘N'], desc: 'New conversation' },
+        { keys: tabsEnabled ? ['⌘N', '⌘T'] : ['⌘N'], desc: 'New conversation' },
         { keys: ['⌘F'], desc: 'Search' },
         { keys: ['⌘J'], desc: 'Toggle Formatted / Terminal, resuming if needed' },
         { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
         { keys: ['⌥-click'], desc: 'Mark conversation unread' },
-        // Double-click is the only click gesture tabs add. The ⌘/⇧ variants were removed: they came
-        // from browsers, and in an editor-shaped app they read as arbitrary rather than familiar.
-        // Opening to the side or in a new window lives on the ⋮ and right-click menus, which say so.
+        // Double-click is the only click gesture tabs add: ⌘/⇧-click variants come from browsers, and in
+        // an editor-shaped app they read as arbitrary rather than familiar. Opening to the side or in a new
+        // window lives on the ⋮ and right-click menus, which say so.
         ...(tabsEnabled ? [{ keys: ['double-click'], desc: 'Keep a conversation’s tab' }] : [])
       ]
     },
@@ -120,8 +133,9 @@ function groupsFor(tabsEnabled: boolean): Group[] {
             title: 'Tabs & panes',
             items: [
               { keys: ['⌘W'], desc: 'Close tab' },
+              { keys: ['⇧⌘T'], desc: 'Reopen closed tab' },
               { keys: ['⌘\\'], desc: 'Split / unsplit the view' },
-              { keys: ['⇧⌘N'], desc: 'Open the conversation in a new window' }
+              { keys: ['⇧⌘N'], desc: 'New window' }
             ]
           }
         ]
@@ -168,6 +182,16 @@ const FAQ: Faq[] = [
       <>
         No, selecting only previews the transcript (read-only). A live agent process starts only
         when you <strong>Resume</strong> an existing conversation or start a <strong>New</strong> one.
+      </>
+    )
+  },
+  {
+    q: 'Do my tabs come back after quitting or updating?',
+    a: (
+      <>
+        Yes, Switchboard automatically preserves all tabs across all windows. Quitting or updating the
+        app will never get rid of your tabs. Conversations that were running come back showing their
+        transcript, since quitting ends live sessions; press <strong>Resume</strong> to pick one up.
       </>
     )
   },
@@ -219,20 +243,16 @@ interface Props {
   themeMode: ThemeMode
   /** Set the theme mode (from the Appearance segmented control). */
   onSetThemeMode: (mode: ThemeMode) => void
+  /** Conversation-list row density (Appearance). */
+  railDensity: RailDensity
+  onSetRailDensity: (density: RailDensity) => void
   /** Whether the macOS dock icon uses the dark variant (independent of the theme). */
   darkIcon: boolean
   /** Toggle the dark dock icon (a Light / Dark segmented control). */
   onSetDarkIcon: (value: boolean) => void
-  // --- App page: default folder for new conversations ---
-  /** Absolute path of the default folder ('' = none chosen). A chosen folder is always active. */
-  defaultDir: string
-  /** Open the native picker to choose the default folder. */
-  onChooseDefaultDir: () => void
-  /** Forget the default folder. */
-  onClearDefaultDir: () => void
   // --- App page: default agent for new conversations ---
-  /** The default-agent choice: 'none' (no default) or the agent ⌘N / + should start with. With <2
-   *  agents installed this is the forced display value (the sole agent, or 'none'). */
+  /** The default-agent choice: 'none' (no default) or the agent a new conversation preselects. With
+   *  <2 agents installed this is the forced display value (the sole agent, or 'none'). */
   defaultAgentChoice: 'none' | AgentKind
   /** True when <2 agents are launchable — the control renders selected-but-disabled (no choice). */
   defaultAgentDisabled: boolean
@@ -266,13 +286,16 @@ interface Props {
   onPreviewDotColor: (hex: string | null) => void
   /** Toggle the Markdown-copy behavior (an On / Off segmented control, like Theme). */
   onSetMarkdownCopy: (value: boolean) => void
+  /** Reopen the What's new dialog (Application page). */
+  onShowWhatsNew: () => void
 }
 
 /**
  * The Preferences modal — a left nav (Appearance / Application / Beta Features / Shortcuts / FAQ)
  * over the shared
- * scrim+card. Appearance holds theme + dock icon; Application holds Updates (first), the live-session
- * cap, and the new-conversation defaults; Beta Features holds the tabs / split / windows flag;
+ * scrim+card. Appearance holds theme, dock icon, sidebar density and the tabs / split / windows setting
+ * with its tab layout; Application holds Updates (first), What's new, the live-session cap, and the
+ * new-conversation default agent; Beta Features holds the liveness dot color;
  * Shortcuts / FAQ are reference. Open it to a specific page via
  * `page` (⌘, / title-bar gear → appearance; ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is
  * handled by App's global key handler, which also makes the rest of the keyboard inert while open.
@@ -284,11 +307,10 @@ export default function SettingsModal({
   updates,
   themeMode,
   onSetThemeMode,
+  railDensity,
+  onSetRailDensity,
   darkIcon,
   onSetDarkIcon,
-  defaultDir,
-  onChooseDefaultDir,
-  onClearDefaultDir,
   defaultAgentChoice,
   defaultAgentDisabled,
   onSetDefaultAgentChoice,
@@ -306,7 +328,8 @@ export default function SettingsModal({
   dotColor,
   onSetDotColor,
   onPreviewDotColor,
-  onSetMarkdownCopy
+  onSetMarkdownCopy,
+  onShowWhatsNew
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -406,39 +429,19 @@ export default function SettingsModal({
         </div>
         <div className="sb-settings-body">
           <nav className="sb-settings-nav">
-            <button
-              className={`sb-settings-nav-item${page === 'appearance' ? ' active' : ''}`}
-              onClick={() => onChangePage('appearance')}
-            >
-              Appearance
-            </button>
-            <button
-              className={`sb-settings-nav-item${page === 'application' ? ' active' : ''}`}
-              onClick={() => onChangePage('application')}
-            >
-              Application
-              {updates.needsAttention && (
-                <span className="sb-attn-dot sb-attn-dot-nav" aria-hidden="true" />
-              )}
-            </button>
-            <button
-              className={`sb-settings-nav-item${page === 'beta' ? ' active' : ''}`}
-              onClick={() => onChangePage('beta')}
-            >
-              Beta Features
-            </button>
-            <button
-              className={`sb-settings-nav-item${page === 'shortcuts' ? ' active' : ''}`}
-              onClick={() => onChangePage('shortcuts')}
-            >
-              Shortcuts
-            </button>
-            <button
-              className={`sb-settings-nav-item${page === 'faq' ? ' active' : ''}`}
-              onClick={() => onChangePage('faq')}
-            >
-              FAQ
-            </button>
+            {NAV.map(({ page: p, label, Icon }) => (
+              <button
+                key={p}
+                className={`sb-settings-nav-item${page === p ? ' active' : ''}`}
+                onClick={() => onChangePage(p)}
+              >
+                <Icon size={15} />
+                {label}
+                {p === 'application' && updates.needsAttention && (
+                  <span className="sb-attn-dot sb-attn-dot-nav" aria-hidden="true" />
+                )}
+              </button>
+            ))}
           </nav>
 
           <div className={`sb-settings-page sb-page-${page}`}>
@@ -487,12 +490,101 @@ export default function SettingsModal({
                     </div>
                     <div className="sb-setting-desc">Use a dark dock icon, independent of the app theme.</div>
                   </div>
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">Sidebar</div>
+                    <div className="sb-seg" role="radiogroup" aria-label="Sidebar">
+                      {RAIL_DENSITIES.map((d) => (
+                        <button
+                          key={d.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={railDensity === d.value}
+                          className={`sb-seg-btn${railDensity === d.value ? ' active' : ''}`}
+                          onClick={() => onSetRailDensity(d.value)}
+                        >
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="sb-setting-desc">
+                      Compact rows are one line; hover one for its preview, folder and last activity.
+                      Spacious rows show the preview and details inline.
+                    </div>
+                  </div>
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">Tabs and split view</div>
+                    <div className="sb-seg" role="radiogroup" aria-label="Tabs and split view">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={tabsEnabled}
+                        className={`sb-seg-btn${tabsEnabled ? ' active' : ''}`}
+                        onClick={() => onSetTabsEnabled(true)}
+                      >
+                        On
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={!tabsEnabled}
+                        className={`sb-seg-btn${!tabsEnabled ? ' active' : ''}`}
+                        onClick={() => onSetTabsEnabled(false)}
+                      >
+                        Off
+                      </button>
+                    </div>
+                    <div className="sb-setting-desc">
+                      Keep several conversations open at once in a tab strip, split the view into two
+                      panes, and open conversations in their own windows. Clicking a conversation
+                      previews it in a replaceable tab; double-clicking, resuming or typing in it keeps
+                      that tab. Turn this off to show one conversation at a time.
+                    </div>
+                  </div>
+                  <div className="sb-setting" aria-disabled={!tabsEnabled}>
+                    <div className="sb-setting-title">Tab overflow</div>
+                    <div
+                      className="sb-seg"
+                      role="radiogroup"
+                      aria-label="Tab overflow"
+                      aria-disabled={!tabsEnabled}
+                      aria-describedby="tab-layout-description"
+                    >
+                      {(['wrap', 'scroll'] as const).map((layout) => (
+                        <button
+                          key={layout}
+                          type="button"
+                          role="radio"
+                          aria-checked={tabLayout === layout}
+                          disabled={!tabsEnabled}
+                          className={`sb-seg-btn${tabLayout === layout ? ' active' : ''}`}
+                          onClick={() => onSetTabLayout(layout)}
+                        >
+                          {layout === 'wrap' ? 'Wrap' : 'Scroll'}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="sb-setting-desc" id="tab-layout-description">
+                      Wrap tabs onto multiple rows, or scroll horizontally in a single row.
+                      {!tabsEnabled && ' Enable Tabs and split view to change this setting.'}
+                    </div>
+                  </div>
                 </div>
               </>
             ) : page === 'application' ? (
               <>
                 <div className="sb-modal-group">
                   <UpdatesSetting updates={updates} />
+                </div>
+                <div className="sb-modal-group">
+                  <div className="sb-setting">
+                    <div className="sb-setting-title">What’s new</div>
+                    <button className="sb-setting-btn sb-setting-btn-start" onClick={onShowWhatsNew}>
+                      Show what’s new
+                    </button>
+                    <div className="sb-setting-desc">
+                      Tabs and split view, the compact and folder sidebar, and the bell.
+                    </div>
+                  </div>
                 </div>
                 <div className="sb-modal-group">
                   <div className="sb-setting">
@@ -533,7 +625,7 @@ export default function SettingsModal({
                         aria-valuetext={String(maxLiveSessions)}
                         style={{ '--pct': `${sliderPos}%` } as CSSProperties}
                       />
-                      <span className="sb-slider-value mono">{maxLiveSessions}</span>
+                      <span className="sb-slider-value">{maxLiveSessions}</span>
                       <button
                         type="button"
                         className="sb-slider-reset"
@@ -617,43 +709,8 @@ export default function SettingsModal({
                       ))}
                     </div>
                     <div className="sb-setting-desc">
-                      Skip the agent picker: <kbd className="sb-kbd">⌘N</kbd> and the{' '}
-                      <strong>+</strong> button start new conversations with this agent.
-                    </div>
-                  </div>
-                  <div className="sb-setting">
-                    <div className="sb-setting-title">Default directory</div>
-                    <div className="sb-setting-folder">
-                      {defaultDir ? (
-                        <>
-                          <Folder size={15} className="sb-setting-folder-icon" />
-                          <div className="sb-setting-folder-info">
-                            <span className="sb-setting-folder-name truncate">{basename(defaultDir)}</span>
-                            <span className="sb-setting-folder-path mono truncate">{defaultDir}</span>
-                          </div>
-                          <div className="sb-setting-actions">
-                            <button className="sb-setting-btn" onClick={onChooseDefaultDir}>
-                              Change…
-                            </button>
-                            <button className="sb-setting-btn" onClick={onClearDefaultDir}>
-                              Clear
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <span className="sb-setting-folder-empty">No folder chosen yet.</span>
-                          <button className="sb-setting-btn" onClick={onChooseDefaultDir}>
-                            Choose…
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <div className="sb-setting-desc">
-                      Skip folder selection: <kbd className="sb-kbd">⌘N</kbd> and the{' '}
-                      <strong>+</strong> button start new conversations in this location
-                      automatically. Right-click the <strong>+</strong> button to choose a specific
-                      folder.
+                      Preselects this agent when you start a new conversation with{' '}
+                      <kbd className="sb-kbd">⌘N</kbd> or a folder&apos;s pencil.
                     </div>
                   </div>
                 </div>
@@ -665,63 +722,6 @@ export default function SettingsModal({
                     <Warning size={16} />
                     <span>Beta features are experimental and subject to change.</span>
                   </div>
-                  <div className="sb-setting-title">Tabs and split view</div>
-                  <div className="sb-seg" role="radiogroup" aria-label="Tabs and split view">
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={tabsEnabled}
-                      className={`sb-seg-btn${tabsEnabled ? ' active' : ''}`}
-                      onClick={() => onSetTabsEnabled(true)}
-                    >
-                      On
-                    </button>
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={!tabsEnabled}
-                      className={`sb-seg-btn${!tabsEnabled ? ' active' : ''}`}
-                      onClick={() => onSetTabsEnabled(false)}
-                    >
-                      Off
-                    </button>
-                  </div>
-                  <div className="sb-setting-desc">
-                    Keep several conversations open at once in a tab strip, split the view into two
-                    panes, and open conversations in their own windows. Clicking a conversation
-                    previews it in a replaceable tab; double-clicking or resuming it keeps that tab.
-                    Turn this off to show one conversation at a time.
-                  </div>
-                </div>
-                <div className="sb-setting" aria-disabled={!tabsEnabled}>
-                  <div className="sb-setting-title">Tab layout</div>
-                  <div
-                    className="sb-seg"
-                    role="radiogroup"
-                    aria-label="Tab layout"
-                    aria-disabled={!tabsEnabled}
-                    aria-describedby="tab-layout-description"
-                  >
-                    {(['wrap', 'scroll'] as const).map((layout) => (
-                      <button
-                        key={layout}
-                        type="button"
-                        role="radio"
-                        aria-checked={tabLayout === layout}
-                        disabled={!tabsEnabled}
-                        className={`sb-seg-btn${tabLayout === layout ? ' active' : ''}`}
-                        onClick={() => onSetTabLayout(layout)}
-                      >
-                        {layout === 'wrap' ? 'Wrap' : 'Scroll'}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="sb-setting-desc" id="tab-layout-description">
-                    Wrap tabs onto multiple rows, or scroll horizontally in a single row.
-                    {!tabsEnabled && ' Enable Tabs and split view to change this setting.'}
-                  </div>
-                </div>
-                <div className="sb-setting">
                   <div className="sb-setting-title">Liveness dot color</div>
                   <div className="sb-dotcolor-control">
                     <input
@@ -756,25 +756,29 @@ export default function SettingsModal({
                 </div>
               </div>
             ) : page === 'shortcuts' ? (
-              groupsFor(tabsEnabled).map((group) => (
-                <div className="sb-modal-group" key={group.title}>
-                  <div className="sb-modal-group-label">{group.title}</div>
-                  <div className="sb-shortcuts">
-                    {group.items.map((s) => (
-                      <div className="sb-shortcut" key={s.desc}>
-                        <div className="sb-shortcut-keys">
-                          {s.keys.map((k) => (
-                            <kbd className="sb-kbd" key={k}>
-                              {renderKeyLabel(k)}
-                            </kbd>
-                          ))}
+              // Columns on a wrapper, not the page: the page is the scroll container, and columns on a
+              // box of fixed height add columns sideways instead of letting it scroll down.
+              <div className="sb-shortcut-columns">
+                {groupsFor(tabsEnabled).map((group) => (
+                  <div className="sb-modal-group" key={group.title}>
+                    <div className="sb-modal-group-label">{group.title}</div>
+                    <div className="sb-shortcuts">
+                      {group.items.map((s) => (
+                        <div className="sb-shortcut" key={s.desc}>
+                          <div className="sb-shortcut-keys">
+                            {s.keys.map((k) => (
+                              <kbd className="sb-kbd" key={k}>
+                                {renderKeyLabel(k)}
+                              </kbd>
+                            ))}
+                          </div>
+                          <div className="sb-shortcut-desc">{s.desc}</div>
                         </div>
-                        <div className="sb-shortcut-desc">{s.desc}</div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             ) : (
               <div className="sb-faq">
                 {FAQ.map((item) => (

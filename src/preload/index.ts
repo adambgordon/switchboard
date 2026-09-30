@@ -38,8 +38,13 @@ const api: SwitchboardApi = {
   codeContextMenu: (code) => ipcRenderer.send(IPC.codeContextMenu, code),
   tabContextMenu: (opts) => ipcRenderer.invoke(IPC.tabContextMenu, opts),
   onMenuCloseTab: (cb) => subscribe(IPC.menuCloseTab, cb as never),
+  onMenuReopenTab: (cb) => subscribe(IPC.menuReopenTab, cb as never),
   closeWindow: () => ipcRenderer.send(IPC.windowClose),
   openConversationWindow: (payload) => ipcRenderer.send(IPC.windowOpenConversation, payload),
+  onMenuNewConversation: (cb) => subscribe(IPC.menuNewConversation, cb as never),
+  onMenuNewWindow: (cb) => subscribe(IPC.menuNewWindow, cb as never),
+  setTabsMenuEnabled: (enabled) => ipcRenderer.send(IPC.menuSetTabsEnabled, enabled),
+  openNewWindow: (preselect, agent) => ipcRenderer.send(IPC.windowOpenNew, preselect, agent),
   tabDragBegin: (payload) => ipcRenderer.send(IPC.tabDragBegin, payload),
   tabDragHover: () => ipcRenderer.send(IPC.tabDragHover),
   tabDragDrop: () => ipcRenderer.invoke(IPC.tabDragDrop),
@@ -135,7 +140,18 @@ function readWindowInit(): WindowInit {
           : sessionIds[0] ?? null,
       restoredTabs: sanitizeTabLayout(parsed.restoredTabs),
       primary: parsed.primary === true,
-      collapseRail: parsed.collapseRail === true
+      collapseRail: parsed.collapseRail === true,
+      ...(parsed.newConversation && typeof parsed.newConversation === 'object'
+        ? {
+            newConversation: {
+              preselect:
+                typeof parsed.newConversation.preselect === 'string' ? parsed.newConversation.preselect : null,
+              ...(parsed.newConversation.agent === 'claude' || parsed.newConversation.agent === 'codex'
+                ? { agent: parsed.newConversation.agent }
+                : {})
+            }
+          }
+        : {})
     }
   } catch {
     return {

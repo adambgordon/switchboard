@@ -19,6 +19,7 @@ import { readdir } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
+  CONVERSATION_MENU_ACTIONS,
   IPC,
   type AgentAvailability,
   type AgentKind,
@@ -30,7 +31,8 @@ import {
   type PtyState,
   type TabDragPayload,
   type TabDropOutcome,
-  type TabMenuAction,
+  type ConversationMenuAction,
+  type ConversationMenuEntry,
   type TabOpenMode,
   type UpdateRunState,
   type WindowInit
@@ -48,6 +50,7 @@ import {
 } from './tabOwnership'
 import { transferPty } from './pty/transfer'
 import { indexConversations, type MetaCache } from './sessions/indexer'
+import { ProjectRoots } from './sessions/projectRoot'
 import { parseTranscript } from './sessions/parser'
 import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
 import { appendCustomTitle } from './sessions/rename'
@@ -55,6 +58,7 @@ import { renameCodexThread } from './sessions/codexRename'
 import { SessionWatcher } from './sessions/watcher'
 import { PtyManager } from './pty/manager'
 import { syncTrafficLights } from './trafficLights'
+import { setTabsMenuEnabled } from './menu'
 import { buildInfo, checkForUpdates, runUpdate, relaunchForUpdate } from './updater'
 import { singleFlight } from './updater-core'
 import { UpdateChecks } from './updateChecks'
@@ -429,6 +433,14 @@ function emitActive(): void {
  *  re-parses only the transcript(s) actually changing rather than re-reading the whole index each
  *  pass (387 MB+ of transcripts on a busy machine). See indexer's MetaCache / extractWithCache. */
 const metaCache: MetaCache = new Map()
+/** The one project-root resolver, shared by the index and the PTY manager so a conversation's row
+ *  and its live terminal always agree on its project. Created on first use rather than at import:
+ *  the userData path depends on the app name, which is set after this module loads. */
+let projectRoots: ProjectRoots | null = null
+function getProjectRoots(): ProjectRoots {
+  projectRoots ??= new ProjectRoots({ dir: app.getPath('userData') })
+  return projectRoots
+}
 /** Signature of the last broadcast group tree, so reindexAndBroadcast can skip pushing an identical
  *  snapshot — the poll's 2.5s idle tail, Codex's flat (lazy-flush) periods, and the watcher's
  *  post-write re-fire after a rename all otherwise re-broadcast unchanged data. */
@@ -455,7 +467,12 @@ function broadcast(channel: string, ...args: unknown[]): void {
 }
 
 const conversationIndex = new LatestTask(
-  async () => retainHiddenSessions(await indexConversations(PROJECTS_ROOT, undefined, metaCache), hiddenSessionIds),
+  async () => {
+    const resolveRoots = (cwds: readonly string[], missing: ReadonlySet<string>) =>
+      getProjectRoots().resolveAll(cwds, missing)
+    const snapshot = await indexConversations(PROJECTS_ROOT, undefined, metaCache, { resolveRoots })
+    return retainHiddenSessions(snapshot, hiddenSessionIds)
+  },
   (snapshot) => {
     const { groups } = snapshot
     if (snapshot.hiddenSessionIds.length !== hiddenSessionIds.size) {
@@ -475,7 +492,7 @@ const conversationIndex = new LatestTask(
     // zero-message / subagent rollouts can never be bind targets. This both binds a terminal that had
     // no identity and corrects one that has since drifted onto another conversation; either emits
     // `bound` + `active-changed`, so the row re-labels in place and the rollout isn't also shown as a
-    // separate Recent conversation.
+    // separate row.
     //
     // Deliberately NOT awaited, and deliberately ABOVE the identical-groups early return: the probe
     // shells out to lsof, which must never delay the session-list broadcast, and a pass whose groups
@@ -542,6 +559,23 @@ const transcriptLoader = new TranscriptLoader(
     ? parseTranscript(source.path)
     : parseCodexTranscript(source.path)
 )
+
+/**
+ * A terminal that ended having written nothing leaves no conversation behind — a new session stopped
+ * before its first message — so Back/Forward must step over its stops, as they do an unbound
+ * placeholder's. The index drops empty conversations, so one it lists has messages; one it does not is
+ * read fresh, because the index trails a first message by up to a second.
+ */
+function retireIfEmpty(sessionId: string): void {
+  const listed = conversationIndex.peek()?.groups.some((g) => g.conversations.some((c) => c.sessionId === sessionId))
+  if (listed) return
+  void transcriptLoader.load(sessionId, `exit:${Date.now()}`).then(
+    (t) => {
+      if (!t || t.messages.length === 0) navigation.retire(sessionId)
+    },
+    () => {}
+  )
+}
 
 /**
  * Which agent CLIs are launchable, probed via the LOGIN+INTERACTIVE shell (`$SHELL -lic`) — the same
@@ -641,66 +675,37 @@ export function popCodeContextMenu(code: string, win: BrowserWindow | null): voi
 }
 
 /**
- * Pop the NATIVE context menu for a tab and resolve with what was chosen (null if dismissed).
- * Native for the same reasons as the link and code menus above, plus one specific to a strip: an OS
- * menu isn't anchored to a DOM node, so the strip scrolling out from under it cannot close it.
+ * Pop the NATIVE context menu for a tab and resolve with what was chosen (null if dismissed). The
+ * renderer builds the list (conversationMenu) — the same one the rail row's menu renders — so this only
+ * turns it into menu items. Native for the same reasons as the link and code menus above, plus one
+ * specific to a strip: an OS menu isn't anchored to a DOM node, so the strip scrolling out from under
+ * it cannot close it. A destructive entry cannot be colored in a native menu; its label says enough.
  *
  * Resolution is settle-once. A click resolves immediately with its action; the close callback
  * resolves `null` only if nothing was picked, and is deferred a tick because the ordering of a menu
  * item's `click` against the popup's close callback is not something to rely on.
  *
- * No accelerator is attached to Close Tab here even though ⌘W performs it. A popup-menu accelerator
+ * No accelerator is attached to Close tab here even though ⌘W performs it. A popup-menu accelerator
  * would register a second binding for a chord the File menu already owns; the label alone is enough,
  * and the item is reached by pointer anyway.
  */
 export function popTabContextMenu(
-  opts: {
-    count: number
-    closeOthers: boolean
-    details: boolean
-    splitRight: boolean
-    moveRight: boolean
-    moveLeft: boolean
-    newWindow: boolean
-  },
+  entries: ConversationMenuEntry[],
   win: BrowserWindow | null
-): Promise<TabMenuAction | null> {
+): Promise<ConversationMenuAction | null> {
   return new Promise((resolve) => {
     let settled = false
-    const finish = (action: TabMenuAction | null): void => {
+    const finish = (action: ConversationMenuAction | null): void => {
       if (settled) return
       settled = true
       resolve(action)
     }
-    const pick = (action: TabMenuAction) => () => finish(action)
-    // Every label counts its targets, so a command that will act on a whole selection says so. The
-    // suffix is empty for one tab, which keeps the ordinary menu reading exactly as it did.
-    const n = Math.max(1, opts.count)
-    const many = n > 1
-    const tabs = many ? `${n} Tabs` : 'Tab'
-    const items: MenuItemConstructorOptions[] = [
-      { label: `Close ${tabs}`, click: pick('close') }
-    ]
-    if (opts.closeOthers) items.push({ label: 'Close Other Tabs', click: pick('closeOthers') })
-    // Where a tab can be sent. Hidden rather than disabled when it does not apply, matching `details`
-    // and the row menu: a control that silently does nothing is worse than an absent one. The label
-    // says what will actually happen — "Split" only when a pane is about to be created, "Move" when
-    // both already exist.
-    if (opts.splitRight || opts.moveRight || opts.moveLeft || opts.newWindow) {
-      items.push({ type: 'separator' })
-      if (opts.splitRight) items.push({ label: 'Split Right', click: pick('splitRight') })
-      if (opts.moveRight) items.push({ label: 'Move Right', click: pick('moveRight') })
-      if (opts.moveLeft) items.push({ label: 'Move Left', click: pick('moveLeft') })
-      if (opts.newWindow) {
-        // Singular window either way: a group moves into ONE new window, not one each.
-        items.push({
-          label: many ? `Move ${n} Tabs to New Window` : 'Move to New Window',
-          click: pick('newWindow')
-        })
-      }
-    }
-    if (opts.details) {
-      items.push({ type: 'separator' }, { label: 'Session Details…', click: pick('details') })
+    const items: MenuItemConstructorOptions[] = entries.map((e) =>
+      'separator' in e ? { type: 'separator' } : { label: e.label, click: () => finish(e.action) }
+    )
+    if (items.length === 0) {
+      finish(null)
+      return
     }
     Menu.buildFromTemplate(items).popup({
       ...(win ? { window: win } : {}),
@@ -709,9 +714,32 @@ export function popTabContextMenu(
   })
 }
 
+/** A menu list from a renderer, kept only if every entry is one this app defines. */
+function parseMenuEntries(value: unknown): ConversationMenuEntry[] | null {
+  if (!Array.isArray(value)) return null
+  const known: readonly string[] = CONVERSATION_MENU_ACTIONS
+  const out: ConversationMenuEntry[] = []
+  for (const e of value) {
+    if (e && typeof e === 'object' && (e as { separator?: unknown }).separator === true) out.push({ separator: true })
+    else if (
+      e &&
+      typeof e === 'object' &&
+      typeof (e as { label?: unknown }).label === 'string' &&
+      known.includes((e as { action?: unknown }).action as string)
+    ) {
+      out.push({ action: (e as { action: ConversationMenuAction }).action, label: (e as { label: string }).label })
+    } else return null
+  }
+  return out
+}
+
 export function registerIpc(): void {
   mgr = new PtyManager({
-    claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') }
+    claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') },
+    // A resumed conversation is always indexed, so its row takes its folder from the index, never from
+    // its terminal — and its cwd may sit on a volume the index could not verify. So only a new session
+    // walks; a resume reads what the index already resolved, without touching the disk.
+    resolveProjectRoot: (cwd, origin) => getProjectRoots().resolve(cwd, origin === 'new').root
   })
   mgr.on('data', (ptyId: string, data: string) =>
     sendToWindow(ptyOwner.get(ptyId) ?? null, IPC.ptyData, ptyId, data)
@@ -725,13 +753,14 @@ export function registerIpc(): void {
     boundTabReservations.discardPty(ptyId)
     ptyOwner.delete(ptyId)
     if (provisional) navigation.retire(sessionId)
+    else retireIfEmpty(sessionId)
     broadcast(IPC.ptyExit, ptyId, code)
   })
   mgr.on('active-changed', () => emitActive())
   // A Codex PTY's sessionId changed. `kind` must be forwarded: it tells the renderer whether this
   // replaced a placeholder (everything keyed to it migrates) or corrected a terminal onto a different
   // real conversation (CONVERSATION-owned state — persisted seen/unread, earlier history stops —
-  // stays put, while terminal-owned state — selection, current stop, surface, Live slot — follows the
+  // stays put, while terminal-owned state — selection, current stop, surface, rail position — follows the
   // terminal). See PtyBindKind.
   mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) => {
     boundTabReservations.discardPty(ptyId)
@@ -813,8 +842,8 @@ export function registerIpc(): void {
     return forWindow([st], e.sender.id)[0]
   })
   ipcMain.handle(IPC.ptyStartNew, (e, cwd: string, agent: AgentKind) => {
-    // Guard a stale default folder: if it's been deleted/renamed since it was chosen in Preferences,
-    // reject so the renderer can fall back to the chooser instead of node-pty throwing on a bad cwd.
+    // Guard a folder that is gone — a rail folder's agent logo can point at a deleted or renamed
+    // directory: reject, so the renderer falls back to the chooser instead of node-pty throwing on it.
     if (!existsSync(cwd)) throw new Error(`Directory no longer exists: ${cwd}`)
     const st = mgr!.startNew(cwd, agent, (spawned) => {
       ptyOwner.set(spawned.ptyId, e.sender.id)
@@ -885,21 +914,10 @@ export function registerIpc(): void {
   ipcMain.on(IPC.codeContextMenu, (e, code: string) =>
     popCodeContextMenu(code, BrowserWindow.fromWebContents(e.sender))
   )
-  ipcMain.handle(
-    IPC.tabContextMenu,
-    (
-      e,
-      opts: {
-        count: number
-        closeOthers: boolean
-        details: boolean
-        splitRight: boolean
-        moveRight: boolean
-        moveLeft: boolean
-        newWindow: boolean
-      }
-    ) => popTabContextMenu(opts, BrowserWindow.fromWebContents(e.sender))
-  )
+  ipcMain.handle(IPC.tabContextMenu, (e, value: unknown) => {
+    const entries = parseMenuEntries(value)
+    return entries ? popTabContextMenu(entries, BrowserWindow.fromWebContents(e.sender)) : null
+  })
   // ---- dragging a tab between windows ----
   // The referee. While a mouse button is held the OS delivers every move to the window the drag began
   // in, so no other window can see the pointer over itself; main is the only party that can. It reads
@@ -1062,6 +1080,23 @@ export function registerIpc(): void {
     })
     if (opened) claimTabsForWindow(opened.webContents.id, payload.sessionIds)
   })
+  // ⇧⌘N: a fresh window onto the new-conversation chooser, with the rail hidden like any other window
+  // beyond the first — ⌘B brings it back. `preselect` is the sender's folder, so "new window here" starts
+  // where the user was.
+  // Given an agent too, the window starts that conversation rather than offering the chooser.
+  ipcMain.on(IPC.windowOpenNew, (_e, preselect: unknown, agent: unknown) => {
+    const dir = typeof preselect === 'string' ? preselect : null
+    openWindow?.({
+      sessionIds: [],
+      activeSessionId: null,
+      restoredTabs: null,
+      primary: false,
+      collapseRail: true,
+      newConversation:
+        dir !== null && (agent === 'claude' || agent === 'codex') ? { preselect: dir, agent } : { preselect: dir }
+    })
+  })
+  ipcMain.on(IPC.menuSetTabsEnabled, (_e, enabled: unknown) => setTabsMenuEnabled(enabled === true))
   // Keep the OS window background in lockstep with the renderer's theme, so a live window resize
   // fills newly-exposed regions with the current --paper instead of flashing the other theme.
   ipcMain.on(IPC.windowSetBackgroundColor, (e, color: string) =>

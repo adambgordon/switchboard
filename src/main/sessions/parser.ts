@@ -24,7 +24,7 @@ import { isConversationalMessage } from '../../shared/messageCount'
 /** Max characters for a cleaned title before we truncate. */
 const TITLE_MAX = 80
 /** Max characters for the preview line. */
-const PREVIEW_MAX = 200
+const PREVIEW_MAX = 320
 
 /** Split raw file text into non-empty lines, tolerant of CRLF and trailing newline. */
 function splitLines(text: string): string[] {
@@ -205,10 +205,22 @@ export function cleanTitle(raw: string): string {
   return s
 }
 
-/** Collapse arbitrary text to a trimmed, single-line preview, capped at `max`. */
-function toPreview(raw: string, max = PREVIEW_MAX): string {
+/** How far back from the cap a preview may be cut to end on a whole word rather than mid-word. */
+const PREVIEW_WORD_BACKOFF = 30
+
+/**
+ * Collapse arbitrary text to a trimmed, single-line preview of at most `max` characters. A preview that
+ * had to be cut says so with a trailing `…` — inside the budget — and ends on a word break when one is
+ * close enough to the cap, so it never reads as a complete sentence or ends on half a word. Shared by
+ * both agents' parsers.
+ */
+export function toPreview(raw: string, max = PREVIEW_MAX): string {
   const oneLine = raw.replace(/\s+/g, ' ').trim()
-  return oneLine.length > max ? oneLine.slice(0, max).trimEnd() : oneLine
+  if (oneLine.length <= max) return oneLine
+  let cut = oneLine.slice(0, max - 1)
+  const space = cut.lastIndexOf(' ')
+  if (space > 0 && space >= cut.length - PREVIEW_WORD_BACKOFF) cut = cut.slice(0, space)
+  return `${cut.trimEnd()}…`
 }
 
 /** Inputs collected during a scan, fed to {@link resolveTitle}. */
@@ -565,11 +577,13 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
   let text: string
   let mtime: number
   let sizeBytes: number
+  let birthtimeMs: number
   try {
     const [content, stats] = await Promise.all([readFile(filePath, 'utf8'), stat(filePath)])
     text = content
     mtime = stats.mtimeMs
     sizeBytes = stats.size
+    birthtimeMs = stats.birthtimeMs
   } catch {
     return null
   }
@@ -730,6 +744,8 @@ export async function extractMeta(filePath: string): Promise<ConversationMeta | 
     cacheReadTokens,
     contextTokens,
     firstActivityAt,
+    // A filesystem that does not track creation reports 0; absent reads unambiguously as unknown.
+    ...(birthtimeMs > 0 ? { birthtimeMs } : {}),
     turnState,
     turnEndedAt,
     lastActivityAt,

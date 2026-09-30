@@ -94,146 +94,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* .sb-newwrap is the positioned anchor for the New popover. The "+" trigger now lives in the
-   rail head (see rail.css `.sb-rail-new-btn` / `.sb-rail-newwrap`); the old title-bar pill is gone. */
-.sb-newwrap {
-  position: relative;
-  -webkit-app-region: no-drag;
-}
-
-/* ---- new-conversation popover ---- */
-/* Dismiss backdrop (see NewConversationMenu): transparent, full-window, and no-drag so it
-   catches the click-away even over the draggable title bar — which swallows DOM mouse events.
-   z-index sits just below the menu (100) and above the title bar's own context (50). */
-.sb-newmenu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  -webkit-app-region: no-drag;
-}
-.sb-newmenu {
-  position: absolute;
-  top: calc(100% + 9px);
-  right: 0;
-  width: 330px;
-  background: var(--paper-raised);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-pop);
-  padding: 8px;
-  z-index: 100;
-  transform-origin: top right;
-  animation: sb-fade-up var(--dur) var(--ease);
-}
-.sb-newmenu-head {
-  padding: 6px 8px 9px;
-  /* Hanken, sentence case — chrome, not data. Follows .sb-rail-section-label rather than the
-     mono/caps `.label-caps` utility, which is reserved for data labels. `.label-caps` is dropped
-     from the element entirely rather than overridden here, so this doesn't depend on stylesheet
-     order to win. Deliberately quieter than .sb-rail-section-label: this is a caption over the
-     folder list, not a structural header competing with it, so it sits at --ink-faint rather than
-     --ink-soft and at 400 rather than 600. (--ink-ghost is the next step down but means
-     "disabled/placeholder" — using it here would make a live label read as inert.) 400 is a real
-     loaded cut (see main.tsx), not a synthesized weight. */
-  font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  font-weight: 400;
-  color: var(--ink-faint);
-}
-.sb-newmenu-list {
-  max-height: 300px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-/* The New-menu list's auto-hiding scrollbar comes from the shared .sb-autoscroll rules (global.css). */
-.sb-newmenu-empty {
-  padding: 8px;
-  color: var(--ink-faint);
-  font-size: var(--text-sm);
-}
-.sb-newmenu-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 8px;
-  border-radius: var(--r-sm);
-  text-align: left;
-  width: 100%;
-  transition: background var(--dur-fast);
-}
-.sb-newmenu-item:hover {
-  background: var(--paper-hover);
-}
-.sb-newmenu-folder {
-  color: var(--ink-faint);
-  flex-shrink: 0;
-}
-.sb-newmenu-name {
-  font-weight: 600;
-  font-size: var(--text-sm);
-  flex-shrink: 0;
-  max-width: 130px;
-}
-.sb-newmenu-path {
-  color: var(--ink-ghost);
-  font-size: var(--text-xs);
-  flex: 1;
-  text-align: right;
-}
-.sb-newmenu-other {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 8px;
-  margin-top: 6px;
-  /* --rule-raised, not --rule: dark --rule (#2b2b2b) against the raised menu surface
-     (--paper-raised #2a2a2a) is a one-value difference — invisible. The token resolves to plain
-     --rule in light (where the raised surface is white and --rule reads fine) and to the stronger
-     step in dark; see its definition in tokens.css. */
-  border-top: 1px solid var(--rule-raised);
-  color: var(--ink-soft);
-  font-weight: 500;
-  font-size: var(--text-sm);
-}
-.sb-newmenu-other:hover {
-  color: var(--ink);
-}
-/* The keyboard cursor — the focused row. Uses :focus (NOT :focus-visible) so it shows CONSISTENTLY,
-   including the programmatic focus when the menu opens (Chromium's focus-visible heuristic fires
-   unreliably for programmatic focus, so the highlight flickered in/out on ⌘N). Suppress the global
-   cobalt ring so a focused menu item never reads as "alive". */
-.sb-newmenu-item:focus,
-.sb-newmenu-other:focus {
-  outline: none;
-  color: var(--ink);
-  background: var(--paper-hover);
-}
-/* The default folder opens pre-selected and accented — a darker fill plus a border — but ONLY while
-   it's the focused row. Move the cursor off it and it drops back to a plain row (no lingering
-   highlight); whatever row you land on shows the neutral cursor above. */
-.sb-newmenu-item.selected:focus {
-  background: var(--paper-active);
-  box-shadow: inset 0 0 0 1px var(--rule-strong);
-}
-/* Agent segment at the top of the New menu — the shared .sb-seg pill, stretched full-width with the
-   two agents splitting it evenly, each showing its grayscale logo + label. Not rendered at all when
-   only one agent is launchable, so single-agent users get the unchanged directory menu. */
-.sb-newmenu-agents {
-  display: flex;
-  width: 100%;
-  margin-bottom: 8px;
-}
-.sb-newmenu-agent {
-  flex: 1;
-  justify-content: center;
-}
-.sb-newmenu-agent:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
 
 /* ---- buttons ---- */
 .sb-btn-resume {
@@ -343,8 +203,8 @@
   background: var(--dot);
 }
 /* Nothing unread: either a finished turn the user has seen, or a new unlinked terminal with no
-   messages yet. The unlinked state remains distinct in behavior and the Live tally, but shares the
-   exact hollow treatment because neither row has unseen conversation content. */
+   messages yet. The unlinked state remains distinct in behavior, but shares the exact hollow
+   treatment because neither row has unseen conversation content. */
 .sb-dot.quiet,
 .sb-dot.unlinked {
   background: transparent;
@@ -470,6 +330,120 @@ body.sb-resizing .sb-pane {
   transform: translateY(-50%);
 }
 
+/* ---- the needs-you bell ---- */
+/* Its dot is a row's dot, class for class (rippling = asking, solid = unread), shrunk and pinned to the
+   bell's corner where the gear carries its update dot. */
+.sb-bell .sb-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  pointer-events: none;
+}
+/* The rail's surface, not the pane's: it lists rows from the rail, so it wears the rail's paper and
+   the rail's hover. */
+.sb-ctxmenu.sb-bell-panel {
+  -webkit-app-region: no-drag; /* its top edge overlaps the title bar's drag region */
+  width: 320px;
+  padding: 0 4px 4px;
+  background: var(--paper-sunken);
+}
+/* All caught up: the same width as a list, greyed, and with nothing to press. */
+.sb-bell-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 22px 0 18px;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+.sb-bell-empty svg {
+  color: var(--ink-ghost);
+}
+.sb-bell-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: 9px 10px 7px;
+}
+.sb-bell-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink);
+}
+.sb-bell-allread {
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  transition: color var(--dur-fast) var(--ease);
+}
+.sb-bell-allread:hover {
+  color: var(--ink);
+}
+.sb-bell-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.sb-bell-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast);
+}
+.sb-bell-item:hover {
+  background: var(--rail-hover);
+}
+.sb-bell-open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px 6px 10px;
+  text-align: left;
+}
+.sb-bell-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sb-bell-name,
+.sb-bell-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Everything listed here needs you, so every title carries the rail's attention weight (.sb-row.attention). */
+.sb-bell-name {
+  font-size: var(--text-sm);
+  font-weight: 800;
+  color: var(--ink);
+}
+.sb-bell-meta {
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+/* Mark read without going there: hidden until its row is hovered, so the list reads as a list. */
+.sb-bell-read {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: 6px;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  color: var(--ink-ghost);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast);
+}
+.sb-bell-item:hover .sb-bell-read {
+  opacity: 1;
+}
+.sb-bell-read:hover {
+  color: var(--ink);
+  background: var(--paper-active);
+}
+
 /* ---- keyboard-shortcuts modal ---- */
 .sb-modal-scrim {
   position: fixed;
@@ -545,7 +519,7 @@ body.sb-resizing .sb-pane {
   font-size: var(--text-md);
   font-weight: 700;
   color: var(--ink);
-  padding: 6px 0;
+  padding: 2px 0 4px;
 }
 .sb-shortcuts {
   display: flex;
@@ -555,7 +529,7 @@ body.sb-resizing .sb-pane {
   display: flex;
   align-items: center;
   gap: var(--s4);
-  padding: var(--s2) 0;
+  padding: 6px 0;
   border-bottom: 1px solid var(--rule-soft);
 }
 .sb-shortcut:last-child {
@@ -586,14 +560,23 @@ body.sb-resizing .sb-pane {
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--ink-soft);
-  background: var(--paper-sunken);
-  border: 1px solid var(--rule-strong);
+  /* A cap a step below the page, a quiet border, and the darkest line as its bottom edge — the depth
+     of a real key. Tuned per theme, below. */
+  background: #f2f2f2;
+  border: 1px solid #e0e0e0;
   border-radius: var(--r-sm);
-  box-shadow: 0 1px 0 var(--rule-strong);
+  box-shadow: 0 1px 0 #c4c4c4;
 }
 /* ⌘0: a bare zero in --font-keys (SF Pro) is nearly an "O". Render just the digit in IBM Plex Mono
    (--font-mono, already loaded for the terminal), whose zero is disambiguated by design — a real
    glyph, so it stays centered at any zoom (unlike a CSS overlay, which subpixel-drifts). */
+/* Dark: the same rule, so the edge is black. A gray edge under a dark cap reads as lit from below —
+   depth drawn upside down. */
+:root[data-theme='dark'] .sb-kbd {
+  background: #151515;
+  border-color: #333333;
+  box-shadow: 0 1px 0 #000000;
+}
 .sb-kbd-zero {
   font-family: var(--font-mono);
   /* Plex Mono's digit renders a touch smaller than the SF keycap text at the same px — nudge it up
@@ -603,7 +586,7 @@ body.sb-resizing .sb-pane {
 
 /* ---- settings modal: left nav + page (selection is INK, never cobalt — two-accent invariant) ---- */
 .sb-modal-settings {
-  width: 760px;
+  width: 852px;
 }
 /* Mirror the main app's three surfaces so the modal reads as a little Switchboard: the head takes
    the title-bar's slightly-off-white (--paper), the nav takes the rail's sunken gray
@@ -611,19 +594,21 @@ body.sb-resizing .sb-pane {
    .sb-modal). */
 .sb-modal-settings .sb-modal-head {
   background: var(--paper-sunken);
+  /* As slim as the app's own title bar reads, and the title starts where the nav's labels do. */
+  padding: 7px 18px 7px 20px;
 }
-/* Fixed height, sized to the taller Shortcuts page, so the modal keeps one size + shape across both
-   pages (no resize when switching App ↔ Shortcuts). Sized so the full Shortcuts list (3 groups)
-   fits without scrolling; the App page top-aligns its settings in the extra room. The viewport cap
-   lets the page scroll on short windows (or if the shortcut list ever grows past this height). */
+/* Fixed height, so the modal keeps one size and shape across its pages (no resize when switching).
+   Sized so every page fits, the FAQ included and Shortcuts in its two columns; the shorter ones
+   top-align in the extra room, and a page that outgrows it scrolls within it. The viewport cap lets
+   any page scroll on a short window. */
 .sb-settings-body {
   display: flex;
-  height: 740px;
+  height: 800px;
   max-height: calc(100vh - 128px);
 }
 .sb-settings-nav {
   flex-shrink: 0;
-  width: 152px;
+  width: 184px;
   padding: 12px 10px;
   display: flex;
   flex-direction: column;
@@ -634,11 +619,16 @@ body.sb-resizing .sb-pane {
 }
 .sb-settings-nav-item {
   position: relative; /* anchors the Application row's attention dot (.sb-attn-dot-nav) */
+  display: flex;
+  align-items: center;
+  gap: 9px;
   width: 100%;
   padding: 7px 10px;
   border-radius: var(--r-sm);
   text-align: left;
-  font-size: var(--text-sm);
+  white-space: nowrap;
+  /* The rail's row-title size, so the modal's sidebar reads like the app's. */
+  font-size: var(--text-base);
   font-weight: 500;
   color: var(--ink-faint);
   transition: all var(--dur-fast) var(--ease);
@@ -763,6 +753,17 @@ body.sb-resizing .sb-pane {
   padding-bottom: 0;
   border-bottom: none;
 }
+/* Shortcuts in two columns, each group kept whole: the list is too long for one column at any height
+   the window allows. The columns balance by height, so the groups split evenly with tabs on or off. */
+.sb-shortcut-columns {
+  columns: 2;
+  column-gap: 28px;
+}
+.sb-shortcut-columns .sb-modal-group {
+  break-inside: avoid;
+  margin-top: 0;
+  padding-bottom: var(--s4);
+}
 .sb-setting .sb-seg,
 .sb-setting .sb-slider-control {
   align-self: flex-start;
@@ -815,45 +816,6 @@ body.sb-resizing .sb-pane {
   vertical-align: baseline;
 }
 
-/* the chosen-folder row */
-.sb-setting-folder {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  padding: 10px 12px;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  background: var(--paper-sunken);
-}
-.sb-setting-folder-icon {
-  flex-shrink: 0;
-  color: var(--ink-faint);
-}
-.sb-setting-folder-info {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-.sb-setting-folder-name {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-}
-.sb-setting-folder-path {
-  font-size: var(--text-xs);
-  color: var(--ink-faint);
-}
-.sb-setting-folder-empty {
-  flex: 1;
-  font-size: var(--text-sm);
-  color: var(--ink-faint);
-}
-.sb-setting-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-}
 .sb-setting-btn {
   padding: 5px 10px;
   font-size: var(--text-xs);
@@ -876,6 +838,94 @@ body.sb-resizing .sb-pane {
   cursor: default;
 }
 
+/* A lone button in a setting sits at its natural width, like the segmented controls. */
+.sb-setting-btn-start {
+  align-self: flex-start;
+}
+
+/* --- What's new (WhatsNewModal.tsx): an icon column beside each section, one ink button to leave --- */
+.sb-modal-whatsnew {
+  width: 560px;
+}
+.sb-whatsnew-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  padding: var(--s5) 22px var(--s2);
+}
+.sb-whatsnew-item {
+  display: flex;
+  gap: 14px;
+}
+.sb-whatsnew-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-md);
+  background: var(--paper-sunken);
+  color: var(--ink-soft);
+}
+.sb-whatsnew-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sb-whatsnew-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+.sb-whatsnew-desc {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+/* A link in running text, drawn like a transcript link. */
+.sb-whatsnew-link {
+  padding: 0;
+  font: inherit;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--rule-strong);
+  transition: text-decoration-color var(--dur-fast) var(--ease);
+}
+.sb-whatsnew-link:hover {
+  text-decoration-color: var(--ink);
+}
+.sb-whatsnew-action {
+  display: block;
+  margin-top: var(--s2);
+}
+.sb-whatsnew-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--s4) 22px 18px;
+}
+/* Closer to the head and the first section than the sections are to each other: an aside, not an item. */
+.sb-whatsnew-again {
+  margin: calc(-1 * var(--s2)) 0;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+/* Ink, not cobalt: cobalt means alive, and closing a dialog is not. */
+.sb-whatsnew-done {
+  padding: 6px 16px;
+  border-radius: var(--r-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--paper-raised);
+  background: var(--ink);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.sb-whatsnew-done:hover {
+  opacity: 0.85;
+}
+
 /* --- Updates (self-update control on the App page; see UpdatesSetting.tsx) --- */
 .sb-update {
   display: flex;
@@ -887,22 +937,21 @@ body.sb-resizing .sb-pane {
   align-items: center;
   gap: 12px;
 }
-/* version + status stacked at the RIGHT (version on top, smaller; status below, not bold); the single
-   action button — when there is one — sits at the left. */
-.sb-update-info {
-  margin-left: auto;
+/* The version rides the title line, at its right: what is installed, beside what the setting is.
+   Below it, the single action button — when there is one — and the status after it. */
+.sb-update-title {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-  text-align: right;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 .sb-update-version {
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
+  font-weight: 400;
   color: var(--ink-faint);
 }
 .sb-update-status {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--ink-soft);
   /* Always reserve one line so an empty status (the first check, before a result) doesn't collapse the
      version/status block and shift it as the text appears/disappears. */
@@ -972,12 +1021,10 @@ body.sb-resizing .sb-pane {
 /* ---- conversation-info modal (ConversationInfoModal): a compact info card whose heading IS the
    conversation title, edited IN PLACE (an input styled as the heading), plus a list of copyable
    detail rows. Reuses the shared .sb-modal scrim+card. Neutral ink throughout — the lone accent is
-   the static cobalt liveness dot in the Status row, and only when live (two-accent invariant).
-   `.sb-info-label` inherits its color/type from .label-caps; rules here are layout. ---- */
+   the static cobalt liveness dot in the Status row, and only when live (two-accent invariant). Set in
+   the Preferences register — sentence case throughout, a quiet key beside an ink value. ---- */
 .sb-modal-info {
   width: 460px;
-  /* the whole dialog reads in the terminal mono face (IBM Plex Mono) — title, labels, and values */
-  font-family: var(--font-mono);
 }
 /* head holds the editable title (heading-styled input) + auto-generate (rewind) + close */
 .sb-info-head {
@@ -1037,16 +1084,16 @@ body.sb-resizing .sb-pane {
 }
 .sb-info-row > .sb-info-label {
   flex-shrink: 0;
-  width: 112px; /* fits the longest key ("INPUT + CACHE") on one line */
+  width: 104px; /* fits the longest key ("Agent/Harness") on one line */
   white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
 }
 .sb-info-value {
   flex: 1;
   min-width: 0;
-  /* every value is mono now (terminal face, inherited) and ONE size — so e.g. Session ID and
-     Started read identically. The `.mono` Row prop no longer changes size, only intent. */
-  font-size: var(--text-xs);
-  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  color: var(--ink);
   /* values are selectable (the global body sets user-select:none) — highlight to copy */
   user-select: text;
   cursor: text;
@@ -1056,6 +1103,10 @@ body.sb-resizing .sb-pane {
   align-items: center;
   gap: 7px;
 }
+/* The Session ID: mono runs wide, so a step down keeps a whole UUID on the line beside its copy button. */
+.sb-info-value.mono {
+  font-size: var(--text-xs);
+}
 /* the per-row copy reveals on row hover (matches the transcript's hover-revealed copies);
    .copy-btn.copied keeps it visible through the check-flash even once the pointer leaves */
 .sb-info-copy {
@@ -1064,19 +1115,16 @@ body.sb-resizing .sb-pane {
 .sb-info-row:hover .sb-info-copy {
   opacity: 1;
 }
-/* sections — a caps header (mono + faint, via .label-caps) over a group of detail rows, so the
-   dialog reads as grouped blocks (Workspace · Activity · Tokens · Session) rather than one long list */
+/* sections — a header over a group of detail rows, so the dialog reads as grouped blocks
+   (Environment · Activity · Tokens · Session) rather than one long list */
 .sb-info-section + .sb-info-section {
-  margin-top: 14px;
+  margin-top: 18px;
 }
-/* Section headers are the dialog's chrome — UI face (Hanken), not the mono data below them.
-   --tracking-caps (0.14em) is tuned for mono, so loosen-to-tighten for Hanken caps. */
 .sb-info-section-label {
-  padding-bottom: 3px;
-  font-family: var(--font-ui);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--ink-soft);
+  padding-bottom: 4px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
 }
 
 /* live-sessions cap — a compact slider sitting flush-right in the setting head (where the stepper
@@ -1126,8 +1174,8 @@ body.sb-resizing .sb-pane {
   margin: var(--s2) 0;
 }
 .sb-dotcolor-input {
-  width: 26px;
-  height: 26px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 1px solid var(--rule-strong);
   border-radius: var(--r-sm);
@@ -1301,9 +1349,5 @@ body.sb-resizing .sb-pane {
 .sb-ctxmenu-sep {
   height: 1px;
   margin: 4px 6px;
-  /* --rule-raised, not --rule: on the raised menu surface a plain --rule hairline is ~invisible in
-     dark (--rule #2b2b2b vs --paper-raised #2a2a2a). This previously used --rule-strong for both
-     themes, which over-darkened light; the token splits them. Same treatment as .sb-newmenu-other —
-     see tokens.css. */
-  background: var(--rule-raised);
+  background: var(--rule);
 }

@@ -47,14 +47,12 @@ import type {
   TranscriptMessage
 } from '../../shared/types'
 import { isConversationalMessage } from '../../shared/messageCount'
-import { cleanTitle } from './parser'
+import { cleanTitle, toPreview } from './parser'
 
 /** Default Codex sessions root: `~/.codex/sessions`. */
 export function defaultCodexRoot(): string {
   return path.join(homedir(), '.codex', 'sessions')
 }
-
-const PREVIEW_MAX = 200
 
 function splitLines(text: string): string[] {
   const out: string[] = []
@@ -80,11 +78,6 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 
 function numField(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
-}
-
-function toPreview(raw: string, max = PREVIEW_MAX): string {
-  const oneLine = raw.replace(/\s+/g, ' ').trim()
-  return oneLine.length > max ? oneLine.slice(0, max).trimEnd() : oneLine
 }
 
 function safeStringify(v: unknown): string {
@@ -502,15 +495,19 @@ export async function extractCodexMeta(filePath: string): Promise<ConversationMe
   let text: string
   let mtime: number
   let sizeBytes: number
+  let birthtimeMs: number
   try {
     const [content, stats] = await Promise.all([readFile(filePath, 'utf8'), stat(filePath)])
     text = content
     mtime = stats.mtimeMs
     sizeBytes = stats.size
+    birthtimeMs = stats.birthtimeMs
   } catch {
     return null
   }
-  return extractCodexMetaFromText(text, sessionId, mtime, sizeBytes)
+  const meta = extractCodexMetaFromText(text, sessionId, mtime, sizeBytes)
+  // A filesystem that does not track creation reports 0; absent reads unambiguously as unknown.
+  return meta && birthtimeMs > 0 ? { ...meta, birthtimeMs } : meta
 }
 
 /** Recursively list rollout `*.jsonl` files under the (date-nested) Codex sessions root. */

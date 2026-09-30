@@ -31,11 +31,18 @@ function pixelsOf(image) {
     return [bytes[i + 2], bytes[i + 1], bytes[i]]
   } }
 }
-function profile(samples, background, rule) {
-  const coverage = samples.map(([position, color]) => ({
-    position, color,
-    coverage: Math.max(0, Math.min(1, (color[0] - background[0]) / (rule[0] - background[0])))
-  }))
+// A divider can separate two DIFFERENT surfaces — the active tab is lifted onto the pane's color, and
+// the last row's rule has the strip above it and whatever lies below the strip beneath it. Scoring
+// every pixel against the strip's color would count the other surface as stroke whenever it sits on
+// the rule's side of the strip, so each pixel is scored against the surface on its own side of the
+// divider's trailing edge (`split`, in device pixels): the first sample's color before it, the last
+// sample's after. A divider between two strip-colored tabs scores exactly as against the strip.
+function profile(samples, split, rule) {
+  const before = samples[0][1], after = samples[samples.length - 1][1]
+  const coverage = samples.map(([position, color]) => {
+    const surface = position + 1 > split ? after : before
+    return { position, color, coverage: Math.max(0, Math.min(1, (color[0] - surface[0]) / (rule[0] - surface[0]))) }
+  })
   return {
     samples: coverage,
     painted: coverage.filter(p => p.coverage > 0.5).map(p => p.position),
@@ -69,7 +76,7 @@ async function capture(label) {
   assert(verticalTab, label + ': fixture needs a visible vertical border')
   const borderX = verticalTab.right, borderY = Math.floor((verticalTab.top + 6) * scale)
   const fromX = Math.floor((borderX - 3) * scale), toX = Math.ceil((borderX + 3) * scale)
-  const vertical = profile(Array.from({ length: toX - fromX + 1 }, (_, i) => [fromX + i, bitmap.at(fromX + i, borderY)]), background, rule)
+  const vertical = profile(Array.from({ length: toX - fromX + 1 }, (_, i) => [fromX + i, bitmap.at(fromX + i, borderY)]), borderX * scale, rule)
   check(vertical.painted.length > 0, label + ': absent native vertical reference')
   const bottoms = []
   for (const tab of tabs) if (!bottoms.some(y => Math.abs(y - tab.bottom) < 0.05)) bottoms.push(tab.bottom)
@@ -80,7 +87,7 @@ async function capture(label) {
     const tab = inRow.find(tab => !tab.active && tab.left + 12 > strip.left + 1 && tab.left + 12 < strip.right - 1)
     if (!tab) continue
     const fromY = Math.floor((bottom - 3) * scale), toY = Math.ceil((bottom + 3) * scale)
-    const sampleAt = x => profile(Array.from({ length: toY - fromY + 1 }, (_, i) => [fromY + i, bitmap.at(Math.floor(x * scale), fromY + i)]), background, rule)
+    const sampleAt = x => profile(Array.from({ length: toY - fromY + 1 }, (_, i) => [fromY + i, bitmap.at(Math.floor(x * scale), fromY + i)]), bottom * scale, rule)
     const inside = sampleAt(tab.left + 12)
     const emptyX = strip.right - 4
     const empty = Math.max(...inRow.map(tab => tab.right)) + 4 < emptyX ? sampleAt(emptyX) : null

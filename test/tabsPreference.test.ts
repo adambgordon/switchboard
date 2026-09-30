@@ -3,8 +3,8 @@ import { DEFAULT_TABS_ENABLED, parseTabsEnabled } from '../src/renderer/lib/tabs
 
 describe('parseTabsEnabled', () => {
   // The property being reserved: absence means "never chose", so it must follow the CONSTANT
-  // rather than a hardcoded value. Flipping the default later reaches exactly this population, and
-  // a literal here would silently strand that flip while every other test still passed.
+  // rather than a hardcoded value. A change of default reaches exactly this population, and a
+  // literal here would silently strand it while every other test still passed.
   it('follows the default when nothing has been stored', () => {
     expect(parseTabsEnabled(null)).toBe(DEFAULT_TABS_ENABLED)
     expect(parseTabsEnabled('')).toBe(DEFAULT_TABS_ENABLED)
@@ -15,18 +15,20 @@ describe('parseTabsEnabled', () => {
     expect(parseTabsEnabled('{"enabled":false}')).toBe(false)
   })
 
-  // The rule stated at a default of TRUE, which is the only way to observe it. With the default
-  // at `false`, "absence follows the default" and "always returns false" agree on every input, so
-  // a test that only ever sees today's default cannot tell a correct implementation from one that
-  // ignores the default entirely — and that is exactly the implementation which would silently
-  // strand a future flip.
-  it('follows a flipped default for absence without disturbing explicit choices', () => {
-    expect(parseTabsEnabled(null, true)).toBe(true)
-    expect(parseTabsEnabled('', true)).toBe(true)
-    expect(parseTabsEnabled('not json', true)).toBe(true)
-    expect(parseTabsEnabled('{}', true)).toBe(true)
-    // An explicit off must SURVIVE the flip — that is the whole point of storing a choice.
-    expect(parseTabsEnabled('{"enabled":false}', true)).toBe(false)
+  // The rule stated at BOTH fallbacks, which is the only way to observe it. At any one default,
+  // "absence follows the default" and "always returns that value" agree on every input, so a test
+  // that only ever sees today's default cannot tell a correct implementation from one that ignores
+  // the fallback entirely.
+  it('follows the fallback for absence, whichever it is, without disturbing explicit choices', () => {
+    for (const fallback of [true, false]) {
+      expect(parseTabsEnabled(null, fallback)).toBe(fallback)
+      expect(parseTabsEnabled('', fallback)).toBe(fallback)
+      expect(parseTabsEnabled('not json', fallback)).toBe(fallback)
+      expect(parseTabsEnabled('{}', fallback)).toBe(fallback)
+      // An explicit choice must SURVIVE a change of default — that is the whole point of storing it.
+      expect(parseTabsEnabled('{"enabled":false}', fallback)).toBe(false)
+      expect(parseTabsEnabled('{"enabled":true}', fallback)).toBe(true)
+    }
   })
 
   it('falls back to the default for malformed or incomplete records', () => {
