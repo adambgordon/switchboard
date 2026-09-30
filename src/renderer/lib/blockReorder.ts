@@ -79,8 +79,8 @@ export function blockEdgeSpeed(speed: number, slots: readonly Slot[], scrollTop:
 
 /**
  * The autoscroll speed for a drag, read from the dragged unit's LEADING edge rather than the pointer.
- * The unit is held inside the rail (`cloneTop`), so waiting for the pointer to reach the edge band left
- * a dead zone: the unit already stopped at the edge, the rail not yet scrolling. `top` / `bottom` are
+ * The unit is held inside the rail (`cloneTop`), so waiting for the pointer to reach the edge band would
+ * leave a dead zone: the unit already stopped at the edge, the rail not yet scrolling. `top` / `bottom` are
  * where the unit would sit if it followed the pointer freely; that can run far past the rail, so the
  * speed is capped at the band's own maximum. A unit taller than the rail has no leading edge inside
  * it, and there the pointer decides, as it does for the tab strip.

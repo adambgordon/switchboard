@@ -46,7 +46,7 @@ export interface ChooserFolder {
 
 /**
  * The folders matching a typed filter, in the order given. Every whitespace-separated word must appear in
- * the path, case-insensitively — so "sw rev" finds `…/switchboard/sidebar-revamp` — and the ranking stays
+ * the path, case-insensitively — so "exp at" finds `…/atlas/billing-export` — and the ranking stays
  * the chooser's own, since a filter narrows the list rather than re-deciding what is likely.
  */
 export function filterChooserFolders(folders: readonly ChooserFolder[], query: string): readonly ChooserFolder[] {

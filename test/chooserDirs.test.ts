@@ -67,9 +67,9 @@ describe('chooserDirs start times', () => {
 
 describe('filterChooserFolders', () => {
   const folders = [
-    { dir: '/w/switchboard/sidebar-revamp', startedAt: 3 },
+    { dir: '/w/atlas/billing-export', startedAt: 3 },
     { dir: '/w/Notes', startedAt: 2 },
-    { dir: '/w/switchboard', startedAt: 1 }
+    { dir: '/w/atlas', startedAt: 1 }
   ]
 
   it('keeps everything, by identity, for an empty or blank query', () => {
@@ -78,16 +78,16 @@ describe('filterChooserFolders', () => {
   })
 
   it('requires every word, anywhere in the path, ignoring case, in the given order', () => {
-    expect(filterChooserFolders(folders, 'rev SW').map((f) => f.dir)).toEqual(['/w/switchboard/sidebar-revamp'])
+    expect(filterChooserFolders(folders, 'EXP at').map((f) => f.dir)).toEqual(['/w/atlas/billing-export'])
     expect(filterChooserFolders(folders, 'notes').map((f) => f.dir)).toEqual(['/w/Notes'])
-    expect(filterChooserFolders(folders, 'switch').map((f) => f.dir)).toEqual([
-      '/w/switchboard/sidebar-revamp',
-      '/w/switchboard'
+    expect(filterChooserFolders(folders, 'atlas').map((f) => f.dir)).toEqual([
+      '/w/atlas/billing-export',
+      '/w/atlas'
     ])
   })
 
   it('matches nothing when one word is absent', () => {
-    expect(filterChooserFolders(folders, 'switch nope')).toEqual([])
+    expect(filterChooserFolders(folders, 'atlas nope')).toEqual([])
   })
 })
 

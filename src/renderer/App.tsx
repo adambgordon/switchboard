@@ -1294,7 +1294,7 @@ export default function App() {
    * the user did meanwhile decides where it lands:
    *  - The chooser is still open: with tabs on it BECOMES the conversation, in place — `rekey`, since a
    *    chooser id is a placeholder that names nothing — shown only if it is still what the user is on.
-   *    With tabs off it gives way and the conversation opens as the pane's one tab, as it always has.
+   *    With tabs off it gives way and the conversation opens as the pane's one tab.
    *  - The chooser was closed: with tabs on the conversation still gets a tab, in the background, so
    *    closing a chooser mid-start never quietly strands a session the user asked for.
    *  - No chooser (a folder's logo), or tabs off: shown only if nothing else was navigated to meanwhile.

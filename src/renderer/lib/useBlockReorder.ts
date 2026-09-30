@@ -27,7 +27,7 @@ import { dragScrollFeedback, dragScrollRequest, type EdgeMotion } from './edgeSc
  * The grabbed unit lifts into a CLONE that follows the pointer while its siblings slide to open a gap
  * at the drop slot; order changes only on drop. The clone is `position: fixed` on `<body>`, never the
  * real unit transformed in place: the rail body's overflow clip beats any z-index, so a transformed
- * unit dragged toward the head was cut off beneath it, and a folder's sticky header would paint over
+ * unit dragged toward the head would be cut off beneath it, and a folder's sticky header would paint over
  * it. The real unit stays in flow, hidden, as the gap. The clone sits in a host carrying the rail's
  * own classes, so every rail-scoped rule — density, selection, row padding — styles it exactly as it
  * looked in place.

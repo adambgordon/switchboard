@@ -15,7 +15,7 @@ const PORT = Number(process.env.SCREENSHOT_CDP_PORT || 9400)
 // directory. Claimed with a marker file so a directory that is not ours is never touched.
 const PROJECTS = '/Users/Shared/demo'
 const MARKER = '.switchboard-readme-screenshots'
-// The window size the README screenshots have always used, in points.
+// The window size for the README screenshots, in points.
 const WINDOW = { width: 1728, height: 1084 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

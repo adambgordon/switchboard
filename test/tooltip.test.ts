@@ -229,7 +229,7 @@ describe('tooltip groups', () => {
   })
 
   it('hides immediately when no grouped label is on screen, whatever comes next', () => {
-    // A label still waiting out its delay has nothing to hold: leaving cancels it, as before.
+    // A label still waiting out its delay has nothing to hold: leaving cancels it.
     for (const to of [null, { group: null }, { group: ROWS }]) expect(tipOnLeave(null, to)).toBe('hide')
   })
 

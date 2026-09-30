@@ -135,7 +135,7 @@ describe('seeds', () => {
   })
 
   it('keep a row with no first message in place while its transcript is written', () => {
-    // The regression a "harmless" `?? mtime` would reintroduce: every write would lift the row.
+    // Why `?? mtime` is not harmless: every write would lift the row.
     const other = conv('other', T - 50)
     const build = (mtime: number): string[] =>
       visibleRows(
