@@ -542,6 +542,25 @@ describe('existenceProbe', () => {
     expect(calls).toEqual(['/h1', '/h2'])
   })
 
+  it('checks a cwd that answered late after the others, so slow volumes cannot hold the slots', async () => {
+    const calls: string[] = []
+    const probe = existenceProbe(
+      async (cwd) => {
+        calls.push(cwd)
+        if (cwd === '/fast') return true
+        await new Promise((r) => setTimeout(r, 40))
+        return true
+      },
+      10,
+      2
+    )
+    expect((await probe(['/slow1', '/slow2', '/fast'])).exists).toEqual(new Set())
+    await new Promise((r) => setTimeout(r, 60))
+    // Both slow checks answered after their pass gave up, so the next pass starts with the fast one.
+    expect((await probe(['/slow1', '/slow2', '/fast'])).exists).toEqual(new Set(['/slow1', '/slow2', '/fast']))
+    expect(calls.slice(0, 3)).toEqual(['/slow1', '/slow2', '/fast'])
+  })
+
   it('does not wait again on a check still pending from an earlier pass', async () => {
     // Joining a hung check each pass would cost every later pass the full deadline (and a handler).
     const probe = existenceProbe(async (cwd) => (cwd === '/hung' ? never : true), 300)

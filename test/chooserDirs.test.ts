@@ -190,6 +190,7 @@ describe('the rail is unaffected', () => {
       liveState: () => null,
       active: new Set(),
       collapsed: {},
+      autoCollapsed: null,
       navExpanded: new Set(),
       activeCollapsed: new Set(),
       revealed: {},

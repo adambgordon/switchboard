@@ -84,6 +84,9 @@ export interface SidebarModel {
    *  which reorders it for triage. Unaffected by search, collapse and caps, so nothing can hide one
    *  from it. */
   needsYou: string[]
+  /** The folders that start collapsed in this build — the input's, or the ones past the auto-expand
+   *  index when it had none. */
+  autoCollapsed: ReadonlySet<string>
 }
 
 export interface SidebarLimits {
@@ -94,7 +97,7 @@ export interface SidebarLimits {
   /** Unpinned rows a group shows however many are pinned — pins always show, so they cannot crowd
    *  the rest out entirely. */
   minUnpinned: number
-  /** Folders past this index start collapsed unless something says otherwise. */
+  /** Folders past this index at launch start collapsed unless something says otherwise. */
   autoExpand: number
 }
 
@@ -115,6 +118,10 @@ export interface SidebarInput {
   active: ReadonlySet<string>
   /** Stored per-folder collapse preferences. */
   collapsed: Readonly<Record<string, boolean>>
+  /** The folders that start collapsed, fixed at launch (a model's `autoCollapsed`), so a folder that
+   *  arrives above them or a folder drag collapses nothing. Null until then: the folders past
+   *  `limits.autoExpand` in this build's order. */
+  autoCollapsed: ReadonlySet<string> | null
   /** Folders expanded by navigation this session, which keep a folder open after focus moves on. */
   navExpanded: ReadonlySet<string>
   /** Folders the user collapsed while a conversation in them was active — the one thing that closes
@@ -262,14 +269,14 @@ export function folderLabels(roots: readonly string[]): Map<string, string> {
   return out
 }
 
-function isCollapsed(input: SidebarInput, key: string, index: number, rows: readonly SidebarRow[]): boolean {
+function isCollapsed(input: SidebarInput, key: string, auto: ReadonlySet<string>, rows: readonly SidebarRow[]): boolean {
   if (input.search) return false
   // Derived, not stored: whatever path made a conversation active, its folder opens for it — unless
   // the user has collapsed it since, which only they can do.
   if (!input.activeCollapsed.has(key) && rows.some((r) => input.active.has(r.sessionId))) return false
   if (input.navExpanded.has(key)) return false
   if (Object.hasOwn(input.collapsed, key)) return input.collapsed[key]
-  return index >= input.limits.autoExpand
+  return auto.has(key)
 }
 
 function sortRows(rows: SidebarRow[]): SidebarRow[] {
@@ -280,7 +287,7 @@ function buildGroup(
   input: SidebarInput,
   key: string,
   label: string,
-  index: number,
+  auto: ReadonlySet<string>,
   all: SidebarRow[]
 ): SidebarGroup | null {
   const wantsAttention = all.some((r) => needsYou(r.liveState))
@@ -288,7 +295,7 @@ function buildGroup(
   // All mode is always exactly one group, even empty; a folder with nothing to show is dropped.
   if (rows.length === 0 && input.mode === 'folders') return null
   const header = input.mode === 'folders'
-  const collapsed = header && isCollapsed(input, key, index, rows)
+  const collapsed = header && isCollapsed(input, key, auto, rows)
   const pinned = sortRows(rows.filter((r) => r.pinned))
   const unpinned = sortRows(rows.filter((r) => !r.pinned))
 
@@ -339,22 +346,19 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
   const folders = new Map<string, FolderRank>()
   for (const [root, b] of byRoot) folders.set(root, { rank: rankOf(root, b.seed, input.folderRanks), seed: b.seed })
 
-  let buckets: { key: string; rows: SidebarRow[] }[]
-  if (input.mode === 'all') {
-    buckets = [{ key: '', rows: placed.map((p) => p.row) }]
-  } else {
-    buckets = [...byRoot]
-      .map(([root, b]) => ({ id: root, rank: folders.get(root)!.rank, rows: b.rows }))
-      .sort(compareRanked)
-      .map((b) => ({ key: b.id, rows: b.rows }))
-  }
+  const folderOrder = [...folders].map(([id, f]) => ({ id, rank: f.rank })).sort(compareRanked).map((f) => f.id)
+  const auto = input.autoCollapsed ?? new Set(folderOrder.slice(input.limits.autoExpand))
+  const buckets =
+    input.mode === 'all'
+      ? [{ key: '', rows: placed.map((p) => p.row) }]
+      : folderOrder.map((root) => ({ key: root, rows: byRoot.get(root)!.rows }))
 
   const labels = folderLabels([...byRoot.keys()])
   const groups: SidebarGroup[] = []
-  buckets.forEach((b, i) => {
-    const g = buildGroup(input, b.key, labels.get(b.key) ?? '', i, b.rows)
+  for (const b of buckets) {
+    const g = buildGroup(input, b.key, labels.get(b.key) ?? '', auto, b.rows)
     if (g) groups.push(g)
-  })
+  }
 
   const order: string[] = []
   for (const b of buckets) {
@@ -363,7 +367,7 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
   }
   const rows = new Map<string, RowPlace>()
   for (const p of placed) rows.set(p.row.sessionId, { rank: p.row.rank, seed: p.seed, root: p.root, pinned: p.row.pinned })
-  return { groups, rows, folders, labels, needsYou: order }
+  return { groups, rows, folders, labels, needsYou: order, autoCollapsed: auto }
 }
 
 /**

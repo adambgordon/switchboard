@@ -279,7 +279,9 @@ export const EXISTENCE_MAX_INFLIGHT = 2
  * - a pass waits at most `deadlineMs`, so no check can withhold the index;
  * - at most `maxInflight` checks are unsettled at once, so hung ones cannot starve the thread pool;
  * - a cwd whose check is still pending is not checked or subscribed to again, so a hung check costs
- *   one call and one handler however many passes it outlives.
+ *   one call and one handler however many passes it outlives;
+ * - a cwd whose check has outlived its pass is checked after every other from then on, so slow volumes
+ *   cannot take the slots from the fast ones pass after pass.
  * A cwd with no answer this pass reads as its last known answer, or missing if it never had one —
  * but only for display: it is never `verified`, so the resolver does not walk it on that answer.
  */
@@ -290,10 +292,12 @@ export function existenceProbe(
 ): ExistenceProbe {
   const pending = new Set<string>()
   const lastKnown = new Map<string, boolean>()
+  const late = new Set<string>()
   let inflight = 0
   return (cwds) =>
     new Promise<Existence>((resolve) => {
-      const queue = [...new Set(cwds)].filter((cwd) => !pending.has(cwd))
+      const fresh = [...new Set(cwds)].filter((cwd) => !pending.has(cwd))
+      const queue = [...fresh.filter((cwd) => !late.has(cwd)), ...fresh.filter((cwd) => late.has(cwd))]
       const verified = new Set<string>()
       let running = 0
       let done = false
@@ -313,6 +317,7 @@ export function existenceProbe(
             .catch(() => false)
             .then((exists) => {
               lastKnown.set(cwd, exists)
+              if (done) late.add(cwd)
               if (exists) verified.add(cwd)
               inflight--
               running--

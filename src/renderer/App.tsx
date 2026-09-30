@@ -594,6 +594,13 @@ export default function App() {
       if (kind === 'initial') {
         rekeyPendingNavigation(oldId, newId)
         closedTabsRef.current = rekeyClosed(closedTabsRef.current, oldId, newId)
+        setChoosers((prev) => {
+          const opened = Object.entries(prev).filter(([, c]) => c.from === oldId)
+          if (opened.length === 0) return prev
+          const next = { ...prev }
+          for (const [k, c] of opened) next[k] = { ...c, from: newId }
+          return next
+        })
       }
       const ev = { oldId, newId, kind }
       latestBinds.set(ptyId, ev)
@@ -882,6 +889,9 @@ export default function App() {
   // the last model shown, so a row the index has just re-seeded keeps its place (`buildSidebarHeld`);
   // not while loading, when the first load re-seeds every live row at its real start.
   const shownModelRef = useRef<SidebarModel | null>(null)
+  // The folders that start collapsed, fixed once the launch order is (below). A ref: the build that
+  // fixes it already used exactly this set, so nothing needs rebuilding when it is set.
+  const autoCollapsedRef = useRef<ReadonlySet<string> | null>(null)
   const sidebar = useMemo(
     () =>
       buildSidebarHeld(loading ? null : shownModelRef.current, {
@@ -895,6 +905,7 @@ export default function App() {
         liveState: liveStateFor,
         active: visibleIds,
         collapsed: folderCollapse,
+        autoCollapsed: autoCollapsedRef.current,
         navExpanded,
         activeCollapsed,
         revealed,
@@ -935,25 +946,30 @@ export default function App() {
   // load with indexed conversations — the index arrives whole, and a failed one arrives empty, which
   // must not count as "done" even while a live terminal gives the rail a row of its own. A layout effect, so the frozen order is what first paints. The marker is folded into a
   // fresh read, and every window checks it first, so a later window finds it done and skips.
+  // Then — on the build after a freeze, which carries the frozen order — the folders that start
+  // collapsed are fixed for the launch.
   const catalogReady = !loading && groups.some((g) => g.conversations.length > 0)
+  const frozeRef = useRef(false)
   useLayoutEffect(() => {
-    if (!catalogReady) return
-    let done: string[]
+    if (!catalogReady || autoCollapsedRef.current) return
+    let done: string[] | null
     try {
       done = parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY))
     } catch {
+      done = null
+    }
+    if (done && !done.includes(FOLDER_SEED_TASK) && !frozeRef.current) {
+      frozeRef.current = true
+      mutateFolders((stored) => freezeFoldersByNewest(sidebarModel, stored))
+      try {
+        localStorage.setItem(ONCE_TASKS_KEY, JSON.stringify(withOnceTask(done, FOLDER_SEED_TASK)))
+      } catch {
+        /* storage unavailable — the freeze simply runs again next launch */
+      }
       return
     }
-    if (done.includes(FOLDER_SEED_TASK)) return
-    const model = sidebarModelRef.current
-    if (!model) return
-    mutateFolders((stored) => freezeFoldersByNewest(model, stored))
-    try {
-      localStorage.setItem(ONCE_TASKS_KEY, JSON.stringify(withOnceTask(done, FOLDER_SEED_TASK)))
-    } catch {
-      /* storage unavailable — the freeze simply runs again next launch */
-    }
-  }, [catalogReady, mutateFolders])
+    autoCollapsedRef.current = sidebarModel.autoCollapsed
+  }, [catalogReady, sidebarModel, mutateFolders])
 
   // Navigation entering a folder opens it: remembered so it stays open once focus moves on, and any
   // collapse made while it was active is forgotten. Keyed on the (conversation, folder) pairs, not the

@@ -129,7 +129,7 @@ function Fixture() {
     mode: cfg.mode, groups: cfg.only ? cat.groups.filter((g) => cfg.only.includes(g.root)) : cat.groups,
     ptys: cfg.only ? cat.ptys.filter((p) => cfg.only.includes(p.projectRoot)) : cat.ptys, pinned: pins, hidden: new Set(), rowRanks, folderRanks,
     liveState: (pty, _meta, id) => (pty ? LIVE[id] ?? 'quiet' : null),
-    active: new Set([cfg.selected]), collapsed: cfg.collapsed, navExpanded: new Set(), activeCollapsed: new Set(),
+    active: new Set([cfg.selected]), collapsed: cfg.collapsed, autoCollapsed: null, navExpanded: new Set(), activeCollapsed: new Set(),
     revealed, search, limits: LIMITS
   }), [cfg, pins, rowRanks, folderRanks, revealed, search, cat])
   const modelRef = useRef(model)

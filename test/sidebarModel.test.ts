@@ -89,6 +89,7 @@ function input(over: Partial<SidebarInput> = {}): SidebarInput {
     liveState: states({}),
     active: new Set(),
     collapsed: {},
+    autoCollapsed: null,
     navExpanded: new Set(),
     activeCollapsed: new Set(),
     revealed: {},
@@ -317,6 +318,17 @@ describe('collapse precedence', () => {
 
   it('collapses folders past the automatic count', () => {
     expect(collapsedOf({})).toEqual([false, false, true])
+    expect(buildSidebar(input({ groups })).autoCollapsed).toEqual(new Set(['/w/c']))
+  })
+
+  it('keeps the folders fixed at launch, however the order changes after', () => {
+    const launch = buildSidebar(input({ groups })).autoCollapsed
+    // A folder arriving at the top pushes /w/b past the automatic count; it stays open, and so does the
+    // newcomer, while /w/c stays collapsed.
+    const arrived = [group('/w/new', [conv('n', T)]), ...groups]
+    expect(collapsedOf({ groups: arrived, autoCollapsed: launch })).toEqual([false, false, false, true])
+    // A folder dragged below the count stays open; the one it passes stays collapsed.
+    expect(collapsedOf({ folderRanks: { '/w/a': T - 10 }, autoCollapsed: launch })).toEqual([false, true, false])
   })
 
   it('lets a stored preference beat the automatic rule both ways', () => {
@@ -522,7 +534,7 @@ describe('an empty or loading catalog', () => {
     const collapsed = Object.freeze({ '/w/a': true })
     const pinned = Object.freeze(['a'])
     const model = buildSidebar(input({ rowRanks, folderRanks, collapsed, pinned }))
-    expect(model).toEqual({ groups: [], rows: new Map(), folders: new Map(), labels: new Map(), needsYou: [] })
+    expect(model).toEqual({ groups: [], rows: new Map(), folders: new Map(), labels: new Map(), needsYou: [], autoCollapsed: new Set() })
     expect([rowRanks, folderRanks, collapsed, pinned]).toEqual([{ a: T }, { '/w/a': T }, { '/w/a': true }, ['a']])
   })
 })
