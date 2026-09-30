@@ -11,13 +11,12 @@ const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
 /**
  * FLIP (First-Last-Invert-Play) position animation for the conversation rows.
  *
- * Rows move between sections — a conversation gets pinned, resumed, or unpinned — by unmounting from
- * one section's subtree and mounting in another (each section is its own keyed Fragment). Without
- * help that reads as a *teleport*: the row vanishes from its old spot and appears in the new one.
- * This hook makes the move glide: after each order-changing commit it measures every visible row's
- * viewport position, compares to the previous commit, and for any row that moved it plays a
- * compositor-only `translateY` from the old offset back to zero. A brand-new row (e.g. a freshly
- * spawned session arriving in Live) fades and rises in instead.
+ * Rows move between blocks — a conversation gets pinned, resumed, or unpinned — by unmounting from
+ * one block's subtree and mounting in another. Without help that reads as a *teleport*: the row
+ * vanishes from its old spot and appears in the new one. This hook makes the move glide: after each
+ * order-changing commit it measures every visible row's viewport position, compares to the previous
+ * commit, and for any row that moved it plays a compositor-only `translateY` from the old offset back
+ * to zero. A brand-new row (a freshly started conversation) fades and rises in instead.
  *
  * Web Animations API rather than inline-style transitions: it's compositor-driven, auto-cleans up
  * (nothing lingers on the element for React to fight), and an in-flight slide is canceled before we
@@ -25,9 +24,9 @@ const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
  *
  * Cost is one `querySelectorAll` + `getBoundingClientRect` pass over the visible rows (≤ a few dozen),
  * and ONLY when the order actually changes — never per render, never per frame. No play happens on the
- * initial mount, nor when only `controlSig` changed (a search filter or a section collapse/expand):
+ * initial mount, nor when only `controlSig` changed (a search filter or a folder collapse/expand):
  * those still refresh the baseline so the next real move measures correctly, but stay visually instant,
- * so typing in search and toggling a section never trigger a slide cascade.
+ * so typing in search and toggling a folder never trigger a slide cascade.
  *
  * @param containerRef the scroll container holding the rows (`.sb-rail-body`)
  * @param orderSig     changes whenever the visible rows' identity or order changes (drives a slide)

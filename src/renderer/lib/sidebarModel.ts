@@ -35,6 +35,9 @@ export interface SidebarBlock {
   id: string
   kind: 'pinned' | 'unpinned'
   rows: SidebarRow[]
+  /** How many rows, from the top, are shown in rank order. The rest are live or open rows past the
+   *  cap, which rank below rows the block withholds. */
+  capped: number
 }
 
 export interface SidebarGroup {
@@ -291,11 +294,13 @@ function buildGroup(
 
   const cap = input.mode === 'all' ? input.limits.allCap : input.limits.folderCap
   let shown = unpinned
+  let capped = unpinned.length
   if (!input.search) {
     // Capped by POSITION, so whether an idle row shows never depends on another row's liveness. Rows
     // past the cap that are live or on screen still render, after the rest, in their own order. Pins
     // always show and count toward the cap, down to the unpinned floor.
     const limit = Math.max(input.limits.minUnpinned, cap - pinned.length) + (input.revealed[key] ?? 0)
+    capped = Math.min(limit, unpinned.length)
     shown = [
       ...unpinned.slice(0, limit),
       ...unpinned.slice(limit).filter((r) => r.pty !== null || input.active.has(r.sessionId))
@@ -304,8 +309,8 @@ function buildGroup(
   const id = header ? key : '*'
   const blocks: SidebarBlock[] = []
   if (!collapsed) {
-    if (pinned.length > 0) blocks.push({ id: `pin:${id}`, kind: 'pinned', rows: pinned })
-    if (shown.length > 0) blocks.push({ id: `un:${id}`, kind: 'unpinned', rows: shown })
+    if (pinned.length > 0) blocks.push({ id: `pin:${id}`, kind: 'pinned', rows: pinned, capped: pinned.length })
+    if (shown.length > 0) blocks.push({ id: `un:${id}`, kind: 'unpinned', rows: shown, capped })
   }
   return {
     key,
@@ -375,6 +380,36 @@ export function rankSpace(model: SidebarModel): Ranked[] {
 /** The folders' ranks: the space a folder drop writes into. Every folder, rendered or not. */
 export function folderRankSpace(model: SidebarModel): Ranked[] {
   return [...model.folders].map(([id, f]) => ({ id, rank: f.rank }))
+}
+
+/**
+ * The neighbors a drop into an unpinned block really lands between. The block shows its capped rows
+ * and then any live or open rows past the cap, which rank below every row it withholds — so two rows
+ * adjacent on screen can straddle hidden ones, and a midpoint between them would hide a capped row
+ * dropped there. A capped row lands directly below the row above it in the block's full order instead;
+ * below a row that is itself past the cap, it lands below the last capped row, the lowest place that
+ * still shows it. A row past the cap shows wherever it lands, so its drop is taken as it is.
+ */
+export function dropNeighbors(
+  model: SidebarModel,
+  block: SidebarBlock,
+  draggedId: string,
+  higherId: string | null,
+  lowerId: string | null
+): [higher: string | null, lower: string | null] {
+  const at = block.rows.findIndex((r) => r.sessionId === draggedId)
+  if (higherId === null || at >= block.capped) return [higherId, lowerId]
+  // The capped rows other than the dragged one, top first.
+  const capped = block.rows.slice(0, block.capped).filter((r) => r.sessionId !== draggedId)
+  const higher = capped.some((r) => r.sessionId === higherId) ? higherId : capped[capped.length - 1]?.sessionId
+  if (higher === undefined) return [higherId, lowerId]
+  const root = block.id.slice('un:'.length)
+  const full: Ranked[] = []
+  for (const [id, p] of model.rows) {
+    if (id !== draggedId && !p.pinned && (root === '*' || p.root === root)) full.push({ id, rank: p.rank })
+  }
+  const order = full.sort(compareRanked).map((e) => e.id)
+  return [higher, order[order.indexOf(higher) + 1] ?? null]
 }
 
 /** The rows on screen, top to bottom — what keyboard navigation steps through. */

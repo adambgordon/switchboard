@@ -311,7 +311,8 @@ export default function MainPane(props: Props) {
     const el = paneRef.current
     if (!el) return
     const onDown = (e: PointerEvent): void => {
-      if (!e.altKey) onPaneFocusRef.current?.()
+      if (e.altKey && e.target instanceof Element && e.target.closest('.sb-tab, .sb-term')) return
+      onPaneFocusRef.current?.()
     }
     el.addEventListener('pointerdown', onDown, true)
     return () => el.removeEventListener('pointerdown', onDown, true)

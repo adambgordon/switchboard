@@ -492,7 +492,7 @@ const conversationIndex = new LatestTask(
     // zero-message / subagent rollouts can never be bind targets. This both binds a terminal that had
     // no identity and corrects one that has since drifted onto another conversation; either emits
     // `bound` + `active-changed`, so the row re-labels in place and the rollout isn't also shown as a
-    // separate Recent conversation.
+    // separate row.
     //
     // Deliberately NOT awaited, and deliberately ABOVE the identical-groups early return: the probe
     // shells out to lsof, which must never delay the session-list broadcast, and a pass whose groups
@@ -736,7 +736,10 @@ function parseMenuEntries(value: unknown): ConversationMenuEntry[] | null {
 export function registerIpc(): void {
   mgr = new PtyManager({
     claudeParkedJobs: { sessionsRoot: join(os.homedir(), '.claude', 'sessions') },
-    resolveProjectRoot: (cwd) => getProjectRoots().resolve(cwd).root
+    // A resumed conversation is always indexed, so its row takes its folder from the index, never from
+    // its terminal — and its cwd may sit on a volume the index could not verify. So only a new session
+    // walks; a resume reads what the index already resolved, without touching the disk.
+    resolveProjectRoot: (cwd, origin) => getProjectRoots().resolve(cwd, origin === 'new').root
   })
   mgr.on('data', (ptyId: string, data: string) =>
     sendToWindow(ptyOwner.get(ptyId) ?? null, IPC.ptyData, ptyId, data)
@@ -757,7 +760,7 @@ export function registerIpc(): void {
   // A Codex PTY's sessionId changed. `kind` must be forwarded: it tells the renderer whether this
   // replaced a placeholder (everything keyed to it migrates) or corrected a terminal onto a different
   // real conversation (CONVERSATION-owned state — persisted seen/unread, earlier history stops —
-  // stays put, while terminal-owned state — selection, current stop, surface, Live slot — follows the
+  // stays put, while terminal-owned state — selection, current stop, surface, rail position — follows the
   // terminal). See PtyBindKind.
   mgr.on('bound', (ptyId: string, oldId: string, newId: string, kind: PtyBindKind) => {
     boundTabReservations.discardPty(ptyId)
@@ -839,8 +842,8 @@ export function registerIpc(): void {
     return forWindow([st], e.sender.id)[0]
   })
   ipcMain.handle(IPC.ptyStartNew, (e, cwd: string, agent: AgentKind) => {
-    // Guard a stale default folder: if it's been deleted/renamed since it was chosen in Preferences,
-    // reject so the renderer can fall back to the chooser instead of node-pty throwing on a bad cwd.
+    // Guard a folder that is gone — a rail folder's agent logo can point at a deleted or renamed
+    // directory: reject, so the renderer falls back to the chooser instead of node-pty throwing on it.
     if (!existsSync(cwd)) throw new Error(`Directory no longer exists: ${cwd}`)
     const st = mgr!.startNew(cwd, agent, (spawned) => {
       ptyOwner.set(spawned.ptyId, e.sender.id)

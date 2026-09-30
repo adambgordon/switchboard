@@ -203,8 +203,8 @@
   background: var(--dot);
 }
 /* Nothing unread: either a finished turn the user has seen, or a new unlinked terminal with no
-   messages yet. The unlinked state remains distinct in behavior and the Live tally, but shares the
-   exact hollow treatment because neither row has unseen conversation content. */
+   messages yet. The unlinked state remains distinct in behavior, but shares the exact hollow
+   treatment because neither row has unseen conversation content. */
 .sb-dot.quiet,
 .sb-dot.unlinked {
   background: transparent;

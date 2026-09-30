@@ -319,8 +319,7 @@
     opacity: 1;
   }
 }
-/* The first header rises into that same padding (so it rests where the old 2px-padded section header
-   did) and keeps a full top pad for when it is stuck. */
+/* The first header rises 6px into that same padding, and keeps a full top pad for when it is stuck. */
 .sb-group:first-child > .sb-group-head {
   margin-top: -6px;
   padding-top: 8px;
@@ -354,7 +353,7 @@
   background: var(--paper-active);
 }
 /* A leader rule from the end of the name to the header's far edge, so each header doubles as the
-   break between folders — the old section headers' rule. --ink-ghost reads darker than the --rule
+   break between folders. --ink-ghost reads darker than the --rule
    grays on light and lighter on dark, so it outranks the inter-row dividers in both themes. */
 .sb-group-toggle::after {
   content: '';
@@ -562,8 +561,8 @@
   /* Nearer the last row above it than the next folder's header below, so it reads as the folder's
      closing line rather than the next folder's opener — and clear of that header, whose paper would
      otherwise cover it. */
-  margin-top: -4px;
-  margin-bottom: -1px;
+  margin-top: -3px;
+  margin-bottom: -1.5px;
   /* The button's line box, so an empty reserved line (Compact's folder break) is as tall as a full one. */
   min-height: calc(var(--text-2xs) * 1.1);
   opacity: 0;

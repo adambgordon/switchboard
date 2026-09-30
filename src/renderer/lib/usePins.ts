@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { moveBetween } from './reorder'
 
 /**
- * Pinned conversations — a user-curated, MANUALLY ORDERED list of session IDs that surface in the
- * Tally Rail whether or not they're live. Persisted in localStorage (renderer state; survives
+ * Pinned conversations — a user-curated, MANUALLY ORDERED list of session IDs that head their
+ * folder in the rail whether or not they're live. Persisted in localStorage (renderer state; survives
  * restarts). The ordered array is the source of truth (top of the list = index 0); a Set is derived
  * for the rail's membership filters. Newly pinned conversations land at the BOTTOM; the user drags to reorder.
  */

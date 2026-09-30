@@ -953,8 +953,9 @@ describe('reopen — a closed group comes back where it stood', () => {
     sessionId: string,
     index: number,
     paneId = 'p0',
-    side: ClosedTab['side'] = 'only'
-  ): ClosedTab => ({ sessionId, paneId, side, index })
+    side: ClosedTab['side'] = 'only',
+    emptiedPane = true
+  ): ClosedTab => ({ sessionId, paneId, side, index, emptiedPane })
   const reopen = (l: PaneLayout, tabs: ClosedTab[], activeId = tabs[0].sessionId): PaneLayout =>
     step(l, { type: 'reopen', group: { tabs, activeId }, paneId: 'p9' })
 
@@ -992,6 +993,12 @@ describe('reopen — a closed group comes back where it stood', () => {
     const after = reopen(layout([pane('p0', [t('A')], 0)]), [closed('R', 0, 'p1', 'right')])
     expect(after.panes).toEqual([pane('p0', [t('A')], 0), pane('p9', [t('R')], 0)])
     expect(after.focusIndex).toBe(1)
+  })
+
+  it('leaves a split closed that the user closed after the tab, landing it in the single pane', () => {
+    // R closed from a right pane that kept other tabs; the user then removed the split themselves.
+    const after = reopen(layout([pane('p0', [t('A'), t('B')], 0)]), [closed('R', 0, 'p1', 'right', false)])
+    expect(after.panes).toEqual([pane('p0', [t('R'), t('A'), t('B')], 0)])
   })
 
   it('…and the left side, ahead of the pane that survived', () => {

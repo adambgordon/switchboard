@@ -1,6 +1,6 @@
 import { memo, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
-import { relTime, absShort, formatCount } from '../lib/format'
+import { relTime, formatCount } from '../lib/format'
 import type { RailDensity } from '../lib/sidebarPrefs'
 import { rowTipPreview, rowTipTitle } from '../lib/rowTip'
 import { needsYou } from '../lib/sidebarModel'
@@ -129,7 +129,7 @@ function ConversationRowImpl({
       // The drag contract (useBlockReorder): the row is its own unit and its own handle.
       data-key={meta.sessionId}
       data-drag=""
-      // The hover carries what the row no longer shows: the full title, the preview, and when and
+      // The hover carries what a compact row leaves out: the full title, the preview, and when and
       // where. The preview is the tab strip's derivation, so a parked row keeps its explanation; with
       // no real preview the line is omitted rather than spent saying there is nothing to say.
       data-tip={rowTipTitle(title)}
@@ -176,9 +176,7 @@ function ConversationRowImpl({
           )}
           <span className="sb-row-meta">
             {mark}
-            <span data-tip={absShort(lastActive)}>
-              {relTime(lastActive)}
-            </span>
+            <span>{relTime(lastActive)}</span>
             <span className="sb-sep">·</span>
             <span>{formatCount(meta.messageCount)} msg</span>
             {elsewhere && (

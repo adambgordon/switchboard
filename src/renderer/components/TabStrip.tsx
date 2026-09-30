@@ -30,6 +30,9 @@ export interface TabDescriptor {
   dot: LiveDotClass | null
   /** No conversation is known to belong to this terminal, so it has no details to show. */
   unlinked: boolean
+  /** Its conversation is in the index — what Resume, Pin, Rename and Session details act on. A new
+   *  conversation has none until its first message is written. */
+  indexed: boolean
   /** Its terminal is running — what decides Stop or Resume in its menu. Not its liveness: that is
    *  `dot`, derived with the rail row's rules. */
   running: boolean
@@ -335,7 +338,7 @@ export default function TabStrip({
       conversationMenu({
         surface: 'tab',
         count: groupSize,
-        linked: !tab.unlinked,
+        linked: tab.indexed,
         live: tab.running,
         pinned: tab.pinned,
         unread: tab.unread,

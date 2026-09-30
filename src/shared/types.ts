@@ -207,7 +207,7 @@ export interface ConversationGroup {
   /** Display label (typically the basename, with full path available on hover). */
   label: string
   conversations: ConversationMeta[]
-  /** Most recent mtime in the group, for ordering sections by recency. */
+  /** Most recent mtime in the group, for ordering groups by recency. */
   latestMtime: number
 }
 
@@ -222,7 +222,7 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  *  - conversation-owned — persisted seen/unread markers, and EARLIER history stops — belongs to the
  *    id itself. Earlier stops were genuine visits to a conversation that still exists.
  *  - terminal-owned — the current selection, the CURRENT history stop, the surface that selection is
- *    showing, and the row's Live slot — describes the terminal in front of the user, and follows it.
+ *    showing, and the row's rail position — describes the terminal in front of the user, and follows it.
  *    Main retargets the current app-wide visit after the focused corrected tab's adoption commits;
  *    earlier visits retain their original conversation.
  *
@@ -230,7 +230,7 @@ export type PtyStatus = 'busy' | 'idle' | 'exited'
  *   placeholder names no conversation and is about to cease existing, so there is no conversation-owned
  *   state to protect: EVERYTHING keyed to it migrates, or it is orphaned.
  * - `correction`: a bound PTY was proven to be running a DIFFERENT conversation than the one it
- *   claimed. Both ids name durable conversations — the old one still exists and reappears in Recent,
+ *   claimed. Both ids name durable conversations — the old one still exists and keeps its own row,
  *   the new one may already carry its own state — so conversation-owned state does NOT move; moving it
  *   would delete one conversation's read state and overwrite the other's. Terminal-owned state still
  *   follows, and the selection and its surface do so only when the user is actually on that terminal.
@@ -539,7 +539,6 @@ export interface WindowInit {
    * shared by every window of the app.
    */
   collapseRail: boolean
-  /** Open onto a new-conversation chooser with this folder focused (null: the first). Absent otherwise. */
   /** Opened for a new conversation: onto the chooser with `preselect` focused, or — with an `agent` —
    *  starting one with it in `preselect`. */
   newConversation?: { preselect: string | null; agent?: AgentKind }

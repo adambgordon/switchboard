@@ -23,6 +23,8 @@ export interface ClosedTab {
   side: ClosedSide
   /** Its slot in that pane's strip. */
   index: number
+  /** The close took every tab its pane had, so the pane — and a split, with it — closed too. */
+  emptiedPane: boolean
 }
 
 export interface ClosedGroup {
@@ -44,9 +46,10 @@ export function captureClosed(layout: PaneLayout, ids: readonly string[]): Close
   const tabs: ClosedTab[] = []
   layout.panes.forEach((pane, p) => {
     const side: ClosedSide = layout.panes.length === 1 ? 'only' : p === 0 ? 'left' : 'right'
+    const emptiedPane = pane.tabs.every((tab) => closing.has(tab.sessionId))
     pane.tabs.forEach((tab, index) => {
       if (!closing.has(tab.sessionId) || isChooserTab(tab.sessionId)) return
-      tabs.push({ sessionId: tab.sessionId, paneId: pane.id, side, index })
+      tabs.push({ sessionId: tab.sessionId, paneId: pane.id, side, index, emptiedPane })
     })
   })
   if (tabs.length === 0) return null

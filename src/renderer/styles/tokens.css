@@ -7,7 +7,7 @@
 :root {
   /* ---- paper & ink (neutral grayscale — no warm tint) ---- */
   --paper: #fafafa; /* app field */
-  --paper-raised: #ffffff; /* raised tiles: live cards, modals, menus, popovers */
+  --paper-raised: #ffffff; /* raised tiles: the selected rail row, modals, menus, popovers */
   --paper-pane: #ffffff; /* main content surface: pane + Formatted + terminal (= raised in light) */
   --paper-sunken: #f4f4f4; /* sidebar / rail */
   --paper-code: #f6f6f6; /* unified mono surface: fenced + inline code AND tool result/JSON — midway between sunken and pane */
@@ -42,11 +42,11 @@
   /* The liveness dot alone, which Preferences -> Beta Features can recolor. Through --live rather
      than a copy of its value, so it tracks the accent per theme and needs no dark-scope twin; a
      chosen color is set inline on <html>, which outranks this, and clearing it lands back here
-     exactly. Recoloring --live instead would take the card ring, tally and Resume with it. */
+     exactly. Recoloring --live instead would take the selected row's edge and Resume with it. */
   --dot: var(--live);
   /* Opacity of the breathing dot's halo. Theme-aware for the reason --shadow-sel-hover is: the
      same alpha does not carry the same strength across the light/dark gap. Measured as the
-     perceptual lightness gap between the composited halo and the live card under it. */
+     perceptual lightness gap between the composited halo and the row under it. */
   --dot-halo: 0.22;
 
   /* ---- accent 2: warm red = negative / destructive (End, Stop, errors) ---- */
@@ -117,14 +117,11 @@
      so 7 + 7 = 14px. It is also the room anything painted outside a row has before .sb-rail-body's
      overflow clip cuts it — today the focused row's 2px edge. Raising this costs row width, 1px/side. */
   --rail-inset: 7px;
-  /* Where the rail's FLAT-row text column starts: a row's inset, plus the gutter it doesn't reserve, plus
-     .sb-row's own 8px padding. The head and the New popover align to it, so the head's label sits over
-     the flat-row titles. It is NOT a universal all-rows column: a live CARD overrides .sb-row's padding
-     to 10px and adds a 1px border, so its title lands 3px further in. That 3px is deliberate — a card is
-     its own container and reads as inset — but it means "aligned to the text column" describes the head,
-     the popover, and flat rows only. Anything centered (see .sb-rail-empty) should use a plain literal
-     instead, since this token positions an EDGE and would otherwise reflow for unrelated reasons.
-     Derived, not typed, so it tracks the two tokens above. */
+  /* Where the rail's row text column starts: a row's inset, plus the gutter it doesn't reserve, plus
+     .sb-row's own 8px padding. The head aligns to it, so its controls sit over the row titles. Anything
+     centered (see .sb-rail-empty) should use a plain literal instead, since this token positions an EDGE
+     and would otherwise reflow for unrelated reasons. Derived, not typed, so it tracks the two tokens
+     above. */
   --rail-text-inset: calc(var(--rail-inset) + var(--bar-thin) + 8px);
 
   /* ---- elevation (used sparingly; depth is mostly hairlines) ---- */
@@ -187,7 +184,7 @@
   --live-wash: #18202f; /* faintest wash */
   --live-glow: rgba(59, 108, 240, 0.3);
 
-  /* 0.22 over a near-black card lands at 58% of the strength it has over a white one, which is
+  /* 0.22 over a near-black row lands at 58% of the strength it has over a white one, which is
      what makes the breathing halo read as faint in dark. Parity with light is 0.38; this sits
      just below it, at 91%. The measurement sets the range and the eye picks inside it — a halo is a
      soft aura rather than an edge, so equal lightness gaps do not read as equal presence.

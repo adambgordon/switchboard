@@ -248,19 +248,21 @@ export default function Sidebar({
   const menuStateFor = (id: string): { entries: ConversationMenuEntry[] } | null => {
     const entry = entryById(id)
     if (!entry) return null
-    // A row that stands for no conversation keeps only what its terminal supports: Stop.
-    const linked = !isUnlinkedRow(entry.pty, entry.meta)
+    // A row that stands for no conversation keeps only what its terminal supports: Stop. One whose
+    // conversation is not indexed yet — a new one before its first message — can also move, but has
+    // nothing to pin, rename or show details of.
+    const movable = !isUnlinkedRow(entry.pty, entry.meta)
     const place = placementFor?.(id) ?? { side: null, hasTabHere: false }
     return {
       entries: conversationMenu({
         surface: 'row',
         count: 1,
-        linked,
+        linked: movable && !entry.meta.provisional,
         live: !!entry.pty,
         pinned: entry.pinned,
         unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
-        side: linked && onOpenToSide ? place.side : null,
-        newWindow: linked && !!onOpenInNewWindow,
+        side: movable && onOpenToSide ? place.side : null,
+        newWindow: movable && !!onOpenInNewWindow,
         hasTabHere: place.hasTabHere,
         closeOthers: false,
         reopen: 0

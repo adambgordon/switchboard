@@ -4,7 +4,7 @@
  *
  * Deliberately NOT React state. ⇧ goes down with every capital letter typed into a terminal, and
  * state would re-render each control listening for it on every one of those keystrokes. So what shows
- * the change is outside React: CSS reads `data-alt-held` / `data-shift-held` on the root (the red ×),
+ * the change is outside React: CSS reads `data-alt-held` on the root (the red ×),
  * and the tooltip layer, which is subscribed here, swaps in a host's `data-tip-alt` / `data-tip-shift`
  * text. A click reads its own event's `altKey` / `shiftKey`, so nothing needs this to act.
  *
@@ -25,7 +25,6 @@ function set(next: HeldKeys): void {
   held = next
   const root = document.documentElement
   root.toggleAttribute('data-alt-held', next.alt)
-  root.toggleAttribute('data-shift-held', next.shift)
   for (const l of listeners) l(next)
 }
 

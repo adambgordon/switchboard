@@ -26,6 +26,7 @@ import { useSidebarPrefs } from './lib/useSidebarPrefs'
 import {
   DEFAULT_SIDEBAR_LIMITS,
   buildSidebarHeld,
+  dropNeighbors,
   freezeFoldersByNewest,
   folderRankSpace,
   rankSpace,
@@ -745,24 +746,14 @@ export default function App() {
     [ptys.bySession, metaById]
   )
 
-  // The set of sessions matching the active search, or null when not searching. The
-  // query filters entries *within* every section (Pinned/Live/Recent) — it does not
-  // replace them with a separate flat list.
+  // The set of sessions matching the active search, or null when not searching. The rail filters its
+  // folders to them rather than replacing them with a separate flat list.
   const matchIds = useMemo(
     () => (query.trim() ? new Set(searchConversations(allConversations, query).map((c) => c.sessionId)) : null),
     [allConversations, query]
   )
   const searching = matchIds !== null
 
-  // The pane's three sections. Ordering is stable w.r.t. activity — positions key off
-  // pin order and a manual Live order, never lastActivity/startedAt — so a session emitting
-  // output never makes a row jump (see git ce407fa). The lone exception is the not-live
-  // "Recent" history, which sorts by mtime because it IS a recency list. Live rows are
-  // joined to their indexed meta so they carry a preview and a fresh (renamed/aiTitle) title.
-  //   1. Pinned — pinned convos (live or not), most-recently-pinned on top.
-  //   2. Live   — live & unpinned, in manual order (newest on top; drag to reorder).
-  //   3. Recent — everything else (not live, not pinned), most-recent first.
-  // When a search is active, each section is filtered to the matching sessions.
   // --- terminal ownership + per-pane resolution ---
   //
   // Which pane each live terminal is mounted in. A window holds one stable xterm per terminal in the
@@ -861,12 +852,10 @@ export default function App() {
   }, [view0.id, view1.id])
 
   // THE composition of liveness for one session, hoisted so every surface reading it reads the same
-  // value: the rail's sections, the Live tally, both tab strips, and the read/unread toggle. It was
-  // previously hand-copied at each site, and `resolveRowLiveState` exists because one of those copies
-  // was written without the unlinked gate. The tab strip then repeated the mistake one level up —
-  // deriving `live: !!pty` and drawing a solid "finished, unseen" dot next to a rail row showing the
-  // hollow "idle" one, for the same session at the same moment. Two derivations of one fact are two
-  // claims about it, so there is one.
+  // value: the rail's rows, the bell, both tab strips, and the read/unread toggle. A second derivation
+  // — `live: !!pty` in a tab strip, say — would draw a solid "finished, unseen" dot beside a row
+  // showing the hollow "idle" one for the same session at the same moment, and skip the unlinked gate
+  // `resolveRowLiveState` applies. Two derivations of one fact are two claims about it, so there is one.
   const liveStateFor = useCallback(
     (pty: PtyState | null, meta: ConversationMeta, id: string): LiveState | null =>
       resolveRowLiveState(pty, meta, seen[id] ?? 0, focused && visibleIds.has(id), unread[id]),
@@ -1062,6 +1051,7 @@ export default function App() {
               preview: tab.preview,
               dot: null,
               unlinked: true,
+              indexed: false,
               running: false,
               pinned: false,
               unread: false
@@ -1091,6 +1081,7 @@ export default function App() {
             // so this resolves to "no dot" for exactly the sessions that have no state to report.
             dot: meta ? liveDotClass(pty, meta, state) : null,
             unlinked: isUnlinkedId(tab.sessionId),
+            indexed: metaById.has(tab.sessionId),
             running: !!pty,
             pinned: pinned.has(tab.sessionId),
             // What the rail row's menu calls unread, so the two menus offer the same toggle.
@@ -1951,9 +1942,11 @@ export default function App() {
 
   // A header click writes the folder's preference — the opposite of what it shows. Collapsing also
   // forgets that navigation opened it and closes it even over an active conversation in it; expanding
-  // lifts that. Both hold until navigation next enters the folder.
+  // lifts that. Both hold until navigation next enters the folder. Inert while searching: every folder
+  // shows open then, so a click would save a collapse nobody sees until the search is cleared.
   const toggleFolder = useCallback(
     (root: string) => {
+      if (searching) return
       const group = sidebarModelRef.current?.groups.find((g) => g.key === root)
       if (!group) return
       const collapse = !group.collapsed
@@ -1965,7 +1958,7 @@ export default function App() {
         setActiveCollapsed((prev) => withoutFolders(prev, [root]))
       }
     },
-    [setFolderCollapsed]
+    [setFolderCollapsed, searching]
   )
 
   // Collapse all / Expand all: the preference for every folder, rendered or not, and the navigation
@@ -1991,7 +1984,8 @@ export default function App() {
       else {
         const model = sidebarModelRef.current
         if (!model) return
-        const writes = dropWrites(rankSpace(model), draggedId, higherId, lowerId, Date.now())
+        const [higher, lower] = dropNeighbors(model, block, draggedId, higherId, lowerId)
+        const writes = dropWrites(rankSpace(model), draggedId, higher, lower, Date.now())
         if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
       }
       setReorderTick((t) => t + 1)

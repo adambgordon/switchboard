@@ -7,7 +7,7 @@ const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
 const FOLD_ID = 'sb-fold'
 /** On the folded folder: clips it to its header and fades its rows (rail.css). The drag's clone is
  *  copied from the folded folder, so it carries the class too. */
-export const FOLD_CLASS = 'sb-folded'
+const FOLD_CLASS = 'sb-folded'
 
 /**
  * Fold the folder being dragged down to its header, so it moves as one short card while the rest of the
@@ -21,9 +21,6 @@ export const FOLD_CLASS = 'sb-folded'
  */
 export function foldFolder(folder: HTMLElement): DragReshape {
   let from = 0
-  const stop = (): void => {
-    for (const a of folder.getAnimations()) if (a.id === FOLD_ID) a.cancel()
-  }
   return {
     apply() {
       from = folder.getBoundingClientRect().height
@@ -38,9 +35,8 @@ export function foldFolder(folder: HTMLElement): DragReshape {
       if (!folder.style.height || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
       folder.animate([{ height: `${from}px` }, { height: folder.style.height }], { duration: FOLD_MS, easing: EASE, id: FOLD_ID })
     },
-    stop,
     revert() {
-      stop()
+      for (const a of folder.getAnimations()) if (a.id === FOLD_ID) a.cancel()
       folder.style.height = ''
       folder.classList.remove(FOLD_CLASS)
     }

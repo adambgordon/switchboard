@@ -52,15 +52,12 @@ import { dragScrollFeedback, dragScrollRequest, type EdgeMotion } from './edgeSc
 
 /**
  * A temporary change to the rail's layout for the length of a drag. `apply` must leave the layout the
- * drag will run in, so the drag measures it; `play` may then animate toward it. `stop` ends any
- * animation, leaving the applied layout; `revert` undoes everything.
+ * drag will run in, so the drag measures it; `play` may then animate toward it; `revert` stops any
+ * animation and undoes everything.
  */
 export interface DragReshape {
-  /** Put on the clone's host, when the reshaped rail styles the unit through a class on an ancestor. */
-  hostClass?: string
   apply(): void
   play(): void
-  stop(): void
   revert(): void
 }
 
@@ -130,14 +127,14 @@ function findBlock(container: HTMLElement, id: string): HTMLElement | null {
 }
 
 /** Lift `unit` into a fixed clone, in a host that carries the rail's classes. */
-function lift(container: HTMLElement, unit: HTMLElement, rect: DOMRect, hostClass: string | null): Lifted {
+function lift(container: HTMLElement, unit: HTMLElement, rect: DOMRect): Lifted {
   const rail = container.closest<HTMLElement>('.sb-rail')
   const host = document.createElement('div')
   host.className = `${rail?.className ?? ''} sb-drag-host`
   host.style.cssText =
     'position:fixed;left:0;top:0;width:0;height:0;overflow:visible;background:none;pointer-events:none;z-index:1000'
   const body = document.createElement('div')
-  body.className = hostClass ? `sb-rail-body ${hostClass}` : 'sb-rail-body'
+  body.className = 'sb-rail-body'
   body.style.cssText = 'position:static;overflow:visible;padding:0;display:block'
   const clone = unit.cloneNode(true) as HTMLElement
   // A folder's header can rise into the space above it by a negative margin; on a card that would put
@@ -222,7 +219,6 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     const real = units.find((u) => u.dataset.key === pending.key) ?? null
     if (pending.shape) {
       // Open the rail again, holding the dropped unit where it landed.
-      pending.shape.stop()
       const landed = real?.getBoundingClientRect().top ?? 0
       pending.shape.revert()
       if (real) container.scrollTop += real.getBoundingClientRect().top - landed
@@ -408,7 +404,7 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
         startScroll
       }
       el.setPointerCapture(e.pointerId)
-      lifted = lift(el, unit, rect, shape?.hostClass ?? null)
+      lifted = lift(el, unit, rect)
       // Measured; now the reshape may animate toward the layout just measured.
       shape?.play()
       unit.style.visibility = 'hidden'

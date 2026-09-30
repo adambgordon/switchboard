@@ -18,7 +18,8 @@ export interface ConversationMenuState {
   surface: 'row' | 'tab'
   /** How many tabs the where-to and close commands act on: more than 1 only for a multi-selection. */
   count: number
-  /** There is a conversation behind it. A chooser tab, or a terminal not yet bound to one, has none. */
+  /** There is an indexed conversation behind it. A chooser tab, a terminal not yet bound to one, and a
+   *  new conversation before its first message have none. */
   linked: boolean
   live: boolean
   pinned: boolean

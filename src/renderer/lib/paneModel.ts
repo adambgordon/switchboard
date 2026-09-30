@@ -822,11 +822,12 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
 /**
  * The pane a reopened tab goes back to, or -1 when its side of a split has to be opened again: the
  * same pane if it is still here; else, with two panes, the one on its side; else the single pane,
- * unless the tab came from a split.
+ * unless the tab's own close is what collapsed the split — a split the user closed afterward stays
+ * closed.
  */
 function reopenTarget(panes: Pane[], tab: ClosedTab, focusIndex: number): number {
   const same = panes.findIndex((pane) => pane.id === tab.paneId)
   if (same >= 0) return same
   if (panes.length === 2) return tab.side === 'left' ? 0 : tab.side === 'right' ? 1 : focusIndex
-  return tab.side === 'only' ? 0 : -1
+  return tab.side !== 'only' && tab.emptiedPane ? -1 : 0
 }

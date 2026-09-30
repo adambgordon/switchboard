@@ -373,6 +373,30 @@ describe('ProjectRoots', () => {
     expect(new ProjectRoots({ home }).resolve(sub)).toEqual({ root: parent, worktree: false })
   })
 
+  it('without a walk, answers from the memo or the cache and touches nothing on disk', () => {
+    const r = repo('repo')
+    const sub = dir('repo', 'sub')
+    const other = dir('repo', 'other')
+    const data = dir('data')
+    writeFileSync(path.join(data, 'project-roots.json'), JSON.stringify({ [other]: { root: r, worktree: false } }))
+    let touched = 0
+    const counting = {
+      realpath: (p: string) => (touched++, nodeRootFs.realpath(p)),
+      kind: (p: string) => (touched++, nodeRootFs.kind(p)),
+      readFile: (p: string) => (touched++, nodeRootFs.readFile(p))
+    }
+    const roots = new ProjectRoots({ dir: data, home, fs: counting })
+    // Never walked this launch: the cwd itself, or its cached root.
+    expect(roots.resolve(sub, false)).toEqual({ root: sub, worktree: false })
+    expect(roots.resolve(other, false)).toEqual({ root: r, worktree: false })
+    expect(touched).toBe(0)
+    // Walked once, it is memoized, and the no-walk answer is the walked one.
+    expect(roots.resolve(sub)).toEqual({ root: r, worktree: false })
+    touched = 0
+    expect(roots.resolve(sub, false)).toEqual({ root: r, worktree: false })
+    expect(touched).toBe(0)
+  })
+
   it('writes the cache once per batch, not once per cwd', () => {
     const data = dir('data')
     const cwds = [repo('a'), repo('b'), repo('c')]

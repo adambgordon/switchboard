@@ -26,7 +26,7 @@ const layout = (panes: Pane[], focusIndex = 0): PaneLayout => ({
   splitFraction: SPLIT_LIMITS.default
 })
 const group = (ids: string[], activeId = ids[0]): ClosedGroup => ({
-  tabs: ids.map((sessionId, index) => ({ sessionId, paneId: 'p0', side: 'only', index })),
+  tabs: ids.map((sessionId, index) => ({ sessionId, paneId: 'p0', side: 'only', index, emptiedPane: false })),
   activeId
 })
 
@@ -36,9 +36,9 @@ describe('captureClosed', () => {
     const l = layout([pane('p0', ['A', 'B', 'C'], 0), pane('p3', ['D', 'E', 'F'], 0)])
     expect(captureClosed(l, ['F', 'B', 'D'])).toEqual({
       tabs: [
-        { sessionId: 'B', paneId: 'p0', side: 'left', index: 1 },
-        { sessionId: 'D', paneId: 'p3', side: 'right', index: 0 },
-        { sessionId: 'F', paneId: 'p3', side: 'right', index: 2 }
+        { sessionId: 'B', paneId: 'p0', side: 'left', index: 1, emptiedPane: false },
+        { sessionId: 'D', paneId: 'p3', side: 'right', index: 0, emptiedPane: false },
+        { sessionId: 'F', paneId: 'p3', side: 'right', index: 2, emptiedPane: false }
       ],
       activeId: 'D'
     })
@@ -46,7 +46,7 @@ describe('captureClosed', () => {
 
   it('a single pane is neither side, so a later split does not decide where it goes', () => {
     expect(captureClosed(layout([pane('p0', ['A', 'B'], 0)]), ['B'])?.tabs).toEqual([
-      { sessionId: 'B', paneId: 'p0', side: 'only', index: 1 }
+      { sessionId: 'B', paneId: 'p0', side: 'only', index: 1, emptiedPane: false }
     ])
   })
 
@@ -63,13 +63,21 @@ describe('captureClosed', () => {
     expect(captureClosed(l, ['A', 'B', 'D'])?.activeId).toBe('A')
   })
 
+  it('marks the tabs whose close takes their whole pane, and only those', () => {
+    const l = layout([pane('p0', ['A', 'B'], 0), pane('p1', ['C'], 0)])
+    expect(captureClosed(l, ['B', 'C'])?.tabs.map((t) => [t.sessionId, t.emptiedPane])).toEqual([
+      ['B', false],
+      ['C', true]
+    ])
+  })
+
   it('records no chooser — it stands for no conversation — and nothing at all for a chooser alone', () => {
     const chooser = chooserTabId(1)
     const l = layout([pane('p0', ['A', chooser, 'B'], 1)])
     expect(captureClosed(l, ['A', chooser, 'B'])).toEqual({
       tabs: [
-        { sessionId: 'A', paneId: 'p0', side: 'only', index: 0 },
-        { sessionId: 'B', paneId: 'p0', side: 'only', index: 2 }
+        { sessionId: 'A', paneId: 'p0', side: 'only', index: 0, emptiedPane: true },
+        { sessionId: 'B', paneId: 'p0', side: 'only', index: 2, emptiedPane: true }
       ],
       activeId: 'A'
     })
@@ -119,8 +127,8 @@ describe('takeReopenable', () => {
     const { group: g } = takeReopenable([group(['A', 'B', 'C'], 'C')], (id) => id !== 'B')
     expect(g).toEqual({
       tabs: [
-        { sessionId: 'A', paneId: 'p0', side: 'only', index: 0 },
-        { sessionId: 'C', paneId: 'p0', side: 'only', index: 2 }
+        { sessionId: 'A', paneId: 'p0', side: 'only', index: 0, emptiedPane: false },
+        { sessionId: 'C', paneId: 'p0', side: 'only', index: 2, emptiedPane: false }
       ],
       activeId: 'C'
     })

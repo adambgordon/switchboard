@@ -180,9 +180,13 @@ export class ProjectRoots {
     this.persisted = this.dir ? loadPersisted(this.dir) : new Map()
   }
 
-  /** Resolve one cwd. Sync; memo → fresh walk → persisted cache → the cwd itself. */
-  resolve(cwd: string): ProjectRoot {
-    return this.resolveAll([cwd]).get(cwd) ?? { root: cwd, worktree: false }
+  /**
+   * Resolve one cwd. Sync; memo → fresh walk → persisted cache → the cwd itself. `walk: false` skips
+   * the fresh walk, for a caller that must not touch the filesystem and can live with a cwd the index
+   * has not resolved yet reading as its cached root.
+   */
+  resolve(cwd: string, walk = true): ProjectRoot {
+    return this.resolveAll([cwd], walk ? undefined : new Set([cwd])).get(cwd) ?? { root: cwd, worktree: false }
   }
 
   /**

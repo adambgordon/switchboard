@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationGroup, ConversationMeta, LiveState, PtyState } from '../src/shared/types'
-import { absorbBind, absorbBindFolder, holdRank } from '../src/renderer/lib/rowRank'
+import { absorbBind, absorbBindFolder, dropWrites, holdRank } from '../src/renderer/lib/rowRank'
 import {
   buildSidebar,
   conversationSeed,
@@ -10,6 +10,7 @@ import {
   folderRankSpace,
   rankSpace,
   buildSidebarHeld,
+  dropNeighbors,
   resumeWrites,
   visibleRows,
   enteredFolders,
@@ -676,6 +677,63 @@ describe('the folder rank space', () => {
       { id: '/w/b', rank: T - 10 },
       { id: '/w/c', rank: T - 9 }
     ])
+  })
+})
+
+describe('a drop beside a row shown past the cap', () => {
+  // c0 newest … c5 oldest; c5 is live, so with a cap of 2 the folder shows c0, c1, then c5 — and c2–c4
+  // are withheld between c1 and c5.
+  const convs = [0, 1, 2, 3, 4, 5].map((i) => conv(`c${i}`, T - i * 1000))
+  const build = (rowRanks: Record<string, number> = {}): SidebarModel =>
+    buildSidebar(input({ groups: [group('/w/r', convs)], ptys: [pty('c5')], rowRanks }))
+  const shownRows = (model: SidebarModel): string[] => model.groups[0].blocks[0].rows.map((r) => r.sessionId)
+  const drop = (higher: string | null, lower: string | null): string[] => {
+    const model = build()
+    const block = model.groups[0].blocks[0]
+    const [h, l] = dropNeighbors(model, block, 'c0', higher, lower)
+    return shownRows(build(dropWrites(rankSpace(model), 'c0', h, l, T)))
+  }
+
+  it('keeps the dropped row on screen, directly below the row it was dropped under', () => {
+    expect(shownRows(build())).toEqual(['c0', 'c1', 'c5'])
+    expect(drop('c1', 'c5')).toEqual(['c1', 'c0', 'c5'])
+    // Taken as shown, the neighbors straddle c2–c4, and the midpoint withholds c0 among them.
+    const model = build()
+    expect(shownRows(build(dropWrites(rankSpace(model), 'c0', 'c1', 'c5', T)))).toEqual(['c1', 'c2', 'c5'])
+  })
+
+  it('lands below the last row shown in order when dropped under the row past the cap', () => {
+    expect(drop('c5', null)).toEqual(['c1', 'c0', 'c5'])
+  })
+
+  it('keeps a capped row on screen dropped under a live row that sits right at the cap', () => {
+    // Nothing withheld between the cap and the live row, so the rows match their full order all the
+    // way down — only the cap says where the shown-in-order run ends.
+    const four = [0, 1, 2, 3].map((i) => conv(`c${i}`, T - i * 1000))
+    const at = (rowRanks: Record<string, number> = {}): SidebarModel =>
+      buildSidebar(input({ groups: [group('/w/r', four)], ptys: [pty('c2')], rowRanks }))
+    const model = at()
+    const block = model.groups[0].blocks[0]
+    expect(block.rows.map((r) => r.sessionId)).toEqual(['c0', 'c1', 'c2'])
+    const [h, l] = dropNeighbors(model, block, 'c0', 'c2', null)
+    expect(shownRows(at(dropWrites(rankSpace(model), 'c0', h, l, T)))).toEqual(['c1', 'c0', 'c2'])
+  })
+
+  it('takes a drop of a row past the cap as it is: it shows wherever it lands', () => {
+    const twoLive = (rowRanks: Record<string, number> = {}): SidebarModel =>
+      buildSidebar(input({ groups: [group('/w/r', convs)], ptys: [pty('c4'), pty('c5')], rowRanks }))
+    const model = twoLive()
+    const block = model.groups[0].blocks[0]
+    expect(block.rows.map((r) => r.sessionId)).toEqual(['c0', 'c1', 'c4', 'c5'])
+    expect(dropNeighbors(model, block, 'c4', 'c5', null)).toEqual(['c5', null])
+    expect(shownRows(twoLive(dropWrites(rankSpace(model), 'c4', 'c5', null, T)))).toEqual(['c0', 'c1', 'c5', 'c4'])
+  })
+
+  it('leaves a drop between rows adjacent in order, or at the top, as it was', () => {
+    const model = build()
+    const block = model.groups[0].blocks[0]
+    expect(dropNeighbors(model, block, 'c1', null, 'c0')).toEqual([null, 'c0'])
+    expect(dropNeighbors(model, block, 'c5', 'c0', 'c1')).toEqual(['c0', 'c1'])
   })
 })
 
