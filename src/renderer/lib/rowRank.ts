@@ -3,9 +3,10 @@
  *
  * Every row has a rank and the rail sorts descending. A row nobody has touched ranks at its SEED — a
  * fixed number derived from the row itself (its conversation's start, see `sidebarModel`) — and
- * stores nothing. Only three events write, each one key: a drag writes the dropped row's new rank, a
- * Resume lifts its row above everything, and a placeholder terminal binding to its real conversation
- * hands its rank to the real id. Nothing derived from the catalog is ever written, so rendering
+ * stores nothing. Only four events write, each one key: a drag writes the dropped row's new rank, a
+ * Resume lifts its row above everything, a placeholder terminal binding to its real conversation
+ * hands its rank to the real id, and a new conversation's first index keeps the rank its terminal's
+ * stand-in row had. Nothing derived from the catalog is ever written, so rendering
  * against a partial or empty catalog (startup, a second window) cannot lose a position.
  *
  * Ranks are ms timestamps, so a rank space is global: the same numbers order the All list and every
@@ -148,6 +149,18 @@ export function absorbBind(
   delete next[placeholderId]
   next[realId] = dragged ? overrides[placeholderId] : seenRank
   return next
+}
+
+/**
+ * A row whose seed changed under it keeps the rank it was showing — the same-id sibling of
+ * `absorbBind`. A new Claude conversation's row is a stand-in seeded by its terminal's start until the
+ * index lists it, and the index re-seeds it at its first message, later; without this it would jump
+ * past every row started or resumed in between. A row that already carries an override was placed by
+ * the user (or by another window's identical hold), and is left alone.
+ */
+export function holdRank(overrides: RankOverrides, id: string, shownRank: number): Record<string, number> {
+  if (Object.hasOwn(overrides, id)) return overrides as Record<string, number>
+  return { ...overrides, [id]: shownRank }
 }
 
 /**

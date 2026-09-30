@@ -201,6 +201,19 @@ describe('PtyManager live-session cap', () => {
     expect(announced).toBe(0)
   })
 
+  it("announces a provisional terminal's first use once, so every window sees it is no longer untouched", () => {
+    // Stop-on-close reads this: a prompt sent to an unlinked Codex terminal may have started a rollout
+    // its placeholder cannot show, and the window closing the tab may not be the one that was typed in.
+    const unlinked = mgr.startNew(CWD, 'codex')
+    let last: { ptyId: string; usedByUser: boolean }[] = []
+    mgr.on('active-changed', (s: { ptyId: string; usedByUser: boolean }[]) => (last = s))
+    announced = 0
+    mgr.markUsed(unlinked.ptyId)
+    mgr.markUsed(unlinked.ptyId)
+    expect(announced).toBe(1)
+    expect(last.find((s) => s.ptyId === unlinked.ptyId)?.usedByUser).toBe(true)
+  })
+
   it('stops protecting a question once the user has responded to it', () => {
     // The bug: a request detected from output is cleared by nothing if the user DECLINES. Accepting
     // lets the transcript overtake the timestamp; declining leaves no trace at all, so the terminal

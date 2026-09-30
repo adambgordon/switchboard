@@ -286,6 +286,13 @@ export interface PtySession {
    */
   provisional: boolean
   /**
+   * Whether a person has used this terminal — typed, pasted or dropped into it, in any window. Its
+   * first use is announced at once only while `provisional`, the one time a reader needs it promptly:
+   * a prompt sent to a provisional terminal may have started a conversation its placeholder id cannot
+   * show, so closing its tab must not stop it. Otherwise it rides the next snapshot.
+   */
+  usedByUser: boolean
+  /**
    * [Claude] The background agent this session has launched, or null. Its presence means ONLY that —
    * Claude writes the marker on spawn and never clears it, so it says nothing about whether the
    * terminal is currently showing that agent. Paired with "this session has no indexed conversation"

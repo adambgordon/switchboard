@@ -561,6 +561,23 @@ const transcriptLoader = new TranscriptLoader(
 )
 
 /**
+ * A terminal that ended having written nothing leaves no conversation behind — a new session stopped
+ * before its first message — so Back/Forward must step over its stops, as they do an unbound
+ * placeholder's. The index drops empty conversations, so one it lists has messages; one it does not is
+ * read fresh, because the index trails a first message by up to a second.
+ */
+function retireIfEmpty(sessionId: string): void {
+  const listed = conversationIndex.peek()?.groups.some((g) => g.conversations.some((c) => c.sessionId === sessionId))
+  if (listed) return
+  void transcriptLoader.load(sessionId, `exit:${Date.now()}`).then(
+    (t) => {
+      if (!t || t.messages.length === 0) navigation.retire(sessionId)
+    },
+    () => {}
+  )
+}
+
+/**
  * Which agent CLIs are launchable, probed via the LOGIN+INTERACTIVE shell (`$SHELL -lic`) — the same
  * shell the PtyManager spawns, so this reflects the real PATH a session would get, not the GUI app's
  * minimal process.env. `command -v` prints the resolved path for each that exists and nothing for
@@ -733,6 +750,7 @@ export function registerIpc(): void {
     boundTabReservations.discardPty(ptyId)
     ptyOwner.delete(ptyId)
     if (provisional) navigation.retire(sessionId)
+    else retireIfEmpty(sessionId)
     broadcast(IPC.ptyExit, ptyId, code)
   })
   mgr.on('active-changed', () => emitActive())

@@ -100,7 +100,7 @@ function catalog() {
 const CATALOG = catalog()
 let added = 0
 // Caps high enough that every row renders: the tall folder must overflow the rail on its own.
-const LIMITS = { folderCap: 100, allCap: 200, autoExpand: 40 }
+const LIMITS = { folderCap: 100, allCap: 200, minUnpinned: 3, autoExpand: 40 }
 // `agents`: the installed agents, in the order the header logos take their slots outward from the pencil.
 // `tips`: mount the app's tooltip layer. Off by default, so a label left up by a hover never paints over
 // what another check reads.

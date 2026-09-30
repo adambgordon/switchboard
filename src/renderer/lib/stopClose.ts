@@ -34,7 +34,12 @@ export function confirmedEmpty(indexedMessages: number, transcript: { messages: 
  * to confirm it. A running terminal with nothing indexed — which includes an unlinked Codex terminal,
  * whose rollout does not exist until its first prompt — except one whose work went into a Claude
  * background agent: that writes no transcript of its own, so it looks empty while the agent works.
+ * And except a provisional terminal someone has used: its prompt may already have started a rollout
+ * under an id not yet bound to it, which no read under its placeholder can see.
  */
-export function stopsOnClose(pty: Pick<PtyState, 'parkedJob'> | undefined, indexedMessages: number): boolean {
-  return pty !== undefined && pty.parkedJob === null && indexedMessages === 0
+export function stopsOnClose(
+  pty: Pick<PtyState, 'parkedJob' | 'provisional' | 'usedByUser'> | undefined,
+  indexedMessages: number
+): boolean {
+  return pty !== undefined && pty.parkedJob === null && indexedMessages === 0 && !(pty.provisional && pty.usedByUser)
 }

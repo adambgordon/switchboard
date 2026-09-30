@@ -25,7 +25,7 @@ import { useRowRank } from './lib/useRowRank'
 import { useSidebarPrefs } from './lib/useSidebarPrefs'
 import {
   DEFAULT_SIDEBAR_LIMITS,
-  buildSidebar,
+  buildSidebarHeld,
   freezeFoldersByNewest,
   folderRankSpace,
   rankSpace,
@@ -39,7 +39,7 @@ import {
   type SidebarBlock,
   type SidebarModel
 } from './lib/sidebarModel'
-import { absorbBind, absorbBindFolder, dropWrites } from './lib/rowRank'
+import { absorbBind, absorbBindFolder, dropWrites, holdRank, type RankOverrides } from './lib/rowRank'
 import { FOLDER_SEED_TASK, ONCE_TASKS_KEY, WHATS_NEW_TASK, parseOnceTasks, withOnceTask } from './lib/onceTasks'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
@@ -73,7 +73,7 @@ import {
   type ChooserMemory
 } from './lib/chooserTab'
 import { confirmedEmpty, endedStops, stopsOnClose } from './lib/stopClose'
-import { captureClosed, pushClosed, takeReopenable, type ClosedGroup } from './lib/closedTabs'
+import { captureClosed, pushClosed, rekeyClosed, takeReopenable, type ClosedGroup } from './lib/closedTabs'
 import type { SidePlace } from './lib/conversationMenu'
 import {
   NO_SELECTION,
@@ -590,7 +590,10 @@ export default function App() {
     })
     const off = window.api.onPtyBound((ptyId, oldId, newId, kind, ownedHere, adoptionToken) => {
       cancelPending(ptyId)
-      if (kind === 'initial') rekeyPendingNavigation(oldId, newId)
+      if (kind === 'initial') {
+        rekeyPendingNavigation(oldId, newId)
+        closedTabsRef.current = rekeyClosed(closedTabsRef.current, oldId, newId)
+      }
       const ev = { oldId, newId, kind }
       latestBinds.set(ptyId, ev)
       const act = bindActions(ev, selectedIdRef.current, ownedHere)
@@ -886,10 +889,13 @@ export default function App() {
   }, [visiblePtySig])
 
   // THE rail: every row, its folder, its order, and which rows render. One pure build, read by the
-  // rail AND by keyboard navigation, so the two cannot disagree about what is on screen.
-  const sidebarModel = useMemo(
+  // rail AND by keyboard navigation, so the two cannot disagree about what is on screen. Built against
+  // the last model shown, so a row the index has just re-seeded keeps its place (`buildSidebarHeld`);
+  // not while loading, when the first load re-seeds every live row at its real start.
+  const shownModelRef = useRef<SidebarModel | null>(null)
+  const sidebar = useMemo(
     () =>
-      buildSidebar({
+      buildSidebarHeld(loading ? null : shownModelRef.current, {
         mode: sidebarMode,
         groups,
         ptys: ptys.active,
@@ -907,6 +913,7 @@ export default function App() {
         limits: DEFAULT_SIDEBAR_LIMITS
       }),
     [
+      loading,
       sidebarMode,
       groups,
       ptys.active,
@@ -923,7 +930,17 @@ export default function App() {
       matchIds
     ]
   )
+  const sidebarModel = sidebar.model
   sidebarModelRef.current = sidebarModel
+  // Persist what the build held — only the entries the store lacks, folded into a fresh read, so a hold
+  // never overwrites a position written meanwhile (by a drag, or another window's identical hold).
+  useLayoutEffect(() => {
+    shownModelRef.current = loading ? null : sidebar.model
+    const holds = (held: RankOverrides, from: RankOverrides) => (stored: RankOverrides) =>
+      Object.entries(held).reduce((s, [id, rank]) => (Object.hasOwn(from, id) ? s : holdRank(s, id, rank)), stored)
+    if (sidebar.rowRanks !== rowRanks) mutateRows(holds(sidebar.rowRanks, rowRanks))
+    if (sidebar.folderRanks !== folderRanks) mutateFolders(holds(sidebar.folderRanks, folderRanks))
+  }, [sidebar, loading, rowRanks, folderRanks, mutateRows, mutateFolders])
 
   // Once per profile, ever: the first time this rail runs, freeze the folders newest-first. Waits for a
   // load with indexed conversations — the index arrives whole, and a failed one arrives empty, which

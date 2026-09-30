@@ -3,6 +3,7 @@ import {
   CLOSED_TABS_CAP,
   captureClosed,
   pushClosed,
+  rekeyClosed,
   takeReopenable,
   type ClosedGroup
 } from '../src/renderer/lib/closedTabs'
@@ -92,6 +93,13 @@ describe('pushClosed', () => {
   it('honors a cap other than the default', () => {
     const stack = pushClosed(pushClosed(pushClosed([], group(['A'])), group(['B']), 2), group(['C']), 2)
     expect(stack.map((g) => g.tabs[0].sessionId)).toEqual(['B', 'C'])
+  })
+})
+
+describe('rekeyClosed', () => {
+  it('moves a closed placeholder, and its active mark, to the conversation it bound to', () => {
+    const stack = [group(['a', 'ph'], 'ph'), group(['b']), group(['ph', 'c'], 'c')]
+    expect(rekeyClosed(stack, 'ph', 'real')).toEqual([group(['a', 'real'], 'real'), group(['b']), group(['real', 'c'], 'c')])
   })
 })
 

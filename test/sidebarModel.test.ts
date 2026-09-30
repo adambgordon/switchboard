@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationGroup, ConversationMeta, LiveState, PtyState } from '../src/shared/types'
-import { absorbBind, absorbBindFolder } from '../src/renderer/lib/rowRank'
+import { absorbBind, absorbBindFolder, holdRank } from '../src/renderer/lib/rowRank'
 import {
   buildSidebar,
   conversationSeed,
@@ -9,6 +9,7 @@ import {
   freezeFoldersByNewest,
   folderRankSpace,
   rankSpace,
+  buildSidebarHeld,
   resumeWrites,
   visibleRows,
   enteredFolders,
@@ -59,6 +60,7 @@ function pty(sessionId: string, over: Partial<PtyState> = {}): PtyState {
     inputRequestedAt: null,
     origin: 'resume',
     provisional: false,
+    usedByUser: false,
     parkedJob: null,
     registryStatus: null,
     ownedHere: true,
@@ -570,6 +572,46 @@ describe('an initial bind', () => {
     expect(absorbBindFolder({}, '/w/a', { rank: T - 50, seed: T - 50 }, T)).toEqual({})
     const placed = { '/w/a': T - 7 }
     expect(absorbBindFolder(placed, '/w/a', { rank: T - 7, seed: T }, T)).toBe(placed)
+  })
+})
+
+describe("a new Claude conversation's first index", () => {
+  // Two new terminals in a brand-new folder /w/n: 'a' started at T, 'b' at T+1000, neither indexed, so
+  // 'b' leads. /w/o's conversation started at T+500, so /w/o leads /w/n. Then 'a' gets its first
+  // message, at T+3000, and the index lists it.
+  const ptys = [pty('a', { projectRoot: '/w/n', startedAt: T, origin: 'new' }), pty('b', { projectRoot: '/w/n', startedAt: T + 1000, origin: 'new' })]
+  const before = buildSidebar(input({ groups: [group('/w/o', [conv('o', T + 500)])], ptys }))
+  const indexed = (over: Partial<SidebarInput> = {}): SidebarInput =>
+    input({ groups: [group('/w/o', [conv('o', T + 500)]), group('/w/n', [conv('a', T + 3000)])], ptys, ...over })
+  const rowsOf = (model: SidebarModel, key: string): string[] =>
+    model.groups.find((g) => g.key === key)!.blocks.flatMap((b) => b.rows.map((r) => r.sessionId))
+
+  it('keeps the row and its folder where they were, in the same build', () => {
+    expect(rowsOf(before, '/w/n')).toEqual(['b', 'a'])
+    const held = buildSidebarHeld(before, indexed())
+    expect(held.rowRanks).toEqual({ a: T })
+    expect(held.folderRanks).toEqual({ '/w/n': T })
+    expect(keys(held.model)).toEqual(['/w/o', '/w/n'])
+    expect(rowsOf(held.model, '/w/n')).toEqual(['b', 'a'])
+    // Unheld, 'a' jumps above 'b', and /w/n above /w/o.
+    const unheld = buildSidebar(indexed())
+    expect(rowsOf(unheld, '/w/n')).toEqual(['a', 'b'])
+    expect(keys(unheld)).toEqual(['/w/n', '/w/o'])
+  })
+
+  it('holds nothing without a model to hold against, or once the hold is stored', () => {
+    const plain = indexed()
+    expect(buildSidebarHeld(null, plain).rowRanks).toBe(plain.rowRanks)
+    const stored = indexed({ rowRanks: { a: T }, folderRanks: { '/w/n': T } })
+    const again = buildSidebarHeld(buildSidebarHeld(before, indexed()).model, stored)
+    expect(again.rowRanks).toBe(stored.rowRanks)
+    expect(again.folderRanks).toBe(stored.folderRanks)
+  })
+
+  it('leaves a row the user already placed', () => {
+    const placed = { a: T + 9 }
+    expect(holdRank(placed, 'a', T)).toBe(placed)
+    expect(buildSidebarHeld(before, indexed({ rowRanks: placed })).rowRanks).toBe(placed)
   })
 })
 

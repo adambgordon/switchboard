@@ -1,5 +1,14 @@
 import type { ConversationGroup, ConversationMeta, LiveState, PtyState } from '../../shared/types'
-import { bumpRank, compareRanked, rankOf, topRank, type RankOverrides, type Ranked } from './rowRank'
+import {
+  absorbBindFolder,
+  bumpRank,
+  compareRanked,
+  holdRank,
+  rankOf,
+  topRank,
+  type RankOverrides,
+  type Ranked
+} from './rowRank'
 import type { SidebarMode } from './sidebarPrefs'
 
 /**
@@ -382,6 +391,38 @@ export function resumeWrites(model: SidebarModel, id: string, now: number): Reco
   const place = model.rows.get(id)
   if (!place || place.pinned) return {}
   return { [id]: bumpRank(topRank(rankSpace(model)), now) }
+}
+
+/**
+ * `buildSidebar`, holding in place every live row whose seed changed since `before` — a new Claude
+ * conversation the index has just listed, whose stand-in row was seeded by its terminal's start (see
+ * `holdRank`) — and its folder, when that row was what seeded it. Held in the SAME build, so the rail
+ * never renders the row where its new seed would put it, not even for a frame the rail's reorder
+ * animation would slide.
+ *
+ * `before` is the last model shown, or null when there is none to hold against: nothing shown yet, or
+ * a catalog still loading, whose first load re-seeds every live row at its conversation's real start.
+ * Only live rows can re-seed, and a stand-in is never pinned — nothing without an identity can be.
+ * Returns the overrides the model was built from; the caller persists the entries its store lacks.
+ */
+export function buildSidebarHeld(
+  before: SidebarModel | null,
+  input: SidebarInput
+): { model: SidebarModel; rowRanks: RankOverrides; folderRanks: RankOverrides } {
+  const model = buildSidebar(input)
+  let { rowRanks, folderRanks } = input
+  if (before) {
+    for (const p of input.ptys) {
+      const was = before.rows.get(p.sessionId)
+      const now = model.rows.get(p.sessionId)
+      if (!was || !now || was.seed === now.seed) continue
+      rowRanks = holdRank(rowRanks, p.sessionId, was.rank)
+      const folder = before.folders.get(was.root)
+      if (folder) folderRanks = absorbBindFolder(folderRanks, was.root, folder, was.seed)
+    }
+  }
+  if (rowRanks === input.rowRanks && folderRanks === input.folderRanks) return { model, rowRanks, folderRanks }
+  return { model: buildSidebar({ ...input, rowRanks, folderRanks }), rowRanks, folderRanks }
 }
 
 /** One conversation on screen and the folder it belongs to. */
