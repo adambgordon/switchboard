@@ -154,8 +154,8 @@
   margin-right: 0;
 }
 /* the ⋮ actions button: hidden at rest, revealed while the row is hovered. Absolutely placed so it
-   overlays the gutter's dot rather than taking its own column; clicking it opens the row's actions
-   menu (Pin/Unpin · read/unread · details · Stop/Resume). */
+   overlays the gutter's dot rather than taking its own column; clicking it opens the conversation's
+   menu (lib/conversationMenu). */
 .sb-row-menu-btn {
   position: absolute;
   inset: 0;

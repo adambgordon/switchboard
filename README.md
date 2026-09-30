@@ -79,21 +79,24 @@ Then quit (⌘Q) (if already running) and reopen the app.
 
 ## What it does
 
-- **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped together by folder so a repo's conversations from both agents sit side by side; titles and previews update live as a file watcher re-indexes. A Claude Code background continuation appears beside the original (whose transcript stops at the handoff) as its own independently resumable row; repeated handoffs can therefore produce several rows from one lineage. Each background row is marked by a dashed ring around the Claude logo; internal Claude daemons, one-shot runs of either agent (`claude -p` or the Agent SDK, `codex exec`), and delegated Codex sessions, including approval reviews, are omitted. A one-shot Claude session reappears once it is resumed interactively. Recognized Codex subagents are also removed from restored tabs and skipped by Back/Forward. Automatically derived Codex names use a bounded first-line title, including when copied. Switchboard owns no data of its own.
+- **Browse** — reads the session files each agent already writes (Claude Code's JSONL under `~/.claude/projects/`, Codex's rollouts under `~/.codex/sessions/`), grouped by project folder so a repo's conversations from both agents sit side by side — including those started in its subdirectories and its worktrees; titles and previews update live as a file watcher re-indexes. A Claude Code background continuation appears beside the original (whose transcript stops at the handoff) as its own independently resumable row; repeated handoffs can therefore produce several rows from one lineage. Each background row is marked by a dashed ring around the Claude logo; internal Claude daemons, one-shot runs of either agent (`claude -p` or the Agent SDK, `codex exec`), and delegated Codex sessions, including approval reviews, are omitted. A one-shot Claude session reappears once it is resumed interactively. Recognized Codex subagents are also removed from restored tabs and skipped by Back/Forward. Automatically derived Codex names use a bounded first-line title, including when copied. Switchboard owns no data of its own.
 - **Preview without disturbing** — click any conversation to render its transcript instantly from disk. **No `claude` process is started**, so you can click through dozens to find the one you want.
-- **Resume / start, explicitly** — the only way to spawn a live process is **Resume** or **New**, each dropping you into a real terminal running the right agent (`claude --resume` / `codex resume`, and so on). **New** lets you pick the agent when more than one is installed.
+- **Resume / start, explicitly** — the only way to spawn a live process is **Resume** or **New**, each dropping you into a real terminal running the right agent (`claude --resume` / `codex resume`, and so on).
+- **New conversation** — `⌘N` (or `⌘T`, or the pencil at the top of the sidebar) opens a chooser in a tab of its own, on the folder of the conversation you're in: type to narrow the folders, pick the agent when more than one is installed, and press `⏎`. Each folder in the sidebar has its own pencil, and its agent logos start a conversation there straight away; ⇧-click either to start in a new window. Preferences → Application → **Default agent** sets which agent the chooser opens on.
 - **Formatted ⇄ Terminal** — click the view toggle or press **⌘J** in the focused pane to switch between the raw **Terminal** (where you type) and a **Formatted** view that renders both your prompts and the agent's replies as Markdown — with syntax-highlighted code blocks — and stays pinned to the latest message. If the conversation is not live, **⌘J** resumes it and focuses its terminal. The chosen view and each Formatted reading position stick per conversation while the app is open; hovering a link reveals its URL.
 - **Copy from the transcript** — in the **Formatted** view, ⌘C preserves Markdown formatting only when selected non-whitespace content extends beyond either end of the complete component. Exact and partial selections copy its content without its outer markers; nested styles are evaluated independently. Selected whitespace and code indentation are preserved; boundary whitespace may sit outside formatting markers and lose its styling. Trailing selected line breaks remain literal newlines; Markdown destinations may hide the final empty lines. Multi-item lists keep complete items’ markers; table selections use tabs/newlines unless selected non-whitespace content extends beyond either end of the whole table. In Markdown mode, eligible formatting inside cells survives even in tab-separated output. Multi-cell fields containing tabs, newlines, or quotes are quoted; a single cell stays unquoted. Selections crossing speaker sections gain attribution. Only expanded tools and the displayed portion of clamped results participate. Passages containing retained Markdown escape literal text consistently and may use character references at formatting boundaries; plain-text destinations show that syntax. Bare-only selections stay literal. If Markdown serialization fails, the entire selection quietly falls back to plain text using the same visibility rules. **Preferences → Application → Copy as markdown** switches to plain text.
 - **Copy buttons** — hover a turn, code block, table, or tool input/result for its copy button; the transcript footer also offers **Copy entire conversation**. Turn and conversation copies include prose and image labels, always exclude tools, and preserve complete formatting when **Copy as markdown** is on. **Copy table** copies the complete Markdown table or tab-separated plain text. Code, JSON, and result buttons always copy the complete bare payload, including content hidden by a result’s clamp. Right-click inline code for **Copy Code**. Each button flashes a check when copied.
 - **Copy a link target** — right-click any link in the **Formatted** view for **Copy Link** (or **Copy Path**, for a file path). Web links also offer **Open Link in Browser**; only `http(s)` opens, so a path can be copied but never launched.
-- **Tabs, a split, and extra windows** — keep several conversations open at once. Clicking one previews it in a **replaceable** tab (shown italic), so browsing a list doesn't pile up tabs; double-clicking it, or resuming it, makes that tab stick. Tabs wrap onto more rows as they accumulate, or stay in a single horizontally scrolling row with **Preferences → Beta Features → Tab layout → Scroll**. The layout choice is available while tabs are enabled and is remembered when they are turned off. Tabs keep their width when a session starts or stops, and drag to reorder — across the split, or out into a window of their own. **Split Right** puts a second pane beside the first; **Move to New Window** opens a conversation on its own, rail hidden until you press `⌘B`. ⌘-click or ⇧-click tabs to select several and close or move them together. A conversation is only ever open in **one** place — asking for one that's already open takes you to it rather than opening a second copy. Your tabs come back where you left them after a restart, as transcripts — nothing is resumed on your behalf, so no agent starts running because you reopened the app. Still settling in, so it starts **off** — turn it on at **Preferences → Beta Features → Tabs and split view**, or leave it off for one conversation at a time.
-- **Your own liveness dot color** — the dot is cobalt by default; pick another at **Preferences → Beta Features → Liveness dot color**, and the rewind arrow puts it back. Only the dot changes: a live row's ring, the Live tally and Resume stay cobalt. Whatever you pick is nudged if it needs to be to stay legible against both light and dark backgrounds — a pale yellow would otherwise vanish on a white row — so the two sample dots beside the picker show the real result.
-- **Pin & organize** — the left pane has three collapsible sections: **Pinned**, **Live** (running now), and **Recent**. Pins persist across restarts; live and pinned rows drag to reorder; a cobalt dot tracks each live conversation's turn-state — working, waiting on your reply, finished-unread, or seen.
-- **Row menu (⋮)** — each row's **⋮** button (or a right-click) opens a quick menu to pin/unpin, open **Session details**, resume or stop a session, and mark it read or unread. **⌥-click** a live row (or its terminal) to mark it unread directly.
+- **Tabs, a split, and extra windows** — keep several conversations open at once. Clicking one previews it in a **replaceable** tab (shown italic), so browsing a list doesn't pile up tabs; double-clicking it, resuming it, or typing in it makes that tab stick. Tabs wrap onto more rows as they accumulate, or stay in a single horizontally scrolling row with **Preferences → Appearance → Tab overflow → Scroll**. Tabs keep their width when a session starts or stops, go bold when their conversation needs you, and drag to reorder — across the split, or out into a window of their own. **Split Right** puts a second pane beside the first; **Move to New Window** opens a conversation on its own, sidebar hidden until you press `⌘B`. ⌘-click or ⇧-click tabs to select several and close or move them together, and `⇧⌘T` reopens what you last closed. Closing the tab of a new conversation that has written nothing — and that nobody has typed into — also stops it; ⌥-click a running tab's × to stop any conversation as you close it. A conversation is only ever open in **one** place — asking for one that's already open takes you to it rather than opening a second copy. Your tabs come back where you left them after a restart, as transcripts — nothing is resumed on your behalf, so no agent starts running because you reopened the app. On by default; turn it off at **Preferences → Appearance → Tabs and split view** for one conversation at a time.
+- **Your own liveness dot color** — the dot is cobalt by default; pick another at **Preferences → Beta Features → Liveness dot color**, and the rewind arrow puts it back. Only the dot changes: the selected row's edge and Resume stay cobalt. Whatever you pick is nudged if it needs to be to stay legible against both light and dark backgrounds — a pale yellow would otherwise vanish on a white row — so the two sample dots beside the picker show the real result.
+- **A sidebar of folders** — conversations are grouped into collapsible project folders, or switch the sidebar to **All** for one list. Rows are one line each by default — hover one for its preview, folder, and last activity — or pick **Spacious** at **Preferences → Appearance → Sidebar** to see those inline. Each list starts where each conversation began, newest first, and holds still: activity never reorders it. Drag rows within their folder and drag folders by their header to arrange them your way; **Resume** lifts a conversation to the top. Each folder shows its latest few, with **Show more** for the rest; running conversations and the one you're looking at always show. Folders past the first eight start collapsed when the app opens, and folder headers stick to the top while you scroll through them. A cobalt dot tracks each live conversation's turn-state — working, waiting on your reply, finished-unread, or seen — and a conversation that needs you goes bold, in the sidebar and in its tab.
+- **Pin** — pinned conversations sit at the top of their folder (or of the All list) in an order you drag, and persist across restarts.
+- **The bell** — the bell in the title bar collects everything that needs you: it pulses when an agent is waiting on your answer and turns solid when a turn finished unread. Hover it for the list, questions first, and jump straight in or mark each one read.
+- **Conversation menu (⋮)** — each row's **⋮** button, a right-click on the row, or a right-click on its tab opens the same menu: resume, open to the side or in a new window, pin/unpin, rename, **Session details**, mark read or unread, and stop. **⌥-click** a live row, its tab, or its terminal to mark it unread directly.
+- **What's new** — a short tour of what changed appears once; reopen it any time from **Preferences → Application**.
 - **Rename & inspect** — click a conversation's title at the top of the pane (or right-click a row → **Session details**) to open an info card: agent, folder, git branch, model, message count (visible human/agent prose or image messages, not tool plumbing), size, duration, token usage (per-agent categories) plus current context size, last activity, and session ID — values are selectable to copy (and session ID has a one-click copy). Rename **in place** right in the heading — press **Enter** to save. Renames are real and go through each agent's *own* store — Claude Code's title record (carries into `claude --resume`), Codex's app-server `thread/name/set` — never a Switchboard-private one.
 - **Search, two kinds** — fuzzy search *across* conversations (titles, previews, directories), and find-in-conversation (`⌘F`) that highlights matches in human and agent messages, including their code blocks. Tool sections are excluded, whether collapsed or expanded.
 - **Navigate by keyboard** — switch conversations with `⌥⌘↑` / `⌥⌘↓` (the main pane stays focused, so you can type or hit `⏎` to resume), app-wide back/forward through conversation and Formatted/Terminal visits, and more (see below). History follows a tab wherever it lives and reopens a closed tab as a preview; restoring a Terminal visit only uses an existing live terminal and never starts an agent. Navigation history resets when you quit.
-- **Defaults for New** — set a default directory and/or a default agent in Preferences so **New** (`⌘N`) skips the picker(s) and starts there with that agent.
 - **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences → Appearance, where you can also pick a light or dark **dock icon** independent of the theme.
 
 _For the design rationale and implementation invariants, see [`AGENTS.md`](AGENTS.md)._
@@ -102,25 +105,26 @@ _For the design rationale and implementation invariants, see [`AGENTS.md`](AGENT
 
 | Key | Action |
 | --- | --- |
-| `⌘N` | New conversation (directory picker, or your default directory if one is set) |
+| `⌘N` / `⌘T` | New conversation — a chooser tab on the folder you're in (`⌘T` with tabs on) |
 | `⌘F` | Find in the conversation (main pane focused) — or search the list (otherwise) |
 | `⌘J` | Toggle Formatted / Terminal in the focused pane; resume if not already live |
 | `⏎` / `⇧⏎` | In the find bar: next / previous match |
 | `⌥⌘↑` / `⌥⌘↓` | Previous / next conversation — lands focused in the main pane (type right away, or `⏎` to resume) |
 | `⏎` | Resume the selected conversation from its transcript — or, if it's already live, focus into its terminal |
 | `⇧⌘U` | Mark the selected conversation read / unread |
-| `⌥-click` | Mark a conversation unread — a live row in the list, or its terminal |
+| `⌥-click` | Mark a conversation unread — a live row in the list, its tab, or its terminal |
 | `⌘[` / `⌘]` | Back / forward through conversation and view visits across all windows |
-| `⌘B` | Toggle the pane |
+| `⌘B` | Toggle the sidebar |
 | `⌘W` / `⇧⌘W` | Close the focused tab group (or current tab) / close the window |
+| `⇧⌘T` | Reopen the last closed tab (or tabs) |
 | `⌘1`–`⌘9` | Jump to a tab by position |
 | `⌥⌘←` / `⌥⌘→` | Previous / next tab (wraps, and continues across the split) |
 | `⌘\` | Split the view, or close the split |
-| `⇧⌘N` | Open the selected conversation in a new window |
+| `⇧⌘N` | New window, on a new-conversation chooser |
 | `⌘-click` / `⇧-click` | On a tab: add it to the selection / select the run up to it |
 | `⌘,` | Open Preferences (the title-bar gear opens the same dialog) |
 | `⌘?` | Open Preferences to the Shortcuts page |
-| `Esc` | Close the find bar / clear the query and close search / close menu / close Preferences |
+| `Esc` | Close the find bar / clear the query and close search / close menu / close the chooser / close Preferences |
 | `⌘Q` | Quit — ends all live sessions |
 | `⌘+` / `⌘−` / `⌘0` | Zoom in / out / reset |
 | `⌘R` | Refresh the current view — forces a clean redraw without reloading; Codex Terminal returns to the latest output |
@@ -147,11 +151,14 @@ Quality gates:
 npm run typecheck    # tsc over main (node) and renderer (web) projects
 npm test             # vitest — unit tests (parser, indexer, liveness, theme, rename, …)
 npm run test:tabs-ui  # native Electron tab rendering, zoom, drag, and overflow regression
+npm run test:rail-ui  # native Electron sidebar drags, autoscroll, sticky headers, and folder pencils
 npm run test:copy-ui  # transcript copy events, Markdown fidelity, pointer selection, and clipping
 SWITCHBOARD_SMOKE=1 node_modules/.bin/electron .   # headless boot check: node-pty spawns + renderer loads
 ```
 
-The tab rendering check mounts the real tab component with sample conversations, exercises native zoom commands and hold-and-reverse drags in both themes, and compares horizontal and vertical border coverage. It requires a macOS graphical session and leaves screenshots and measurements in the printed temporary directory. The copy check uses real copy events and re-renders copied Markdown to verify its text and formatting, without changing the system clipboard.
+The tab rendering check mounts the real tab component with sample conversations, exercises native zoom commands and hold-and-reverse drags in both themes, and compares horizontal and vertical border coverage. The sidebar check does the same for the real sidebar: row and folder drags, Escape cancel, edge autoscroll, the drag clone against the sticky headers, and the folder pencils, in both themes and at several zoom levels. Both require a macOS graphical session and leave screenshots and measurements in the printed temporary directory. The copy check uses real copy events and re-renders copied Markdown to verify its text and formatting, without changing the system clipboard.
+
+`npm run screenshots:readme` launches a made-up instance for the README screenshots: a temporary home with sample conversations, stand-in agents that start nothing, and sample project folders under `/Users/Shared/demo` that it removes when you quit it.
 
 > `npm run package` (which `npm run setup` wraps) rebuilds the `.app` from scratch. `npm run build` alone refreshes `out/` for `npm run dev` but does **not** update the packaged app.
 
@@ -159,7 +166,7 @@ The tab rendering check mounts the real tab component with sample conversations,
 
 ```
 build/                     app icon — icon.svg (source) → icon.png + icon.icns
-scripts/                   rebuild-native.mjs (node-pty ABI) · setup.mjs (one-shot build)
+scripts/                   rebuild-native.mjs (node-pty ABI) · setup.mjs (one-shot build) · tab-/rail-/copy-rendering (native UI checks) · readme-screenshots
 src/
   shared/                  types.ts (IPC contract + data types) · messageCount.ts (canonical visible-message count)
   main/                    Electron main process (Node)
@@ -172,6 +179,7 @@ src/
     updater.ts             self-update: git ls-remote check + git-pull/rebuild + relaunch (updater-core.ts = pure helpers)
     updateChecks.ts        shared update-check cache, coalescing, and 30-minute background schedule
     sessions/              parser · indexer · watcher · rename · codexParser · codexThreadsDb · codexSessionIndex · codexRename  (read ~/.claude/projects + ~/.codex/sessions)
+                           · projectRoot (which project folder each working directory belongs to)
     pty/manager.ts         spawns login shells, types the agent command; holds the live-session cap (configurable, default 8)
     pty/evictionPolicy.ts  which live terminal the cap may stop — turn-state and real use, never terminal output
     pty/codexInputNotifications.ts  scans explicit Codex OSC 9 question/approval notifications for live-dot liveness
@@ -180,9 +188,12 @@ src/
   preload/index.ts         contextBridge → typed window.api (contextIsolation on)
   renderer/                React 18 + Vite
     App.tsx                two-column layout + state orchestration (per-conversation view memory, app-wide navigation adapter)
-    components/            TitleBar · MainPane · PaneHeader · TranscriptView · TranscriptSearch ·
-                           TerminalDeck/TerminalView · TallyRail · ResizeHandle · SettingsModal · UpdatesSetting · AppVeil · TooltipLayer · …
+    components/            TitleBar · AttentionBell · MainPane · PaneHeader · TabStrip · ChooserView · TranscriptView · TranscriptSearch ·
+                           TerminalDeck/TerminalView · Sidebar/SidebarHead/SidebarGroupHeader · ConversationRow · ResizeHandle ·
+                           SettingsModal · WhatsNewModal · UpdatesSetting · AppVeil · TooltipLayer · …
     lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus/focusSync · useLayout · useTheme · useDarkIcon · useTranscript ·
+                           sidebarModel · rowRank/useRowRank · useSidebarPrefs · useBlockReorder/blockReorder · paneModel/usePaneLayout ·
+                           conversationMenu · closedTabs · chooserTab/chooserDirs · attention · onceTasks ·
                            useAppNavigation · useMaxLiveSessions · useMarkdownCopy · useSyncedAnimation/animationSync · useRailFlip ·
                            useTranscriptSearch · useAutoHideScrollbar · messageGroups · clipboard · copyFallback · mdCopy/mdCopyInline/mdCopyDom/mdCopyAst ·
                            maxLiveScale · fuzzy · findMatches · ptyStream · format

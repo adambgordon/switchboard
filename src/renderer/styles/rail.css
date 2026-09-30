@@ -168,7 +168,7 @@
      The padding is also the only room anything may paint OUTSIDE a row, because the overflow clip edge
      is the padding box: the white row's 2px edge, and a folder header's hover fill,
      which hangs into the leading side (.sb-group-toggle).
-     Top also trades against .sb-rail-head's bottom padding: that pair must always sum to 10px or the
+     Top also trades against .sb-rail-head's bottom padding: that pair must always sum to 17px or the
      first row moves. Bottom has no such partner, so it is the cheap one to widen. */
   padding: 6px var(--rail-inset) 12px calc(var(--rail-inset) + var(--bar-thin));
   display: flex;
