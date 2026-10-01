@@ -14,7 +14,7 @@
 import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
-import type { ConversationGroup, ConversationIndexSnapshot, ConversationMeta } from '../../shared/types'
+import type { AgentKind, ConversationGroup, ConversationIndexSnapshot, ConversationMeta } from '../../shared/types'
 import { extractMeta } from './parser'
 import { defaultCodexRoot, extractCodexMeta, listCodexRollouts } from './codexParser'
 import { readCodexThreads } from './codexThreadsDb'
@@ -157,7 +157,7 @@ function labelForCwd(cwd: string): string {
  * ones are left out of this pass only, never added to the sticky hidden set, because an interactive
  * resume turns one into a real conversation that must reappear. [] if the root is missing.
  */
-async function indexClaudeMetas(root: string, cache: MetaCache): Promise<ConversationMeta[]> {
+async function indexClaudeMetas(root: string, resolve: MetaResolver): Promise<ConversationMeta[]> {
   try {
     const rootStat = await stat(root)
     if (!rootStat.isDirectory()) return []
@@ -168,9 +168,7 @@ async function indexClaudeMetas(root: string, cache: MetaCache): Promise<Convers
   const projectDirs = await listProjectDirs(root)
   const fileLists = await Promise.all(projectDirs.map((dir) => listSessionFiles(dir)))
   const allFiles = fileLists.flat()
-  const metas = await mapWithConcurrency(allFiles, CONCURRENCY, (f) =>
-    extractWithCache(f, cache, safeExtractMeta)
-  )
+  const metas = await mapWithConcurrency(allFiles, CONCURRENCY, (f) => resolve('claude', f))
 
   const out: ConversationMeta[] = []
   for (const meta of metas) {
@@ -188,14 +186,12 @@ async function indexClaudeMetas(root: string, cache: MetaCache): Promise<Convers
  * for non-interactive (`codex exec`) rollouts; here we additionally drop zero-message and subagent
  * threads and report their ids separately. Empty results if the root is missing.
  */
-async function indexCodexMetas(root: string, cache: MetaCache): Promise<{
+async function indexCodexMetas(root: string, resolve: MetaResolver): Promise<{
   metas: ConversationMeta[]
   hiddenSessionIds: string[]
 }> {
   const files = await listCodexRollouts(root)
-  const metas = await mapWithConcurrency(files, CONCURRENCY, (f) =>
-    extractWithCache(f, cache, safeExtractCodexMeta)
-  )
+  const metas = await mapWithConcurrency(files, CONCURRENCY, (f) => resolve('codex', f))
 
   // Consult Codex's own stores once per pass (both reads are cheap — a tiny SQLite table and a small
   // append-only file): DROP archived threads (Codex hides those from its own list, so surfacing them
@@ -243,7 +239,17 @@ export interface IndexOptions {
   resolveRoots?: ProjectRootsResolver
   /** Which cwds exist. Defaults to one process-wide {@link existenceProbe} over the real filesystem. */
   existing?: ExistenceProbe
+  /**
+   * Metadata for one listed session file. Defaults to parsing in-process behind the `cache` passed
+   * to {@link indexConversations} (re-parsing only files whose mtime/size moved). A caller can supply
+   * its own — e.g. a store kept across launches that parses off the main thread — without changing
+   * what the index does with the result. Must never reject: resolve null for "no metadata".
+   */
+  resolveMeta?: MetaResolver
 }
+
+/** Metadata for one listed session file of the given agent; null when it has none. */
+export type MetaResolver = (agent: AgentKind, filePath: string) => Promise<ConversationMeta | null>
 
 /**
  * Which of `cwds` exist as directories. `exists` is the best answer available — this pass's, else
@@ -352,9 +358,13 @@ export async function indexConversations(
   const fileCache = cache ?? new Map()
   const resolveRoots = options.resolveRoots ?? ((cwds, missing) => new ProjectRoots().resolveAll(cwds, missing))
 
+  const resolve: MetaResolver =
+    options.resolveMeta ??
+    ((agent, f) => extractWithCache(f, fileCache, agent === 'claude' ? safeExtractMeta : safeExtractCodexMeta))
+
   const [claudeMetas, codex] = await Promise.all([
-    indexClaudeMetas(claudeRoot, fileCache),
-    indexCodexMetas(codexSessionsRoot, fileCache)
+    indexClaudeMetas(claudeRoot, resolve),
+    indexCodexMetas(codexSessionsRoot, resolve)
   ])
 
   const groups = new Map<string, ConversationMeta[]>()

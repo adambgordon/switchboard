@@ -49,10 +49,13 @@ import {
   shouldReleaseTab
 } from './tabOwnership'
 import { transferPty } from './pty/transfer'
-import { indexConversations, type MetaCache } from './sessions/indexer'
+import { indexConversations } from './sessions/indexer'
 import { ProjectRoots } from './sessions/projectRoot'
-import { parseTranscript } from './sessions/parser'
-import { parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
+import { extractMeta, parseTranscript } from './sessions/parser'
+import { extractCodexMeta, parseCodexTranscript, resolveCodexFile } from './sessions/codexParser'
+import { MetaStore } from './sessions/metaStore'
+import { SessionWorkerClient } from './sessions/sessionWorkerClient'
+import { readParserFingerprint, spawnSessionWorker } from './sessionWorkerHost'
 import { appendCustomTitle } from './sessions/rename'
 import { renameCodexThread } from './sessions/codexRename'
 import { SessionWatcher } from './sessions/watcher'
@@ -158,6 +161,10 @@ const tabOwner = new Map<string, number>()
 /** Eager claims protected from stale target reports until that target first reports the tab. */
 const pendingTabClaims = new Map<string, number>()
 let hiddenSessionIds: ReadonlySet<string> = new Set()
+/** Whether a conversation is hidden (a delegated Codex thread). The one question every guard asks. */
+function isHidden(sessionId: string): boolean {
+  return hiddenSessionIds.has(sessionId)
+}
 const boundTabReservations = new BoundTabReservations()
 
 const navigation = new NavigationCoordinator({
@@ -199,7 +206,7 @@ const pendingSnapshots = new Map<
 let updateRunState: UpdateRunState = { phase: 'idle', log: '' }
 
 function claimTabsForWindow(windowId: number, sessionIds: string[]): void {
-  const releases = claimWindowTabs(tabOwner, windowId, sessionIds.filter((id) => !hiddenSessionIds.has(id)), pendingTabClaims)
+  const releases = claimWindowTabs(tabOwner, windowId, sessionIds.filter((id) => !isHidden(id)), pendingTabClaims)
   for (const { ownerId, sessionId } of releases) sendToWindow(ownerId, IPC.tabRelease, sessionId)
   emitTabsElsewhere()
 }
@@ -220,7 +227,7 @@ function emitTabsElsewhere(): void {
 }
 
 function setWindowTabs(wcId: number, sessionIds: string[]): void {
-  const releases = reconcileWindowTabs(tabOwner, wcId, sessionIds.filter((id) => !hiddenSessionIds.has(id)), pendingTabClaims)
+  const releases = reconcileWindowTabs(tabOwner, wcId, sessionIds.filter((id) => !isHidden(id)), pendingTabClaims)
   for (const { ownerId, sessionId } of releases) sendToWindow(ownerId, IPC.tabRelease, sessionId)
   emitTabsElsewhere()
 }
@@ -429,10 +436,37 @@ function emitActive(): void {
   }
 }
 
-/** Persistent per-file meta cache shared across every re-index, so the frequent live-turn poll
- *  re-parses only the transcript(s) actually changing rather than re-reading the whole index each
- *  pass (387 MB+ of transcripts on a busy machine). See indexer's MetaCache / extractWithCache. */
-const metaCache: MetaCache = new Map()
+/** Parses session files off the main thread, which also routes every input event to the windows.
+ *  Created on first use; falls back to in-process parsing if the worker cannot run. */
+let sessionWorker: SessionWorkerClient | null = null
+function getSessionWorker(): SessionWorkerClient {
+  sessionWorker ??= new SessionWorkerClient(spawnSessionWorker, (agent, file) =>
+    agent === 'claude' ? extractMeta(file) : extractCodexMeta(file)
+  )
+  return sessionWorker
+}
+/** The sidebar-metadata cache, kept across launches (see sessions/metaStore). Shared by every
+ *  re-index, so the frequent live-turn poll re-parses only the transcript(s) actually changing.
+ *  Created on first use: the userData path depends on the app name, set after this module loads. */
+let metaStore: MetaStore | null = null
+function getMetaStore(): MetaStore {
+  metaStore ??= new MetaStore({
+    dir: app.getPath('userData'),
+    fingerprint: readParserFingerprint(),
+    extract: (agent, file, priority) => getSessionWorker().meta(agent, file, priority)
+  })
+  return metaStore
+}
+/** Write the metadata cache now, e.g. while quitting. */
+export function flushMetaStore(): void {
+  metaStore?.flush()
+}
+/** Whether the session worker answers a job itself (boot self-test). */
+export async function sessionWorkerServes(): Promise<boolean> {
+  const client = getSessionWorker()
+  await client.meta('claude', join(app.getPath('temp'), 'switchboard-smoke-missing.jsonl'), 'foreground')
+  return client.served() > 0
+}
 /** The one project-root resolver, shared by the index and the PTY manager so a conversation's row
  *  and its live terminal always agree on its project. Created on first use rather than at import:
  *  the userData path depends on the app name, which is set after this module loads. */
@@ -470,10 +504,18 @@ const conversationIndex = new LatestTask(
   async () => {
     const resolveRoots = (cwds: readonly string[], missing: ReadonlySet<string>) =>
       getProjectRoots().resolveAll(cwds, missing)
-    const snapshot = await indexConversations(PROJECTS_ROOT, undefined, metaCache, { resolveRoots })
+    const store = getMetaStore()
+    store.beginPass()
+    const snapshot = await indexConversations(PROJECTS_ROOT, undefined, undefined, {
+      resolveRoots,
+      resolveMeta: (agent, file) => store.resolve(agent, file)
+    })
+    // Only a pass that completed may close the launch window and forget unlisted files.
+    store.endPass()
     return retainHiddenSessions(snapshot, hiddenSessionIds)
   },
   (snapshot) => {
+    scheduleRevalidation()
     const { groups } = snapshot
     if (snapshot.hiddenSessionIds.length !== hiddenSessionIds.size) {
       hiddenSessionIds = new Set(snapshot.hiddenSessionIds)
@@ -538,6 +580,39 @@ const conversationIndex = new LatestTask(
     }
   }
 )
+
+/** How often, at most, background revalidation re-indexes to show what it has re-parsed so far. */
+const REVALIDATE_REINDEX_MS = 1000
+let revalidationScheduled = false
+let revalidateReindex: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * After the first index is published, re-parse in the background whatever it answered from stale or
+ * missing cache entries, re-indexing as results land so the rail settles onto them. Scheduled with
+ * a timer rather than run here: this is called from inside the index's own accept step, and a
+ * re-index requested there would join the run in progress — holding every caller of the FIRST index
+ * until the whole re-parse finished, which is exactly the wait this cache exists to remove.
+ */
+function scheduleRevalidation(): void {
+  if (revalidationScheduled) return
+  revalidationScheduled = true
+  setTimeout(() => {
+    const store = getMetaStore()
+    if (store.pendingCount() === 0) return
+    store.revalidate((remaining) => {
+      if (remaining === 0) {
+        if (revalidateReindex) clearTimeout(revalidateReindex)
+        revalidateReindex = null
+        void reindexAndBroadcast()
+        return
+      }
+      revalidateReindex ??= setTimeout(() => {
+        revalidateReindex = null
+        void reindexAndBroadcast()
+      }, REVALIDATE_REINDEX_MS)
+    })
+  }, 0)
+}
 
 /** Re-index both agents' sessions and push the result to the renderer. Swallows transient fs errors. */
 function reindexAndBroadcast(queueIfRunning = true): Promise<ConversationIndexSnapshot> {
@@ -801,9 +876,9 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.sessionsList, () => conversationIndex.get().catch(() => ({ ...EMPTY_SESSION_INDEX, hiddenSessionIds: [...hiddenSessionIds] })))
   ipcMain.handle(IPC.sessionsGet, async (_e, sessionId: string, revision: string) => {
     await conversationIndex.get()
-    if (hiddenSessionIds.has(sessionId)) return null
+    if (isHidden(sessionId)) return null
     const transcript = await transcriptLoader.load(sessionId, revision)
-    return hiddenSessionIds.has(sessionId) ? null : transcript
+    return isHidden(sessionId) ? null : transcript
   })
   // Set/clear a conversation's title, then re-index + broadcast IMMEDIATELY so the new title lands in
   // the UI now rather than when the watcher/poll next fires. Dispatch by agent: a Claude session has a
@@ -812,10 +887,10 @@ export function registerIpc(): void {
   // title read then surfaces (the rollout is untouched).
   ipcMain.handle(IPC.sessionsRename, async (_e, sessionId: string, title: string): Promise<boolean> => {
     await conversationIndex.get()
-    if (hiddenSessionIds.has(sessionId)) return false
+    if (isHidden(sessionId)) return false
     const claudeFp = await resolveSessionFile(sessionId)
     try {
-      if (hiddenSessionIds.has(sessionId)) return false
+      if (isHidden(sessionId)) return false
       if (claudeFp) await appendCustomTitle(claudeFp, sessionId, title)
       else await renameCodexThread(sessionId, title.trim())
       await reindexAndBroadcast()
@@ -830,10 +905,10 @@ export function registerIpc(): void {
   // later move is an explicit claim.
   ipcMain.handle(IPC.ptyResume, async (e, sessionId: string, cwd: string, agent: AgentKind, title?: string) => {
     await conversationIndex.get()
-    if (hiddenSessionIds.has(sessionId)) throw new Error('This conversation is hidden')
+    if (isHidden(sessionId)) throw new Error('This conversation is hidden')
     const existing = mgr!.findBySession(sessionId)
     if (existing) {
-      await transferTerminal(existing.ptyId, e.sender.id, () => !hiddenSessionIds.has(sessionId))
+      await transferTerminal(existing.ptyId, e.sender.id, () => !isHidden(sessionId))
       return forWindow([existing], e.sender.id)[0]
     }
     const st = mgr!.resume(sessionId, cwd, agent, title, (spawned) => {
@@ -852,7 +927,7 @@ export function registerIpc(): void {
   })
   ipcMain.handle(IPC.ptyClaim, (e, ptyId: string) => transferTerminal(ptyId, e.sender.id, () => {
     const pty = mgr?.list().find((p) => p.ptyId === ptyId)
-    return !!pty && !hiddenSessionIds.has(pty.sessionId)
+    return !!pty && !isHidden(pty.sessionId)
   }))
   ipcMain.on(
     IPC.ptySnapshotReply,
@@ -1020,7 +1095,7 @@ export function registerIpc(): void {
     navigation.complete(e.sender.id, requestId, visit)
   })
   ipcMain.on(IPC.conversationResume, (e, sessionId: string) => {
-    if (hiddenSessionIds.has(sessionId)) return
+    if (isHidden(sessionId)) return
     const owner = tabOwner.get(sessionId)
     if (owner == null || owner === e.sender.id) return
     for (const w of BrowserWindow.getAllWindows()) {
@@ -1039,7 +1114,7 @@ export function registerIpc(): void {
     return shouldReleaseTab(tabOwner, e.sender.id, sessionId)
   })
   ipcMain.handle(IPC.tabReserveBound, (e, ptyId: string, oldSessionId: string, sessionId: string): string | null => {
-    if (hiddenSessionIds.has(sessionId)) return null
+    if (isHidden(sessionId)) return null
     if (!canReserveTabForBoundPty(
       ptyOwner,
       mgr?.list() ?? [],
@@ -1053,7 +1128,7 @@ export function registerIpc(): void {
   })
   ipcMain.on(IPC.tabCommitBound, (e, token: string) => {
     const reservation = boundTabReservations.take(token, e.sender.id)
-    if (!reservation || hiddenSessionIds.has(reservation.sessionId)) return
+    if (!reservation || isHidden(reservation.sessionId)) return
     if (reservation.fromSessionId) {
       navigation.retarget(reservation.windowId, reservation.fromSessionId, reservation.sessionId)
     }
@@ -1179,6 +1254,7 @@ export function disposeIpc(): void {
   }
   watcher?.stop()
   watcher = null
+  sessionWorker?.close()
   for (const pending of pendingSnapshots.values()) {
     clearTimeout(pending.timer)
     pending.resolve(null)

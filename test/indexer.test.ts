@@ -355,6 +355,40 @@ describe('indexConversations Codex subagent filtering', () => {
   })
 })
 
+describe('indexConversations with a supplied metadata resolver', () => {
+  it('asks the resolver for every listed file, per agent, and filters its answers as usual', async () => {
+    const root = await mkdtemp(path.join(TMP_BASE, 'indexer-resolver-'))
+    const claudeRoot = path.join(root, 'claude')
+    const codexRoot = path.join(root, 'sessions')
+    try {
+      const claude = await writeSession(claudeRoot, '-repo', [msgLine('user', CWD_A, 'hi')], 1_000_000_000_000)
+      const parent = await writeCodexRollout(codexRoot, CWD_A, 'user', 2_000_000_000_000)
+      const sub = await writeCodexRollout(codexRoot, CWD_A, 'subagent', 3_000_000_000_000)
+      const asked: string[] = []
+      const cache = new Map()
+      const snapshot = await indexConversations(claudeRoot, codexRoot, cache, {
+        resolveMeta: async (agent, file) => {
+          asked.push(agent)
+          // Answer from the real parsers, but retitle — so the result proves it came from here.
+          const { extractMeta } = await import('../src/main/sessions/parser')
+          const { extractCodexMeta } = await import('../src/main/sessions/codexParser')
+          const meta = agent === 'claude' ? await extractMeta(file) : await extractCodexMeta(file)
+          return meta ? { ...meta, title: `resolved:${meta.sessionId.slice(0, 4)}` } : null
+        }
+      })
+      expect(asked.sort()).toEqual(['claude', 'codex', 'codex'])
+      const titles = snapshot.groups.flatMap((g) => g.conversations.map((c) => c.title)).sort()
+      expect(titles).toEqual([`resolved:${claude.id.slice(0, 4)}`, `resolved:${parent.slice(0, 4)}`].sort())
+      // The subagent the resolver reported is still hidden, not shown.
+      expect(snapshot.hiddenSessionIds).toEqual([sub])
+      // The default per-call cache is bypassed entirely.
+      expect(cache.size).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('indexConversations project roots and existence', () => {
   it('tags each group with its project, whether it is a worktree, and whether its cwd exists', async () => {
     const base = await realpath(await mkdtemp(path.join(TMP_BASE, 'indexer-roots-')))
