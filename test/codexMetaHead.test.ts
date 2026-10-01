@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { extractCodexMeta } from '../src/main/sessions/codexParser'
 
-const ID = '01a0aabb-51ca-7340-9c9f-609f5dc5da48'
+const ID = '00000000-0000-7000-8000-000000000001'
 const TS = '2026-07-27T12:00:00.000Z'
 
 function sessionMeta(payload: Record<string, unknown>): object {
