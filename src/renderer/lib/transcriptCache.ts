@@ -33,6 +33,47 @@ export function isCurrent(entry: CachedTranscript | undefined, revision: string)
   return entry !== undefined && entry.transcript !== null && revision !== UNINDEXED_REVISION && entry.revision === revision
 }
 
+/** What a Formatted view shows: its session's transcript, or that one is still on its way. */
+export interface TranscriptState {
+  id: string | null
+  transcript: Transcript | null
+  /** A fetch is outstanding and there is nothing to show meanwhile. */
+  loading: boolean
+}
+
+export const NO_TRANSCRIPT: TranscriptState = { id: null, transcript: null, loading: false }
+
+/**
+ * What to show for `id` before its fetch answers: the cached transcript if there is one, else the one
+ * already showing for it, else loading. Never "no transcript" — the pane reads a null transcript that
+ * is not loading as an empty conversation, so only a fetch that came back empty may say so. A cached
+ * empty result counts as nothing cached: it is about to be checked again. Returns `prev` itself when
+ * that is already the answer, so a refresh of the showing transcript costs no render.
+ */
+export function pendingState(prev: TranscriptState, id: string, cached: CachedTranscript | undefined): TranscriptState {
+  const showing = prev.id === id && prev.transcript !== null
+  if (cached !== undefined && cached.transcript !== null) {
+    return showing && prev.transcript === cached.transcript ? prev : { id, transcript: cached.transcript, loading: false }
+  }
+  if (showing) return prev
+  return { id, transcript: null, loading: true }
+}
+
+/**
+ * What to show this render. A newly requested session is answered from the cache during the render
+ * itself, so the frame before the fetching effect runs shows the right transcript — not the previous
+ * session's, and not an empty pane.
+ */
+export function shownState(
+  state: TranscriptState,
+  sessionId: string | null,
+  enabled: boolean,
+  cached: CachedTranscript | undefined
+): TranscriptState {
+  if (!sessionId || !enabled) return NO_TRANSCRIPT
+  return state.id === sessionId ? state : pendingState(state, sessionId, cached)
+}
+
 /** The entry, marked most recently used. */
 export function cacheGet(cache: Map<string, CachedTranscript>, id: string): CachedTranscript | undefined {
   const entry = cache.get(id)

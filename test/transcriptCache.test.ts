@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  NO_TRANSCRIPT,
   TRANSCRIPT_CACHE_CAP,
   UNINDEXED_REVISION,
   cacheGet,
   cachePut,
   isCurrent,
+  pendingState,
+  shownState,
   transcriptRevision,
-  type CachedTranscript
+  type CachedTranscript,
+  type TranscriptState
 } from '../src/renderer/lib/transcriptCache'
 import type { Transcript } from '../src/shared/types'
 
@@ -98,5 +102,67 @@ describe('cachePut', () => {
     const ids = Array.from({ length: TRANSCRIPT_CACHE_CAP + 1 }, (_, i) => `s${i}`)
     for (const id of ids) cachePut(cache, id, entry(id))
     expect([...cache.keys()]).toEqual(ids.slice(1))
+  })
+})
+
+describe('pendingState', () => {
+  const a = transcript('a')
+  const b = transcript('b')
+  const showingA: TranscriptState = { id: 'a', transcript: a, loading: false }
+
+  it('shows the cached transcript at once', () => {
+    expect(pendingState(NO_TRANSCRIPT, 'b', { transcript: b, revision: '1:1' })).toEqual({ id: 'b', transcript: b, loading: false })
+  })
+
+  it('loads a session with nothing cached — never the previous session, never an empty pane', () => {
+    expect(pendingState(showingA, 'b', undefined)).toEqual({ id: 'b', transcript: null, loading: true })
+  })
+
+  it('treats a cached empty result as nothing cached', () => {
+    expect(pendingState(NO_TRANSCRIPT, 'b', { transcript: null, revision: '1:1' })).toEqual({ id: 'b', transcript: null, loading: true })
+  })
+
+  it('keeps showing its own transcript when the cache has dropped it', () => {
+    expect(pendingState(showingA, 'a', undefined)).toBe(showingA)
+  })
+
+  it('keeps the same state when the cache holds the transcript already showing', () => {
+    expect(pendingState(showingA, 'a', { transcript: a, revision: '1:1' })).toBe(showingA)
+  })
+
+  it('moves to a newer cached transcript of the same session', () => {
+    // Equal in content to the one showing, so only identity can tell them apart.
+    const newer = transcript('a')
+    const next = pendingState(showingA, 'a', { transcript: newer, revision: '2:2' })
+    expect(next.transcript).toBe(newer)
+    expect(next).toEqual({ id: 'a', transcript: newer, loading: false })
+  })
+})
+
+describe('shownState', () => {
+  const a = transcript('a')
+  const b = transcript('b')
+  const showingA: TranscriptState = { id: 'a', transcript: a, loading: false }
+
+  it('shows nothing while the view is off or has no session', () => {
+    expect(shownState(showingA, 'a', false, { transcript: a, revision: '1:1' })).toBe(NO_TRANSCRIPT)
+    expect(shownState(showingA, null, true, undefined)).toBe(NO_TRANSCRIPT)
+  })
+
+  it('shows the state the fetch settled, empty result included', () => {
+    const empty: TranscriptState = { id: 'a', transcript: null, loading: false }
+    expect(shownState(empty, 'a', true, { transcript: a, revision: '1:1' })).toBe(empty)
+  })
+
+  it('answers a newly requested session from the cache in the same render', () => {
+    expect(shownState(showingA, 'b', true, { transcript: b, revision: '1:1' })).toEqual({ id: 'b', transcript: b, loading: false })
+  })
+
+  it('shows a newly requested uncached session as loading, not as the previous one', () => {
+    expect(shownState(showingA, 'b', true, undefined)).toEqual({ id: 'b', transcript: null, loading: true })
+  })
+
+  it('shows a re-enabled view as loading rather than empty', () => {
+    expect(shownState(NO_TRANSCRIPT, 'a', true, undefined)).toEqual({ id: 'a', transcript: null, loading: true })
   })
 })

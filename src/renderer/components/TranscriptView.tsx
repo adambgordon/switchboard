@@ -63,8 +63,17 @@ const REFRESH_SCROLL_SETTLE_MS = 100
 // px of the top, so it's in place before they reach it. Replaces the old eager idle-grow, which
 // prepended while pinned to the bottom and caused the open-time shake.
 const GROW_TRIGGER_PX = 1500
+// Most loads land well inside this, and a skeleton shown for a frame or two reads as a flicker; the
+// pane stays blank until a load has visibly taken a while.
+const SKELETON_DELAY_MS = 150
 
 function LoadingState(): ReactNode {
+  const [shown, setShown] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setShown(true), SKELETON_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [])
+  if (!shown) return null
   return (
     <div className="transcript-loading">
       <span className="transcript-loading-label label-caps">Reading transcript…</span>
