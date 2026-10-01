@@ -113,6 +113,8 @@ export class MetaStore {
   private readonly fresh = new Map<string, ConversationMeta>()
   private readonly stale = new Map<string, ConversationMeta>()
   private readonly pending = new Map<string, Pending>()
+  /** Files this process parsed to "no metadata": a save never restores another copy's entry for them. */
+  private readonly dropped = new Set<string>()
   private readonly dir: string | null
   private readonly name: string | null
   private readonly extract: PrioritizedExtract
@@ -215,8 +217,12 @@ export class MetaStore {
   }
 
   private accept(filePath: string, meta: ConversationMeta | null): void {
-    if (meta) this.fresh.set(filePath, meta)
-    else this.fresh.delete(filePath)
+    if (meta) {
+      this.fresh.set(filePath, meta)
+    } else {
+      this.fresh.delete(filePath)
+      this.dropped.add(filePath)
+    }
     this.stale.delete(filePath)
     this.dirty = true
     this.schedule()
@@ -290,9 +296,10 @@ export class MetaStore {
   /**
    * Write this build's file through a rename, so a reader never sees half of it. Several app
    * processes can share the directory, so what is on disk now is folded in for files this process
-   * has no entry for — limited to files the last full pass listed, so a deleted transcript's entry is
-   * not resurrected. Older builds' files are pruned, keeping the most recent one as a seed for a
-   * downgrade.
+   * has no entry for — limited to files the last full pass listed (a deleted transcript's entry is
+   * not resurrected) and never for a file this process itself found to have no metadata (or that
+   * entry would come back on every save). Older builds' files are pruned, keeping the most recent
+   * one as a seed for a downgrade. Never throws: this runs from a timer and while quitting.
    */
   private save(): void {
     if (!this.dir || !this.name) {
@@ -301,7 +308,7 @@ export class MetaStore {
     }
     const file = path.join(this.dir, `${this.name}.json`)
     const onDisk = readCacheFile(file)
-    const keep = (f: string) => this.seenLast === null || this.seenLast.has(f)
+    const keep = (f: string) => !this.dropped.has(f) && (this.seenLast === null || this.seenLast.has(f))
     const entries: Record<string, ConversationMeta> = {}
     const staleOut: Record<string, ConversationMeta> = {}
     for (const [f, meta] of onDisk?.entries ?? []) {
@@ -320,9 +327,18 @@ export class MetaStore {
       renameSync(temp, file)
       this.dirty = false
     } catch {
-      rmSync(temp, { force: true })
+      removeQuietly(temp)
       return
     }
-    for (const old of this.otherFiles().slice(1)) rmSync(old, { force: true })
+    for (const old of this.otherFiles().slice(1)) removeQuietly(old)
+  }
+}
+
+/** Delete a file, ignoring every failure — `force` only covers a missing file, not e.g. EACCES. */
+function removeQuietly(file: string): void {
+  try {
+    rmSync(file, { force: true })
+  } catch {
+    /* a leftover file only costs disk space */
   }
 }

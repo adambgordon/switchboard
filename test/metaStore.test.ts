@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, mkdirSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -303,6 +303,54 @@ describe('MetaStore — persistence', () => {
     s.flush()
     const onDisk = JSON.parse(readFileSync(path.join(userData, 'session-meta-cache', 'fp1.json'), 'utf8'))
     expect(Object.keys(onDisk.entries).map((f) => path.basename(f)).sort()).toEqual(['a.jsonl', 'b.jsonl'])
+  })
+
+  it('does not restore from disk an entry this process found to have no metadata', async () => {
+    const a = writeSession('a.jsonl', 'A')
+    const b = writeSession('b.jsonl', 'B') // keeps the cache warm, so a stale entry would be served
+    const s = store('fp1')
+    await pass(s, [a, b])
+    s.flush()
+    writeSession('a.jsonl', 'none') // a now parses to "no metadata"
+    expect(await pass(s, [a, b])).toEqual([null, 'B'])
+    s.flush()
+
+    const rec = recordingExtract()
+    const again = store('fp1', rec.extract)
+    // Restored, the old entry would be served at launch as 'A'.
+    expect(await pass(again, [a, b])).toEqual([null, 'B'])
+  })
+
+  it('never throws when the cache directory cannot be written', async () => {
+    const a = writeSession('a.jsonl', 'A')
+    const cacheDir = path.join(userData, 'session-meta-cache')
+    mkdirSync(cacheDir)
+    chmodSync(cacheDir, 0o000) // even cleaning up the temp file fails now
+    try {
+      const s = store('fp1')
+      await pass(s, [a])
+      expect(() => s.flush()).not.toThrow()
+    } finally {
+      chmodSync(cacheDir, 0o700)
+    }
+  })
+
+  it('never throws when an older build file cannot be pruned', async () => {
+    const a = writeSession('a.jsonl', 'A')
+    const cacheDir = path.join(userData, 'session-meta-cache')
+    // Two "older build files", so one is pruned — and that one is a directory, which rm refuses.
+    mkdirSync(path.join(cacheDir, 'unremovable.json'), { recursive: true })
+    clock += 10
+    utimesSync(path.join(cacheDir, 'unremovable.json'), clock - 1000, clock - 1000)
+    const seed = store('fp-old')
+    await pass(seed, [a])
+    seed.flush()
+    const s = store('fp-new')
+    await pass(s, [a])
+    s.revalidate(() => {})
+    await settle()
+    expect(() => s.flush()).not.toThrow()
+    expect(readdirSync(cacheDir).sort()).toEqual(['fp-new.json', 'fp-old.json', 'unremovable.json'])
   })
 
   it('forgets a file that can no longer be read', async () => {
