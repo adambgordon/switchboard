@@ -36,7 +36,7 @@
  * functions are pure (string in, value out) so they're unit-testable without the filesystem.
  */
 
-import { readFile, stat, readdir } from 'node:fs/promises'
+import { open, readFile, stat, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import type {
@@ -489,9 +489,73 @@ export async function parseCodexTranscript(filePath: string): Promise<Transcript
   return parseCodexTranscriptText(text, sessionId)
 }
 
-/** Metadata-only pass for one rollout file. Null on read failure / non-interactive / no-cwd. */
+/** Bytes read per step while looking for the end of a rollout's `session_meta` head. */
+const HEAD_CHUNK_BYTES = 64 * 1024
+/** Give up on the head (and read the whole file) past this many bytes. */
+const HEAD_MAX_BYTES = 1024 * 1024
+
+/**
+ * The rollout's leading run of `session_meta` lines, as text — or null when that run is not over
+ * within {@link HEAD_MAX_BYTES} (or the file cannot be read), meaning only a full read can answer.
+ * Splits on the newline BYTE before decoding, so a multi-byte character straddling a chunk boundary
+ * is never decoded in halves.
+ */
+async function readCodexHead(filePath: string): Promise<string | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null
+  try {
+    handle = await open(filePath, 'r')
+    const lines: string[] = []
+    let carry = Buffer.alloc(0)
+    let offset = 0
+    while (offset < HEAD_MAX_BYTES) {
+      const chunk = Buffer.alloc(HEAD_CHUNK_BYTES)
+      const { bytesRead } = await handle.read(chunk, 0, HEAD_CHUNK_BYTES, offset)
+      offset += bytesRead
+      const eof = bytesRead === 0
+      let data = Buffer.concat([carry, chunk.subarray(0, bytesRead)])
+      for (let nl = data.indexOf(0x0a); nl !== -1 || (eof && data.length > 0); nl = data.indexOf(0x0a)) {
+        const end = nl === -1 ? data.length : nl
+        const line = data.subarray(0, end).toString('utf8').trim()
+        data = data.subarray(nl === -1 ? data.length : nl + 1)
+        if (line.length === 0) continue
+        if (parseLine(line)?.type !== 'session_meta') return lines.join('\n')
+        lines.push(line)
+      }
+      if (eof) return lines.join('\n')
+      carry = data
+    }
+    return null
+  } catch {
+    return null
+  } finally {
+    await handle?.close().catch(() => {})
+  }
+}
+
+/**
+ * Metadata-only pass for one rollout file. Null on read failure / non-interactive / no-cwd.
+ *
+ * A delegated (subagent) rollout is answered from its `session_meta` head alone, without reading
+ * the rest of the file: it is hidden, so nothing past its identity is ever used, and these files
+ * are a large share of what is on disk. The head goes through the same extractor as the full file,
+ * and every field the hidden path needs is either set by the first `session_meta` line that carries
+ * it or only ever switched on — so a positive answer from the head is the full file's answer. A
+ * head that does not say "subagent" proves nothing, and the whole file is read as before.
+ */
 export async function extractCodexMeta(filePath: string): Promise<ConversationMeta | null> {
   const sessionId = sessionIdFromPath(filePath)
+  const head = await readCodexHead(filePath)
+  if (head !== null) {
+    try {
+      const stats = await stat(filePath)
+      const fromHead = extractCodexMetaFromText(head, sessionId, stats.mtimeMs, stats.size)
+      if (fromHead?.codexSubagent) {
+        return stats.birthtimeMs > 0 ? { ...fromHead, birthtimeMs: stats.birthtimeMs } : fromHead
+      }
+    } catch {
+      return null
+    }
+  }
   let text: string
   let mtime: number
   let sizeBytes: number
