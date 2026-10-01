@@ -13,8 +13,7 @@ import type {
   ConversationMeta,
   LiveState,
   PtyState,
-  TabOpenMode,
-  Transcript
+  TabOpenMode
 } from '@shared/types'
 import { makeTabDragPayload } from '@shared/tabDrag'
 import { visibleTabLayout } from '@shared/sessionVisibility'
@@ -98,6 +97,7 @@ import { useMaxLiveSessions } from './lib/useMaxLiveSessions'
 import { useSeen } from './lib/useSeen'
 import { useWindowFocus } from './lib/useWindowFocus'
 import { useTranscript } from './lib/useTranscript'
+import { transcriptRevision, type CachedTranscript } from './lib/transcriptCache'
 import { useAppNavigation } from './lib/useAppNavigation'
 import type { ConversationView, NavigationCommand } from '@shared/navigation'
 import { useTheme } from './lib/useTheme'
@@ -332,7 +332,7 @@ export default function App() {
   }, [])
   const setTerminalHost0 = useCallback((node: HTMLDivElement | null) => setTerminalHost(0, node), [setTerminalHost])
   const setTerminalHost1 = useCallback((node: HTMLDivElement | null) => setTerminalHost(1, node), [setTerminalHost])
-  const transcriptCacheRef = useRef(new Map<string, Transcript | null>())
+  const transcriptCacheRef = useRef(new Map<string, CachedTranscript>())
   const transcriptScrollStateRef = useRef(new Map<string, TranscriptScrollState>())
   const [findOpen, setFindOpen] = useState(false)
   // Bumped on every ⌘F while focus is in the main pane, so pressing ⌘F again (after clicking into
@@ -831,13 +831,13 @@ export default function App() {
   const view1 = paneView(1)
   const { transcript: transcript0, loading: loading0 } = useTranscript(
     view0.id,
-    view0.meta ? `${view0.meta.mtime}:${view0.meta.sizeBytes}` : 'unindexed',
+    transcriptRevision(view0.meta),
     view0.view === 'transcript',
     transcriptCacheRef.current
   )
   const { transcript: transcript1, loading: loading1 } = useTranscript(
     view1.id,
-    view1.meta ? `${view1.meta.mtime}:${view1.meta.sizeBytes}` : 'unindexed',
+    transcriptRevision(view1.meta),
     view1.view === 'transcript',
     transcriptCacheRef.current
   )
