@@ -11,6 +11,8 @@ import {
   initializeTabWorkspace,
   registerTabWindow,
   flushTabWorkspace,
+  flushMetaStore,
+  sessionWorkerServes,
   navigationWindowFocused
 } from './ipc'
 import { installAppMenu } from './menu'
@@ -224,13 +226,18 @@ app.whenReady().then(() => {
 })
 
 /**
- * Boot self-test (only when SWITCHBOARD_SMOKE=1): confirms node-pty loads and
- * spawns under Electron's ABI and the window resolved, then exits.
+ * Boot self-test (only when SWITCHBOARD_SMOKE=1): confirms node-pty loads and spawns under
+ * Electron's ABI, the session-parsing worker loads and answers (its bundle is resolved at runtime,
+ * so a packaging mistake shows up only here), and the window resolved, then exits.
  */
 function runSmoke(): void {
-  const finish = (ok: boolean, detail: string): void => {
+  const finish = async (ptyOk: boolean, detail: string): Promise<void> => {
     const win = firstWindow && !firstWindow.isDestroyed() ? firstWindow.webContents.getURL() : ''
-    console.log(`SMOKE ${ok ? 'PASS' : 'FAIL'} | pty:${ok} | window:${win ? 'loaded' : 'none'} | ${detail}`)
+    const worker = await sessionWorkerServes().catch(() => false)
+    const ok = ptyOk && worker
+    console.log(
+      `SMOKE ${ok ? 'PASS' : 'FAIL'} | pty:${ptyOk} | worker:${worker} | window:${win ? 'loaded' : 'none'} | ${detail}`
+    )
     // app.exit() intentionally skips before-quit, so release IPC-owned watchers explicitly.
     disposeIpc()
     app.exit(ok ? 0 : 1)
@@ -245,14 +252,14 @@ function runSmoke(): void {
         rows: 20,
         cwd: process.env.HOME || '.'
       })
-      const timer = setTimeout(() => finish(false, 'pty timeout'), 8000)
+      const timer = setTimeout(() => void finish(false, 'pty timeout'), 8000)
       p.onData((d) => (out += d))
       p.onExit(() => {
         clearTimeout(timer)
-        finish(out.includes('SMOKE_PTY_OK'), `out=${JSON.stringify(out.trim().slice(-40))}`)
+        void finish(out.includes('SMOKE_PTY_OK'), `out=${JSON.stringify(out.trim().slice(-40))}`)
       })
     })
-    .catch((e) => finish(false, `node-pty load failed: ${String(e)}`))
+    .catch((e) => void finish(false, `node-pty load failed: ${String(e)}`))
 }
 
 app.on('window-all-closed', () => {
@@ -262,5 +269,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   appQuitting = true
   flushTabWorkspace()
+  flushMetaStore()
   disposeIpc()
 })
