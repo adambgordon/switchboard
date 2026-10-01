@@ -192,7 +192,7 @@ src/
     components/            TitleBar · AttentionBell · MainPane · PaneHeader · TabStrip · ChooserView · TranscriptView · TranscriptSearch ·
                            TerminalDeck/TerminalView · Sidebar/SidebarHead/SidebarGroupHeader · ConversationRow · ResizeHandle ·
                            SettingsModal · WhatsNewModal · UpdatesSetting · AppVeil · TooltipLayer · …
-    lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus/focusSync · useLayout · useTheme · useDarkIcon · useTranscript ·
+    lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus/focusSync · useLayout · useTheme · useDarkIcon · useTranscript/transcriptCache ·
                            sidebarModel · rowRank/useRowRank · useSidebarPrefs · useBlockReorder/blockReorder · paneModel/usePaneLayout ·
                            conversationMenu · closedTabs · chooserTab/chooserDirs · attention · onceTasks ·
                            useAppNavigation · useMaxLiveSessions · useMarkdownCopy · useSyncedAnimation/animationSync · useRailFlip ·
