@@ -95,7 +95,7 @@ export default function PaneHeader({
               <span className="sb-sep" aria-hidden="true" />
               <span>{formatCount(meta.messageCount)} msg</span>
               {/* Each collapsible item OWNS its leading separator, so hiding it in a narrow pane does
-                  not leave a dangling `·` behind. */}
+                  not leave a dangling separator behind. */}
               <span className="sb-pane-meta-part sb-pane-part-cwd">
                 <span className="sb-sep" aria-hidden="true" />
                 <span className="sb-pane-cwd truncate">{cwd || '—'}</span>

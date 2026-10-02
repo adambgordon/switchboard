@@ -68,7 +68,7 @@
 .sb-pane-meta {
   overflow: hidden;
 }
-/* A collapsible meta item and its own leading separator, so hiding the item takes the `·` with it. */
+/* A collapsible meta item and its own leading separator, so hiding the item takes the separator with it. */
 .sb-pane-meta-part {
   display: flex;
   align-items: center;

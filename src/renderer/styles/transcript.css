@@ -1095,6 +1095,9 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 }
 
 .transcript-foot-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--ink-ghost);
 }
 .transcript-foot-meta,

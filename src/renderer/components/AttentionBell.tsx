@@ -92,11 +92,14 @@ export default function AttentionBell({ entries, onOpen, onMarkRead, onMarkAllRe
 
   const count = entries.length
   const asking = entries.filter((e) => e.state === 'asking').length
-  // Each kind named only when there is some: "2 awaiting input · 3 unread", "1 unread".
-  const summary = [asking > 0 && `${asking} awaiting input`, count - asking > 0 && `${count - asking} unread`]
-    .filter(Boolean)
-    .join(META_SEP)
-  const label = count === 0 ? 'All caught up' : summary
+  // Each kind named only when there is some: "2 awaiting input", "3 unread", or both.
+  const kinds = [
+    asking > 0 && `${asking} awaiting input`,
+    count - asking > 0 && `${count - asking} unread`
+  ].filter(Boolean)
+  const summary = kinds.join(META_SEP)
+  // The spoken label joins with a comma; the separator is for the eye.
+  const label = count === 0 ? 'All caught up' : kinds.join(', ')
   return (
     <>
       <button

@@ -235,7 +235,7 @@
 .sb-dot.asking::after {
   animation-delay: 0.15s;
 }
-/* The meta separator: a drawn dot rather than the `·` glyph, which at metadata sizes is too small to
+/* The meta separator: a drawn dot rather than the middle-dot glyph, which at metadata sizes is too small to
    read and sits below the text's center. Every row it separates is a centered flex row. */
 .sb-sep {
   flex: none;
@@ -1081,7 +1081,7 @@ body.sb-resizing .sb-pane {
   overflow-y: auto;
 }
 
-/* detail rows — a label · value list, each value copyable on row hover */
+/* detail rows — a label-and-value list, each value copyable on row hover */
 .sb-info-grid {
   display: flex;
   flex-direction: column;
@@ -1131,7 +1131,7 @@ body.sb-resizing .sb-pane {
   opacity: 1;
 }
 /* sections — a header over a group of detail rows, so the dialog reads as grouped blocks
-   (Environment · Activity · Tokens · Session) rather than one long list */
+   (Environment, Activity, Tokens, Session) rather than one long list */
 .sb-info-section + .sb-info-section {
   margin-top: 18px;
 }
@@ -1143,7 +1143,7 @@ body.sb-resizing .sb-pane {
 }
 
 /* live-sessions cap — a compact slider sitting flush-right in the setting head (where the stepper
-   was): slider · value · reset. Neutral INK fill + thumb only (never cobalt — the two-accent
+   was): slider, value, reset. Neutral INK fill + thumb only (never cobalt — the two-accent
    invariant; matches the ink toggle). */
 .sb-slider-control {
   display: flex;

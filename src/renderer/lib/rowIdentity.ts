@@ -4,7 +4,7 @@ import { isManualUnread, resolveLiveState } from './liveness'
 /**
  * A live terminal whose work went into a Claude background agent rather than its own transcript. Such
  * a session has the agent's marker but never writes a conversation of its own, so it would otherwise
- * render as an empty "New conversation · 0 msg" row while the user is busy in it.
+ * render as an empty "New conversation, 0 msg" row while the user is busy in it.
  *
  * `messageCount === 0` is what identifies an unindexed session: the indexer drops zero-message
  * conversations, so any meta that came from it has at least one, and only the renderer's synthesized

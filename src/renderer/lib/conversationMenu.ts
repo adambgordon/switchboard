@@ -6,7 +6,7 @@ import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/type
  * conversation offers the same commands, under the same words, in the same order, from either place.
  * A tab adds only what is about tabs (closing them, and reopening what was closed).
  *
- * The groups, top to bottom: start it · where it shows · filing and naming · (tabs) closing · end it.
+ * The groups, top to bottom: start it, where it shows, filing and naming, (tabs) closing, end it.
  * Resume heads the menu because it is the command a finished conversation's menu is most often opened
  * for; Stop is last because it is destructive, and red.
  */

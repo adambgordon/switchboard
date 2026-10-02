@@ -39,7 +39,7 @@ interface Props {
   // own idea, not an import.
   /** Option+click on a live row — always mark it unread (never toggles). */
   onMarkUnread?: (id: string) => void
-  /** Open the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume) by clicking the ⋮
+  /** Open the row's actions menu (Pin/Unpin, read/unread, details, Stop/Resume) by clicking the ⋮
    * button; the menu anchors under it. */
   onOpenMenu?: (e: MouseEvent, id: string) => void
   /** Right-click / two-finger click — opens the same actions menu at the cursor. */
