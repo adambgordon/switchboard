@@ -8,7 +8,7 @@
  * test reaching it.
  */
 
-import { relTime } from './format'
+import { META_SEP, relTime } from './format'
 
 /**
  * Longest label we will show, in code points. A `data-tip` carries whatever the host hands it, and a
@@ -85,7 +85,7 @@ export function tipMetaLine(at: number | null, meta: string | null, now: number)
     parts.push(rel === 'now' ? 'Just now' : `${rel} ago`)
   }
   if (meta) parts.push(meta)
-  return parts.length > 0 ? parts.join(' · ') : null
+  return parts.length > 0 ? parts.join(META_SEP) : null
 }
 
 export interface TipBox {

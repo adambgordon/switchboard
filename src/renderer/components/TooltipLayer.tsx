@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { heldKeys, onHeldKeys } from '../lib/heldKeys'
 import { clampTipText, placeTip, placeTipRight, tipMetaLine, tipOnEnter, tipOnLeave, type TipTarget } from '../lib/tooltip'
+import MetaText from './MetaText'
 
 interface Tip {
   text: string
@@ -275,7 +276,7 @@ export default function TooltipLayer() {
         <>
           <div className="sb-tip-title">{tip.text}</div>
           {tip.sub && <div className="sb-tip-sub">{tip.sub}</div>}
-          {tip.meta && <div className="sb-tip-meta">{tip.meta}</div>}
+          {tip.meta && <div className="sb-tip-meta"><MetaText text={tip.meta} /></div>}
         </>
       ) : (
         tip.text

@@ -92,17 +92,17 @@ export default function PaneHeader({
               <span data-tip={absShort(meta.lastActivityAt ?? meta.mtime)}>
                 {relTime(meta.lastActivityAt ?? meta.mtime)}
               </span>
-              <span className="sb-sep">·</span>
+              <span className="sb-sep" aria-hidden="true" />
               <span>{formatCount(meta.messageCount)} msg</span>
               {/* Each collapsible item OWNS its leading separator, so hiding it in a narrow pane does
                   not leave a dangling `·` behind. */}
               <span className="sb-pane-meta-part sb-pane-part-cwd">
-                <span className="sb-sep">·</span>
+                <span className="sb-sep" aria-hidden="true" />
                 <span className="sb-pane-cwd truncate">{cwd || '—'}</span>
               </span>
               {meta.gitBranch && meta.gitBranch !== 'HEAD' && (
                 <span className="sb-pane-meta-part sb-pane-part-branch">
-                  <span className="sb-sep">·</span>
+                  <span className="sb-sep" aria-hidden="true" />
                   <span>{meta.gitBranch}</span>
                 </span>
               )}
@@ -112,7 +112,7 @@ export default function PaneHeader({
               {live && (
                 <>
                   <span>new session</span>
-                  <span className="sb-sep">·</span>
+                  <span className="sb-sep" aria-hidden="true" />
                 </>
               )}
               <span className="sb-pane-cwd truncate">{cwd || '—'}</span>

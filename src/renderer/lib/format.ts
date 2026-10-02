@@ -78,6 +78,10 @@ export function formatCount(n: number): string {
   return COUNT.format(n)
 }
 
+/** What joins metadata written as one string ("4m ago · app"). `MetaText` draws each occurrence as the
+ *  meta dot, so build such strings with this, never a literal. */
+export const META_SEP = ' · '
+
 /** Compact count, e.g. 942 -> "942", 5200 -> "5.2K", 324315 -> "324K", 18389031 -> "18.4M",
  *  1234567890 -> "1.2B". Counts read in thousands, millions and billions, so billions are B — G is
  *  for sizes (see formatBytes). One decimal under 100 of a unit; the exact count belongs in a tooltip. */

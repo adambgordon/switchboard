@@ -1,4 +1,5 @@
 import { endClampTip } from './tooltip'
+import { META_SEP } from './format'
 
 /**
  * What a rail row's hover says, beyond what the row shows: its full title, its preview, and a quiet
@@ -48,7 +49,7 @@ export function rowTipMeta(label: string, cwd: string, root: string, notes: RowT
     notes.background ? 'Background session' : '',
     notes.elsewhere ? 'In another window' : ''
   ]
-  return endClampTip(parts.filter((s) => s.length > 0).join(' · '), TIP_META_MAX)
+  return endClampTip(parts.filter((s) => s.length > 0).join(META_SEP), TIP_META_MAX)
 }
 
 export const rowTipTitle = (title: string): string => endClampTip(title, TIP_TITLE_MAX)

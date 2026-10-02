@@ -540,13 +540,27 @@ function ToolPairView({ pair }: { pair: ToolPair }): ReactNode {
  * head grammar). Native (uncontrolled) <details>: browser-instant
  * toggle, open-state tracked only to word the tooltip. Expanding
  * shows every call + its result.
+ *
+ * The body mounts on first open and stays mounted after. A closed run's
+ * calls and full outputs are otherwise the bulk of a transcript's DOM —
+ * and its open-time layout — while nothing reads them: search skips
+ * runs and selection-copy reads only open ones. The summary's click
+ * mounts the body in the same frame the run opens; `onToggle` covers a
+ * run opened programmatically.
  * ------------------------------------------------------------------ */
 function ToolRun({ item }: { item: ToolRunItem }): ReactNode {
   const [open, setOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
   const noun = item.count === 1 ? 'tool call' : 'tool calls'
   return (
-    <details className="tool-run" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="tool-head tool-toggle">
+    <details
+      className="tool-run"
+      onToggle={(e) => {
+        setOpen(e.currentTarget.open)
+        if (e.currentTarget.open) setMounted(true)
+      }}
+    >
+      <summary className="tool-head tool-toggle" onClick={() => setMounted(true)}>
         {/* No gear on the run header itself — the individual calls inside keep theirs. data-tip rides
             the label cluster (not the full-width summary) so the tooltip anchors beside the cursor. The
             noun matches the count so a single-call run reads "tool call" (label + tooltip). */}
@@ -559,9 +573,7 @@ function ToolRun({ item }: { item: ToolRunItem }): ReactNode {
         </span>
       </summary>
       <div className="tool-run-body">
-        {item.pairs.map((pair) => (
-          <ToolPairView key={pair.key} pair={pair} />
-        ))}
+        {mounted ? item.pairs.map((pair) => <ToolPairView key={pair.key} pair={pair} />) : null}
       </div>
     </details>
   )

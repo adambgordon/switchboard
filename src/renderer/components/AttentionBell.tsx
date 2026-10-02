@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentKind } from '@shared/types'
 import { bellState, type AttentionItem } from '../lib/attention'
-import { relTime } from '../lib/format'
+import { META_SEP, relTime } from '../lib/format'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import AgentLogo from './AgentLogo'
+import MetaText from './MetaText'
 import { Bell, Check, CheckCircle } from './icons'
 
 /** One conversation in the panel, already in triage order. */
@@ -94,7 +95,7 @@ export default function AttentionBell({ entries, onOpen, onMarkRead, onMarkAllRe
   // Each kind named only when there is some: "2 awaiting input · 3 unread", "1 unread".
   const summary = [asking > 0 && `${asking} awaiting input`, count - asking > 0 && `${count - asking} unread`]
     .filter(Boolean)
-    .join(' · ')
+    .join(META_SEP)
   const label = count === 0 ? 'All caught up' : summary
   return (
     <>
@@ -131,7 +132,7 @@ export default function AttentionBell({ entries, onOpen, onMarkRead, onMarkAllRe
             </div>
           ) : (
             <div className="sb-bell-head">
-              <span className="sb-bell-title">{summary}</span>
+              <span className="sb-bell-title"><MetaText text={summary} /></span>
               <button className="sb-bell-allread" onClick={onMarkAllRead}>
                 Mark all read
               </button>
@@ -169,7 +170,7 @@ function BellItem({ entry, onOpen, onMarkRead }: { entry: AttentionEntry; onOpen
         <AgentLogo agent={entry.agent} />
         <span className="sb-bell-text">
           <span className="sb-bell-name">{entry.title}</span>
-          <span className="sb-bell-meta">{entry.folder ? `${entry.folder} · ${when}` : when}</span>
+          <span className="sb-bell-meta"><MetaText text={entry.folder ? `${entry.folder}${META_SEP}${when}` : when} /></span>
         </span>
       </button>
       <button
