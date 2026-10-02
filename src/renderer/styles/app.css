@@ -244,12 +244,13 @@
   border-radius: 50%;
   background: var(--ink-ghost);
 }
-/* In running text (MetaText): sits on the lowercase center and takes the place of " · ", spaces
-   included. currentColor keeps it in step with text that is itself dimmed (a tooltip's meta line). */
+/* In running text (MetaText): sits on the lowercase center between the separator's two spaces, which
+   MetaText keeps as text; with Hanken's 0.26em space this margin makes each side 0.45em. currentColor
+   keeps it in step with text that is itself dimmed (a tooltip's meta line). */
 .sb-sep-inline {
   display: inline-block;
   vertical-align: middle;
-  margin: 0 0.45em;
+  margin: 0 0.19em;
   background: currentColor;
 }
 
