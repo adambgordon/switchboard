@@ -235,8 +235,22 @@
 .sb-dot.asking::after {
   animation-delay: 0.15s;
 }
+/* The meta separator: a drawn dot rather than the `·` glyph, which at metadata sizes is too small to
+   read and sits below the text's center. Every row it separates is a centered flex row. */
 .sb-sep {
-  color: var(--ink-ghost);
+  flex: none;
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: 50%;
+  background: var(--ink-ghost);
+}
+/* In running text (MetaText): sits on the lowercase center and takes the place of " · ", spaces
+   included. currentColor keeps it in step with text that is itself dimmed (a tooltip's meta line). */
+.sb-sep-inline {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 0.45em;
+  background: currentColor;
 }
 
 /* ---- resizable pane dividers ---- */

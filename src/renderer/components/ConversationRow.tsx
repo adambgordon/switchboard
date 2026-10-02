@@ -177,11 +177,11 @@ function ConversationRowImpl({
           <span className="sb-row-meta">
             {mark}
             <span>{relTime(lastActive)}</span>
-            <span className="sb-sep">·</span>
+            <span className="sb-sep" aria-hidden="true" />
             <span>{formatCount(meta.messageCount)} msg</span>
             {elsewhere && (
               <>
-                <span className="sb-sep">·</span>
+                <span className="sb-sep" aria-hidden="true" />
                 {elsewhereMark}
               </>
             )}
