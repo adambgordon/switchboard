@@ -6,7 +6,8 @@ import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/type
  * conversation offers the same commands, under the same words, in the same order, from either place.
  * A tab adds only what is about tabs (closing them, and reopening what was closed).
  *
- * The groups, top to bottom: start it, where it shows, filing and naming, (tabs) closing, end it.
+ * The groups, top to bottom: start it, where it shows, filing (pin, hide, read) and naming, (tabs)
+ * closing, end it.
  * Resume heads the menu because it is the command a finished conversation's menu is most often opened
  * for; Stop is last because it is destructive, and red.
  */
@@ -24,6 +25,9 @@ export interface ConversationMenuState {
   live: boolean
   pinned: boolean
   unread: boolean
+  /** Why the user's hide covers it, or null (`hiddenBy`). Hidden by its folder, only the folder can
+   *  bring it back. */
+  hidden: 'folder' | 'self' | null
   /** Where "to the side" would put it, or null when it cannot go there. */
   side: SidePlace | null
   newWindow: boolean
@@ -62,6 +66,13 @@ export function conversationMenu(s: ConversationMenuState): ConversationMenuEntr
 
   if (!many && s.linked) {
     const filing = [item(s.pinned ? 'unpin' : 'pin', s.pinned ? 'Unpin' : 'Pin')]
+    filing.push(
+      s.hidden === 'folder'
+        ? item('unhideFolder', 'Unhide folder')
+        : s.hidden === 'self'
+          ? item('unhide', 'Unhide')
+          : item('hide', 'Hide')
+    )
     if (s.live) filing.push(item(s.unread ? 'markRead' : 'markUnread', s.unread ? 'Mark as read' : 'Mark as unread'))
     filing.push(item('rename', 'Rename…'), item('details', 'Session details…'))
     groups.push(filing)
@@ -80,6 +91,15 @@ export function conversationMenu(s: ConversationMenuState): ConversationMenuEntr
 
   if (!many && s.live) groups.push([item('stop', 'Stop session', true)])
 
+  return joinGroups(groups)
+}
+
+/** A folder header's menu. Hiding a folder hides every conversation in it, in both modes. */
+export function folderMenu(hidden: boolean): ConversationMenuEntry[] {
+  return [hidden ? { action: 'unhideFolder', label: 'Unhide folder' } : { action: 'hideFolder', label: 'Hide folder' }]
+}
+
+function joinGroups(groups: ConversationMenuEntry[][]): ConversationMenuEntry[] {
   const out: ConversationMenuEntry[] = []
   for (const g of groups) {
     if (g.length === 0) continue

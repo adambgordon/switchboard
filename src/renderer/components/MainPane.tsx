@@ -97,12 +97,12 @@ interface Props {
   onEngage?: (id: string) => void
   /** Stable portal target for every xterm homed to this pane. */
   terminalHostRef: (node: HTMLDivElement | null) => void
-  /** Ref to the pane root (`.sb-pane`); App reads it to route ⌘F when focus is in the main pane. */
+  /** Ref to the pane root (`.sb-pane`); App focuses it to hand the pane the keyboard on open. */
   paneRef: RefObject<HTMLElement>
   /** Whether the find-in-conversation bar is open (App owns the toggle; ⌘F / Esc drive it). */
   findOpen: boolean
-  /** Bumped on each ⌘F while focus is in the main pane, so the find input re-focuses even when the
-   *  bar is already open (e.g. after clicking into the transcript). */
+  /** Bumped on each ⌘F, so the find input re-focuses even when the bar is already open (e.g. after
+   *  clicking into the transcript). */
   findFocusReq: number
   /** Close the find bar. */
   onFindClose: () => void

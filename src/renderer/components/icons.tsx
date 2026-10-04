@@ -75,14 +75,15 @@ export const Plus = (p: IconProps) =>
     </>,
     p
   )
-// New conversation: a pencil breaking out of an open-cornered page.
+// New conversation: a pencil breaking out of an open-cornered page. The pencil's tip reaches above
+// and right of the page, so the whole drawing is shifted back by that much to sit centered.
 export const Compose = (p: IconProps) =>
   svg(
-    <>
+    <g transform="translate(-0.6 0.6)">
       <path d="M11 4.5H7A2.5 2.5 0 0 0 4.5 7v10A2.5 2.5 0 0 0 7 19.5h10a2.5 2.5 0 0 0 2.5-2.5v-4" />
       <path d="M17.4 3.6a1.9 1.9 0 0 1 2.7 2.7L12.5 14l-3.6.9.9-3.6z" />
       <line x1="15.6" y1="5.4" x2="18.3" y2="8.1" />
-    </>,
+    </g>,
     p
   )
 /** A pencil alone — renaming. Compose (the pencil over a page) is reserved for a new conversation. */
@@ -261,6 +262,35 @@ export const ExpandAll = (p: IconProps) =>
     <>
       <polyline points="7 15 12 20 17 15" />
       <polyline points="7 9 12 4 17 9" />
+    </>,
+    p
+  )
+
+// The rail head's filter: three centered lines, each shorter than the last. Heavier while a filter is on.
+export const ListFilter = ({ heavy = false, ...p }: IconProps & { heavy?: boolean }) =>
+  svg(
+    <>
+      <line x1="3.5" y1="6.5" x2="20.5" y2="6.5" />
+      <line x1="7" y1="12" x2="17" y2="12" />
+      <line x1="10" y1="17.5" x2="14" y2="17.5" />
+    </>,
+    { ...p, strokeWidth: heavy ? 2.6 : (p.strokeWidth ?? 1.8) }
+  )
+export const Eye = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+      <circle cx="12" cy="12" r="3" />
+    </>,
+    p
+  )
+export const EyeOff = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
+      <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
+      <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
+      <path d="m2 2 20 20" />
     </>,
     p
   )

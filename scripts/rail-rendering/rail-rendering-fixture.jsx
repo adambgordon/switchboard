@@ -105,7 +105,8 @@ const LIMITS = { folderCap: 100, allCap: 200, minUnpinned: 3, autoExpand: 40 }
 // `tips`: mount the app's tooltip layer. Off by default, so a label left up by a hover never paints over
 // what another check reads.
 const DEFAULTS = {
-  mode: 'folders', density: 'compact', searchOpen: false, query: '', collapsed: {}, selected: 'atlas-3', agents: ['claude', 'codex'], tips: false
+  mode: 'folders', density: 'compact', searchOpen: false, query: '', collapsed: {}, selected: 'atlas-3', agents: ['claude', 'codex'], tips: false,
+  filter: []
 }
 const noop = () => {}
 
@@ -125,13 +126,15 @@ function Fixture() {
     if (!q) return null
     return new Set(cat.groups.flatMap((g) => g.conversations).filter((c) => c.title.toLowerCase().includes(q)).map((c) => c.sessionId))
   }, [cfg.query, cat])
+  const filter = useMemo(() => new Set(cfg.filter), [cfg.filter])
   const model = useMemo(() => buildSidebar({
     mode: cfg.mode, groups: cfg.only ? cat.groups.filter((g) => cfg.only.includes(g.root)) : cat.groups,
-    ptys: cfg.only ? cat.ptys.filter((p) => cfg.only.includes(p.projectRoot)) : cat.ptys, pinned: pins, hidden: new Set(), rowRanks, folderRanks,
+    ptys: cfg.only ? cat.ptys.filter((p) => cfg.only.includes(p.projectRoot)) : cat.ptys, pinned: pins, delegated: new Set(),
+    userHidden: { rows: new Set(), folders: new Set() }, filter, rowRanks, folderRanks,
     liveState: (pty, _meta, id) => (pty ? LIVE[id] ?? 'quiet' : null),
     active: new Set([cfg.selected]), collapsed: cfg.collapsed, autoCollapsed: null, navExpanded: new Set(), activeCollapsed: new Set(),
     revealed, search, limits: LIMITS
-  }), [cfg, pins, rowRanks, folderRanks, revealed, search, cat])
+  }), [cfg, filter, pins, rowRanks, folderRanks, revealed, search, cat])
   const modelRef = useRef(model)
   modelRef.current = model
 
@@ -211,6 +214,7 @@ function Fixture() {
         model={model} mode={cfg.mode} onModeChange={(mode) => setCfg((p) => ({ ...p, mode }))} density={cfg.density}
         onNeedsYou={noop} onSetAllCollapsed={noop} loading={false} openElsewhere={new Set()}
         selectedSessionId={cfg.selected} onJump={select} onSelect={select} onTogglePin={noop}
+        filter={filter} onFilterChange={noop} onSetConversationHidden={noop} onSetFolderHidden={noop}
         query={cfg.query} onQueryChange={(query) => setCfg((p) => ({ ...p, query }))} searchRef={searchRef}
         searchOpen={cfg.searchOpen} onSearchToggle={() => setCfg((p) => ({ ...p, searchOpen: !p.searchOpen, query: '' }))}
         searching={search !== null}

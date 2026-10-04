@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ConversationGroup, ConversationMeta } from '../src/shared/types'
 import { chooserDirs, chooserPreselect, filterChooserFolders } from '../src/renderer/lib/chooserDirs'
 import { buildSidebar, DEFAULT_SIDEBAR_LIMITS } from '../src/renderer/lib/sidebarModel'
+import { NO_FILTER, NOTHING_HIDDEN } from '../src/renderer/lib/railFilter'
 
 const T = 1_780_000_000_000
 
@@ -184,7 +185,9 @@ describe('the rail is unaffected', () => {
       groups,
       ptys: [],
       pinned: [],
-      hidden: new Set(),
+      delegated: new Set(),
+      userHidden: NOTHING_HIDDEN,
+      filter: NO_FILTER,
       rowRanks: {},
       folderRanks: {},
       liveState: () => null,

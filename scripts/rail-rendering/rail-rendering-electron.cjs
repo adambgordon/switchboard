@@ -1411,6 +1411,99 @@ CHECKS['9-ring-geometry'] = async () => {
   record('9-ring-geometry', failures, {})
 }
 
+// The head's one row fits the rail at its minimum width (the host's 300px is PANE_LIMITS.min) in
+// Folders mode, where its tools are widest: every tool on one line, inside the head, clear of the
+// grouping toggle. The head never wraps, so this is what holds the minimum honest as tools are added.
+CHECKS['15-head-fit'] = async () => {
+  const failures = []
+  await reset({ mode: 'folders' })
+  await settle(60)
+  const g = await js(`(() => {
+    const box = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top } }
+    return {
+      row: box(document.querySelector('.sb-rail-head-top')),
+      mode: box(document.querySelector('.sb-rail-mode')),
+      tools: [...document.querySelectorAll('.sb-rail-head-tools > button')].map(box)
+    }
+  })()`)
+  const first = g.tools[0], last = g.tools[g.tools.length - 1]
+  if (g.tools.length < 5) failures.push(`expected the five Folders-mode tools, found ${g.tools.length}`)
+  if (g.tools.some((t) => Math.abs(t.top - first.top) > 0.5)) failures.push('the tools do not sit on one line')
+  if (last.right > g.row.right + 0.5) failures.push(`the last tool overruns the head by ${(last.right - g.row.right).toFixed(2)}px`)
+  const room = first.left - g.mode.right
+  if (room < 8) failures.push(`only ${room.toFixed(2)}px between the grouping toggle and the tools`)
+  record('15-head-fit', failures, { room: +room.toFixed(2), tools: g.tools.length })
+}
+
+// The Escape that closes a rail menu — the filter's or a row's — is that menu's alone. App listens for
+// Escape on the window to clear the rail's search or close Find, so an Escape that reached it would
+// also throw that away; a bubble-phase window listener stands in for App's here.
+CHECKS['16-menu-escape'] = async () => {
+  const failures = []
+  await reset({ mode: 'folders' })
+  await js(`window.appEscapes = 0
+    if (!window.appEscapeListener) {
+      window.appEscapeListener = (e) => { if (e.key === 'Escape') window.appEscapes++ }
+      window.addEventListener('keydown', window.appEscapeListener)
+    }`)
+  const escapeCloses = async (name, isOpen) => {
+    if (!(await js(isOpen))) { failures.push(`${name}: no menu opened`); return }
+    const before = await js('window.appEscapes')
+    await escapeKey()
+    if (await js(isOpen)) failures.push(`${name}: Escape left the menu open`)
+    const reached = (await js('window.appEscapes')) - before
+    if (reached !== 0) failures.push(`${name}: the Escape that closed the menu reached the window ${reached}x`)
+  }
+
+  const btn = await js(`document.querySelector('.sb-rail-filter-btn').getBoundingClientRect().toJSON()`)
+  await press(btn.left + btn.width / 2, btn.top + btn.height / 2)
+  await release()
+  await settle(60)
+  await escapeCloses('filter menu', `!!document.querySelector('.sb-filter-menu')`)
+
+  // A row's ⋮ menu fades out on close, so "closed" is its closing class as much as its absence.
+  const key = (await js('window.order()')).blocks[0].rows[0]
+  const row = await call('rowRect', key)
+  await hover(row.left + 60, row.top + row.height / 2)
+  await delay(60)
+  const menu = await call('menuButton', key)
+  if (!menu) failures.push(`row menu: no ⋮ button on ${key}`)
+  else {
+    await press(menu.rect.left + menu.rect.width / 2, menu.rect.top + menu.rect.height / 2)
+    await release()
+    await settle(60)
+    await escapeCloses('row menu', `!!document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')`)
+  }
+  await park()
+  record('16-menu-escape', failures, {})
+}
+
+// No drag while a filter is set, as while searching: the neighbors a drop reports would straddle rows
+// the filter leaves out. The same press-and-move drags with no filter, so a broken gesture cannot pass.
+CHECKS['17-filter-no-drag'] = async () => {
+  const failures = []
+  const attempt = async (filter) => {
+    await reset({ mode: 'folders', filter })
+    const key = (await js('window.order()')).blocks.find((b) => b.rows.length > 0).rows[0]
+    const r = await call('rowRect', key)
+    const x = r.left + 60, y = r.top + r.height / 2
+    await press(x, y)
+    await moveTo(x, y + 60, 6)
+    const s = await call('state')
+    await release()
+    await delay(200)
+    return { key, dragging: s.dragging || s.clones > 0, drops: (await js('window.dropCalls')).length }
+  }
+  const free = await attempt([])
+  if (!free.dragging) failures.push(`harness: with no filter, press-and-move on ${free.key} did not drag`)
+  // Live leaves the fixture's running rows; any set criterion locks drags the same way.
+  const live = await attempt(['live'])
+  if (live.dragging) failures.push(`Live: press-and-move on ${live.key} started a drag`)
+  if (live.drops) failures.push(`Live: the gesture produced ${live.drops} drop calls`)
+  await park()
+  record('17-filter-no-drag', failures, { free })
+}
+
 function summary(r) {
   return { key: r.key, landing: r.expect.index, gap: r.gap?.index, call: r.calls?.[0] ?? null, shot: r.shot }
 }

@@ -52,8 +52,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   user-select: none;
 }
 
-/* The transcript is click-focusable (tabIndex -1) so clicking it gives the main pane focus —
-   that's what routes ⌘F to find-in-conversation. It's not keyboard-tabbable and never needs a
+/* The transcript is click-focusable (tabIndex -1) so clicking it gives the main pane focus, and
+   arrows then scroll it. It's not keyboard-tabbable and never needs a
    ring (the global cobalt :focus-visible would also break the cobalt-is-liveness invariant). */
 .transcript-scroll:focus,
 .transcript-scroll:focus-visible {

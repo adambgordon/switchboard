@@ -14,9 +14,10 @@ import ConversationRow from './ConversationRow'
 import SidebarHead from './SidebarHead'
 import SidebarGroupHeader from './SidebarGroupHeader'
 import { isUnlinkedRow } from '../lib/rowIdentity'
-import { conversationMenu, type SidePlace } from '../lib/conversationMenu'
+import { conversationMenu, folderMenu, type SidePlace } from '../lib/conversationMenu'
+import type { RailFilter } from '../lib/railFilter'
 import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/types'
-import { Pin, Info, NewWindow, Rename, SplitVertical, Stop, Play } from './icons'
+import { Pin, Info, NewWindow, Rename, SplitVertical, Stop, Play, Eye, EyeOff } from './icons'
 
 interface Props {
   /** What to draw — built in App by `buildSidebar`, which keyboard navigation walks too. */
@@ -44,6 +45,11 @@ interface Props {
   /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
   onOpenInNewWindow?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
+  /** Which conversations the rail shows (`railFilter`). Drags are off while any criterion is set. */
+  filter: RailFilter
+  onFilterChange: (filter: RailFilter) => void
+  onSetConversationHidden: (sessionId: string, hidden: boolean) => void
+  onSetFolderHidden: (root: string, hidden: boolean) => void
   query: string
   onQueryChange: (q: string) => void
   searchRef: RefObject<HTMLInputElement>
@@ -107,6 +113,12 @@ function menuIcon(action: ConversationMenuAction): ReactNode {
       return <span className="sb-menu-dot hollow" aria-hidden="true" />
     case 'markUnread':
       return <span className="sb-menu-dot filled" aria-hidden="true" />
+    case 'hide':
+    case 'hideFolder':
+      return <EyeOff size={14} />
+    case 'unhide':
+    case 'unhideFolder':
+      return <Eye size={14} />
     case 'rename':
       return <Rename size={14} />
     case 'details':
@@ -119,6 +131,64 @@ function menuIcon(action: ConversationMenuAction): ReactNode {
 }
 /** The smallest margin the row menu keeps from the window's edges. */
 const MENU_EDGE = 8
+
+/**
+ * An empty rail says why it is empty, and when the filter is the reason, offers the way out: an empty
+ * list must never read as conversations that are gone.
+ */
+function EmptyRail({
+  searching,
+  filter,
+  filteredOut,
+  onFilterChange
+}: {
+  searching: boolean
+  filter: RailFilter
+  /** What the filter keeps out that the search, if any, matches. */
+  filteredOut: number
+  onFilterChange: (filter: RailFilter) => void
+}) {
+  const filtering = filter.size > 0
+  const only = filter.size === 1 ? [...filter][0] : null
+  const title = searching
+    ? 'No matches'
+    : only === 'hidden'
+      ? 'Nothing hidden'
+      : only === 'live'
+        ? 'No live conversations'
+        : filtering
+          ? 'No matches'
+          : filteredOut > 0
+            ? 'All conversations are hidden'
+            : 'No conversations yet'
+  // Unfiltered, what the filter keeps out is exactly what is hidden.
+  const outside = filtering
+    ? `${filteredOut} more outside the filter`
+    : `${filteredOut} hidden ${filteredOut === 1 ? 'conversation matches' : 'conversations match'}`
+  return (
+    <div className="sb-rail-empty">
+      <div className="sb-rail-empty-mark" />
+      <div className="label-caps">{title}</div>
+      {filtering ? (
+        <>
+          {filteredOut > 0 && <div className="sb-rail-empty-hint">{outside}</div>}
+          <button className="sb-rail-more" onClick={() => onFilterChange(new Set())}>
+            Clear filters
+          </button>
+        </>
+      ) : filteredOut > 0 ? (
+        <>
+          {searching && <div className="sb-rail-empty-hint">{outside}</div>}
+          <button className="sb-rail-more" onClick={() => onFilterChange(new Set(['hidden']))}>
+            Show hidden
+          </button>
+        </>
+      ) : (
+        !searching && <div className="sb-rail-empty-hint">Start or resume a conversation and it&apos;ll show up here.</div>
+      )}
+    </div>
+  )
+}
 
 /**
  * The unified conversation pane. A head (grouping mode, search, new) above one
@@ -142,6 +212,10 @@ export default function Sidebar({
   placementFor,
   onOpenInNewWindow,
   onTogglePin,
+  filter,
+  onFilterChange,
+  onSetConversationHidden,
+  onSetFolderHidden,
   query,
   onQueryChange,
   searchRef,
@@ -169,6 +243,7 @@ export default function Sidebar({
   // Nothing to draw: no folder has a row, or All mode's one group is empty. A collapsed folder is not
   // empty — it has rows, just not on screen.
   const empty = model.groups.every((g) => g.blocks.length === 0 && !g.collapsed)
+  const filtering = filter.size > 0
 
   // Obsidian-style scrollbar: the thumb shows only while scrolling (+ a beat after), never at rest.
   const listRef = useRef<HTMLDivElement>(null)
@@ -188,6 +263,7 @@ export default function Sidebar({
   const orderSig = shown.map((r) => r.sessionId).join('|')
   const controlSig = JSON.stringify([
     query,
+    [...filter],
     mode,
     density,
     model.groups.map((g) => [g.key, g.collapsed]),
@@ -206,11 +282,13 @@ export default function Sidebar({
     },
     [model, onDropRow, onDropFolder]
   )
+  // Off while filtering, as while searching: the neighbors a drop reports would straddle rows the
+  // filter leaves out, and only caps are accounted for there (dropNeighbors).
   useBlockReorder(listRef, {
-    enabled: !searching,
+    enabled: !searching && !filtering,
     onDrop,
     commitKey: reorderTick,
-    cancelKey: JSON.stringify([mode, density, searchOpen, searching]),
+    cancelKey: JSON.stringify([mode, density, searchOpen, searching, filtering]),
     // Moving a folder folds it to its header, so it moves as one short card.
     reshape: (block, unit) => (block === FOLDERS_BLOCK ? foldFolder(unit) : null)
   })
@@ -233,6 +311,8 @@ export default function Sidebar({
   // instance, opened by CLICKING the ⋮ button (anchored under it) or right-clicking (at the cursor);
   // dismissed by an outside click, Esc, or scroll.
   const [ctxMenu, setCtxMenu] = useState<{
+    /** A row's conversation, or a folder header's root. */
+    kind: 'row' | 'folder'
     id: string
     /** What it opens against, in viewport coords: the ⋮ button's top and bottom edges, or — for a
      *  right-click — the cursor, as a zero-height anchor. `gap` is the space kept between the two. */
@@ -261,6 +341,7 @@ export default function Sidebar({
         live: !!entry.pty,
         pinned: entry.pinned,
         unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
+        hidden: entry.hiddenBy,
         side: movable && onOpenToSide ? place.side : null,
         newWindow: movable && !!onOpenInNewWindow,
         hasTabHere: place.hasTabHere,
@@ -312,12 +393,26 @@ export default function Sidebar({
   const openRowMenu = (e: MouseEvent, id: string): void => {
     const s = menuStateFor(id)
     if (!s) return
-    openMenu({ id, anchorTop: e.clientY, anchorBottom: e.clientY, gap: 0, left: e.clientX, ...s })
+    openMenu({ kind: 'row', id, anchorTop: e.clientY, anchorBottom: e.clientY, gap: 0, left: e.clientX, ...s })
+  }
+  // A folder header's right-click: its own menu, at the cursor.
+  const openFolderMenu = (e: MouseEvent, root: string): void => {
+    const group = model.groups.find((g) => g.key === root)
+    if (!group) return
+    openMenu({
+      kind: 'folder',
+      id: root,
+      anchorTop: e.clientY,
+      anchorBottom: e.clientY,
+      gap: 0,
+      left: e.clientX,
+      entries: folderMenu(group.folderHidden)
+    })
   }
   // The ⋮ button (click): TOGGLE — close if this row's menu is already open, else open anchored under
   // the button's right edge. Read the rect synchronously — React nulls currentTarget after the handler.
   const openRowMenuFromButton = (e: MouseEvent, id: string): void => {
-    if (ctxMenu && ctxMenu.id === id && !closing) {
+    if (ctxMenu && ctxMenu.kind === 'row' && ctxMenu.id === id && !closing) {
       closeMenu()
       return
     }
@@ -325,6 +420,7 @@ export default function Sidebar({
     const s = menuStateFor(id)
     if (!s) return
     openMenu({
+      kind: 'row',
       id,
       anchorTop: rect.top,
       anchorBottom: rect.bottom,
@@ -356,8 +452,12 @@ export default function Sidebar({
   }, [ctxMenu])
   useEffect(() => {
     if (!ctxMenu) return
+    // The Escape that closes the menu is consumed: App's own Escape would also clear the rail's
+    // search or close Find.
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') closeMenu()
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      closeMenu()
     }
     // Scroll-to-close is scoped to the RAIL body, not a document-wide capture listener. The menu is
     // viewport-fixed but anchored to a rail row, so only a list scroll detaches it. A `document`
@@ -399,6 +499,7 @@ export default function Sidebar({
         live={row.pty}
         liveState={row.liveState}
         pinned={row.pinned}
+        dimmed={row.hiddenBy !== null}
         elsewhere={openElsewhere.has(row.sessionId)}
         onSelect={onSelect}
         onJump={onJump}
@@ -412,8 +513,17 @@ export default function Sidebar({
     )
   }
 
-  const runMenuAction = (action: ConversationMenuAction, id: string): void => {
+  const runMenuAction = (action: ConversationMenuAction, kind: 'row' | 'folder', id: string): void => {
+    if (kind === 'folder') {
+      if (action === 'hideFolder' || action === 'unhideFolder') onSetFolderHidden(id, action === 'hideFolder')
+      return
+    }
     if (action === 'resume') onResumeSession(id)
+    else if (action === 'hide' || action === 'unhide') onSetConversationHidden(id, action === 'hide')
+    else if (action === 'unhideFolder') {
+      const root = model.rows.get(id)?.root
+      if (root !== undefined) onSetFolderHidden(root, false)
+    }
     else if (action === 'toSide') onOpenToSide?.(id)
     else if (action === 'newWindow') onOpenInNewWindow?.(id)
     else if (action === 'pin' || action === 'unpin') onTogglePin(id)
@@ -430,6 +540,8 @@ export default function Sidebar({
         mode={mode}
         onModeChange={onModeChange}
         onSetAllCollapsed={onSetAllCollapsed}
+        filter={filter}
+        onFilterChange={onFilterChange}
         query={query}
         onQueryChange={onQueryChange}
         searchRef={searchRef}
@@ -453,17 +565,16 @@ export default function Sidebar({
             <div className="label-caps">Indexing conversations…</div>
           </div>
         ) : empty ? (
-          <div className="sb-rail-empty">
-            <div className="sb-rail-empty-mark" />
-            <div className="label-caps">{searching ? 'No matches' : 'No conversations yet'}</div>
-            {!searching && (
-              <div className="sb-rail-empty-hint">Start or resume a conversation and it&apos;ll show up here.</div>
-            )}
-          </div>
+          <EmptyRail
+            searching={searching}
+            filter={filter}
+            filteredOut={model.filteredOut}
+            onFilterChange={onFilterChange}
+          />
         ) : (
           model.groups.map((g) => {
             const extra = revealed[g.key] ?? 0
-            const more = !g.collapsed && !searching && g.hidden > 0
+            const more = !g.collapsed && !searching && g.withheld > 0
             const less = !g.collapsed && !searching && extra > 0
             // Compact draws no rules, so the space closing each expanded folder is what separates it
             // from the next — reserved whether or not there is anything to show more of, so every
@@ -477,7 +588,9 @@ export default function Sidebar({
                     label={g.label}
                     collapsed={g.collapsed}
                     wantsAttention={g.wantsAttention}
+                    dimmed={g.folderHidden}
                     onToggle={onToggleFolder}
+                    onContextMenu={openFolderMenu}
                     agents={agents}
                     onNew={onNewInFolder}
                     onStart={onStartInFolder}
@@ -527,7 +640,7 @@ export default function Sidebar({
                 key={e.action}
                 className={`sb-ctxmenu-item${e.danger ? ' danger' : e.action === 'resume' ? ' live' : ''}`}
                 onClick={() => {
-                  runMenuAction(e.action, ctxMenu.id)
+                  runMenuAction(e.action, ctxMenu.kind, ctxMenu.id)
                   closeMenu()
                 }}
               >

@@ -117,7 +117,7 @@ function groupsFor(tabsEnabled: boolean): Group[] {
       title: 'Conversations',
       items: [
         { keys: tabsEnabled ? ['⌘N', '⌘T'] : ['⌘N'], desc: 'New conversation' },
-        { keys: ['⌘F'], desc: 'Search' },
+        { keys: ['⌘F'], desc: 'Find in the conversation' },
         { keys: ['⌘J'], desc: 'Toggle Formatted / Terminal, resuming if needed' },
         { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
         { keys: ['⌥-click'], desc: 'Mark conversation unread' },

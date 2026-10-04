@@ -22,6 +22,8 @@ interface Props {
   /** Resolved liveness for the dot (working / asking / awaiting / quiet); null when not live. */
   liveState?: LiveState | null
   pinned: boolean
+  /** Hidden by the user, drawn greyed whatever the rail's filter. */
+  dimmed?: boolean
   /** Another window holds this conversation's tab, so clicking the row raises THAT window rather than
    *  opening it here. Marked, because a click that brings a different window forward is startling
    *  when nothing said it would. */
@@ -54,6 +56,7 @@ function ConversationRowImpl({
   live,
   liveState,
   pinned,
+  dimmed,
   elsewhere,
   onSelect,
   onJump,
@@ -98,7 +101,7 @@ function ConversationRowImpl({
   )
   return (
     <div
-      className={`sb-row ${density}${selected ? ' selected' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
+      className={`sb-row ${density}${selected ? ' selected' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${dimmed ? ' dimmed' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
       onClick={(e) => {
         if (e.altKey) {
           // Option+click = mark unread only; never navigate (selecting/engaging would trip the

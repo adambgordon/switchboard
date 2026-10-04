@@ -19,6 +19,7 @@ import {
   type SidebarInput,
   type SidebarModel
 } from '../src/renderer/lib/sidebarModel'
+import { NO_FILTER, NOTHING_HIDDEN } from '../src/renderer/lib/railFilter'
 
 const T = 1_780_000_000_000
 
@@ -83,7 +84,9 @@ function input(over: Partial<SidebarInput> = {}): SidebarInput {
     groups: [],
     ptys: [],
     pinned: [],
-    hidden: new Set(),
+    delegated: new Set(),
+    userHidden: NOTHING_HIDDEN,
+    filter: NO_FILTER,
     rowRanks: {},
     folderRanks: {},
     liveState: states({}),
@@ -99,12 +102,12 @@ function input(over: Partial<SidebarInput> = {}): SidebarInput {
   }
 }
 
-/** The whole rendered shape: each group's key, collapse, hidden count and blocks' row ids. */
+/** The whole rendered shape: each group's key, collapse, withheld count and blocks' row ids. */
 function shape(model: SidebarModel): unknown[] {
   return model.groups.map((g) => ({
     key: g.key,
     collapsed: g.collapsed,
-    hidden: g.hidden,
+    withheld: g.withheld,
     blocks: g.blocks.map((b) => [b.id, ...b.rows.map((r) => r.sessionId)])
   }))
 }
@@ -167,7 +170,7 @@ describe('All mode', () => {
     )
     expect(model.groups.map((g) => [g.key, g.header, g.label])).toEqual([['', false, '']])
     expect(shape(model)).toEqual([
-      { key: '', collapsed: false, hidden: 1, blocks: [['pin:*', 'p2', 'p1'], ['un:*', 'a', 'c', 'd']] }
+      { key: '', collapsed: false, withheld: 1, blocks: [['pin:*', 'p2', 'p1'], ['un:*', 'a', 'c', 'd']] }
     ])
   })
 
@@ -175,13 +178,13 @@ describe('All mode', () => {
     const model = buildSidebar(
       input({ mode: 'all', groups: [group('/w/one', [conv('a', T)])], collapsed: { '': true, '/w/one': true } })
     )
-    expect(shape(model)).toEqual([{ key: '', collapsed: false, hidden: 0, blocks: [['un:*', 'a']] }])
+    expect(shape(model)).toEqual([{ key: '', collapsed: false, withheld: 0, blocks: [['un:*', 'a']] }])
   })
 
   it('uses the All cap, not the folder cap', () => {
     const rows = ['a', 'b', 'c', 'd', 'e'].map((id, i) => conv(id, T - i))
     const model = buildSidebar(input({ mode: 'all', groups: [group('/w/one', rows)] }))
-    expect(shape(model)).toEqual([{ key: '', collapsed: false, hidden: 2, blocks: [['un:*', 'a', 'b', 'c']] }])
+    expect(shape(model)).toEqual([{ key: '', collapsed: false, withheld: 2, blocks: [['un:*', 'a', 'b', 'c']] }])
   })
 })
 
@@ -197,7 +200,7 @@ describe('Folders mode', () => {
       })
     )
     expect(shape(model)).toEqual([
-      { key: '/w/repo', collapsed: false, hidden: 1, blocks: [['un:/w/repo', 'wt', 'sub']] }
+      { key: '/w/repo', collapsed: false, withheld: 1, blocks: [['un:/w/repo', 'wt', 'sub']] }
     ])
   })
 
@@ -231,8 +234,8 @@ describe('Folders mode', () => {
     // The folders are ordered by their conversations' SEEDS (a2 started at T-40), not by a2's
     // dragged rank: a drag inside a folder never moves the folder.
     expect(shape(folders)).toEqual([
-      { key: '/w/b', collapsed: false, hidden: 0, blocks: [['un:/w/b', 'b1']] },
-      { key: '/w/a', collapsed: false, hidden: 0, blocks: [['un:/w/a', 'a1', 'a2']] }
+      { key: '/w/b', collapsed: false, withheld: 0, blocks: [['un:/w/b', 'b1']] },
+      { key: '/w/a', collapsed: false, withheld: 0, blocks: [['un:/w/a', 'a1', 'a2']] }
     ])
   })
 
@@ -244,8 +247,8 @@ describe('Folders mode', () => {
       })
     )
     expect(shape(model)).toEqual([
-      { key: '/w/b', collapsed: false, hidden: 0, blocks: [['pin:/w/b', 'pb'], ['un:/w/b', 'b1']] },
-      { key: '/w/a', collapsed: false, hidden: 0, blocks: [['pin:/w/a', 'pa'], ['un:/w/a', 'a1']] }
+      { key: '/w/b', collapsed: false, withheld: 0, blocks: [['pin:/w/b', 'pb'], ['un:/w/b', 'b1']] },
+      { key: '/w/a', collapsed: false, withheld: 0, blocks: [['pin:/w/a', 'pa'], ['un:/w/a', 'a1']] }
     ])
   })
 })
@@ -260,8 +263,8 @@ describe('live terminals', () => {
       })
     )
     expect(shape(model)).toEqual([
-      { key: '/w/a', collapsed: false, hidden: 0, blocks: [['un:/w/a', 'a1', 'fresh', 'a2']] },
-      { key: '/w/z', collapsed: false, hidden: 0, blocks: [['un:/w/z', 'elsewhere']] }
+      { key: '/w/a', collapsed: false, withheld: 0, blocks: [['un:/w/a', 'a1', 'fresh', 'a2']] },
+      { key: '/w/z', collapsed: false, withheld: 0, blocks: [['un:/w/z', 'elsewhere']] }
     ])
   })
 
@@ -284,15 +287,15 @@ describe('live terminals', () => {
   })
 })
 
-describe('hidden sessions', () => {
-  it('drops hidden ids whether indexed, live or pinned', () => {
+describe('delegated sessions', () => {
+  it('drops delegated ids whether indexed, live or pinned', () => {
     const model = buildSidebar(
       input({
         mode: 'all',
         groups: [group('/w/a', [conv('keep', T - 1), conv('gone', T - 2), conv('pinnedGone', T - 3)])],
         ptys: [pty('liveGone')],
         pinned: ['pinnedGone'],
-        hidden: new Set(['gone', 'liveGone', 'pinnedGone'])
+        delegated: new Set(['gone', 'liveGone', 'pinnedGone'])
       })
     )
     expect(visibleRows(model).map((r) => r.sessionId)).toEqual(['keep'])
@@ -364,7 +367,7 @@ describe('collapse precedence', () => {
     const model = buildSidebar(
       input({ groups: [group('/w/a', [conv('pin', T - 5), conv('row', T - 1)])], pinned: ['pin'], collapsed: { '/w/a': true } })
     )
-    expect(shape(model)).toEqual([{ key: '/w/a', collapsed: true, hidden: 0, blocks: [] }])
+    expect(shape(model)).toEqual([{ key: '/w/a', collapsed: true, withheld: 0, blocks: [] }])
   })
 })
 
@@ -376,27 +379,27 @@ describe('caps', () => {
     // r1 live at the top still takes a capped slot: r3 stays hidden whether r1 is live or not. A cap
     // counting only idle rows would let r3 in while r1 is live and drop it again when r1 stops.
     expect(rowsOf({ ptys: [pty('r1')] })).toEqual([
-      { key: '/w/a', collapsed: false, hidden: 3, blocks: [['un:/w/a', 'r1', 'r2']] }
+      { key: '/w/a', collapsed: false, withheld: 3, blocks: [['un:/w/a', 'r1', 'r2']] }
     ])
-    expect(rowsOf({})).toEqual([{ key: '/w/a', collapsed: false, hidden: 3, blocks: [['un:/w/a', 'r1', 'r2']] }])
+    expect(rowsOf({})).toEqual([{ key: '/w/a', collapsed: false, withheld: 3, blocks: [['un:/w/a', 'r1', 'r2']] }])
   })
 
   it('renders live and active rows past the cap, after the rest, in rank order', () => {
     expect(rowsOf({ ptys: [pty('r5')], active: new Set(['r4']) })).toEqual([
-      { key: '/w/a', collapsed: false, hidden: 1, blocks: [['un:/w/a', 'r1', 'r2', 'r4', 'r5']] }
+      { key: '/w/a', collapsed: false, withheld: 1, blocks: [['un:/w/a', 'r1', 'r2', 'r4', 'r5']] }
     ])
   })
 
   it('keeps r2 visible when a live row past the cap stops', () => {
     expect(rowsOf({ ptys: [pty('r4')] })).toEqual([
-      { key: '/w/a', collapsed: false, hidden: 2, blocks: [['un:/w/a', 'r1', 'r2', 'r4']] }
+      { key: '/w/a', collapsed: false, withheld: 2, blocks: [['un:/w/a', 'r1', 'r2', 'r4']] }
     ])
-    expect(rowsOf({})).toEqual([{ key: '/w/a', collapsed: false, hidden: 3, blocks: [['un:/w/a', 'r1', 'r2']] }])
+    expect(rowsOf({})).toEqual([{ key: '/w/a', collapsed: false, withheld: 3, blocks: [['un:/w/a', 'r1', 'r2']] }])
   })
 
   it('reveals extra rows per folder', () => {
     expect(rowsOf({ revealed: { '/w/a': 2 } })).toEqual([
-      { key: '/w/a', collapsed: false, hidden: 1, blocks: [['un:/w/a', 'r1', 'r2', 'r3', 'r4']] }
+      { key: '/w/a', collapsed: false, withheld: 1, blocks: [['un:/w/a', 'r1', 'r2', 'r3', 'r4']] }
     ])
   })
 
@@ -405,20 +408,20 @@ describe('caps', () => {
     // rows. A floor of 2, not the default 1: cap − pins is −1 here, and slicing to −1 happens to leave
     // one row, so with a floor of 1 a missing floor would pass.
     expect(rowsOf({ pinned: ['r3', 'r4', 'r5'], limits: { ...LIMITS, minUnpinned: 2 } })).toEqual([
-      { key: '/w/a', collapsed: false, hidden: 0, blocks: [['pin:/w/a', 'r3', 'r4', 'r5'], ['un:/w/a', 'r1', 'r2']] }
+      { key: '/w/a', collapsed: false, withheld: 0, blocks: [['pin:/w/a', 'r3', 'r4', 'r5'], ['un:/w/a', 'r1', 'r2']] }
     ])
   })
 
   it('counts pinned rows toward the cap', () => {
     // One pin and a cap of 2 leave room for one unpinned row, not two.
     expect(rowsOf({ pinned: ['r5'] })).toEqual([
-      { key: '/w/a', collapsed: false, hidden: 3, blocks: [['pin:/w/a', 'r5'], ['un:/w/a', 'r1']] }
+      { key: '/w/a', collapsed: false, withheld: 3, blocks: [['pin:/w/a', 'r5'], ['un:/w/a', 'r1']] }
     ])
   })
 
   it('lifts every cap while searching and shows only matches', () => {
     expect(rowsOf({ search: new Set(['r1', 'r3', 'r4', 'r5']) })).toEqual([
-      { key: '/w/a', collapsed: false, hidden: 0, blocks: [['un:/w/a', 'r1', 'r3', 'r4', 'r5']] }
+      { key: '/w/a', collapsed: false, withheld: 0, blocks: [['un:/w/a', 'r1', 'r3', 'r4', 'r5']] }
     ])
   })
 
@@ -534,14 +537,14 @@ describe('an empty or loading catalog', () => {
     const collapsed = Object.freeze({ '/w/a': true })
     const pinned = Object.freeze(['a'])
     const model = buildSidebar(input({ rowRanks, folderRanks, collapsed, pinned }))
-    expect(model).toEqual({ groups: [], rows: new Map(), folders: new Map(), labels: new Map(), needsYou: [], autoCollapsed: new Set() })
+    expect(model).toEqual({ groups: [], rows: new Map(), folders: new Map(), labels: new Map(), needsYou: [], filteredOut: 0, autoCollapsed: new Set() })
     expect([rowRanks, folderRanks, collapsed, pinned]).toEqual([{ a: T }, { '/w/a': T }, { '/w/a': true }, ['a']])
   })
 })
 
 describe('All mode is always one group', () => {
   it('keeps its single group with an empty catalog and with a search matching nothing', () => {
-    const empty = { key: '', collapsed: false, hidden: 0, blocks: [] }
+    const empty = { key: '', collapsed: false, withheld: 0, blocks: [] }
     expect(shape(buildSidebar(input({ mode: 'all' })))).toEqual([empty])
     expect(
       shape(buildSidebar(input({ mode: 'all', groups: [group('/w/a', [conv('a', T)])], search: new Set(['none']) })))
@@ -641,13 +644,13 @@ describe('row places', () => {
       ],
       ptys: [pty('fresh', { projectRoot: '/w/new', startedAt: T + 7 })],
       pinned: ['pin'],
-      hidden: new Set(['hid']),
+      delegated: new Set(['hid']),
       rowRanks: { c3: T + 50 },
       search: new Set(['c1'])
     })
   )
 
-  it('holds every row that is not hidden, through search and caps', () => {
+  it('holds every row that is not delegated, through search and caps', () => {
     expect(Object.fromEntries(model.rows)).toEqual({
       c1: { rank: T - 1, seed: T - 1, root: '/w/c', pinned: false },
       c2: { rank: T - 2, seed: T - 2, root: '/w/c', pinned: false },
@@ -816,7 +819,7 @@ describe('the one-time folder freeze', () => {
       group('/w/b', [conv('b1', T - 50), conv('b-hidden', T + 900)]),
       group('/w/c', [conv('c1', T - 1)])
     ],
-    hidden: new Set(['b-hidden']),
+    delegated: new Set(['b-hidden']),
     // b1 was resumed, so its rank is past every start; folders freeze by when rows STARTED.
     rowRanks: { b1: T + 100 }
   })
@@ -838,5 +841,149 @@ describe('the one-time folder freeze', () => {
     })
     // Frozen newest-first (c at T-1, a at T-5, b at T-50); /w/b's new conversation does not lift it.
     expect(keys(later)).toEqual(['/w/c', '/w/a', '/w/b'])
+  })
+})
+
+describe('the user hide and the filter', () => {
+  const hide = (rows: string[] = [], folders: string[] = []): SidebarInput['userHidden'] => ({
+    rows: new Set(rows),
+    folders: new Set(folders)
+  })
+  const ids = (model: SidebarModel): string[] => visibleRows(model).map((r) => r.sessionId)
+  const outside = (model: SidebarModel): string[] => visibleRows(model).filter((r) => r.outside).map((r) => r.sessionId)
+  // What a row is greyed by: its own hide, its folder's, or nothing — read whatever the filter.
+  const greyed = (model: SidebarModel): [string, string | null][] => visibleRows(model).map((r) => [r.sessionId, r.hiddenBy])
+
+  it('leaves a hidden conversation out of the rail but in the rows a Resume writes into', () => {
+    // Placed rows must keep it: filtering where rows are placed would leave a Resume nothing to lift.
+    const model = buildSidebar(
+      input({ groups: [group('/w/a', [conv('kept', T - 1), conv('gone', T - 2)])], userHidden: hide(['gone']) })
+    )
+    expect(ids(model)).toEqual(['kept'])
+    expect(model.rows.has('gone')).toBe(true)
+    expect(resumeWrites(model, 'gone', T + 5)).toEqual({ gone: T + 5 })
+    expect(model.filteredOut).toBe(1)
+  })
+
+  it('hides a folder in All mode too, where it has no header', () => {
+    const groups = [group('/w/a', [conv('a1', T - 1)]), group('/w/b', [conv('b1', T - 2)])]
+    expect(ids(buildSidebar(input({ mode: 'all', groups, userHidden: hide([], ['/w/a']) })))).toEqual(['b1'])
+  })
+
+  it('leaves the other folders’ labels as they were', () => {
+    // Labels computed only over the folders shown would shorten /w/y/app's to `app` once its twin hides.
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/x/app', [conv('x1', T - 1)]), group('/w/y/app', [conv('y1', T - 2)])],
+        userHidden: hide([], ['/w/x/app'])
+      })
+    )
+    expect(model.groups.map((g) => [g.key, g.label])).toEqual([['/w/y/app', 'y/app']])
+    expect(model.labels.get('/w/x/app')).toBe('x/app')
+  })
+
+  it('applies before the cap, so a hidden row takes no slot', () => {
+    // Cap 2: with r1 hidden, r2 and r3 both fit. Capping first would withhold r3 behind the hidden r1.
+    const model = buildSidebar(
+      input({ groups: [group('/w/a', [conv('r1', T - 1), conv('r2', T - 2), conv('r3', T - 3)])], userHidden: hide(['r1']) })
+    )
+    expect(shape(model)).toEqual([{ key: '/w/a', collapsed: false, withheld: 0, blocks: [['un:/w/a', 'r2', 'r3']] }])
+  })
+
+  it('keeps what is on screen, outside the filter, but not what is merely running', () => {
+    // `shown` is open in a pane; `running` has a terminal and nothing more. The cap's own exemption
+    // covers both, so a filter borrowing it would keep `running` too.
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/a', [conv('plain', T - 1), conv('shown', T - 2), conv('running', T - 3)])],
+        ptys: [pty('running')],
+        active: new Set(['shown']),
+        userHidden: hide(['shown', 'running'])
+      })
+    )
+    expect(ids(model)).toEqual(['plain', 'shown'])
+    expect(outside(model)).toEqual(['shown'])
+    expect(model.filteredOut).toBe(1)
+  })
+
+  it('marks a folder hidden only by its own hide, not by its conversations’', () => {
+    const base = { groups: [group('/w/a', [conv('a1', T - 1), conv('a2', T - 2)])], active: new Set(['a1']) }
+    expect(buildSidebar(input({ ...base, userHidden: hide([], ['/w/a']) })).groups[0].folderHidden).toBe(true)
+    expect(buildSidebar(input({ ...base, userHidden: hide(['a1', 'a2']), filter: new Set(['hidden']) })).groups[0].folderHidden).toBe(false)
+  })
+
+  it('shows only what is hidden under Hidden, keeping what is on screen, greyed by its hide alone', () => {
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/a', [conv('open', T - 1), conv('own', T - 2)]), group('/w/b', [conv('b1', T - 3)])],
+        active: new Set(['open']),
+        userHidden: hide(['own'], ['/w/b']),
+        filter: new Set(['hidden'])
+      })
+    )
+    expect(ids(model)).toEqual(['open', 'own', 'b1'])
+    expect(outside(model)).toEqual(['open'])
+    // Grey means hidden in every filter: the hidden rows grey under Hidden too, the open one does not.
+    expect(greyed(model)).toEqual([['open', null], ['own', 'self'], ['b1', 'folder']])
+  })
+
+  it('narrows to running conversations under Live, dropping folders with none, and never brings a hidden one back', () => {
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/a', [conv('idle', T - 1), conv('live', T - 2), conv('hiddenLive', T - 3)]), group('/w/b', [conv('b1', T - 4)])],
+        ptys: [pty('live'), pty('hiddenLive')],
+        userHidden: hide(['hiddenLive']),
+        filter: new Set(['live'])
+      })
+    )
+    expect(keys(model)).toEqual(['/w/a'])
+    expect(ids(model)).toEqual(['live'])
+  })
+
+  it('requires every criterion: Hidden and Live is what is both', () => {
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/a', [conv('hiddenIdle', T - 1), conv('hiddenLive', T - 2), conv('live', T - 3)])],
+        ptys: [pty('hiddenLive'), pty('live')],
+        userHidden: hide(['hiddenIdle', 'hiddenLive']),
+        filter: new Set(['hidden', 'live'])
+      })
+    )
+    expect(ids(model)).toEqual(['hiddenLive'])
+  })
+
+  it('does not bold a folder for a conversation it leaves out, which the bell still lists', () => {
+    // `quiet` shares the folder, so the folder still shows: only the asking row is gone.
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/a', [conv('quiet', T - 1), conv('asks', T - 2)])],
+        ptys: [pty('quiet'), pty('asks')],
+        liveState: states({ asks: 'asking' }),
+        userHidden: hide(['asks'])
+      })
+    )
+    expect(model.groups[0].wantsAttention).toBe(false)
+    expect(model.needsYou).toEqual(['asks'])
+  })
+
+  it('gives hidden folders none of the folders that start expanded', () => {
+    // autoExpand is 2. /w/a is first but hidden, so /w/b and /w/c open and /w/d starts collapsed;
+    // counting /w/a would collapse /w/c as well.
+    const groups = ['a', 'b', 'c', 'd'].map((n, i) => group(`/w/${n}`, [conv(n, T - i)]))
+    const model = buildSidebar(input({ groups, userHidden: hide([], ['/w/a']) }))
+    expect(model.groups.map((g) => [g.key, g.collapsed])).toEqual([
+      ['/w/b', false],
+      ['/w/c', false],
+      ['/w/d', true]
+    ])
+  })
+
+  it('counts what it leaves out among the search matches only', () => {
+    const base = {
+      groups: [group('/w/a', [conv('kept', T - 1), conv('gone', T - 2), conv('also', T - 3)])],
+      userHidden: hide(['gone', 'also'])
+    }
+    expect(buildSidebar(input({ ...base, search: new Set(['gone']) })).filteredOut).toBe(1)
+    expect(buildSidebar(input({ ...base, search: new Set(['kept']) })).filteredOut).toBe(0)
   })
 })
