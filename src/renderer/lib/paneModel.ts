@@ -71,7 +71,11 @@ export type PaneAction =
   | { type: 'openMany'; sessionIds: string[]; activeSessionId: string; pane?: number }
   /** Make a preview tab stick (acting on the conversation, or an explicit gesture). */
   | { type: 'promote'; sessionId: string; pane?: number }
-  | { type: 'close'; pane: number; index: number }
+  /**
+   * `recent` (most recent first, see recentTabs) is where an active tab's close lands: the newest of
+   * them still in the pane. Without one, the neighbour that slid into the slot.
+   */
+  | { type: 'close'; pane: number; index: number; recent?: readonly string[] }
   | { type: 'closeOthers'; pane: number; index: number }
   /**
    * Close, or move, a whole multi-selection at once.
@@ -81,7 +85,7 @@ export type PaneAction =
    * against the layout it can see, which stops being true after the first one lands. Only the reducer
    * sees the states in between, so the batch has to happen here.
    */
-  | { type: 'closeMany'; sessionIds: string[] }
+  | { type: 'closeMany'; sessionIds: string[]; recent?: readonly string[] }
   | {
       type: 'moveMany'
       sessionIds: string[]
@@ -300,12 +304,24 @@ function activeAfterRemoval(activeIndex: number, removed: number, newLength: num
  * wherever it now sits; otherwise the slot is clamped to what remains, which lands on the nearest
  * surviving neighbour.
  */
-function activeAfterKeep(pane: Pane, keep: Tab[]): number {
+function activeAfterKeep(pane: Pane, keep: Tab[], recent?: readonly string[]): number {
   if (keep.length === 0) return -1
   if (pane.activeIndex < 0) return -1
   const activeId = paneActiveId(pane)
   const stillHere = activeId ? keep.findIndex((t) => t.sessionId === activeId) : -1
-  return stillHere >= 0 ? stillHere : Math.min(pane.activeIndex, keep.length - 1)
+  if (stillHere >= 0) return stillHere
+  const viewed = recentIndex(keep, recent)
+  return viewed >= 0 ? viewed : Math.min(pane.activeIndex, keep.length - 1)
+}
+
+/** The most recently viewed of `tabs`, by `recent` (most recent first); -1 when none of them is. */
+function recentIndex(tabs: Tab[], recent: readonly string[] | undefined): number {
+  if (!recent) return -1
+  for (const id of recent) {
+    const at = tabs.findIndex((t) => t.sessionId === id)
+    if (at >= 0) return at
+  }
+  return -1
 }
 
 /**
@@ -461,10 +477,11 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       const pane = state.panes[action.pane]
       if (!pane || action.index < 0 || action.index >= pane.tabs.length) return state
       const tabs = pane.tabs.filter((_, i) => i !== action.index)
+      const viewed = action.index === pane.activeIndex ? recentIndex(tabs, action.recent) : -1
       const withClosed = withPane(state, action.pane, {
         ...pane,
         tabs,
-        activeIndex: activeAfterRemoval(pane.activeIndex, action.index, tabs.length)
+        activeIndex: viewed >= 0 ? viewed : activeAfterRemoval(pane.activeIndex, action.index, tabs.length)
       })
       return pruneEmptyPanes(withClosed)
     }
@@ -544,7 +561,7 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
         const keep = pane.tabs.filter((t) => !kill.has(t.sessionId))
         if (keep.length === pane.tabs.length) return pane
         changed = true
-        return { ...pane, tabs: keep, activeIndex: activeAfterKeep(pane, keep) }
+        return { ...pane, tabs: keep, activeIndex: activeAfterKeep(pane, keep, action.recent) }
       })
       if (!changed) return state
       return pruneEmptyPanes({ ...state, panes })

@@ -114,7 +114,7 @@ export default function AttentionBell({ entries, onOpen, onMarkRead, onMarkAllRe
         aria-label={count === 0 ? label : `Needs you: ${label}`}
         aria-expanded={panel === 'open'}
       >
-        <Bell size={16} />
+        <Bell size={16} filled={count > 0} />
         {dot && <span ref={dotRef} className={`sb-dot ${dot} sb-bell-dot`} aria-hidden="true" />}
       </button>
       {panel !== 'closed' && anchor && (
@@ -169,21 +169,25 @@ function BellItem({ entry, onOpen, onMarkRead }: { entry: AttentionEntry; onOpen
   return (
     <div className="sb-bell-item">
       <button className="sb-bell-open" onClick={onOpen}>
-        <span ref={dotRef} className={`sb-dot ${entry.state}`} aria-hidden="true" />
         <AgentLogo agent={entry.agent} />
         <span className="sb-bell-text">
           <span className="sb-bell-name">{entry.title}</span>
           <span className="sb-bell-meta"><MetaText text={entry.folder ? `${entry.folder}${META_SEP}${when}` : when} /></span>
         </span>
       </button>
-      <button
-        className="sb-bell-read"
-        onClick={onMarkRead}
-        data-tip="Mark as read"
-        aria-label={`Mark “${entry.title}” as read`}
-      >
-        <Check size={13} />
-      </button>
+      {/* The rail's gutter: the dot at rest, swapped for its one action on hover, as a row swaps its
+          dot for ⋮. */}
+      <span className="sb-bell-gutter">
+        <span ref={dotRef} className={`sb-dot ${entry.state}`} aria-hidden="true" />
+        <button
+          className="sb-bell-read"
+          onClick={onMarkRead}
+          data-tip="Mark as read"
+          aria-label={`Mark “${entry.title}” as read`}
+        >
+          <Check size={13} />
+        </button>
+      </span>
     </div>
   )
 }

@@ -5,12 +5,40 @@ import MessageBlock from './MessageBlock'
 import { Arrow } from './icons'
 import { conversationText } from '../lib/clipboard'
 import { formatCount } from '../lib/format'
+import type { CopyMode } from '../lib/mdCopy'
 import { copySelection } from '../lib/mdCopyDom'
 import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
 import { attachAutoHideWithin } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
 
 const NOOP = (): void => {}
+
+/** The selection's range when it reaches into `root`; null when there is none or it lies elsewhere. */
+function selectionWithin(root: Element): Range | null {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null
+  const range = sel.getRangeAt(0)
+  return range.intersectsNode(root) ? range : null
+}
+
+/** The selection as `mode` text; null when there is nothing to put on the clipboard. */
+function selectionText(range: Range, root: Element, mode: CopyMode): string | null {
+  try {
+    const result = copySelection(range, root, mode)
+    if (result.outcome === 'failed') {
+      console.error('Selection copy failed', { stage: 'serialization', mode })
+      return null
+    }
+    if (result.outcome === 'plain-fallback') {
+      console.warn('Selection copied as plain text', { stage: 'serialization', mode })
+    }
+    return result.text || null
+  } catch {
+    // Exceptions can contain selected content; diagnostics deliberately record only the stage and mode.
+    console.error('Selection copy failed', { stage: 'collection', mode })
+    return null
+  }
+}
 
 /** A "You" (human) section — the divider separates these from the agent sections. */
 const isHumanItem = (item: TranscriptItem): boolean => item.kind === 'section' && !item.isAssistant
@@ -297,32 +325,42 @@ export default function TranscriptView({
 
   // Native Copy and ⌘C both dispatch this event. Both formats use the same semantic selection.
   const handleCopy = useCallback((e: ClipboardEvent): void => {
-    const { enabled } = copyCtxRef.current
     const root = scrollElRef.current
-    if (!root) return
-    const sel = window.getSelection()
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return
-    const range = sel.getRangeAt(0)
-    if (!range.intersectsNode(root)) return
+    const range = root && selectionWithin(root)
+    if (!root || !range) return
     // The range belongs to this transcript. Native copy could reintroduce hidden content or chrome.
     e.preventDefault()
-    const mode = enabled ? 'markdown' : 'plain'
-    let stage = 'collection'
+    const mode = copyCtxRef.current.enabled ? 'markdown' : 'plain'
+    const text = selectionText(range, root, mode)
+    if (!text) return
     try {
-      const result = copySelection(range, root, mode)
-      if (result.outcome === 'failed') {
-        console.error('Selection copy failed', { stage: 'serialization', mode })
-        return
-      }
-      stage = 'clipboard-write'
-      if (result.text) e.clipboardData?.setData('text/plain', result.text)
-      if (result.outcome === 'plain-fallback') {
-        console.warn('Selection copied as plain text', { stage: 'serialization', mode })
-      }
+      e.clipboardData?.setData('text/plain', text)
     } catch {
-      // Exceptions can contain selected content; diagnostics deliberately record only the stage and mode.
-      console.error('Selection copy failed', { stage, mode })
+      console.error('Selection copy failed', { stage: 'clipboard-write', mode })
     }
+  }, [])
+
+  // ⇧⌘C copies the same selection in the format the preference does not pick. A keydown rather than a
+  // menu item: an accelerator is consumed before the page sees it, and this only means anything when
+  // the selection is in a transcript. With the view split, only the transcript holding it answers.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code !== 'KeyC' || !e.metaKey || !e.shiftKey || e.altKey || e.ctrlKey) return
+      const focused = document.activeElement
+      if (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) return
+      const root = scrollElRef.current
+      const range = root && selectionWithin(root)
+      if (!root || !range) return
+      e.preventDefault()
+      const mode = copyCtxRef.current.enabled ? 'plain' : 'markdown'
+      const text = selectionText(range, root, mode)
+      if (!text) return
+      navigator.clipboard.writeText(text).catch(() => {
+        console.error('Selection copy failed', { stage: 'clipboard-write', mode })
+      })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   // Callback ref: attach/detach the scroll listener + the auto-hiding scrollbar as the container
