@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { conversationMenu, type ConversationMenuState } from '../src/renderer/lib/conversationMenu'
+import { conversationMenu, folderMenu, type ConversationMenuState } from '../src/renderer/lib/conversationMenu'
 import type { ConversationMenuEntry } from '../src/shared/types'
 
 /**
@@ -14,6 +14,7 @@ const base: ConversationMenuState = {
   live: false,
   pinned: false,
   unread: false,
+  hidden: null,
   side: 'right',
   newWindow: true,
   hasTabHere: false,
@@ -34,6 +35,7 @@ describe('the row menu', () => {
       'Open in new window',
       '—',
       'Pin',
+      'Hide',
       'Rename…',
       'Session details…'
     ])
@@ -45,6 +47,7 @@ describe('the row menu', () => {
       'Open in new window',
       '—',
       'Pin',
+      'Hide',
       'Mark as unread',
       'Rename…',
       'Session details…',
@@ -66,8 +69,21 @@ describe('the row menu', () => {
     expect(labels).not.toContain('Mark as unread')
   })
 
+  it('offers Unhide for a conversation hidden by itself, and its folder for one hidden by its folder', () => {
+    const filing = (hidden: ConversationMenuState['hidden']): string[] =>
+      menu({ hidden, side: null, newWindow: false }).flatMap((e) => ('separator' in e ? [] : [`${e.action}:${e.label}`]))
+    expect(filing('self')).toEqual(['resume:Resume session', 'pin:Pin', 'unhide:Unhide', 'rename:Rename…', 'details:Session details…'])
+    expect(filing('folder')).toEqual([
+      'resume:Resume session',
+      'pin:Pin',
+      'unhideFolder:Unhide folder',
+      'rename:Rename…',
+      'details:Session details…'
+    ])
+  })
+
   it('drops the where-to group, and its divider, when there is nowhere to send it', () => {
-    expect(shape(menu({ side: null, newWindow: false }))).toEqual(['Resume session', '—', 'Pin', 'Rename…', 'Session details…'])
+    expect(shape(menu({ side: null, newWindow: false }))).toEqual(['Resume session', '—', 'Pin', 'Hide', 'Rename…', 'Session details…'])
   })
 
   it('a terminal with no conversation yet can only be stopped', () => {
@@ -95,6 +111,7 @@ describe('the tab menu', () => {
       'Move to new window',
       '—',
       'Pin',
+      'Hide',
       'Rename…',
       'Session details…',
       '—',
@@ -151,6 +168,13 @@ describe('the tab menu', () => {
 
   it('names each command for what it does', () => {
     const actions = menu({ surface: 'tab', live: true, closeOthers: true, reopen: 1 }).flatMap((e) => ('separator' in e ? [] : [e.action]))
-    expect(actions).toEqual(['toSide', 'newWindow', 'pin', 'markUnread', 'rename', 'details', 'close', 'closeOthers', 'reopenClosed', 'stop'])
+    expect(actions).toEqual(['toSide', 'newWindow', 'pin', 'hide', 'markUnread', 'rename', 'details', 'close', 'closeOthers', 'reopenClosed', 'stop'])
+  })
+})
+
+describe('the folder menu', () => {
+  it('offers the one toggle in the direction it would go', () => {
+    expect(folderMenu(false)).toEqual([{ action: 'hideFolder', label: 'Hide folder' }])
+    expect(folderMenu(true)).toEqual([{ action: 'unhideFolder', label: 'Unhide folder' }])
   })
 })

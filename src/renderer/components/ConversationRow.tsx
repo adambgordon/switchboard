@@ -22,6 +22,8 @@ interface Props {
   /** Resolved liveness for the dot (working / asking / awaiting / quiet); null when not live. */
   liveState?: LiveState | null
   pinned: boolean
+  /** Hidden by the user, drawn greyed whatever the rail's filter. */
+  dimmed?: boolean
   /** Another window holds this conversation's tab, so clicking the row raises THAT window rather than
    *  opening it here. Marked, because a click that brings a different window forward is startling
    *  when nothing said it would. */
@@ -39,7 +41,7 @@ interface Props {
   // own idea, not an import.
   /** Option+click on a live row — always mark it unread (never toggles). */
   onMarkUnread?: (id: string) => void
-  /** Open the row's actions menu (Pin/Unpin · read/unread · details · Stop/Resume) by clicking the ⋮
+  /** Open the row's actions menu (Pin/Unpin, read/unread, details, Stop/Resume) by clicking the ⋮
    * button; the menu anchors under it. */
   onOpenMenu?: (e: MouseEvent, id: string) => void
   /** Right-click / two-finger click — opens the same actions menu at the cursor. */
@@ -54,6 +56,7 @@ function ConversationRowImpl({
   live,
   liveState,
   pinned,
+  dimmed,
   elsewhere,
   onSelect,
   onJump,
@@ -98,7 +101,7 @@ function ConversationRowImpl({
   )
   return (
     <div
-      className={`sb-row ${density}${selected ? ' selected' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
+      className={`sb-row ${density}${selected ? ' selected' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${dimmed ? ' dimmed' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
       onClick={(e) => {
         if (e.altKey) {
           // Option+click = mark unread only; never navigate (selecting/engaging would trip the

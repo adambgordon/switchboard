@@ -35,7 +35,7 @@
  * with a background job and no indexed conversation.
  *
  * What this IS good for: a terminal whose own transcript is empty because its work went into a
- * background agent. That row would otherwise read "New conversation · 0 msg" while the user is busy
+ * background agent. That row would otherwise read "New conversation, 0 msg" while the user is busy
  * in it. Pairing this marker with "has no indexed conversation" identifies exactly that case, and the
  * renderer re-asks the question every pass, so the row corrects itself the moment the session writes
  * a transcript of its own.

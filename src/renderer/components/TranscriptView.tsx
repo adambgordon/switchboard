@@ -636,7 +636,11 @@ export default function TranscriptView({
               <span className="transcript-foot-rule" aria-hidden="true" />
               <span className="transcript-foot-meta">
                 <span className="transcript-foot-label label-caps">
-                  End of transcript · {formatCount(count)} {count === 1 ? 'message' : 'messages'}
+                  <span>End of transcript</span>
+                  <span className="sb-sep" aria-hidden="true" />
+                  <span>
+                    {formatCount(count)} {count === 1 ? 'message' : 'messages'}
+                  </span>
                 </span>
                 <span className="transcript-foot-copy-tip" data-tip="Copy entire conversation">
                   <CopyButton

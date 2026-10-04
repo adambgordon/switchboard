@@ -39,6 +39,12 @@
   flex: 1;
   min-width: 0;
 }
+/* Hidden by the user: greyed in every filter, so grey always means hidden. Color only, so it moves
+   nothing. */
+.sb-row.dimmed .sb-row-title,
+.sb-row.dimmed .sb-row-pin {
+  color: var(--ink-ghost);
+}
 /* The logo column is as wide as its widest occupant, the background-session ring, so titles line up
    whichever mark a row carries. Ghost ink, as on the spacious meta line: many rows, a quiet tag. */
 .sb-row-lead {

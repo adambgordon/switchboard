@@ -4,8 +4,7 @@ import { formatCount } from '../lib/format'
 
 interface Props {
   query: string
-  /** Bumped by App on each ⌘F while focus is in the main pane; re-focuses + selects the input
-   *  even when the bar is already open. */
+  /** Bumped by App on each ⌘F; re-focuses + selects the input even when the bar is already open. */
   focusReq: number
   /** Total match count for the current query (0 when none / empty query). */
   count: number
@@ -36,7 +35,7 @@ export default function TranscriptSearch({
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Focus + select on mount AND whenever App bumps focusReq (a ⌘F with focus in the main pane) —
+  // Focus + select on mount AND whenever App bumps focusReq (each ⌘F) —
   // so pressing ⌘F again after clicking into the transcript re-focuses the field, not just the
   // first open. (On mount the effect fires with the initial focusReq, covering the open case too.)
   useEffect(() => {

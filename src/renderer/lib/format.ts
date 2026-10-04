@@ -78,7 +78,7 @@ export function formatCount(n: number): string {
   return COUNT.format(n)
 }
 
-/** What joins metadata written as one string ("4m ago · app"). `MetaText` draws each occurrence as the
+/** What joins metadata written as one string, e.g. an age and a folder. `MetaText` draws each occurrence as the
  *  meta dot, so build such strings with this, never a literal. */
 export const META_SEP = ' · '
 

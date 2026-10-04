@@ -19,7 +19,7 @@ interface Props {
 }
 
 /**
- * One label · value detail row. The value text is selectable (highlight to copy); `labelTip` adds a
+ * One label-and-value detail row. The value text is selectable (highlight to copy); `labelTip` adds a
  * hover tooltip on the KEY describing what the row means, and `copy` adds a one-click copy button
  * (only the Session ID row uses it — everything else is select-to-copy).
  */

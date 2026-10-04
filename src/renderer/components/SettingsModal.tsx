@@ -117,7 +117,7 @@ function groupsFor(tabsEnabled: boolean): Group[] {
       title: 'Conversations',
       items: [
         { keys: tabsEnabled ? ['⌘N', '⌘T'] : ['⌘N'], desc: 'New conversation' },
-        { keys: ['⌘F'], desc: 'Search' },
+        { keys: ['⌘F'], desc: 'Find in the conversation' },
         { keys: ['⌘J'], desc: 'Toggle Formatted / Terminal, resuming if needed' },
         { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
         { keys: ['⌥-click'], desc: 'Mark conversation unread' },
@@ -582,7 +582,8 @@ export default function SettingsModal({
                       Show what’s new
                     </button>
                     <div className="sb-setting-desc">
-                      Tabs and split view, the compact and folder sidebar, and the bell.
+                      Hiding and filtering; tabs and split view, the compact and folder sidebar, and the
+                      bell.
                     </div>
                   </div>
                 </div>

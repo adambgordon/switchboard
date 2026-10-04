@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseOnceTasks, withOnceTask } from '../src/renderer/lib/onceTasks'
+import { parseOnceTasks, unseenWhatsNew, withOnceTask } from '../src/renderer/lib/onceTasks'
 
 describe('parseOnceTasks', () => {
   it('reads the stored task ids, keeping only strings', () => {
@@ -19,5 +19,20 @@ describe('withOnceTask', () => {
   it('returns the same list when the task is already done', () => {
     const done = ['folderSeed']
     expect(withOnceTask(done, 'folderSeed')).toBe(done)
+  })
+})
+
+describe('unseenWhatsNew', () => {
+  it('shows a profile that has seen nothing every release, newest first', () => {
+    expect(unseenWhatsNew([])).toEqual(['whatsNew:2', 'whatsNew:1'])
+  })
+
+  it('shows only the releases not yet seen', () => {
+    expect(unseenWhatsNew(['folderSeed', 'whatsNew:1'])).toEqual(['whatsNew:2'])
+    expect(unseenWhatsNew(['whatsNew:2'])).toEqual(['whatsNew:1'])
+  })
+
+  it('shows nothing once every release is seen', () => {
+    expect(unseenWhatsNew(['whatsNew:2', 'folderSeed', 'whatsNew:1'])).toEqual([])
   })
 })

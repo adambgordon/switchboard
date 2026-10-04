@@ -39,12 +39,24 @@ export interface TabDescriptor {
   pinned: boolean
   /** Marked as needing a look, as its rail row's dot shows. */
   unread: boolean
+  /** Why the user's hide covers it, as its rail row's menu reads it. */
+  hidden: 'folder' | 'self' | null
 }
 
 /** The conversation commands a tab's menu shares with its rail row, resolved by App. */
 export type TabConversationCommand = Extract<
   ConversationMenuAction,
-  'resume' | 'pin' | 'unpin' | 'markRead' | 'markUnread' | 'rename' | 'stop'
+  | 'resume'
+  | 'pin'
+  | 'unpin'
+  | 'markRead'
+  | 'markUnread'
+  | 'hide'
+  | 'unhide'
+  | 'hideFolder'
+  | 'unhideFolder'
+  | 'rename'
+  | 'stop'
 >
 
 interface Props {
@@ -342,6 +354,7 @@ export default function TabStrip({
         live: tab.running,
         pinned: tab.pinned,
         unread: tab.unread,
+        hidden: tab.hidden,
         // Same command either way; the layout decides what it is called — see conversationMenu.
         side: chooser
           ? null

@@ -10,6 +10,7 @@ import {
   type Ranked
 } from './rowRank'
 import type { SidebarMode } from './sidebarPrefs'
+import { admits, hiddenBy, type RailFilter, type UserHidden } from './railFilter'
 
 /**
  * The rail's structure, derived in one pure pass: which rows exist, which folder each belongs to, in
@@ -28,6 +29,11 @@ export interface SidebarRow {
   liveState: LiveState | null
   /** Pinned rows rank by pin order (`-index`), unpinned rows by `override ?? seed`. */
   rank: number
+  /** Why the user's hide covers it, or null when it does not (`hiddenBy`). A hidden row is drawn
+   *  greyed whatever the filter, so grey means one thing: hidden. */
+  hiddenBy: 'folder' | 'self' | null
+  /** Outside the window's filter. Such a row renders only while it is on screen. */
+  outside: boolean
 }
 
 export interface SidebarBlock {
@@ -49,9 +55,12 @@ export interface SidebarGroup {
   /** Empty when collapsed — pins included. */
   blocks: SidebarBlock[]
   /** Unpinned rows withheld by the cap; drives whether Show more / Show less is offered. */
-  hidden: number
-  /** Any row `asking` or `awaiting`, counted over every row including withheld and collapsed ones. */
+  withheld: number
+  /** Any row `asking` or `awaiting` among those the filter admits, withheld and collapsed ones
+   *  included. Never one the filter keeps off the rail: bold would point at something not there. */
   wantsAttention: boolean
+  /** The user has hidden this folder, so its header is drawn greyed. Folders mode only. */
+  folderHidden: boolean
 }
 
 export interface FolderRank {
@@ -72,7 +81,8 @@ export interface RowPlace {
 
 export interface SidebarModel {
   groups: SidebarGroup[]
-  /** Every row that is not hidden, in both modes and regardless of search, collapse and caps. */
+  /** Every row that is not delegated, in both modes and whatever the filter, search, collapse and caps
+   *  show: the space a Resume, a drop and a bind write into, which hiding must not shrink. */
   rows: ReadonlyMap<string, RowPlace>
   /** Every folder's rank and seed, in both modes and regardless of search — what a folder drag or a
    *  bind needs, including for folders not currently rendered. */
@@ -81,9 +91,11 @@ export interface SidebarModel {
    *  names its folder even in All mode, where no header does. */
   labels: ReadonlyMap<string, string>
   /** Every session that needs the user, in fully-expanded display order: the title bar bell's set,
-   *  which reorders it for triage. Unaffected by search, collapse and caps, so nothing can hide one
-   *  from it. */
+   *  which reorders it for triage. Unaffected by the filter, search, collapse and caps, so nothing can
+   *  hide one from it: a hidden conversation still reaches the user through the bell. */
   needsYou: string[]
+  /** Rows the filter keeps off the rail that the search, if any, matches: what an empty rail names. */
+  filteredOut: number
   /** The folders that start collapsed in this build — the input's, or the ones past the auto-expand
    *  index when it had none. */
   autoCollapsed: ReadonlySet<string>
@@ -110,11 +122,15 @@ export interface SidebarInput {
   ptys: readonly PtyState[]
   /** Pin order, top first. */
   pinned: readonly string[]
-  hidden: ReadonlySet<string>
+  /** Delegated Codex threads, which main withholds from every surface: no row, whatever the filter. */
+  delegated: ReadonlySet<string>
+  userHidden: UserHidden
+  filter: RailFilter
   rowRanks: RankOverrides
   folderRanks: RankOverrides
   liveState: (pty: PtyState | null, meta: ConversationMeta, id: string) => LiveState | null
-  /** Conversations on screen. Never withheld by a cap, and their folders are always expanded. */
+  /** Conversations on screen. Never withheld by a cap or the filter, and their folders are always
+   *  expanded. */
   active: ReadonlySet<string>
   /** Stored per-folder collapse preferences. */
   collapsed: Readonly<Record<string, boolean>>
@@ -198,9 +214,10 @@ function placeRows(input: SidebarInput): Placed[] {
   const out: Placed[] = []
   const seen = new Set<string>()
   const place = (id: string, meta: ConversationMeta, pty: PtyState | null, root: string, seed: number): void => {
-    if (seen.has(id) || input.hidden.has(id)) return
+    if (seen.has(id) || input.delegated.has(id)) return
     seen.add(id)
     const pin = pinIndex.get(id)
+    const by = hiddenBy(input.userHidden, id, root)
     out.push({
       row: {
         sessionId: id,
@@ -208,7 +225,9 @@ function placeRows(input: SidebarInput): Placed[] {
         meta,
         pinned: pin !== undefined,
         liveState: input.liveState(pty, meta, id),
-        rank: pin !== undefined ? -pin : rankOf(id, seed, input.rowRanks)
+        rank: pin !== undefined ? -pin : rankOf(id, seed, input.rowRanks),
+        hiddenBy: by,
+        outside: !admits(input.filter, { hidden: by !== null, live: pty !== null })
       },
       root,
       seed
@@ -290,8 +309,11 @@ function buildGroup(
   auto: ReadonlySet<string>,
   all: SidebarRow[]
 ): SidebarGroup | null {
-  const wantsAttention = all.some((r) => needsYou(r.liveState))
-  const rows = input.search ? all.filter((r) => input.search!.has(r.sessionId)) : all
+  // The filter applies here, where search does, rather than when rows are placed, so every row keeps
+  // its rank and folder. Only what is on screen stays outside it: the selection never vanishes.
+  const admitted = all.filter((r) => !r.outside || input.active.has(r.sessionId))
+  const wantsAttention = admitted.some((r) => needsYou(r.liveState))
+  const rows = input.search ? admitted.filter((r) => input.search!.has(r.sessionId)) : admitted
   // All mode is always exactly one group, even empty; a folder with nothing to show is dropped.
   if (rows.length === 0 && input.mode === 'folders') return null
   const header = input.mode === 'folders'
@@ -325,8 +347,9 @@ function buildGroup(
     header,
     collapsed,
     blocks,
-    hidden: collapsed ? 0 : unpinned.length - shown.length,
-    wantsAttention
+    withheld: collapsed ? 0 : unpinned.length - shown.length,
+    wantsAttention,
+    folderHidden: header && input.userHidden.folders.has(key)
   }
 }
 
@@ -347,7 +370,10 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
   for (const [root, b] of byRoot) folders.set(root, { rank: rankOf(root, b.seed, input.folderRanks), seed: b.seed })
 
   const folderOrder = [...folders].map(([id, f]) => ({ id, rank: f.rank })).sort(compareRanked).map((f) => f.id)
-  const auto = input.autoCollapsed ?? new Set(folderOrder.slice(input.limits.autoExpand))
+  // Hidden folders take none of the expanded places, so the first folders the user did not hide open.
+  const auto =
+    input.autoCollapsed ??
+    new Set(folderOrder.filter((root) => !input.userHidden.folders.has(root)).slice(input.limits.autoExpand))
   const buckets =
     input.mode === 'all'
       ? [{ key: '', rows: placed.map((p) => p.row) }]
@@ -366,8 +392,13 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
     for (const r of rows) if (needsYou(r.liveState)) order.push(r.sessionId)
   }
   const rows = new Map<string, RowPlace>()
-  for (const p of placed) rows.set(p.row.sessionId, { rank: p.row.rank, seed: p.seed, root: p.root, pinned: p.row.pinned })
-  return { groups, rows, folders, labels, needsYou: order, autoCollapsed: auto }
+  let filteredOut = 0
+  for (const p of placed) {
+    const id = p.row.sessionId
+    rows.set(id, { rank: p.row.rank, seed: p.seed, root: p.root, pinned: p.row.pinned })
+    if (p.row.outside && !input.active.has(id) && (!input.search || input.search.has(id))) filteredOut++
+  }
+  return { groups, rows, folders, labels, needsYou: order, filteredOut, autoCollapsed: auto }
 }
 
 /**
@@ -424,7 +455,7 @@ export function visibleRows(model: SidebarModel): SidebarRow[] {
 /**
  * A Resume's write: lift the row above every unpinned row, in every folder and in All mode at once.
  * Pinned rows are left where they are — their order is an arrangement the user made — and a row the
- * model does not hold (hidden, or not yet indexed) writes nothing.
+ * model does not hold (delegated, or not yet indexed) writes nothing. A hidden row is held.
  */
 export function resumeWrites(model: SidebarModel, id: string, now: number): Record<string, number> {
   const place = model.rows.get(id)

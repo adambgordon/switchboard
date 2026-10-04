@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react'
 import { AGENTS, type AgentKind } from '@shared/types'
 import AgentLogo from './AgentLogo'
 import { Compose, Folder, FolderOpen } from './icons'
@@ -8,7 +9,11 @@ interface Props {
   collapsed: boolean
   /** Something inside is asking or unread — the label goes heavier. */
   wantsAttention: boolean
+  /** The user has hidden this folder: drawn greyed whatever the rail's filter. */
+  dimmed: boolean
   onToggle: (root: string) => void
+  /** Right-click: the folder's menu, at the cursor. */
+  onContextMenu: (e: MouseEvent, root: string) => void
   /** The installed agents, nearest the pencil first. */
   agents: AgentKind[]
   /** The pencil: start a new conversation, choosing the agent, with this folder preselected. */
@@ -36,7 +41,9 @@ export default function SidebarGroupHeader({
   label,
   collapsed,
   wantsAttention,
+  dimmed,
   onToggle,
+  onContextMenu,
   agents,
   onNew,
   onStart,
@@ -44,7 +51,16 @@ export default function SidebarGroupHeader({
 }: Props) {
   return (
     // The folder's drag handle: the header grabs the whole folder around it (useBlockReorder).
-    <div className="sb-group-head" role="group" aria-label={label} data-drag="">
+    <div
+      className={`sb-group-head${dimmed ? ' dimmed' : ''}`}
+      role="group"
+      aria-label={label}
+      data-drag=""
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onContextMenu(e, root)
+      }}
+    >
       <button
         className={`sb-group-toggle${wantsAttention ? ' attention' : ''}`}
         onClick={() => onToggle(root)}
@@ -73,7 +89,7 @@ export default function SidebarGroupHeader({
           data-tip-slow=""
           aria-label={`New conversation in ${label}`}
         >
-          <Compose size={15} />
+          <Compose size={16} />
         </button>
         {agents.map((a, i) => {
           const tip = `New ${AGENTS[a].label} conversation`

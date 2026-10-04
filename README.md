@@ -93,9 +93,9 @@ Then quit (⌘Q) (if already running) and reopen the app.
 - **Pin** — pinned conversations sit at the top of their folder (or of the All list) in an order you drag, and persist across restarts.
 - **The bell** — the bell in the title bar collects everything that needs you: it pulses when an agent is waiting on your answer and turns solid when a turn finished unread. Hover it for the list, questions first, and jump straight in or mark each one read.
 - **Conversation menu (⋮)** — each row's **⋮** button, a right-click on the row, or a right-click on its tab opens the same menu: resume, open to the side or in a new window, pin/unpin, rename, **Session details**, mark read or unread, and stop. **⌥-click** a live row, its tab, or its terminal to mark it unread directly.
-- **What's new** — a short tour of what changed appears once; reopen it any time from **Preferences → Application**.
+- **What's new** — a short click-through tour of what changed appears once per release, showing only what you haven't seen; reopen it any time from **Preferences → Application**.
 - **Rename & inspect** — click a conversation's title at the top of the pane (or right-click a row → **Session details**) to open an info card: agent, folder, git branch, model, message count (visible human/agent prose or image messages, not tool plumbing), size, duration, token usage (per-agent categories) plus current context size, last activity, and session ID — values are selectable to copy (and session ID has a one-click copy). Rename **in place** right in the heading — press **Enter** to save. Renames are real and go through each agent's *own* store — Claude Code's title record (carries into `claude --resume`), Codex's app-server `thread/name/set` — never a Switchboard-private one.
-- **Search, two kinds** — fuzzy search *across* conversations (titles, previews, directories), and find-in-conversation (`⌘F`) that highlights matches in human and agent messages, including their code blocks. Tool sections are excluded, whether collapsed or expanded.
+- **Search, two kinds** — fuzzy search *across* conversations (titles, previews, directories; the rail's magnifier), and find-in-conversation (`⌘F`) that highlights matches in human and agent messages, including their code blocks. Tool sections are excluded, whether collapsed or expanded.
 - **Navigate by keyboard** — switch conversations with `⌥⌘↑` / `⌥⌘↓` (the main pane stays focused, so you can type or hit `⏎` to resume), app-wide back/forward through conversation and Formatted/Terminal visits, and more (see below). History follows a tab wherever it lives and reopens a closed tab as a preview; restoring a Terminal visit only uses an existing live terminal and never starts an agent. Navigation history resets when you quit.
 - **Light & dark** — neutral light and near-black dark themes; **System** follows the macOS appearance live. Flip from the title-bar toggle or Preferences → Appearance, where you can also pick a light or dark **dock icon** independent of the theme.
 
@@ -106,7 +106,7 @@ _For the design rationale and implementation invariants, see [`AGENTS.md`](AGENT
 | Key | Action |
 | --- | --- |
 | `⌘N` / `⌘T` | New conversation — a chooser tab on the folder you're in (`⌘T` with tabs on) |
-| `⌘F` | Find in the conversation (main pane focused) — or search the list (otherwise) |
+| `⌘F` | Find in the focused conversation (search across conversations from the rail's magnifier) |
 | `⌘J` | Toggle Formatted / Terminal in the focused pane; resume if not already live |
 | `⏎` / `⇧⏎` | In the find bar: next / previous match |
 | `⌥⌘↑` / `⌥⌘↓` | Previous / next conversation — lands focused in the main pane (type right away, or `⏎` to resume) |
@@ -193,7 +193,7 @@ src/
                            TerminalDeck/TerminalView · Sidebar/SidebarHead/SidebarGroupHeader · ConversationRow · ResizeHandle ·
                            SettingsModal · WhatsNewModal · UpdatesSetting · AppVeil · TooltipLayer · …
     lib/                   useSessions · usePtys · usePins · useSeen · useWindowFocus/focusSync · useLayout · useTheme · useDarkIcon · useTranscript/transcriptCache ·
-                           sidebarModel · rowRank/useRowRank · useSidebarPrefs · useBlockReorder/blockReorder · paneModel/usePaneLayout ·
+                           sidebarModel · railFilter/useRailHidden · rowRank/useRowRank · useSidebarPrefs · useBlockReorder/blockReorder · paneModel/usePaneLayout ·
                            conversationMenu · closedTabs · chooserTab/chooserDirs · attention · onceTasks ·
                            useAppNavigation · useMaxLiveSessions · useMarkdownCopy · useSyncedAnimation/animationSync · useRailFlip ·
                            useTranscriptSearch · useAutoHideScrollbar · messageGroups · clipboard · copyFallback · mdCopy/mdCopyInline/mdCopyDom/mdCopyAst ·

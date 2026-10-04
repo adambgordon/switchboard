@@ -34,7 +34,7 @@
   border-bottom-color: var(--rule-soft);
 }
 /* The pane is programmatically focusable (tabIndex -1) so a conversation click can hand it the
-   keyboard immediately — quiet selection + ⌘F routing — before the transcript mounts/loads. No
+   keyboard immediately — quiet selection — before the transcript mounts/loads. No
    ring: the global cobalt :focus-visible is reserved for liveness (cf. the rail / transcript-scroll). */
 .sb-pane:focus,
 .sb-pane:focus-visible {
@@ -68,7 +68,7 @@
 .sb-pane-meta {
   overflow: hidden;
 }
-/* A collapsible meta item and its own leading separator, so hiding the item takes the `·` with it. */
+/* A collapsible meta item and its own leading separator, so hiding the item takes the separator with it. */
 .sb-pane-meta-part {
   display: flex;
   align-items: center;

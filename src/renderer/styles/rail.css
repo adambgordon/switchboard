@@ -64,12 +64,18 @@
   align-items: center;
   gap: var(--s2);
 }
-/* Tight on purpose: each icon button's own 5px padding already spaces the glyphs. */
+/* Tight on purpose: each icon button's own 5px padding already spaces the glyphs.
+   The tools hang out of the head's text inset toward the rail's trailing edge, so they stand in the
+   column of the rows' controls: the head's pencil centers over a folder header's pencil and a row's ⋮.
+   That column's center is the row's right edge (--rail-inset and the --bar-thin scrollbar gutter in
+   from the rail's) less 12px (.sb-group-new's 2px inset and half its 20px box); the head's pencil
+   centers 13px in from the tools' end (5px padding and half its 16px glyph) — hence the 1px. */
 .sb-rail-head-tools {
   display: flex;
   align-items: center;
   gap: 2px;
   margin-left: auto;
+  margin-right: calc(var(--rail-inset) + var(--bar-thin) - 1px - var(--rail-text-inset));
 }
 /* The grouping toggle — the shared .sb-seg pill, a size down: it sits in chrome, not in a form. It
    hangs out of the head's text inset toward the rail's leading edge, lining up with the folder icons
@@ -105,9 +111,25 @@
   color: var(--ink);
   background: var(--paper-hover);
 }
-.sb-rail-search-btn.open {
+/* An open control is told by its glyph, never a pressed tile: search draws heavier, and the filter
+   takes full ink while its menu is open and draws heavier while a criterion is set. */
+.sb-rail-search-btn.open,
+.sb-rail-filter-btn.open,
+.sb-rail-filter-btn.active {
   color: var(--ink);
-  background: var(--paper-active);
+}
+.sb-filter-menu {
+  min-width: 150px;
+}
+.sb-filter-caption {
+  padding: 5px 10px 3px;
+  color: var(--ink-ghost);
+}
+/* Each item leads with its glyph, like the conversation menu's, and a set criterion carries an ink
+   check at the far edge. */
+.sb-filter-check {
+  margin-left: auto;
+  color: var(--ink);
 }
 /* While searching, the field fills the whole row and the ✕ floats inside its right edge (the
    magnifier shows only when search is closed). Boxed like the rename title input; the box stays the
@@ -435,6 +457,11 @@
    look", and an agent working in the background is not a reason to. */
 .sb-group-toggle.attention .sb-group-label-text {
   font-weight: 800;
+}
+/* A hidden folder: the same ghost ink a hidden row's title takes, in every filter. */
+.sb-group-head.dimmed .sb-group-icon,
+.sb-group-head.dimmed .sb-group-label {
+  color: var(--ink-ghost);
 }
 
 /* New conversation in this folder (SidebarGroupHeader). The pencil shows while the pointer is anywhere

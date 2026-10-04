@@ -22,6 +22,8 @@ import { usePtys } from './lib/usePtys'
 import { usePins } from './lib/usePins'
 import { useRowRank } from './lib/useRowRank'
 import { useSidebarPrefs } from './lib/useSidebarPrefs'
+import { useRailHidden } from './lib/useRailHidden'
+import { NO_FILTER, hiddenBy, type RailFilter } from './lib/railFilter'
 import {
   DEFAULT_SIDEBAR_LIMITS,
   buildSidebarHeld,
@@ -40,7 +42,15 @@ import {
   type SidebarModel
 } from './lib/sidebarModel'
 import { absorbBind, absorbBindFolder, dropWrites, holdRank, type RankOverrides } from './lib/rowRank'
-import { FOLDER_SEED_TASK, ONCE_TASKS_KEY, WHATS_NEW_TASK, parseOnceTasks, withOnceTask } from './lib/onceTasks'
+import {
+  FOLDER_SEED_TASK,
+  ONCE_TASKS_KEY,
+  WHATS_NEW_RELEASES,
+  parseOnceTasks,
+  unseenWhatsNew,
+  withOnceTask,
+  type WhatsNewRelease
+} from './lib/onceTasks'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
 import { viewToggleAction } from './lib/viewToggle'
@@ -159,6 +169,10 @@ export default function App() {
     setFolderCollapsed,
     setFoldersCollapsed
   } = useSidebarPrefs()
+  // What the user has hidden, shared by every window; which of it this window shows is its own filter,
+  // never stored, so a launch never opens onto a narrowed rail.
+  const { hidden: userHidden, setConversationHidden, setFolderHidden } = useRailHidden()
+  const [railFilter, setRailFilter] = useState<RailFilter>(NO_FILTER)
   // The last rendered sidebar, for handlers that write positions: a drop, a Resume and a bind all
   // need to know where rows are NOW, and must not re-subscribe on every render to find out.
   const sidebarModelRef = useRef<SidebarModel | null>(null)
@@ -313,12 +327,9 @@ export default function App() {
   // closes, since otherwise being active opens it. Navigation into the folder clears its entry.
   const [activeCollapsed, setActiveCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const searchRef = useRef<HTMLInputElement>(null)
-  // Find-in-conversation (main pane). App owns the open/close toggle — ⌘F opens it when focus is
-  // in the main pane, Esc closes it; the query + match state live in MainPane. `paneRef` lets the
-  // ⌘F handler tell whether focus is physically inside the main pane vs the rail.
-  // One ref per pane. `inMain` is true when focus is inside EITHER, which is what routes ⌘F and keeps
-  // the main area owning the keyboard; the focused pane (paneLayout.focusIndex) is what decides which
-  // one acts on it.
+  // Find-in-conversation (main pane). App owns the open/close toggle — ⌘F opens it in the focused
+  // pane (paneLayout.focusIndex), Esc closes it; the query + match state live in MainPane. One ref
+  // per pane root.
   const pane0Ref = useRef<HTMLElement>(null)
   const pane1Ref = useRef<HTMLElement>(null)
   const [terminalHosts, setTerminalHosts] = useState<Array<HTMLElement | null>>([null, null])
@@ -335,8 +346,8 @@ export default function App() {
   const transcriptCacheRef = useRef(new Map<string, CachedTranscript>())
   const transcriptScrollStateRef = useRef(new Map<string, TranscriptScrollState>())
   const [findOpen, setFindOpen] = useState(false)
-  // Bumped on every ⌘F while focus is in the main pane, so pressing ⌘F again (after clicking into
-  // the transcript) re-focuses the find input even when the bar is already open. Threaded down to
+  // Bumped on every ⌘F, so pressing ⌘F again (after clicking into the transcript) re-focuses the
+  // find input even when the bar is already open. Threaded down to
   // TranscriptSearch, which focuses + selects whenever it changes.
   const [findFocusReq, setFindFocusReq] = useState(0)
   // Find can stay open while tabs change. Remember every live terminal it temporarily moved to
@@ -729,7 +740,7 @@ export default function App() {
     window.api.setDockIcon(darkIcon.value)
   }, [darkIcon.value])
 
-  // Focus the search field whenever it opens (magnifier click or ⌘F).
+  // Focus the search field whenever it opens (the rail's magnifier).
   useEffect(() => {
     if (searchOpen) {
       searchRef.current?.focus()
@@ -899,7 +910,9 @@ export default function App() {
         groups,
         ptys: ptys.active,
         pinned: pinnedOrder,
-        hidden: hiddenSessionIds,
+        delegated: hiddenSessionIds,
+        userHidden,
+        filter: railFilter,
         rowRanks,
         folderRanks,
         liveState: liveStateFor,
@@ -919,6 +932,8 @@ export default function App() {
       ptys.active,
       pinnedOrder,
       hiddenSessionIds,
+      userHidden,
+      railFilter,
       rowRanks,
       folderRanks,
       liveStateFor,
@@ -991,29 +1006,28 @@ export default function App() {
     setActiveCollapsed((prev) => withoutFolders(prev, entered))
   }, [activePlacesKey])
 
-  // What's new: once per profile, in the main window, after the launch fade (AppVeil) so it does not
-  // rise under it. Marked done as it opens, not as it closes — a second window, or a relaunch before it
-  // is dismissed, must not show it again.
-  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
+  // What's new: each release once per profile, in the main window, after the launch fade (AppVeil) so
+  // it does not rise under it — only the releases not yet seen. Marked done as it opens, not as it
+  // closes — a second window, or a relaunch before it is dismissed, must not show it again.
+  const [whatsNew, setWhatsNew] = useState<readonly WhatsNewRelease[] | null>(null)
+  const whatsNewOpen = whatsNew !== null
   useEffect(() => {
     if (detached) return
-    let done: string[]
+    let unseen: WhatsNewRelease[]
     try {
-      done = parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY))
+      unseen = unseenWhatsNew(parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY)))
     } catch {
       return
     }
-    if (done.includes(WHATS_NEW_TASK)) return
+    if (unseen.length === 0) return
     const timer = window.setTimeout(() => {
       try {
-        localStorage.setItem(
-          ONCE_TASKS_KEY,
-          JSON.stringify(withOnceTask(parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY)), WHATS_NEW_TASK))
-        )
+        const done = unseen.reduce(withOnceTask, parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY)))
+        localStorage.setItem(ONCE_TASKS_KEY, JSON.stringify(done))
       } catch {
         return
       }
-      setWhatsNewOpen(true)
+      setWhatsNew(unseen)
     }, WHATS_NEW_DELAY_MS)
     return () => window.clearTimeout(timer)
   }, [detached])
@@ -1038,16 +1052,21 @@ export default function App() {
   )
 
   // A tab's when-and-where line, from the same folder and label the rail row uses. A conversation the
-  // rail does not hold (hidden) falls back to its terminal's project, else its own directory.
+  // rail does not hold (delegated) falls back to its terminal's project, else its own directory.
+  const rootOf = useCallback(
+    (meta: ConversationMeta, pty: PtyState | null): string =>
+      sidebarModel.rows.get(meta.sessionId)?.root ?? pty?.projectRoot ?? meta.cwd,
+    [sidebarModel]
+  )
   const tabTipMeta = useCallback(
     (meta: ConversationMeta, pty: PtyState | null): string => {
-      const root = sidebarModel.rows.get(meta.sessionId)?.root ?? pty?.projectRoot ?? meta.cwd
+      const root = rootOf(meta, pty)
       return rowTipMeta(sidebarModel.labels.get(root) ?? basename(root), meta.cwd, root, {
         background: meta.agent === 'claude' && meta.sessionKind === 'bg',
         elsewhere: false
       })
     },
-    [sidebarModel]
+    [sidebarModel, rootOf]
   )
 
   // Per-pane tab descriptors for the strips. Resolved here rather than in TabStrip so the strip stays
@@ -1070,7 +1089,8 @@ export default function App() {
               indexed: false,
               running: false,
               pinned: false,
-              unread: false
+              unread: false,
+              hidden: null
             }
           }
           const pty = ptys.bySession.get(tab.sessionId) ?? null
@@ -1101,11 +1121,12 @@ export default function App() {
             running: !!pty,
             pinned: pinned.has(tab.sessionId),
             // What the rail row's menu calls unread, so the two menus offer the same toggle.
-            unread: !!pty && (state === 'awaiting' || state === 'asking')
+            unread: !!pty && (state === 'awaiting' || state === 'asking'),
+            hidden: meta ? hiddenBy(userHidden, tab.sessionId, rootOf(meta, pty)) : null
           }
         })
       ),
-    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor, tabTipMeta, pinned]
+    [paneLayout.panes, ptys.bySession, metaById, isUnlinkedId, liveStateFor, tabTipMeta, pinned, userHidden, rootOf]
   )
 
   // Activating a tab is a landing like any other: it marks the conversation read and hands the pane
@@ -2116,10 +2137,14 @@ export default function App() {
       if (command === 'resume') resumeSession(id)
       else if (command === 'pin' || command === 'unpin') togglePinGated(id)
       else if (command === 'markRead' || command === 'markUnread') toggleUnread(id)
-      else if (command === 'rename') showInfo(id, true)
+      else if (command === 'hide' || command === 'unhide') setConversationHidden(id, command === 'hide')
+      else if (command === 'hideFolder' || command === 'unhideFolder') {
+        const root = sidebarModelRef.current?.rows.get(id)?.root
+        if (root !== undefined) setFolderHidden(root, command === 'hideFolder')
+      } else if (command === 'rename') showInfo(id, true)
       else stopSession(id)
     },
-    [resumeSession, togglePinGated, toggleUnread, showInfo, stopSession]
+    [resumeSession, togglePinGated, toggleUnread, setConversationHidden, setFolderHidden, showInfo, stopSession]
   )
 
   // Clear a manual "unread" mark once the user genuinely engages the open conversation — a click
@@ -2151,12 +2176,6 @@ export default function App() {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.metaKey || e.ctrlKey
       const inInput = document.activeElement?.tagName === 'INPUT'
-      // Focus physically inside the main pane (transcript or terminal) vs the rail/list. Routes ⌘F
-      // (find-in-conversation vs search-conversations) and keeps the main pane owning the keyboard —
-      // so arrows/Enter don't drive list-nav while you're reading the transcript or in the terminal.
-      const inMain =
-        !!pane0Ref.current?.contains(document.activeElement) ||
-        !!pane1Ref.current?.contains(document.activeElement)
       // Focus on the read-only Formatted transcript specifically (its scroll container) — not a
       // pane-header button, not the live terminal. Gates Enter-to-resume from the transcript.
       const inTranscript =
@@ -2169,7 +2188,7 @@ export default function App() {
       if (whatsNewOpen) {
         if (e.key === 'Escape') {
           e.preventDefault()
-          setWhatsNewOpen(false)
+          setWhatsNew(null)
         }
         return
       }
@@ -2212,19 +2231,14 @@ export default function App() {
           requestFocus(selectedId)
         }
       } else if (mod && e.key.toLowerCase() === 'f') {
-        // Matched on the lowercased key, so ⇧⌘F lands here too.
+        // Matched on the lowercased key, so ⇧⌘F lands here too. Always find within the focused pane's
+        // conversation, wherever the keyboard is — the rail's search is reached only by its magnifier.
+        // The focus request re-focuses the input even when the bar is already open (setFindOpen(true)
+        // is a no-op then), e.g. after clicking into the transcript to read it.
         e.preventDefault()
-        if (inMain && selectedId) {
-          // Focus is in the main pane → find within the open conversation. Also bump the focus
-          // request so ⌘F re-focuses the input even when the bar is already open (setFindOpen(true)
-          // is a no-op then) — e.g. after clicking into the transcript to read it.
+        if (selectedId) {
           setFindOpen(true)
           setFindFocusReq((n) => n + 1)
-        } else {
-          // List / rail focus (or nothing open) → the existing cross-conversation search.
-          setSearchOpen(true)
-          searchRef.current?.focus()
-          searchRef.current?.select()
         }
       } else if (mod && e.code === 'KeyB') {
         e.preventDefault()
@@ -2395,6 +2409,10 @@ export default function App() {
             placementFor={tabsEnabled ? placementFor : undefined}
             onOpenInNewWindow={tabsEnabled ? (id: string) => moveToNewWindow(id, false) : undefined}
             onTogglePin={togglePinGated}
+            filter={railFilter}
+            onFilterChange={setRailFilter}
+            onSetConversationHidden={setConversationHidden}
+            onSetFolderHidden={setFolderHidden}
             query={query}
             onQueryChange={setQuery}
             searchRef={searchRef}
@@ -2618,7 +2636,8 @@ export default function App() {
         onSetTabsEnabled={setTabsEnabled}
         onShowWhatsNew={() => {
           setSettingsPage(null)
-          setWhatsNewOpen(true)
+          // Every release, newest first.
+          setWhatsNew([...WHATS_NEW_RELEASES].reverse())
         }}
         tabLayout={tabLayout}
         onSetTabLayout={setTabLayout}
@@ -2637,12 +2656,12 @@ export default function App() {
         }}
       />
       <WhatsNewModal
-        open={whatsNewOpen}
-        onClose={() => setWhatsNewOpen(false)}
+        releases={whatsNew}
+        onClose={() => setWhatsNew(null)}
         tabsEnabled={tabsEnabled}
         onEnableTabs={() => setTabsEnabled(true)}
         onShowShortcuts={() => {
-          setWhatsNewOpen(false)
+          setWhatsNew(null)
           setSettingsPage('shortcuts')
         }}
       />
