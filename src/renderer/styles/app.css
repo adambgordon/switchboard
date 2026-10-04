@@ -858,45 +858,58 @@ body.sb-resizing .sb-pane {
   align-self: flex-start;
 }
 
-/* --- What's new (WhatsNewModal.tsx): an icon column beside each section, one ink button to leave --- */
+/* --- What's new (WhatsNewModal.tsx): one slide per feature, Back / dots / Next below --- */
 .sb-modal-whatsnew {
-  width: 560px;
+  width: 500px;
 }
-.sb-whatsnew-body {
+/* Every slide sits in the same cell: the deck takes the tallest one's height, so the controls never
+   move between slides. Only the current slide is visible — and only it is reachable by Tab. */
+.sb-whatsnew-deck {
+  display: grid;
+  padding: var(--s6) 34px var(--s3);
+}
+.sb-whatsnew-slide {
+  grid-area: 1 / 1;
   display: flex;
   flex-direction: column;
-  gap: var(--s5);
-  padding: var(--s5) 22px var(--s2);
+  align-items: center;
+  text-align: center;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    visibility 0s var(--dur-fast);
 }
-.sb-whatsnew-item {
-  display: flex;
-  gap: 14px;
+.sb-whatsnew-slide.current {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity var(--dur-fast) var(--ease);
 }
 .sb-whatsnew-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border-radius: var(--r-md);
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--s4);
+  border-radius: var(--r-lg);
   background: var(--paper-sunken);
   color: var(--ink-soft);
 }
-.sb-whatsnew-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
+/* New / Earlier, only when the deck holds both. */
+.sb-whatsnew-caption {
+  margin-bottom: 4px;
+  color: var(--ink-faint);
 }
 .sb-whatsnew-title {
-  font-size: var(--text-md);
+  margin-bottom: var(--s2);
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--ink);
 }
 .sb-whatsnew-desc {
   font-size: var(--text-sm);
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--ink-soft);
 }
 /* A link in running text, drawn like a transcript link. */
@@ -914,21 +927,68 @@ body.sb-resizing .sb-pane {
 }
 .sb-whatsnew-action {
   display: block;
-  margin-top: var(--s2);
+  margin: var(--s3) auto 0;
 }
-.sb-whatsnew-foot {
-  display: flex;
-  justify-content: flex-end;
-  padding: var(--s4) 22px 18px;
-}
-/* Closer to the head and the first section than the sections are to each other: an aside, not an item. */
+/* An aside under the slide, not part of it. */
 .sb-whatsnew-again {
-  margin: calc(-1 * var(--s2)) 0;
+  margin: 0;
+  padding: 0 34px;
+  text-align: center;
   font-size: var(--text-sm);
   color: var(--ink-faint);
 }
+/* Back, the dots, Next — three columns, so the dots stay centered whatever the buttons say. */
+.sb-whatsnew-foot {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: var(--s4) 22px 18px;
+}
+.sb-whatsnew-back {
+  justify-self: start;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  transition: color var(--dur-fast) var(--ease);
+}
+.sb-whatsnew-back:hover {
+  color: var(--ink);
+}
+.sb-whatsnew-back:disabled {
+  visibility: hidden;
+}
+.sb-whatsnew-dots {
+  grid-column: 2;
+  display: flex;
+  gap: 2px;
+}
+/* A small dot in a larger hit area. */
+.sb-whatsnew-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.sb-whatsnew-dot::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rule-strong);
+  transition: background var(--dur-fast) var(--ease);
+}
+.sb-whatsnew-dot:hover::after {
+  background: var(--ink-faint);
+}
+.sb-whatsnew-dot.current::after {
+  background: var(--ink);
+}
 /* Ink, not cobalt: cobalt means alive, and closing a dialog is not. */
 .sb-whatsnew-done {
+  grid-column: 3;
+  justify-self: end;
   padding: 6px 16px;
   border-radius: var(--r-sm);
   font-size: var(--text-sm);

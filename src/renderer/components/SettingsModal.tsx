@@ -582,7 +582,8 @@ export default function SettingsModal({
                       Show what’s new
                     </button>
                     <div className="sb-setting-desc">
-                      Tabs and split view, the compact and folder sidebar, and the bell.
+                      Hiding and filtering; tabs and split view, the compact and folder sidebar, and the
+                      bell.
                     </div>
                   </div>
                 </div>

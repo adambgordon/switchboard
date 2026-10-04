@@ -42,7 +42,15 @@ import {
   type SidebarModel
 } from './lib/sidebarModel'
 import { absorbBind, absorbBindFolder, dropWrites, holdRank, type RankOverrides } from './lib/rowRank'
-import { FOLDER_SEED_TASK, ONCE_TASKS_KEY, WHATS_NEW_TASK, parseOnceTasks, withOnceTask } from './lib/onceTasks'
+import {
+  FOLDER_SEED_TASK,
+  ONCE_TASKS_KEY,
+  WHATS_NEW_RELEASES,
+  parseOnceTasks,
+  unseenWhatsNew,
+  withOnceTask,
+  type WhatsNewRelease
+} from './lib/onceTasks'
 import { bindActions, boundTabAdoption, type PendingBoundTab } from './lib/bindPolicy'
 import { deferredResumeAction } from './lib/deferredResume'
 import { viewToggleAction } from './lib/viewToggle'
@@ -998,29 +1006,28 @@ export default function App() {
     setActiveCollapsed((prev) => withoutFolders(prev, entered))
   }, [activePlacesKey])
 
-  // What's new: once per profile, in the main window, after the launch fade (AppVeil) so it does not
-  // rise under it. Marked done as it opens, not as it closes — a second window, or a relaunch before it
-  // is dismissed, must not show it again.
-  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
+  // What's new: each release once per profile, in the main window, after the launch fade (AppVeil) so
+  // it does not rise under it — only the releases not yet seen. Marked done as it opens, not as it
+  // closes — a second window, or a relaunch before it is dismissed, must not show it again.
+  const [whatsNew, setWhatsNew] = useState<readonly WhatsNewRelease[] | null>(null)
+  const whatsNewOpen = whatsNew !== null
   useEffect(() => {
     if (detached) return
-    let done: string[]
+    let unseen: WhatsNewRelease[]
     try {
-      done = parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY))
+      unseen = unseenWhatsNew(parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY)))
     } catch {
       return
     }
-    if (done.includes(WHATS_NEW_TASK)) return
+    if (unseen.length === 0) return
     const timer = window.setTimeout(() => {
       try {
-        localStorage.setItem(
-          ONCE_TASKS_KEY,
-          JSON.stringify(withOnceTask(parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY)), WHATS_NEW_TASK))
-        )
+        const done = unseen.reduce(withOnceTask, parseOnceTasks(localStorage.getItem(ONCE_TASKS_KEY)))
+        localStorage.setItem(ONCE_TASKS_KEY, JSON.stringify(done))
       } catch {
         return
       }
-      setWhatsNewOpen(true)
+      setWhatsNew(unseen)
     }, WHATS_NEW_DELAY_MS)
     return () => window.clearTimeout(timer)
   }, [detached])
@@ -2181,7 +2188,7 @@ export default function App() {
       if (whatsNewOpen) {
         if (e.key === 'Escape') {
           e.preventDefault()
-          setWhatsNewOpen(false)
+          setWhatsNew(null)
         }
         return
       }
@@ -2629,7 +2636,8 @@ export default function App() {
         onSetTabsEnabled={setTabsEnabled}
         onShowWhatsNew={() => {
           setSettingsPage(null)
-          setWhatsNewOpen(true)
+          // Every release, newest first.
+          setWhatsNew([...WHATS_NEW_RELEASES].reverse())
         }}
         tabLayout={tabLayout}
         onSetTabLayout={setTabLayout}
@@ -2648,12 +2656,12 @@ export default function App() {
         }}
       />
       <WhatsNewModal
-        open={whatsNewOpen}
-        onClose={() => setWhatsNewOpen(false)}
+        releases={whatsNew}
+        onClose={() => setWhatsNew(null)}
         tabsEnabled={tabsEnabled}
         onEnableTabs={() => setTabsEnabled(true)}
         onShowShortcuts={() => {
-          setWhatsNewOpen(false)
+          setWhatsNew(null)
           setSettingsPage('shortcuts')
         }}
       />
