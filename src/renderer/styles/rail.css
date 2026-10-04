@@ -64,12 +64,18 @@
   align-items: center;
   gap: var(--s2);
 }
-/* Tight on purpose: each icon button's own 5px padding already spaces the glyphs. */
+/* Tight on purpose: each icon button's own 5px padding already spaces the glyphs.
+   The tools hang out of the head's text inset toward the rail's trailing edge, so they stand in the
+   column of the rows' controls: the head's pencil centers over a folder header's pencil and a row's ⋮.
+   That column's center is the row's right edge (--rail-inset and the --bar-thin scrollbar gutter in
+   from the rail's) less 12px (.sb-group-new's 2px inset and half its 20px box); the head's pencil
+   centers 13px in from the tools' end (5px padding and half its 16px glyph) — hence the 1px. */
 .sb-rail-head-tools {
   display: flex;
   align-items: center;
   gap: 2px;
   margin-left: auto;
+  margin-right: calc(var(--rail-inset) + var(--bar-thin) - 1px - var(--rail-text-inset));
 }
 /* The grouping toggle — the shared .sb-seg pill, a size down: it sits in chrome, not in a form. It
    hangs out of the head's text inset toward the rail's leading edge, lining up with the folder icons

@@ -1414,6 +1414,8 @@ CHECKS['9-ring-geometry'] = async () => {
 // The head's one row fits the rail at its minimum width (the host's 300px is PANE_LIMITS.min) in
 // Folders mode, where its tools are widest: every tool on one line, inside the head, clear of the
 // grouping toggle. The head never wraps, so this is what holds the minimum honest as tools are added.
+// The tools stand in the column of the rows' controls, so the head's pencil also centers over a folder
+// header's pencil.
 CHECKS['15-head-fit'] = async () => {
   const failures = []
   await reset({ mode: 'folders' })
@@ -1421,18 +1423,21 @@ CHECKS['15-head-fit'] = async () => {
   const g = await js(`(() => {
     const box = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top } }
     return {
-      row: box(document.querySelector('.sb-rail-head-top')),
+      head: box(document.querySelector('.sb-rail-head')),
       mode: box(document.querySelector('.sb-rail-mode')),
-      tools: [...document.querySelectorAll('.sb-rail-head-tools > button')].map(box)
+      tools: [...document.querySelectorAll('.sb-rail-head-tools > button')].map(box),
+      pencil: box(document.querySelector('.sb-group-pencil'))
     }
   })()`)
   const first = g.tools[0], last = g.tools[g.tools.length - 1]
   if (g.tools.length < 5) failures.push(`expected the five Folders-mode tools, found ${g.tools.length}`)
   if (g.tools.some((t) => Math.abs(t.top - first.top) > 0.5)) failures.push('the tools do not sit on one line')
-  if (last.right > g.row.right + 0.5) failures.push(`the last tool overruns the head by ${(last.right - g.row.right).toFixed(2)}px`)
+  if (last.right > g.head.right + 0.5) failures.push(`the last tool overruns the head by ${(last.right - g.head.right).toFixed(2)}px`)
   const room = first.left - g.mode.right
   if (room < 8) failures.push(`only ${room.toFixed(2)}px between the grouping toggle and the tools`)
-  record('15-head-fit', failures, { room: +room.toFixed(2), tools: g.tools.length })
+  const offset = (last.left + last.right) / 2 - (g.pencil.left + g.pencil.right) / 2
+  if (Math.abs(offset) > 0.5) failures.push(`the head's pencil sits ${offset.toFixed(2)}px off the folder pencil's center`)
+  record('15-head-fit', failures, { room: +room.toFixed(2), tools: g.tools.length, pencilOffset: +offset.toFixed(2) })
 }
 
 // The Escape that closes a rail menu — the filter's or a row's — is that menu's alone. App listens for
