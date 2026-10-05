@@ -229,6 +229,9 @@ export default function MainPane(props: Props) {
   // with no live session has no unread state to set, as on its row and its tab.
   const markUnreadTargetRef = useRef<string | null>(null)
   markUnreadTargetRef.current = selectedId && pty && !unlinked ? selectedId : null
+  // Whether the click now arriving belongs to a ⌥-press already taken as mark-unread. A ref, not effect
+  // state: the mark re-creates `onEngage`, which re-runs the effect below between press and click.
+  const swallowClickRef = useRef(false)
 
   const showTerminal = !!selectedId && view === 'terminal' && !!pty
   const showTranscript = !!selectedId && !showTerminal
@@ -300,20 +303,33 @@ export default function MainPane(props: Props) {
     }
     // ⌥-click in the Formatted view marks unread, the twin of the terminal's. Captured here, above the
     // transcript, so it stops before the engage listener above (which would mark it read again on the
-    // same click) and before the transcript's own selection and link handling.
+    // same click) and before the transcript's own selection handling. The click that follows is
+    // swallowed too: cancelling a mousedown does not cancel its click, which would open a link or
+    // toggle a tool run. Latched at the press rather than re-read from the click, whose ⌥ reflects the
+    // key at release — and ⌥ is often let go a beat before the button.
     const onAltDown = (e: MouseEvent): void => {
       const id = markUnreadTargetRef.current
-      if (!id || !e.altKey || e.button !== 0) return
-      if (!(e.target instanceof Element) || !e.target.closest('.transcript-scroll')) return
+      const swallow =
+        !!id && e.altKey && e.button === 0 && e.target instanceof Element && !!e.target.closest('.transcript-scroll')
+      swallowClickRef.current = swallow
+      if (!swallow || !id) return
       e.preventDefault()
       e.stopPropagation()
       onMarkTabUnread(id)
     }
+    const onAltClick = (e: MouseEvent): void => {
+      if (!swallowClickRef.current) return
+      swallowClickRef.current = false
+      e.preventDefault()
+      e.stopPropagation()
+    }
     el.addEventListener('mousedown', onAltDown, true)
+    el.addEventListener('click', onAltClick, true)
     el.addEventListener('mousedown', onDown)
     el.addEventListener('keydown', onKey, true)
     return () => {
       el.removeEventListener('mousedown', onAltDown, true)
+      el.removeEventListener('click', onAltClick, true)
       el.removeEventListener('mousedown', onDown)
       el.removeEventListener('keydown', onKey, true)
     }

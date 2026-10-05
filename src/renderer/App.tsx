@@ -862,7 +862,9 @@ export default function App() {
   const focusedView = paneLayout.focusIndex === 1 ? view1 : view0
   useLayoutEffect(() => {
     const id = focusedView.id
-    if (id) recentRef.current = touchRecent(recentRef.current, id)
+    // A chooser is a tab too, so it counts as viewed, though it is no conversation to report.
+    const tabId = focusedView.chooser ?? id
+    if (tabId) recentRef.current = touchRecent(recentRef.current, tabId)
     const view = id && findPriorTerminalIdsRef.current.has(id) ? 'terminal' : focusedView.view
     reportNavigation(id ? { sessionId: id, view } : null, focusedView.terminalAt === 'here')
   })
