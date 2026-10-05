@@ -52,7 +52,7 @@
   /* A FIXED height, so two panes' headers line up by construction instead of by their contents
      happening to measure the same. They did not: the action row never shrinks, so a narrow pane
      squeezed it until a button label wrapped to a second line, and that pane's header grew while its
-     neighbour's did not — the content areas beside each other then started at different heights. */
+     neighbor's did not — the content areas beside each other then started at different heights. */
   height: 66px;
   box-sizing: border-box;
 }
@@ -556,7 +556,7 @@ kbd {
 }
 
 /* Find adds a second wide control to the header, so its compact stages start sooner than the
-   resting header's. First collapse the view toggle to its already-labelled icons; once the title
+   resting header's. First collapse the view toggle to its already-labeled icons; once the title
    would be reduced to a fragment, Find replaces that whole identity block and takes its space. */
 @container pane (max-width: 900px) {
   .sb-pane-header:has(.sb-find) .sb-seg-label {

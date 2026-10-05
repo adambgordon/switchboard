@@ -1,6 +1,6 @@
 /**
  * The conversations this window has shown, most recent first — what closing the active tab returns
- * to, instead of whichever neighbour slid into its slot.
+ * to, instead of whichever neighbor slid into its slot.
  *
  * Per window and memory-only, and deliberately not the Back/Forward history: that log is app-wide,
  * keeps Forward stops that are not "previous" at all, and lives across a process boundary, while a

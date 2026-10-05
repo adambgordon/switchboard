@@ -468,7 +468,7 @@ CHECKS['3-folder-header'] = async () => {
     details.inPlace = { held: started.drift, startScroll: g.b.scrollTop, endScroll: scroll }
   }
 
-  // Cancelled mid-drag by a density change: the same restoration, and the release commits nothing.
+  // Canceled mid-drag by a density change: the same restoration, and the release commits nothing.
   await reset({ mode: 'folders' })
   g = await folderGrab()
   started = await folderStart(g, failures, 'cancel')
@@ -476,15 +476,15 @@ CHECKS['3-folder-header'] = async () => {
     await moveTo(g.px, g.py + 40, 4)
     await configure({ density: 'spacious' })
     await delay(350) // the rows fade back in over --dur-fast
-    const cancelled = await call('state')
+    const canceled = await call('state')
     const shape = await call('folderShape')
     const scroll = (await call('box')).scrollTop
     assertUnfolded(shape, failures, 'cancel')
     if (Math.abs(scroll - g.b.scrollTop) > 0.5) failures.push(`cancel: scrollTop ${scroll.toFixed(1)} != drag-start ${g.b.scrollTop.toFixed(1)}`)
-    if (!clean(cancelled)) failures.push(`cancel: drag state not cleaned up: ${JSON.stringify(cancelled)}`)
+    if (!clean(canceled)) failures.push(`cancel: drag state not cleaned up: ${JSON.stringify(canceled)}`)
     await release()
     await delay(300)
-    if ((await js('window.dropCalls')).length) failures.push(`cancel: the cancelled folder drag committed ${JSON.stringify(await js('window.dropCalls'))}`)
+    if ((await js('window.dropCalls')).length) failures.push(`cancel: the canceled folder drag committed ${JSON.stringify(await js('window.dropCalls'))}`)
     details.cancel = { startScroll: g.b.scrollTop, endScroll: scroll }
   }
   record('3-folder-header', failures, details)
@@ -618,8 +618,8 @@ CHECKS['7-cancel'] = async () => {
     if (!during.dragging || during.clones !== 1) { failures.push(`${name}: drag did not start (${JSON.stringify(during)})`); await release(); continue }
     await configure(change)
     await delay(120)
-    const cancelled = await call('state')
-    if (!clean(cancelled)) failures.push(`${name}: not cleaned up after cancel: ${JSON.stringify(cancelled)}`)
+    const canceled = await call('state')
+    if (!clean(canceled)) failures.push(`${name}: not cleaned up after cancel: ${JSON.stringify(canceled)}`)
     // The gesture continues after the cancel: it must not restart, and its release must not commit.
     await moveTo(px, pointer.y + 30, 5)
     const moving = await call('state')
@@ -627,13 +627,13 @@ CHECKS['7-cancel'] = async () => {
     await release()
     await delay(350)
     const calls = await js('window.dropCalls')
-    if (calls.length) failures.push(`${name}: the cancelled gesture committed ${JSON.stringify(calls)}`)
+    if (calls.length) failures.push(`${name}: the canceled gesture committed ${JSON.stringify(calls)}`)
     await screenshot(`${label()}-cancel-${name}`)
     // Back to the original layout: the next drag works.
     await configure({ mode: 'folders', density: 'compact', searchOpen: false })
     await js('window.dropCalls = []')
     const next = await dragUnit({ block, from: 1, to: 3, failures, name: `${name}-next` })
-    details[name] = { cancelled: clean(cancelled), next: next && next.calls.length }
+    details[name] = { canceled: clean(canceled), next: next && next.calls.length }
   }
   // Escape mid-drag, for a row: fully clean, scroll where the drag started, and the release that ends
   // the press — made over the very row it pressed, where an unswallowed release would click it — neither
@@ -657,9 +657,9 @@ CHECKS['7-cancel'] = async () => {
     else {
       await escapeKey()
       await delay(120)
-      const cancelled = await call('state')
+      const canceled = await call('state')
       const scroll = (await call('box')).scrollTop
-      if (!clean(cancelled)) failures.push(`escape-row: not cleaned up after Escape: ${JSON.stringify(cancelled)}`)
+      if (!clean(canceled)) failures.push(`escape-row: not cleaned up after Escape: ${JSON.stringify(canceled)}`)
       if (Math.abs(scroll - scroll0) > 0.5) failures.push(`escape-row: scrollTop ${scroll.toFixed(1)} != drag-start ${scroll0.toFixed(1)}`)
       await moveTo(px, py, 5)
       if ((await call('hitAt', px, py)).row !== key) failures.push(`harness: escape-row release point no longer hits ${key}`)
@@ -670,7 +670,7 @@ CHECKS['7-cancel'] = async () => {
       if (selects.length || selected !== selected0) failures.push(`escape-row: the release after Escape selected ${JSON.stringify(selects)} (selected ${selected}, was ${selected0})`)
       await js('window.dropCalls = []')
       const next = await dragUnit({ block, from: 1, to: 3, failures, name: 'escape-row-next' })
-      details.escapeRow = { cleaned: clean(cancelled), scroll0, scroll, selects, next: next && next.calls.length }
+      details.escapeRow = { cleaned: clean(canceled), scroll0, scroll, selects, next: next && next.calls.length }
     }
   }
   // Escape mid-drag, for a folder: the fold reverted and the scroll restored; the release over the same
@@ -685,10 +685,10 @@ CHECKS['7-cancel'] = async () => {
       await moveTo(g.px, g.py + 40, 4)
       await escapeKey()
       await delay(350) // the rows fade back in over --dur-fast
-      const cancelled = await call('state')
+      const canceled = await call('state')
       const shape = await call('folderShape')
       const scroll = (await call('box')).scrollTop
-      if (!clean(cancelled)) failures.push(`escape-folder: not cleaned up after Escape: ${JSON.stringify(cancelled)}`)
+      if (!clean(canceled)) failures.push(`escape-folder: not cleaned up after Escape: ${JSON.stringify(canceled)}`)
       assertUnfolded(shape, failures, 'escape-folder')
       if (Math.abs(scroll - g.b.scrollTop) > 0.5) failures.push(`escape-folder: scrollTop ${scroll.toFixed(1)} != drag-start ${g.b.scrollTop.toFixed(1)}`)
       await moveTo(g.px, g.py, 4)
@@ -719,7 +719,7 @@ CHECKS['7-cancel'] = async () => {
           failures.push(`escape-folder-next: drop calls ${JSON.stringify(committed)} != one {higher:${want.higher}, lower:${want.lower}}`)
         }
       }
-      details.escapeFolder = { cleaned: clean(cancelled), scroll0: g.b.scrollTop, scroll, open, next: committed && committed.length }
+      details.escapeFolder = { cleaned: clean(canceled), scroll0: g.b.scrollTop, scroll, open, next: committed && committed.length }
     }
   }
   // A non-empty query disables dragging outright.
@@ -878,7 +878,7 @@ CHECKS['11-sibling-resize'] = async () => {
       await delay(300)
       const calls = await js('window.dropCalls')
       if (calls.length) failures.push(`grow-folder: the release after the cancel committed ${JSON.stringify(calls)}`)
-      details.folder = { grew: +(grown - before).toFixed(1), cancelled: clean(state), scroll0: g.b.scrollTop, scroll }
+      details.folder = { grew: +(grown - before).toFixed(1), canceled: clean(state), scroll0: g.b.scrollTop, scroll }
     }
   }
   {
@@ -906,7 +906,7 @@ CHECKS['11-sibling-resize'] = async () => {
       await delay(300)
       const calls = await js('window.dropCalls')
       if (calls.length) failures.push(`grow-block: the release after the cancel committed ${JSON.stringify(calls)}`)
-      details.row = { cancelled: clean(state), scroll0, scroll }
+      details.row = { canceled: clean(state), scroll0, scroll }
     }
   }
   record('11-sibling-resize', failures, details)

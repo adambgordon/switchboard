@@ -22,7 +22,7 @@ interface Props {
   /** Resolved liveness for the dot (working / asking / awaiting / quiet); null when not live. */
   liveState?: LiveState | null
   pinned: boolean
-  /** Hidden by the user, drawn greyed whatever the rail's filter. */
+  /** Hidden by the user, drawn grayed whatever the rail's filter. */
   dimmed?: boolean
   /** Another window holds this conversation's tab, so clicking the row raises THAT window rather than
    *  opening it here. Marked, because a click that brings a different window forward is startling

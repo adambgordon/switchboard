@@ -11,7 +11,7 @@
  *   re-inserts the newest rows from its source-backed transcript, capped at this value. So for
  *   Codex this is what determines the history you can actually scroll back to — including right
  *   after a cross-window handoff, whose repaint nudge is itself a resize. Left unset, Codex
- *   resolves per detected terminal and falls back to 1,000 rows for a host it does not recognise
+ *   resolves per detected terminal and falls back to 1,000 rows for a host it does not recognize
  *   (ours), so setting it explicitly pins that rather than inheriting a value that could change.
  *
  * - `HANDOFF_SCROLLBACK_ROWS` bounds the xterm snapshot taken when a terminal moves to another

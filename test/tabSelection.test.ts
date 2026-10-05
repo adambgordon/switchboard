@@ -186,7 +186,7 @@ describe('extendSelection — ⇧-click', () => {
     //
     // The fixture shares the anchor id with the other pane ON PURPOSE — reachable by dragging the
     // anchored tab across. With disjoint ids the leak is invisible: a stale anchor is simply not found
-    // in the other pane's order, so it falls into the same no-anchor branch and both behaviours return
+    // in the other pane's order, so it falls into the same no-anchor branch and both behaviors return
     // an identical result. The id has to exist over there for the two to differ at all.
     const after = extendSelection(sel(0, ['B'], 'B'), 1, ['X', 'B', 'Y', 'Z'], 'Z')
     expect([...after.ids]).toEqual(['Z'])

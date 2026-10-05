@@ -81,7 +81,7 @@ describe('NavigationCoordinator', () => {
     expect(h.commands.at(-1)?.command.sessionId).toBe('A')
   })
 
-  it('ignores late acknowledgements and cached focus visits after a target becomes hidden', () => {
+  it('ignores late acknowledgments and cached focus visits after a target becomes hidden', () => {
     const h = harness()
     h.seed(); h.nav.focused(1); h.nav.reveal(1, 'B', 'preview')
     const stale = h.commands[0]
@@ -233,7 +233,7 @@ describe('NavigationCoordinator', () => {
     expect(h.nav.state.cursor).toBe(1)
   })
 
-  it('supersedes delayed handoffs and stale acknowledgements during rapid navigation', async () => {
+  it('supersedes delayed handoffs and stale acknowledgments during rapid navigation', async () => {
     const completions: Array<() => void> = []
     const valid: Array<() => boolean> = []
     const h = harness((_id, _session, current) => {
@@ -324,7 +324,7 @@ describe('NavigationCoordinator', () => {
     expect(h.commands.at(-1)?.command.targetRevision).toBe(8)
   })
 
-  it('ignores duplicate and foreign acknowledgements while native focus is still pending', () => {
+  it('ignores duplicate and foreign acknowledgments while native focus is still pending', () => {
     const h = harness(undefined, false)
     h.seed(); h.nav.focused(1); h.nav.reveal(1, 'B', 'preview')
     const command = h.commands.at(-1)!.command

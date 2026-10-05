@@ -129,7 +129,7 @@ module.exports = async function checkDragScrolling(win) {
     const held = await dragState()
     if (held.scroll !== after.scroll) failures.push(`layout cancellation ${theme}/${from}: edge scrolling continued`)
     await mouse('mouseReleased', point.x, point.y)
-    if ((await dragState()).calls.join(',') !== 'tabDragCancel') failures.push(`layout cancellation ${theme}/${from}: cancelled gesture committed`)
+    if ((await dragState()).calls.join(',') !== 'tabDragCancel') failures.push(`layout cancellation ${theme}/${from}: canceled gesture committed`)
     const next = await startDrag()
     if (!(await dragState()).dragging) failures.push(`layout cancellation ${theme}/${from}: next drag did not start`)
     await mouse('mouseReleased', next.x, next.y)

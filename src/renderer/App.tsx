@@ -488,7 +488,7 @@ export default function App() {
   }, [])
 
   // What this window has shown, most recent first, so closing the active tab returns to the last one
-  // viewed rather than to a neighbour — see recentTabs. Touched where navigation is reported; a ref,
+  // viewed rather than to a neighbor — see recentTabs. Touched where navigation is reported; a ref,
   // like the closed stack, because only a close reads it.
   const recentRef = useRef<readonly string[]>([])
 
@@ -1278,7 +1278,7 @@ export default function App() {
       // reducer handles it; another window's tab is only knowable through main, so it is decided here.
       // The rule matches the reducer's exactly: an implicit open reveals the tab where it is, an
       // explicit placement takes it. Read from a ref and answered synchronously — a round trip before
-      // opening a tab would put main's latency on the most-travelled path in the app.
+      // opening a tab would put main's latency on the most-traveled path in the app.
       if (openElsewhereRef.current.has(id) && !locateTab(paneLayoutRef.current, id)) {
         if (opts?.pane === undefined) {
           window.api.revealConversation(id, effectiveTabOpenMode(tabsEnabledRef.current, mode))
@@ -1741,7 +1741,7 @@ export default function App() {
   const persistedTabLayoutKey = JSON.stringify(persistedTabLayout)
   // Seeded with the mount-time value so a window that STARTS with the preference off reads as
   // "still off" rather than as a fresh switch-off — see tabPersistPolicy for why that distinction
-  // is the difference between honouring the setting and deleting the user's saved layout.
+  // is the difference between honoring the setting and deleting the user's saved layout.
   const tabsEnabledWasRef = useRef(tabsEnabled)
   const initialWorkspaceHandledRef = useRef(false)
   useEffect(() => {

@@ -15,7 +15,7 @@ const CODEX_OVERRIDES = [
  * session with a PRE-ASSIGNED id (`--session-id`). Codex resumes by id (`codex resume <id>`) but
  * mints its OWN id for a new session. Codex rebuilds terminal scrollback from its source-backed
  * transcript after a resize; cap that replay explicitly rather than inheriting whatever its
- * terminal detection resolves to for a host it does not recognise — see `shared/terminalHistory`.
+ * terminal detection resolves to for a host it does not recognize — see `shared/terminalHistory`.
  */
 export function bootCommandFor(
   agent: AgentKind,

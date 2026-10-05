@@ -143,7 +143,7 @@ export function emitInline(tokens: InlineToken[], protectLiterals: boolean): str
     repaired.set(index, previous | side)
     for (const affected of touching.get(index) ?? []) pending.push(affected)
   }
-  // Each chunk edge can be repaired once; only a successful repair queues neighbouring boundaries.
+  // Each chunk edge can be repaired once; only a successful repair queues neighboring boundaries.
   for (let cursor = 0; cursor < pending.length; cursor++) {
     const boundary = boundaries[pending[cursor]]
     const before = boundaryClass(chunks[boundary.before]?.value ?? '', true)

@@ -304,7 +304,7 @@ export default function MainPane(props: Props) {
     // ⌥-click in the Formatted view marks unread, the twin of the terminal's. Captured here, above the
     // transcript, so it stops before the engage listener above (which would mark it read again on the
     // same click) and before the transcript's own selection handling. The click that follows is
-    // swallowed too: cancelling a mousedown does not cancel its click, which would open a link or
+    // swallowed too: canceling a mousedown does not cancel its click, which would open a link or
     // toggle a tool run. Latched at the press rather than re-read from the click, whose ⌥ reflects the
     // key at release — and ⌥ is often let go a beat before the button.
     const onAltDown = (e: MouseEvent): void => {
@@ -335,7 +335,7 @@ export default function MainPane(props: Props) {
     }
   }, [onEngage, selectedId, onMarkTabUnread])
 
-  // TerminalView is portalled into this pane from a sibling React subtree, so React's synthetic
+  // TerminalView is portaled into this pane from a sibling React subtree, so React's synthetic
   // events follow TerminalDeck rather than this component. A native capture listener follows the
   // physical DOM instead, keeping pane ownership aligned with the terminal that actually took focus.
   // A ⌥-press is the mark-unread gesture (on a tab or in a terminal), which, as on a rail row,

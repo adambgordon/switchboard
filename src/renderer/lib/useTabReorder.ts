@@ -17,7 +17,7 @@ import {
  * Drag a tab: to reorder its own strip, to the other pane, to another window, or off on its own.
  *
  * Pointer-based rather than HTML5 drag-and-drop, matching the rail's pinned-row reorder — but a
- * separate hook, not a generalisation of it. The rail is a single column of uniform rows with a fixed
+ * separate hook, not a generalization of it. The rail is a single column of uniform rows with a fixed
  * stride, and it drags within ONE container; a tab strip wraps into rows, the tabs have different
  * widths, and a drag can legitimately end in a different container, a different window, or nowhere.
  * Folding both into one hook would make the rail's arithmetic conditional on cases it never has, and
@@ -439,7 +439,7 @@ export function useTabReorder(
       }
       // Released outside this window's strips — main resolves it against the cursor.
       void window.api.tabDragDrop().then((outcome) => {
-        if (outcome === 'cancelled') return
+        if (outcome === 'canceled') return
         optsRef.current.onLeaveWindow(group)
       })
     }

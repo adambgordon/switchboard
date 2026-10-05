@@ -128,7 +128,7 @@ export default function AttentionBell({ entries, onOpen, onMarkRead, onMarkAllRe
           }}
         >
           {count === 0 ? (
-            // Nothing to do here, and it looks it: greyed, and no control to press.
+            // Nothing to do here, and it looks it: grayed, and no control to press.
             <div className="sb-bell-empty">
               <CheckCircle size={20} />
               <span>All caught up</span>

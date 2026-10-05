@@ -57,7 +57,7 @@ describe('shouldCommit', () => {
     expect(shouldCommit('#00a400', '#1f5ae6')).toBe(true)
   })
 
-  it('does not resurrect a pick that was cancelled', () => {
+  it('does not resurrect a pick that was canceled', () => {
     // Reset clears what is pending, but a timer armed before it still fires. If that fired write
     // went through it would land after the reset and silently undo it.
     expect(shouldCommit(null, '#00a400')).toBe(false)

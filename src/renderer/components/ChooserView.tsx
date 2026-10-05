@@ -134,7 +134,7 @@ export default function ChooserView({
     setStarting(true)
     setFailed(null)
     const done = dir === OTHER ? onPickOther(agent) : onStart(dir, agent)
-    // On success this tab becomes the conversation and unmounts; only a failure (or a cancelled
+    // On success this tab becomes the conversation and unmounts; only a failure (or a canceled
     // folder picker) comes back here, and that must leave the chooser usable.
     void done
       .then(() => setStarting(false))

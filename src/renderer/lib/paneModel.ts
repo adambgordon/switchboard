@@ -73,7 +73,7 @@ export type PaneAction =
   | { type: 'promote'; sessionId: string; pane?: number }
   /**
    * `recent` (most recent first, see recentTabs) is where an active tab's close lands: the newest of
-   * them still in the pane. Without one, the neighbour that slid into the slot.
+   * them still in the pane. Without one, the neighbor that slid into the slot.
    */
   | { type: 'close'; pane: number; index: number; recent?: readonly string[] }
   | { type: 'closeOthers'; pane: number; index: number }
@@ -286,7 +286,7 @@ function resolvePane(layout: PaneLayout, index: number | undefined): number {
 
 /**
  * Where the active tab lands after `removed` is taken out: the tab that slid into its slot, else
- * the new last one (so closing the rightmost tab selects its left neighbour).
+ * the new last one (so closing the rightmost tab selects its left neighbor).
  */
 function activeAfterRemoval(activeIndex: number, removed: number, newLength: number): number {
   if (newLength === 0) return -1
@@ -302,7 +302,7 @@ function activeAfterRemoval(activeIndex: number, removed: number, newLength: num
  * arbitrary set removed there is no single "removed index" to compare against. So it is stated in
  * terms of the conversation instead — if the one that was active is still here, it stays active
  * wherever it now sits; otherwise the slot is clamped to what remains, which lands on the nearest
- * surviving neighbour.
+ * surviving neighbor.
  */
 function activeAfterKeep(pane: Pane, keep: Tab[], recent?: readonly string[]): number {
   if (keep.length === 0) return -1
@@ -537,7 +537,7 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       const panes = state.panes.map((p, i) => {
         if (i === action.from.pane) {
           // Plain removal from the source: `activeAfterRemoval` already keeps the same conversation
-          // selected when a different tab left, and falls back to a neighbour when the active one did.
+          // selected when a different tab left, and falls back to a neighbor when the active one did.
           return {
             ...p,
             tabs: srcTabs,

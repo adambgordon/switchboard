@@ -9,7 +9,7 @@ interface Props {
   collapsed: boolean
   /** Something inside is asking or unread — the label goes heavier. */
   wantsAttention: boolean
-  /** The user has hidden this folder: drawn greyed whatever the rail's filter. */
+  /** The user has hidden this folder: drawn grayed whatever the rail's filter. */
   dimmed: boolean
   onToggle: (root: string) => void
   /** Right-click: the folder's menu, at the cursor. */

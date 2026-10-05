@@ -118,7 +118,7 @@ export function parkedJobFromRegistry(text: string): ParkedJobRecord | null {
  *
  * Separate from {@link parkedJobFromRegistry} and not a superset of it: that one requires a
  * `parkedJobId`, which most records do not have, so the two accept different sets of records out of
- * the same file. An unrecognised `status` is rejected rather than mapped to a default — treating an
+ * the same file. An unrecognized `status` is rejected rather than mapped to a default — treating an
  * unknown value as `busy` would make a session unreclaimable for as long as its process lived.
  */
 export function sessionStatusFromRegistry(text: string): SessionStatusRecord | null {

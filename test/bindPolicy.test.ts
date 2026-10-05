@@ -157,7 +157,7 @@ describe('boundTabAdoption', () => {
     expect(boundTabAdoption(initial, layout)).toBe('commit')
   })
 
-  it('requires selection for correction, cancelling if navigation wins', () => {
+  it('requires selection for correction, canceling if navigation wins', () => {
     const correction: BindEvent = { oldId: 'S1', newId: 'S2', kind: 'correction' }
     let layout = paneReducer(initialLayout('p0'), {
       type: 'openMany', sessionIds: ['S1', 'S2', 'B'], activeSessionId: 'S1'

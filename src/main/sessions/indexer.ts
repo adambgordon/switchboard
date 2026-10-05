@@ -254,7 +254,7 @@ export type MetaResolver = (agent: AgentKind, filePath: string) => Promise<Conve
 /**
  * Which of `cwds` exist as directories. `exists` is the best answer available — this pass's, else
  * the last one — and is what the rail and chooser show. `verified` holds only cwds whose check
- * answered yes THIS pass, and is the only licence to walk a cwd synchronously: a last-known answer
+ * answered yes THIS pass, and is the only license to walk a cwd synchronously: a last-known answer
  * says nothing about whether the volume responds now.
  */
 export interface Existence {
@@ -270,7 +270,7 @@ export const EXISTENCE_DEADLINE_MS = 200
 /**
  * Existence checks allowed unsettled at once. Node runs asynchronous filesystem calls on a small
  * shared thread pool (four threads by default), and a check against an unresponsive volume holds its
- * thread until the volume answers — cancelling the wait does not cancel the call. Capping the checks
+ * thread until the volume answers — canceling the wait does not cancel the call. Capping the checks
  * leaves the rest of the pool for the transcript reads the app actually needs.
  */
 export const EXISTENCE_MAX_INFLIGHT = 2

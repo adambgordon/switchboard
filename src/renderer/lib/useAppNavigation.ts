@@ -34,10 +34,10 @@ export function useAppNavigation(
       chosenView.current = null
       pending.current = command
       apply.current?.(command)
-      // An already-active tab still needs a committed acknowledgement.
+      // An already-active tab still needs a committed acknowledgment.
       render((n) => n + 1)
     })
-    const offCancel = window.api.onNavigationCancelled((requestId) => {
+    const offCancel = window.api.onNavigationCanceled((requestId) => {
       latestRequest.current = Math.max(latestRequest.current, requestId)
       if (pending.current?.requestId === requestId) pending.current = null
     })

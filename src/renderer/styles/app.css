@@ -369,7 +369,7 @@ body.sb-resizing .sb-pane {
   padding: 0 4px 4px;
   background: var(--paper-sunken);
 }
-/* All caught up: the same width as a list, greyed, and with nothing to press. */
+/* All caught up: the same width as a list, grayed, and with nothing to press. */
 .sb-bell-empty {
   display: flex;
   flex-direction: column;

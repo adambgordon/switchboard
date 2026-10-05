@@ -14,7 +14,7 @@ window.addEventListener('unhandledrejection', event => window.auditErrors.push(S
 window.dragCalls = []
 window.api = new Proxy({}, { get: (_, key) => () => {
   if (key === 'tabDragCancel' || key === 'tabDragDrop') window.dragCalls.push(key)
-  return key === 'tabDragDrop' ? Promise.resolve('cancelled') : undefined
+  return key === 'tabDragDrop' ? Promise.resolve('canceled') : undefined
 } })
 const titles = ['Arithmetic sketch', 'Review examples in depth', 'Slider mechanics', 'Evaluate powers', 'Square root example', 'Review system thoroughly', 'Planning a moonlit picnic for seventeen imaginary penguins', 'Calculate square root']
 const makeTabs = count => Array.from({ length: count }, (_, i) => ({

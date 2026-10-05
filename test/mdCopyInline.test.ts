@@ -25,7 +25,7 @@ describe('inline emission boundaries', () => {
   ] satisfies InlineToken[][])('rejects a repeated edge repair instead of looping', (...tokens) => {
     expect(() => emitInline(tokens, true)).toThrow('Repeated Markdown boundary repair')
   })
-  it('does not rewrite a protected nonliteral neighbour', () => {
+  it('does not rewrite a protected nonliteral neighbor', () => {
     expect(() => emitInline([
       { kind: 'atom', value: 'x' }, marker('*', true), text('_a'), marker('*', false)
     ], true)).toThrow('Non-literal Markdown boundary')
