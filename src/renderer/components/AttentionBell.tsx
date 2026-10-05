@@ -104,7 +104,7 @@ export default function AttentionBell({ entries, onOpen, onMarkRead, onMarkAllRe
     <>
       <button
         ref={bellRef}
-        className={`sb-panel-toggle sb-bell${panel === 'open' ? ' active' : ''}`}
+        className={`sb-panel-toggle sb-bell${count > 0 ? ' filled' : ''}${panel === 'open' ? ' active' : ''}`}
         onClick={() => {
           clearTimers()
           if (panel !== 'open') open()

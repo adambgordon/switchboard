@@ -322,6 +322,11 @@ body.sb-resizing .sb-pane {
 .sb-panel-toggle.active {
   color: var(--ink-soft);
 }
+/* A filled bell rests at the open panel's ink, not the ghost: a ghost fill reads as a third, weaker
+   state. Hover still takes it to full ink. */
+.sb-bell.filled {
+  color: var(--ink-soft);
+}
 
 /* Attention dot — a small NEUTRAL ink dot marking "the app isn't up to date" (update available, or
    downloaded-but-not-relaunched). Neutral by design: the two-accent invariant reserves cobalt for
