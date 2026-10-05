@@ -225,6 +225,13 @@ export default function MainPane(props: Props) {
   } = props
   const onPaneFocusRef = useRef(onPaneFocus)
   onPaneFocusRef.current = onPaneFocus
+  // What a ⌥-click in the Formatted view marks unread, or null when it marks nothing — a conversation
+  // with no live session has no unread state to set, as on its row and its tab.
+  const markUnreadTargetRef = useRef<string | null>(null)
+  markUnreadTargetRef.current = selectedId && pty && !unlinked ? selectedId : null
+  // Whether the click now arriving belongs to a ⌥-press already taken as mark-unread. A ref, not effect
+  // state: the mark re-creates `onEngage`, which re-runs the effect below between press and click.
+  const swallowClickRef = useRef(false)
 
   const showTerminal = !!selectedId && view === 'terminal' && !!pty
   const showTranscript = !!selectedId && !showTerminal
@@ -294,15 +301,41 @@ export default function MainPane(props: Props) {
     const onKey = (e: KeyboardEvent): void => {
       if (!e.metaKey && !e.ctrlKey) onEngage(selectedId)
     }
+    // ⌥-click in the Formatted view marks unread, the twin of the terminal's. Captured here, above the
+    // transcript, so it stops before the engage listener above (which would mark it read again on the
+    // same click) and before the transcript's own selection handling. The click that follows is
+    // swallowed too: canceling a mousedown does not cancel its click, which would open a link or
+    // toggle a tool run. Latched at the press rather than re-read from the click, whose ⌥ reflects the
+    // key at release — and ⌥ is often let go a beat before the button.
+    const onAltDown = (e: MouseEvent): void => {
+      const id = markUnreadTargetRef.current
+      const swallow =
+        !!id && e.altKey && e.button === 0 && e.target instanceof Element && !!e.target.closest('.transcript-scroll')
+      swallowClickRef.current = swallow
+      if (!swallow || !id) return
+      e.preventDefault()
+      e.stopPropagation()
+      onMarkTabUnread(id)
+    }
+    const onAltClick = (e: MouseEvent): void => {
+      if (!swallowClickRef.current) return
+      swallowClickRef.current = false
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    el.addEventListener('mousedown', onAltDown, true)
+    el.addEventListener('click', onAltClick, true)
     el.addEventListener('mousedown', onDown)
     el.addEventListener('keydown', onKey, true)
     return () => {
+      el.removeEventListener('mousedown', onAltDown, true)
+      el.removeEventListener('click', onAltClick, true)
       el.removeEventListener('mousedown', onDown)
       el.removeEventListener('keydown', onKey, true)
     }
-  }, [onEngage, selectedId])
+  }, [onEngage, selectedId, onMarkTabUnread])
 
-  // TerminalView is portalled into this pane from a sibling React subtree, so React's synthetic
+  // TerminalView is portaled into this pane from a sibling React subtree, so React's synthetic
   // events follow TerminalDeck rather than this component. A native capture listener follows the
   // physical DOM instead, keeping pane ownership aligned with the terminal that actually took focus.
   // A ⌥-press is the mark-unread gesture (on a tab or in a terminal), which, as on a rail row,
@@ -311,7 +344,10 @@ export default function MainPane(props: Props) {
     const el = paneRef.current
     if (!el) return
     const onDown = (e: PointerEvent): void => {
-      if (e.altKey && e.target instanceof Element && e.target.closest('.sb-tab, .sb-term')) return
+      if (e.altKey && e.target instanceof Element) {
+        if (e.target.closest('.sb-tab, .sb-term')) return
+        if (markUnreadTargetRef.current && e.target.closest('.transcript-scroll')) return
+      }
       onPaneFocusRef.current?.()
     }
     el.addEventListener('pointerdown', onDown, true)

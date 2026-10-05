@@ -20,7 +20,7 @@ export type Marks = Record<string, number>
 /**
  * Advance a marker to `ts`, never backward.
  *
- * Forward-only is not an optimisation: `seenAt` is compared against a turn's end time to decide
+ * Forward-only is not an optimization: `seenAt` is compared against a turn's end time to decide
  * whether a finished turn has been looked at, so moving one backward would make an already-seen
  * conversation start reporting itself unread again.
  */

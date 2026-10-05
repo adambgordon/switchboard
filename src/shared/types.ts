@@ -68,7 +68,7 @@ export type TurnState = 'in_progress' | 'awaiting' | 'awaiting_input'
 /**
  * What Claude reports about one of its own live sessions. Deliberately only the two values we act
  * on: anything else Claude may write is read as "no claim" rather than guessed at, because guessing
- * `busy` from an unrecognised value is how a session becomes unreclaimable for good.
+ * `busy` from an unrecognized value is how a session becomes unreclaimable for good.
  */
 export type ClaudeSessionStatus = 'busy' | 'idle'
 
@@ -302,7 +302,7 @@ export interface PtySession {
   parkedJob: { shortId: string; name: string } | null
   /**
    * [Claude] What Claude says IT is doing, from its own live-session registry, or null when there is
-   * no usable record (no registry, a Codex terminal, an unrecognised value).
+   * no usable record (no registry, a Codex terminal, an unrecognized value).
    *
    * The only first-party activity signal either agent publishes, and the only one that reports work
    * the transcript does not: a subagent runs INSIDE the parent process, and the parent's own
@@ -413,7 +413,7 @@ export const IPC = {
   navigationStep: 'navigation:step', // renderer -> main: step the app-wide cursor
   navigationInterrupt: 'navigation:interrupt', // renderer -> main: a local user action supersedes playback
   navigationComplete: 'navigation:complete', // renderer -> main: tagged activation committed
-  navigationCancelled: 'navigation:cancelled', // push (requestId): discard superseded activation
+  navigationCanceled: 'navigation:canceled', // push (requestId): discard superseded activation
   tabResume: 'tab:resumeHere', // push (sessionId): resume the tab in this window
   tabRelease: 'tab:release', // push (sessionId): close your tab for this conversation
   tabShouldRelease: 'tab:shouldRelease', // renderer -> main: confirm a queued release is still current
@@ -499,7 +499,7 @@ export type ConversationMenuEntry =
   | { separator: true }
 
 /** What became of a tab group released outside its own window's strips. See `tabDragDrop`. */
-export type TabDropOutcome = 'moved' | 'detached' | 'cancelled'
+export type TabDropOutcome = 'moved' | 'detached' | 'canceled'
 
 /** The tabs carried by one drag, in source-strip order, and the tab under the pointer. */
 export interface TabDragPayload {
@@ -666,7 +666,7 @@ export interface SwitchboardApi {
    * The pointer was released outside this window's own strips. Main decides from the cursor:
    *  - `moved` — another window took the group; the caller must now close its copies.
    *  - `detached` — no window was under the cursor, so a new one opened with it; also close ours.
-   *  - `cancelled` — the cursor was still over this window, so nothing happened.
+   *  - `canceled` — the cursor was still over this window, so nothing happened.
    */
   tabDragDrop(): Promise<TabDropOutcome>
   /** The source window handled the drop itself (it landed on one of its own strips). */
@@ -706,7 +706,7 @@ export interface SwitchboardApi {
   stepNavigation(direction: -1 | 1): void
   interruptNavigation(revision: number): void
   completeNavigation(requestId: number, visit: NavigationVisit | null): void
-  onNavigationCancelled(cb: (requestId: number) => void): () => void
+  onNavigationCanceled(cb: (requestId: number) => void): () => void
   onTabResume(cb: (sessionId: string) => void): () => void
   /** Another window is taking this conversation — close our tab for it. */
   onTabRelease(cb: (sessionId: string) => void): () => void

@@ -174,7 +174,7 @@ const navigation = new NavigationCoordinator({
     return !!contents && !contents.isDestroyed()
   },
   activate: (windowId, command) => { sendToWindow(windowId, IPC.tabActivate, command) },
-  cancel: (windowId, requestId) => { sendToWindow(windowId, IPC.navigationCancelled, requestId) },
+  cancel: (windowId, requestId) => { sendToWindow(windowId, IPC.navigationCanceled, requestId) },
   focus: (windowId) => {
     const contents = webContents.fromId(windowId)
     if (contents && !contents.isDestroyed()) BrowserWindow.fromWebContents(contents)?.focus()
@@ -363,7 +363,7 @@ export function releaseWindow(webContentsId: number, preserveTabs = false): void
       released = true
     }
   }
-  // A drag whose source window is gone can never be dropped or cancelled by it, so it would otherwise
+  // A drag whose source window is gone can never be dropped or canceled by it, so it would otherwise
   // leave another window stuck showing the drop highlight forever.
   if (tabDrag && (tabDrag.sourceId === webContentsId || tabDrag.hoveringId === webContentsId)) {
     endTabDrag()
@@ -1007,7 +1007,7 @@ export function registerIpc(): void {
   // whether the pointer had left its own viewport and only looked for a target when it said yes — which
   // breaks precisely where it matters: a detached window is CASCADED off the one that spawned it, so
   // the two overlap, and a pointer over the second is still inside the first's rectangle. The answer
-  // came back "no", and every cross-window drop cancelled.
+  // came back "no", and every cross-window drop canceled.
   //
   // So: the source is excluded from the search, and any OTHER window containing the cursor wins. The
   // one case this reads wrongly is a source window sitting ON TOP of another and the release landing
@@ -1025,9 +1025,9 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.tabDragDrop, (e): TabDropOutcome => {
     const drag = tabDrag
     endTabDrag()
-    if (!drag || drag.sourceId !== e.sender.id) return 'cancelled'
+    if (!drag || drag.sourceId !== e.sender.id) return 'canceled'
     const payload = visibleTabDrag(drag.payload, hiddenSessionIds)
-    if (!payload) return 'cancelled'
+    if (!payload) return 'canceled'
     const target = windowUnderCursor(drag.sourceId)
     if (target) {
       claimTabsForWindow(target.webContents.id, payload.sessionIds)
@@ -1037,7 +1037,7 @@ export function registerIpc(): void {
     }
     // No other window under the cursor. Over the source's own body means the user released somewhere
     // that is not a strip, which does nothing; over the desktop is the detach gesture.
-    if (cursorInWindow(drag.sourceId)) return 'cancelled'
+    if (cursorInWindow(drag.sourceId)) return 'canceled'
     const opened = openWindow?.({
       ...payload,
       restoredTabs: null,

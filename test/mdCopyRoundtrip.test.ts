@@ -170,7 +170,7 @@ describe('emitted delimiter context', () => {
     expect(serializeCopy([paragraph([literal])], { mode: 'markdown', intent: 'selection',
       selection: new Map([[literal, { from: 0, to: 16 }]]) })).toBe('*literal* (v2.1)')
   })
-  it('protects literal markers in neighbouring TSV cells', () => {
+  it('protects literal markers in neighboring TSV cells', () => {
     const table: CopyNode = { kind: 'table', align: [], children: [
       { kind: 'row', children: [{ kind: 'cell', children: [copyText('*prefix')] },
         { kind: 'cell', children: [styled('a', 1)] }, { kind: 'cell', children: [copyText('tail*')] }] }

@@ -151,7 +151,7 @@ describe('tabDropIndex — wrapped rows', () => {
   it('clamps ABOVE the strip by distance, not by falling back to the first rect', () => {
     // The assertion above cannot tell those two apart. Its rects happen to start with the top row, so
     // an implementation that measured no distance at all and simply took the first row it enumerated
-    // would give the same answer — two different behaviours, one output. Listing the BOTTOM row first
+    // would give the same answer — two different behaviors, one output. Listing the BOTTOM row first
     // separates them: measured distance still resolves upward to the top row, while a first-rect
     // fallback lands on the bottom one.
     const bottomFirst = [...row(64, 1), ...row(0, 3)]

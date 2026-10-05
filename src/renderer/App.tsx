@@ -84,6 +84,7 @@ import {
 } from './lib/chooserTab'
 import { confirmedEmpty, endedStops, stopsOnClose } from './lib/stopClose'
 import { captureClosed, pushClosed, rekeyClosed, takeReopenable, type ClosedGroup } from './lib/closedTabs'
+import { rekeyRecent, touchRecent } from './lib/recentTabs'
 import type { SidePlace } from './lib/conversationMenu'
 import {
   NO_SELECTION,
@@ -486,6 +487,11 @@ export default function App() {
     if (group) closedTabsRef.current = pushClosed(closedTabsRef.current, group)
   }, [])
 
+  // What this window has shown, most recent first, so closing the active tab returns to the last one
+  // viewed rather than to a neighbor — see recentTabs. Touched where navigation is reported; a ref,
+  // like the closed stack, because only a close reads it.
+  const recentRef = useRef<readonly string[]>([])
+
   // Controls invoked on a tab close its group only when that tab belongs to it. Keyboard close
   // resolves the focused group independently, since the active tab can be outside the selection.
   const closeTabsFrom = useCallback(
@@ -495,8 +501,8 @@ export default function App() {
       if (!id) return
       const ids = targetsFor(pane, id)
       recordClosed(ids)
-      if (ids.length > 1) panes.closeTabs(ids)
-      else panes.closeTab(pane, index)
+      if (ids.length > 1) panes.closeTabs(ids, recentRef.current)
+      else panes.closeTab(pane, index, recentRef.current)
       stopEmptyOnClose(ids)
     },
     [panes.closeTab, panes.closeTabs, targetsFor, beginVisit, stopEmptyOnClose, recordClosed]
@@ -545,7 +551,7 @@ export default function App() {
       const closesTab = tabsEnabledRef.current || (active !== null && isChooserTab(active))
       if (closesTab && ids.length > 0) {
         recordClosed(ids)
-        panes.closeTabs(ids)
+        panes.closeTabs(ids, recentRef.current)
         stopEmptyOnClose(ids)
       } else window.api.closeWindow()
     })
@@ -605,6 +611,7 @@ export default function App() {
       if (kind === 'initial') {
         rekeyPendingNavigation(oldId, newId)
         closedTabsRef.current = rekeyClosed(closedTabsRef.current, oldId, newId)
+        recentRef.current = rekeyRecent(recentRef.current, oldId, newId)
         setChoosers((prev) => {
           const opened = Object.entries(prev).filter(([, c]) => c.from === oldId)
           if (opened.length === 0) return prev
@@ -855,6 +862,9 @@ export default function App() {
   const focusedView = paneLayout.focusIndex === 1 ? view1 : view0
   useLayoutEffect(() => {
     const id = focusedView.id
+    // A chooser is a tab too, so it counts as viewed, though it is no conversation to report.
+    const tabId = focusedView.chooser ?? id
+    if (tabId) recentRef.current = touchRecent(recentRef.current, tabId)
     const view = id && findPriorTerminalIdsRef.current.has(id) ? 'terminal' : focusedView.view
     reportNavigation(id ? { sessionId: id, view } : null, focusedView.terminalAt === 'here')
   })
@@ -1268,7 +1278,7 @@ export default function App() {
       // reducer handles it; another window's tab is only knowable through main, so it is decided here.
       // The rule matches the reducer's exactly: an implicit open reveals the tab where it is, an
       // explicit placement takes it. Read from a ref and answered synchronously — a round trip before
-      // opening a tab would put main's latency on the most-travelled path in the app.
+      // opening a tab would put main's latency on the most-traveled path in the app.
       if (openElsewhereRef.current.has(id) && !locateTab(paneLayoutRef.current, id)) {
         if (opts?.pane === undefined) {
           window.api.revealConversation(id, effectiveTabOpenMode(tabsEnabledRef.current, mode))
@@ -1731,7 +1741,7 @@ export default function App() {
   const persistedTabLayoutKey = JSON.stringify(persistedTabLayout)
   // Seeded with the mount-time value so a window that STARTS with the preference off reads as
   // "still off" rather than as a fresh switch-off — see tabPersistPolicy for why that distinction
-  // is the difference between honouring the setting and deleting the user's saved layout.
+  // is the difference between honoring the setting and deleting the user's saved layout.
   const tabsEnabledWasRef = useRef(tabsEnabled)
   const initialWorkspaceHandledRef = useRef(false)
   useEffect(() => {
@@ -2116,7 +2126,7 @@ export default function App() {
       beginVisit()
       const id = paneLayoutRef.current.panes[pane]?.tabs[index]?.sessionId
       if (id) recordClosed([id])
-      panes.closeTab(pane, index)
+      panes.closeTab(pane, index, recentRef.current)
       if (id) stopEmptyOnClose([id])
     },
     [panes.closeTab, beginVisit, stopEmptyOnClose, recordClosed]

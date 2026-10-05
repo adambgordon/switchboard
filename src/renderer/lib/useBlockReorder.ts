@@ -253,7 +253,7 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     let lifted: Lifted | null = null
     let latestY = 0
     let suppressClick = false
-    // Escape cancelled a drag while the button was still down: the release that ends the press must not
+    // Escape canceled a drag while the button was still down: the release that ends the press must not
     // then click whatever it lands on.
     let escaped = false
     // Pointer moves are coalesced to one update per frame: a high-rate pointer reports several moves a

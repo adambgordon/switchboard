@@ -28,7 +28,7 @@ import { historyReducer } from '../src/main/navigationHistory'
  *
  * Two fixture rules apply throughout this file:
  *
- *   1. **Assert the full result, and separate the ids under test.** Two different wrong behaviours
+ *   1. **Assert the full result, and separate the ids under test.** Two different wrong behaviors
  *      must not be able to produce the same array. Adjacent ids are where that goes wrong — "drop the
  *      stale tab and keep this one in place" and "keep the stale tab's slot and drop this one" emit
  *      an identical list when the two sit side by side.
@@ -383,7 +383,7 @@ describe('close', () => {
     expect(activeTabId(after)).toBe('C')
   })
 
-  it('falls back to the left neighbour when the rightmost tab is closed', () => {
+  it('falls back to the left neighbor when the rightmost tab is closed', () => {
     const after = step(layout([pane('p0', [t('A'), t('B'), t('C')], 2)]), {
       type: 'close',
       pane: 0,
@@ -449,6 +449,64 @@ describe('close', () => {
     const before = layout([pane('p0', [t('A')], 0)])
     expect(paneReducer(before, { type: 'close', pane: 0, index: 3 })).toBe(before)
     expect(paneReducer(before, { type: 'close', pane: 4, index: 0 })).toBe(before)
+  })
+})
+
+describe('close — returning to the last tab viewed', () => {
+  // `recent` is most recent first and, as in the app, leads with the tab being closed (the press that
+  // closes it is itself a visit). The fixtures keep three answers apart: the most recent survivor (E),
+  // the first recent id in strip order (A), and the neighbor that slid into the slot (D).
+
+  it('lands on the most recently viewed tab still in the pane, not the neighbor', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 2)])
+    const after = step(before, { type: 'close', pane: 0, index: 2, recent: ['C', 'E', 'A'] })
+    expect(after.panes[0].tabs).toEqual([t('A'), t('B'), t('D'), t('E')])
+    expect(activeTabId(after)).toBe('E')
+  })
+
+  it('skips recent ids that are not in this pane, even when the other pane holds them', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 2), pane('p1', [t('Z')], 0)])
+    const after = step(before, { type: 'close', pane: 0, index: 2, recent: ['C', 'Z', 'E'] })
+    expect(after.panes.map((p) => p.tabs)).toEqual([[t('A'), t('B'), t('D'), t('E')], [t('Z')]])
+    expect(after.panes[0].activeIndex).toBe(3)
+  })
+
+  it('falls back to the neighbor when nothing recent is left in the pane', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 2), pane('p1', [t('Z')], 0)])
+    const after = step(before, { type: 'close', pane: 0, index: 2, recent: ['C', 'Z', 'Y'] })
+    expect(activeTabId(after)).toBe('D')
+  })
+
+  it('leaves the selection alone when the tab closed was not the active one', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 4)])
+    const after = step(before, { type: 'close', pane: 0, index: 1, recent: ['B', 'A', 'E'] })
+    expect(after.panes[0].tabs).toEqual([t('A'), t('C'), t('D'), t('E')])
+    expect(activeTabId(after)).toBe('E')
+  })
+
+  it('keeps the welcome screen when the pane showed it', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C')], -1)])
+    const after = step(before, { type: 'close', pane: 0, index: 1, recent: ['B', 'C'] })
+    expect(after.panes[0].activeIndex).toBe(-1)
+  })
+
+  it('closeMany lands on the most recently viewed survivor', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 1)])
+    const after = step(before, { type: 'closeMany', sessionIds: ['B', 'D'], recent: ['B', 'E', 'A'] })
+    expect(after.panes[0].tabs).toEqual([t('A'), t('C'), t('E')])
+    expect(activeTabId(after)).toBe('E')
+  })
+
+  it('closeMany keeps a surviving active tab over anything more recent', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 2)])
+    const after = step(before, { type: 'closeMany', sessionIds: ['A', 'D'], recent: ['E', 'B', 'C'] })
+    expect(activeTabId(after)).toBe('C')
+  })
+
+  it('closeMany falls back to the neighbor when no survivor was viewed', () => {
+    const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D'), t('E')], 1)])
+    const after = step(before, { type: 'closeMany', sessionIds: ['B', 'D'], recent: ['B', 'D', 'Q'] })
+    expect(activeTabId(after)).toBe('C')
   })
 })
 
@@ -679,7 +737,7 @@ describe('closeMany / moveMany — acting on a multi-selection', () => {
     expect(activeTabId(after)).toBe('D')
   })
 
-  it('falls back to a neighbour when the active one was closed', () => {
+  it('falls back to a neighbor when the active one was closed', () => {
     const before = layout([pane('p0', [t('A'), t('B'), t('C'), t('D')], 1)])
     const after = step(before, { type: 'closeMany', sessionIds: ['B', 'D'] })
     expect(after.panes[0].tabs).toEqual([t('A'), t('C')])
@@ -929,7 +987,7 @@ describe('collapseToSingle — the feature switched off', () => {
   it('keeps exactly what is on screen, as a preview tab, in the pane the user was in', () => {
     // The surviving pane is the FOCUSED one, so the terminals most likely to be live and visible keep
     // their home and are not remounted. Everything else goes: with tabs off there is one slot and the
-    // next open replaces it, which is the pre-tabs behaviour exactly.
+    // next open replaces it, which is the pre-tabs behavior exactly.
     const before = layout([pane('p0', [t('A'), t('B')], 1), pane('p1', [t('C'), t('D')], 0)], 1)
     const after = step(before, { type: 'collapseToSingle' })
     expect(after).toEqual({

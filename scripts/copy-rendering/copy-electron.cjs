@@ -67,6 +67,15 @@ async function run() {
           await expectRange(prefix + name + '/' + mode + '/' + label + '/' + reverse,
             ['.md-p', from], ['.md-p', to], expected, reverse)
         }
+        // ⇧⌘C copies the other format; the same chord without ⇧, or with ⌥, is not it.
+        const other = mode === 'markdown' ? 'L abc R' : marked
+        const shortcut = await call('copyShortcut', ['.md-p', 0], ['.md-p', 7])
+        check(prefix + name + '/' + mode + '/shift-cmd-c', shortcut.text, other)
+        check(prefix + name + '/' + mode + '/shift-cmd-c / handled', shortcut.prevented, true)
+        for (const [label, init] of [['no-shift', { shiftKey: false }], ['with-alt', { altKey: true }]]) {
+          const ignored = await call('copyShortcut', ['.md-p', 0], ['.md-p', 7], init)
+          check(prefix + name + '/' + mode + '/shift-cmd-c/' + label, ignored.text, null)
+        }
       }
     }
     for (const [source, md, plain] of [

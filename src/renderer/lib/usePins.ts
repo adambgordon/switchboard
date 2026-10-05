@@ -57,7 +57,7 @@ export function usePins(): Pins {
   const [order, setOrder] = useState<string[]>(load)
 
   // Every window shares this list and none of them owns it, so a pin is applied to what is ON DISK
-  // rather than to what this window last rendered. Otherwise one window's save serialises its whole
+  // rather than to what this window last rendered. Otherwise one window's save serializes its whole
   // stale list and silently unpins everything another window pinned since it loaded — the list is a
   // single value, so there is no per-entry granularity to save it.
   const mutate = useCallback((fn: (stored: string[]) => string[]): void => {

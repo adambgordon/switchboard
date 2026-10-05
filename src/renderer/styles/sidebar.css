@@ -35,11 +35,18 @@
 .sb-row.attention .sb-row-title {
   font-weight: 800;
 }
+/* …and its agent mark leaves the ghost ink for the title's own, so the logo carries the same weight.
+   Not on a hidden row, whose gray says hidden. */
+.sb-row.attention:not(.dimmed) .sb-row-lead,
+.sb-row.attention:not(.dimmed) .sb-row-meta > .sb-agent-logo,
+.sb-row.attention:not(.dimmed) .sb-row-meta > .sb-bg-agent-mark {
+  color: var(--ink);
+}
 .sb-row.compact .sb-row-title {
   flex: 1;
   min-width: 0;
 }
-/* Hidden by the user: greyed in every filter, so grey always means hidden. Color only, so it moves
+/* Hidden by the user: grayed in every filter, so gray always means hidden. Color only, so it moves
    nothing. */
 .sb-row.dimmed .sb-row-title,
 .sb-row.dimmed .sb-row-pin {

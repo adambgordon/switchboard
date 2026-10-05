@@ -118,7 +118,7 @@ describe('ptyStream', () => {
     expect(got).toEqual(['tail-1', 'tail-2'])
   })
 
-  it('waits for xterm write acknowledgements before answering a snapshot request', async () => {
+  it('waits for xterm write acknowledgments before answering a snapshot request', async () => {
     const s = await freshStream()
     let acknowledge = (): void => {}
     s.attachPty('a', (_data, done) => {
@@ -137,14 +137,14 @@ describe('ptyStream', () => {
 
   it('applies backpressure at the high-water mark and releases below the low-water mark', async () => {
     const s = await freshStream()
-    const acknowledgements: Array<() => void> = []
-    s.attachPty('a', (_data, done) => acknowledgements.push(done), () => snap('state'))
+    const acknowledgments: Array<() => void> = []
+    s.attachPty('a', (_data, done) => acknowledgments.push(done), () => snap('state'))
     const chunk = 'x'.repeat(100 * 1024)
     s.emit('a', chunk)
     s.emit('a', chunk)
     s.emit('a', chunk)
     expect(s.pauses).toEqual([{ id: 'a', paused: true }])
-    acknowledgements[2]()
+    acknowledgments[2]()
     expect(s.pauses).toEqual([
       { id: 'a', paused: true },
       { id: 'a', paused: false }

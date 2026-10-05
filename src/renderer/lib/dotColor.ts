@@ -36,7 +36,7 @@ export const DOT_COLOR_COMMIT_MS = 250
  * Whether a coalesced pick should still be stored when its wait elapses, or when the picker is
  * left before it does.
  *
- * Two things this rules out. A pick cancelled in the meantime — Reset clears what is pending, and
+ * Two things this rules out. A pick canceled in the meantime — Reset clears what is pending, and
  * a timer armed before that must not resurrect it. And a pick equal to what is already stored,
  * which would wake every other window to tell them nothing changed.
  */

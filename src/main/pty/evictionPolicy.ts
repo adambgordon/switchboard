@@ -25,7 +25,7 @@ export const STALE_REQUEST_MS = 30 * 60_000
  * finished. Recency of use is the one fact that is current at the instant of the decision, and this
  * window covers the gap — comfortably longer than the poll interval that closes it.
  *
- * Generalised deliberately. Special-casing "a turn was just submitted" would need a submission
+ * Generalized deliberately. Special-casing "a turn was just submitted" would need a submission
  * signal the manager does not have, whereas "someone touched this seconds ago, so do not act on a
  * stale reading of it" is both sufficient and a sane LRU rule in its own right.
  */

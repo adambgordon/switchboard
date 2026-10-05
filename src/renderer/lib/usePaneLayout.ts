@@ -32,12 +32,13 @@ export interface PaneLayoutApi {
   activateTab: (pane: number, index: number) => void
   /** Show the welcome screen in the focused pane, leaving its tabs alone. */
   deselect: () => void
-  closeTab: (pane: number, index: number) => void
+  /** `recent` (most recent first) decides where an active tab's close lands — see recentTabs. */
+  closeTab: (pane: number, index: number, recent?: readonly string[]) => void
   closeOtherTabs: (pane: number, index: number) => void
   moveTab: (from: { pane: number; index: number }, to: { pane: number; index: number }) => void
   /** Bulk forms for a multi-selection, by session id — see the `closeMany` / `moveMany` actions for
    *  why a loop of the single-tab calls above cannot stand in for them. */
-  closeTabs: (sessionIds: string[]) => void
+  closeTabs: (sessionIds: string[], recent?: readonly string[]) => void
   moveTabs: (
     sessionIds: string[],
     activeSessionId: string,
@@ -100,7 +101,8 @@ export function usePaneLayout(restored: PersistedTabLayout | null, hidden: Reado
   )
   const deselect = useCallback(() => dispatch({ type: 'deselect' }), [])
   const closeTab = useCallback(
-    (pane: number, index: number) => dispatch({ type: 'close', pane, index }),
+    (pane: number, index: number, recent?: readonly string[]) =>
+      dispatch({ type: 'close', pane, index, recent }),
     []
   )
   const closeOtherTabs = useCallback(
@@ -115,7 +117,8 @@ export function usePaneLayout(restored: PersistedTabLayout | null, hidden: Reado
   // Bulk forms for a multi-selection. One dispatch, not a loop: see the action definitions for why
   // closing or moving several tabs cannot be expressed as repeated single-tab calls.
   const closeTabs = useCallback(
-    (sessionIds: string[]) => dispatch({ type: 'closeMany', sessionIds }),
+    (sessionIds: string[], recent?: readonly string[]) =>
+      dispatch({ type: 'closeMany', sessionIds, recent }),
     []
   )
   const moveTabs = useCallback(

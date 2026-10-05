@@ -77,7 +77,7 @@ describe('sessionStatusFromRegistry', () => {
     expect(sessionStatusFromRegistry(plain)?.status).toBe('busy')
   })
 
-  it('rejects an unrecognised status rather than guessing at it', () => {
+  it('rejects an unrecognized status rather than guessing at it', () => {
     // Mapping an unknown value onto `busy` is how a session becomes permanently unreclaimable.
     expect(sessionStatusFromRegistry(record({ status: 'thinking' }))).toBeNull()
     expect(sessionStatusFromRegistry(record({ status: undefined }))).toBeNull()

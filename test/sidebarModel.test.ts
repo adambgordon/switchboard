@@ -851,8 +851,8 @@ describe('the user hide and the filter', () => {
   })
   const ids = (model: SidebarModel): string[] => visibleRows(model).map((r) => r.sessionId)
   const outside = (model: SidebarModel): string[] => visibleRows(model).filter((r) => r.outside).map((r) => r.sessionId)
-  // What a row is greyed by: its own hide, its folder's, or nothing — read whatever the filter.
-  const greyed = (model: SidebarModel): [string, string | null][] => visibleRows(model).map((r) => [r.sessionId, r.hiddenBy])
+  // What a row is grayed by: its own hide, its folder's, or nothing — read whatever the filter.
+  const grayed = (model: SidebarModel): [string, string | null][] => visibleRows(model).map((r) => [r.sessionId, r.hiddenBy])
 
   it('leaves a hidden conversation out of the rail but in the rows a Resume writes into', () => {
     // Placed rows must keep it: filtering where rows are placed would leave a Resume nothing to lift.
@@ -912,7 +912,7 @@ describe('the user hide and the filter', () => {
     expect(buildSidebar(input({ ...base, userHidden: hide(['a1', 'a2']), filter: new Set(['hidden']) })).groups[0].folderHidden).toBe(false)
   })
 
-  it('shows only what is hidden under Hidden, keeping what is on screen, greyed by its hide alone', () => {
+  it('shows only what is hidden under Hidden, keeping what is on screen, grayed by its hide alone', () => {
     const model = buildSidebar(
       input({
         groups: [group('/w/a', [conv('open', T - 1), conv('own', T - 2)]), group('/w/b', [conv('b1', T - 3)])],
@@ -923,8 +923,8 @@ describe('the user hide and the filter', () => {
     )
     expect(ids(model)).toEqual(['open', 'own', 'b1'])
     expect(outside(model)).toEqual(['open'])
-    // Grey means hidden in every filter: the hidden rows grey under Hidden too, the open one does not.
-    expect(greyed(model)).toEqual([['open', null], ['own', 'self'], ['b1', 'folder']])
+    // Gray means hidden in every filter: the hidden rows gray under Hidden too, the open one does not.
+    expect(grayed(model)).toEqual([['open', null], ['own', 'self'], ['b1', 'folder']])
   })
 
   it('narrows to running conversations under Live, dropping folders with none, and never brings a hidden one back', () => {

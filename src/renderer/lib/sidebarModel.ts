@@ -30,7 +30,7 @@ export interface SidebarRow {
   /** Pinned rows rank by pin order (`-index`), unpinned rows by `override ?? seed`. */
   rank: number
   /** Why the user's hide covers it, or null when it does not (`hiddenBy`). A hidden row is drawn
-   *  greyed whatever the filter, so grey means one thing: hidden. */
+   *  grayed whatever the filter, so gray means one thing: hidden. */
   hiddenBy: 'folder' | 'self' | null
   /** Outside the window's filter. Such a row renders only while it is on screen. */
   outside: boolean
@@ -59,7 +59,7 @@ export interface SidebarGroup {
   /** Any row `asking` or `awaiting` among those the filter admits, withheld and collapsed ones
    *  included. Never one the filter keeps off the rail: bold would point at something not there. */
   wantsAttention: boolean
-  /** The user has hidden this folder, so its header is drawn greyed. Folders mode only. */
+  /** The user has hidden this folder, so its header is drawn grayed. Folders mode only. */
   folderHidden: boolean
 }
 

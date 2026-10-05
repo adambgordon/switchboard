@@ -8,7 +8,7 @@
  *
  * The strip WRAPS, so this is two-dimensional: pick the row from y, then the gap from x. That is the
  * only real difference from the rail's vertical reorder, and it is why the two do not share code —
- * the rail is a single column with a fixed stride, and generalising it would make the part that must
+ * the rail is a single column with a fixed stride, and generalizing it would make the part that must
  * not regress conditional on a case it never has.
  */
 

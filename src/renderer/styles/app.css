@@ -322,6 +322,11 @@ body.sb-resizing .sb-pane {
 .sb-panel-toggle.active {
   color: var(--ink-soft);
 }
+/* A filled bell rests at the open panel's ink, not the ghost: a ghost fill reads as a third, weaker
+   state. Hover still takes it to full ink. */
+.sb-bell.filled {
+  color: var(--ink-soft);
+}
 
 /* Attention dot — a small NEUTRAL ink dot marking "the app isn't up to date" (update available, or
    downloaded-but-not-relaunched). Neutral by design: the two-accent invariant reserves cobalt for
@@ -364,7 +369,7 @@ body.sb-resizing .sb-pane {
   padding: 0 4px 4px;
   background: var(--paper-sunken);
 }
-/* All caught up: the same width as a list, greyed, and with nothing to press. */
+/* All caught up: the same width as a list, grayed, and with nothing to press. */
 .sb-bell-empty {
   display: flex;
   flex-direction: column;
@@ -419,6 +424,22 @@ body.sb-resizing .sb-pane {
   padding: 6px 4px 6px 10px;
   text-align: left;
 }
+/* The dot and the mark-read check share one cell; hover swaps one for the other. `visibility`, not
+   `display`, so the dot keeps its place in the shared animation phase while hidden. */
+.sb-bell-gutter {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 21px;
+  margin-right: 6px;
+}
+.sb-bell-gutter > * {
+  grid-area: 1 / 1;
+}
+.sb-bell-item:hover .sb-bell-gutter .sb-dot,
+.sb-bell-item:focus-within .sb-bell-gutter .sb-dot {
+  visibility: hidden;
+}
 .sb-bell-text {
   display: flex;
   flex-direction: column;
@@ -443,15 +464,14 @@ body.sb-resizing .sb-pane {
 /* Mark read without going there: hidden until its row is hovered, so the list reads as a list. */
 .sb-bell-read {
   display: inline-flex;
-  flex-shrink: 0;
-  margin-right: 6px;
   padding: 4px;
   border-radius: var(--r-sm);
   color: var(--ink-ghost);
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast);
 }
-.sb-bell-item:hover .sb-bell-read {
+.sb-bell-item:hover .sb-bell-read,
+.sb-bell-item:focus-within .sb-bell-read {
   opacity: 1;
 }
 .sb-bell-read:hover {

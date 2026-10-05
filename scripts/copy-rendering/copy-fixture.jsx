@@ -119,6 +119,22 @@ window.copyCurrent = () => {
   return selection.rangeCount ? dispatch(selection.getRangeAt(0).cloneRange(), false)
     : { text: '', prevented: false, types: [] }
 }
+// ⇧⌘C (or another chord, through `init`) over a selection; the opposite-format copy writes through
+// navigator.clipboard, which lands in window.buttonCopy.
+window.copyShortcut = (start, end, init = {}) => {
+  const range = document.createRange()
+  range.setStart(...point(...start))
+  range.setEnd(...point(...end))
+  const selection = window.getSelection()
+  selection.removeAllRanges()
+  selection.addRange(range)
+  window.buttonCopy = null
+  const event = new KeyboardEvent('keydown', {
+    code: 'KeyC', key: 'c', metaKey: true, shiftKey: true, bubbles: true, cancelable: true, ...init
+  })
+  document.body.dispatchEvent(event)
+  return { text: window.buttonCopy, prevented: event.defaultPrevented }
+}
 window.copyContents = (selector, index = 0) => {
   const range = document.createRange()
   range.selectNodeContents(element(selector, index))

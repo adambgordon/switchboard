@@ -338,7 +338,7 @@ body.sb-window-drop-target .sb-tabstrip {
 /* The close button shares the live dot's position. */
 .sb-tab-close {
   position: absolute;
-  /* Centre the 17px hit target over the 10px slot without shrinking the click target. */
+  /* Center the 17px hit target over the 10px slot without shrinking the click target. */
   right: 4.5px;
   top: 50%;
   transform: translateY(-50%);

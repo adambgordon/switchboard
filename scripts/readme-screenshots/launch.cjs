@@ -77,7 +77,8 @@ async function arrange({ send, ev, waitFor }, fx) {
   const row = (id) => `document.querySelector('.sb-rail-body .sb-row[data-session="${id}"]')`
   const count = fx.shownRows
   const rowsReady = `document.querySelectorAll('.sb-rail-body .sb-row[data-session]').length >= ${count}`
-  const dismissWhatsNew = `document.querySelector('.sb-whatsnew-done')?.click()`
+  // Its close button rather than Done: Done only advances a deck of several slides.
+  const dismissWhatsNew = `document.querySelector('.sb-modal-whatsnew .sb-modal-close')?.click()`
 
   // Settings first, then a reload to apply them — rows are only counted once the pins are in, since a
   // pinned row does not count toward its folder's cap. What's new has had its turn; start in light.

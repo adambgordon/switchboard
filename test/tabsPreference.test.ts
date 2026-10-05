@@ -10,7 +10,7 @@ describe('parseTabsEnabled', () => {
     expect(parseTabsEnabled('')).toBe(DEFAULT_TABS_ENABLED)
   })
 
-  it('honours an explicit choice in either direction', () => {
+  it('honors an explicit choice in either direction', () => {
     expect(parseTabsEnabled('{"enabled":true}')).toBe(true)
     expect(parseTabsEnabled('{"enabled":false}')).toBe(false)
   })

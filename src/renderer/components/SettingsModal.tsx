@@ -98,8 +98,9 @@ function LivenessLegend() {
  *
  * A function of the tabs preference rather than a constant: with tabs off, ⌘W closes the window and
  * none of the tab or split chords exist, so listing them would be listing shortcuts that do nothing.
+ * The copy preference likewise decides which format ⇧⌘C names.
  */
-function groupsFor(tabsEnabled: boolean): Group[] {
+function groupsFor(tabsEnabled: boolean, markdownCopy: boolean): Group[] {
   return [
     {
       title: 'Navigation',
@@ -118,6 +119,7 @@ function groupsFor(tabsEnabled: boolean): Group[] {
       items: [
         { keys: tabsEnabled ? ['⌘N', '⌘T'] : ['⌘N'], desc: 'New conversation' },
         { keys: ['⌘F'], desc: 'Find in the conversation' },
+        { keys: ['⇧⌘C'], desc: markdownCopy ? 'Copy selection as plain text' : 'Copy selection as Markdown' },
         { keys: ['⌘J'], desc: 'Toggle Formatted / Terminal, resuming if needed' },
         { keys: ['⇧⌘U'], desc: 'Mark the selected conversation read / unread' },
         { keys: ['⌥-click'], desc: 'Mark conversation unread' },
@@ -670,6 +672,7 @@ export default function SettingsModal({
                     <div className="sb-setting-desc">
                       Preserves Markdown formatting inside broader selections. Exact component selections
                       copy their content; copy buttons preserve complete formatting. Turn this off for plain text.
+                      ⇧⌘C copies a selection the other way.
                     </div>
                   </div>
                 </div>
@@ -760,7 +763,7 @@ export default function SettingsModal({
               // Columns on a wrapper, not the page: the page is the scroll container, and columns on a
               // box of fixed height add columns sideways instead of letting it scroll down.
               <div className="sb-shortcut-columns">
-                {groupsFor(tabsEnabled).map((group) => (
+                {groupsFor(tabsEnabled, markdownCopy).map((group) => (
                   <div className="sb-modal-group" key={group.title}>
                     <div className="sb-modal-group-label">{group.title}</div>
                     <div className="sb-shortcuts">
