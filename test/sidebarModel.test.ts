@@ -12,6 +12,7 @@ import {
   buildSidebarHeld,
   dropNeighbors,
   resumeWrites,
+  unpinWrites,
   visibleRows,
   enteredFolders,
   withFolders,
@@ -776,6 +777,38 @@ describe('a Resume', () => {
   it('writes nothing for a pinned row, or a row the model does not hold', () => {
     expect(resumeWrites(model, 'pin', T)).toEqual({})
     expect(resumeWrites(model, 'nobody', T)).toEqual({})
+  })
+})
+
+describe('an Unpin', () => {
+  // `pin` is the oldest row in its folder and carries a stale drag override from before it was pinned,
+  // so falling back to where it ranked would put it last — past the folder's cap. `ahead`, in another
+  // folder, ranks past the clock: the Unpin must land above it too.
+  const groups = [
+    group('/w/one', [conv('newer', T - 1000), conv('older', T - 2000), conv('pin', T - 9000)]),
+    group('/w/two', [conv('ahead', T - 4000)])
+  ]
+  const before = { groups, rowRanks: { ahead: T + 500, pin: T - 9500 } }
+  const model = buildSidebar(input({ ...before, pinned: ['pin'] }))
+
+  it('lifts the row above every unpinned row, in every folder', () => {
+    expect(unpinWrites(model, 'pin', T)).toEqual({ pin: T + 501 })
+  })
+
+  it('makes the row the first unpinned row, in its folder and in All mode', () => {
+    const rowRanks = { ...before.rowRanks, ...unpinWrites(model, 'pin', T) }
+    const folders = buildSidebar(input({ groups, rowRanks }))
+    expect(folders.groups.find((g) => g.key === '/w/one')?.blocks[0].rows.map((r) => r.sessionId)).toEqual([
+      'pin',
+      'newer'
+    ])
+    const all = buildSidebar(input({ mode: 'all', groups, rowRanks, limits: { ...LIMITS, allCap: 9 } }))
+    expect(visibleRows(all).map((r) => r.sessionId)).toEqual(['pin', 'ahead', 'newer', 'older'])
+  })
+
+  it('writes nothing for a row that is not pinned, or a row the model does not hold', () => {
+    expect(unpinWrites(model, 'newer', T)).toEqual({})
+    expect(unpinWrites(model, 'nobody', T)).toEqual({})
   })
 })
 

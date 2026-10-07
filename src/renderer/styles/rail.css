@@ -18,10 +18,13 @@
 }
 /* Bottom scroll-fade: shown only while the conversation list overflows AND isn't scrolled to the
    bottom (useOverflowFade toggles `has-fade-bottom` on .sb-rail-body). Pinned to the rail's visible
-   bottom so it doesn't scroll with the rows; pointer-events:none so it never blocks clicks/scroll. */
+   bottom so it doesn't scroll with the rows; pointer-events:none so it never blocks clicks/scroll.
+   Above the sticky folder headers (z-index 2): nothing catches a header at the bottom the way the top
+   does, so a header scrolling out there must dissolve with the rows around it. */
 .sb-rail::after {
   content: '';
   position: absolute;
+  z-index: 3;
   left: 0;
   right: 0;
   bottom: 0;
