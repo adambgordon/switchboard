@@ -12,12 +12,17 @@
   transition: background var(--dur-fast);
 }
 .sb-row:hover {
-  background: var(--rail-hover);
+  background: var(--sunken-hover);
 }
-/* The focused pane's conversation is white, hovered or not (rail.css shifts it a step on hover). */
+/* The focused pane's conversation — the one the keyboard acts on — is the rail's one inverted row
+   (--row-selected), hovered or not. One row, not one per pane: the other pane's tab says it is on
+   screen by itself (tabs.css). The ⋮ taking the dot's place says the pointer is on it. Its dot is the
+   one for that fill, or a chosen color placed against it (applyDotColor). */
 .sb-row.selected,
 .sb-row.selected:hover {
-  background: var(--paper-raised);
+  background: var(--row-selected);
+  --dot: var(--dot-on-selected, var(--row-selected-dot));
+  --dot-halo: var(--row-selected-halo);
 }
 /* Compact: one line. Logo, title, then the elsewhere glyph and the dot/⋮ slot, all centered. Both
    paddings are short of the spacious row's, because each end's slot is wider than the mark it holds:
@@ -31,26 +36,40 @@
 .sb-row.compact .sb-row-lead {
   margin-right: -2px;
 }
-/* Asking or unread: the title goes as heavy as its folder's name does for the same reason (needsYou). */
+/* The ink a row's title and pin take: the resting gray, full ink when it needs you (asking or unread —
+   needsYou, as its folder's name), a lighter gray when hidden — hidden after needing you, so that gray
+   always means hidden, in every filter. The selected row takes the same tiers in its own inverted
+   inks. Color only, so it moves nothing. */
+.sb-row {
+  --rail-ink: var(--ink-rest);
+}
+.sb-row.attention {
+  --rail-ink: var(--ink);
+}
+.sb-row.dimmed {
+  --rail-ink: var(--ink-hidden);
+}
+.sb-row.selected {
+  --rail-ink: var(--row-selected-ink);
+}
+.sb-row.selected.dimmed {
+  --rail-ink: var(--row-selected-hidden);
+}
+/* Needing you also goes as heavy as its folder's name does. */
 .sb-row.attention .sb-row-title {
   font-weight: 800;
 }
-/* …and its agent mark leaves the ghost ink for the title's own, so the logo carries the same weight.
-   Not on a hidden row, whose gray says hidden. */
-.sb-row.attention:not(.dimmed) .sb-row-lead,
-.sb-row.attention:not(.dimmed) .sb-row-meta > .sb-agent-logo,
-.sb-row.attention:not(.dimmed) .sb-row-meta > .sb-bg-agent-mark {
-  color: var(--ink);
+/* A row in full ink takes its marks with it, so they carry the title's weight. Otherwise they stay
+   quiet — every row has one, and a column of them at the title's gray is noise. Not on a hidden row,
+   whose gray says hidden. Spacious's logo sits on the meta line instead, and always keeps its gray; the
+   pin follows the logo in each. */
+.sb-row:is(.attention, .selected):not(.dimmed) :is(.sb-row-lead, .sb-row-elsewhere),
+.sb-row.compact:is(.attention, .selected):not(.dimmed) .sb-row-pin {
+  color: var(--rail-ink);
 }
 .sb-row.compact .sb-row-title {
   flex: 1;
   min-width: 0;
-}
-/* Hidden by the user: grayed in every filter, so gray always means hidden. Color only, so it moves
-   nothing. */
-.sb-row.dimmed .sb-row-title,
-.sb-row.dimmed .sb-row-pin {
-  color: var(--ink-ghost);
 }
 /* The logo column is as wide as its widest occupant, the background-session ring, so titles line up
    whichever mark a row carries. Ghost ink, as on the spacious meta line: many rows, a quiet tag. */
@@ -111,23 +130,34 @@
   font-size: var(--text-base);
   /* A light resting weight is what lets a folder needing attention (800) stand out. */
   font-weight: 400;
-  color: var(--ink);
+  color: var(--rail-ink);
   line-height: 1.35;
 }
 /* A pinned conversation carries a small filled pin ahead of its title — an indicator, not a control
-   (pin and unpin live on the ⋮ menu). Soft ink rather than faint, so it still reads in dark. */
+   (pin and unpin live on the ⋮ menu). In metadata's gray, between the logo's ghost and the title's
+   ink: behind the title, but not as faint as the logo, which would lose it in dark. A hidden row's pin
+   takes the hidden title's gray, so it never outranks it; in Compact it takes full ink with the title,
+   as the logo does. */
 .sb-row-pin {
   display: inline-block;
   flex-shrink: 0;
   vertical-align: -1px;
   margin-right: 5px;
-  color: var(--ink-soft);
+  color: var(--ink-faint);
+}
+.sb-row.dimmed .sb-row-pin {
+  color: var(--ink-hidden);
 }
 .sb-row-preview {
   font-size: var(--text-xs);
   /* A hair past --ink-faint toward --ink-ghost, so the preview recedes under the title in both themes. */
   color: color-mix(in srgb, var(--ink-faint) 85%, var(--ink-ghost));
   line-height: 1.3;
+}
+/* A hidden row recedes as a whole: its preview drops below the hidden title's gray, so the title
+   still reads above it. */
+.sb-row.dimmed .sb-row-preview {
+  color: var(--ink-ghost);
 }
 /* placeholder shown when a row has no preview yet (a just-spawned session) — lighter and
    italic so it reads as absent-content, not a real message, while holding the row height */
@@ -198,8 +228,8 @@
 }
 /* Same stuck-:hover problem, for the row body and its dot: a compositor transform doesn't re-run
    :hover, so a row that begins its slide under the cursor would carry the hover fill, with its dot
-   swapped out, the whole glide. Revert both to the resting look while .sb-flipping. The white row's
-   own revert is in rail.css. */
+   swapped out, the whole glide. Revert both to the resting look while .sb-flipping. The selected row
+   needs no revert: hover never changes its fill. */
 .sb-row.sb-flipping:not(.selected) {
   background: transparent;
 }
@@ -208,21 +238,44 @@
 }
 .sb-row-menu-btn:hover {
   color: var(--ink);
-  background: var(--paper-active);
+  background: var(--hover-press);
+}
+
+/* The rest of the selected row — preview, meta line, the marks, the ⋮ — in its softer inverted ink,
+   where the other rows use their quiet grays (a hidden row's included: its title says hidden). Late in
+   the sheet so it wins over those grays; the full-ink marks above still win over it. */
+.sb-row.selected
+  :is(.sb-row-lead, .sb-row-elsewhere, .sb-row-pin, .sb-row-preview, .sb-row-preview-empty, .sb-row-meta, .sb-row-menu-btn) {
+  color: var(--row-selected-soft);
+}
+.sb-row.selected .sb-sep {
+  background: currentColor;
+}
+/* Except the pin of a hidden row, which keeps the hidden title's gray, as it does off the selection. */
+.sb-row.selected.dimmed .sb-row-pin {
+  color: var(--row-selected-hidden);
+}
+.sb-row.selected .sb-row-menu-btn:hover {
+  color: var(--row-selected-ink);
+  background: var(--row-selected-press);
 }
 
 /* ---- gesture affordances (useBlockReorder) ---- */
 /* Drag-to-reorder: the moving unit is a `position:fixed` CLONE on <body> (useBlockReorder), so it
    escapes the rail body's overflow clip and floats over the head and the sticky folder headers; this
-   `.dragging` look (white + hairline ring + shadow, via box-shadow so no border reflow) styles that
-   clone. The real unit is hidden in place as the gap; siblings glide as the gap relocates; commits on
+   `.dragging` look (the rail's own surface, as a moving folder's, + hairline ring + shadow, via
+   box-shadow so no border reflow) styles that clone. The real unit is hidden in place as the gap; siblings glide as the gap relocates; commits on
    drop. */
 .sb-row.dragging {
   cursor: grabbing;
-  background: var(--paper-raised) !important;
+  background: var(--paper-sunken) !important;
   box-shadow:
     0 0 0 1px var(--rule-strong),
     var(--shadow-pane) !important;
+}
+/* The selected row keeps its fill while it moves, or its inverted ink would sit on white. */
+.sb-row.selected.dragging {
+  background: var(--row-selected) !important;
 }
 /* The whole window shows the grab cursor for the duration, not just the dragged row: the pointer is
    captured and passes over rows and buttons whose own `cursor: pointer` would otherwise win. */
@@ -241,10 +294,9 @@ body.sb-dragging-row {
     0 0 0 1px var(--rule-strong),
     var(--shadow-pane);
 }
-/* In place, the header's paper reaches past it to cover rows scrolling beneath; on the card it would
-   paint over the card's edge instead. */
+/* The header's square paper would show past the card's rounded top corners; the card paints the same
+   surface already. */
 .sb-group.dragging > .sb-group-head {
-  box-shadow: none;
   background: transparent;
 }
 /* Siblings glide as the gap relocates. */

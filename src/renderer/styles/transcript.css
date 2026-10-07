@@ -1113,7 +1113,7 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 }
 .copy-btn.transcript-copy:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--pane-hover);
 }
 
 /* ---- copy affordances — hover-revealed icon buttons that flash a check on click. Neutral ink only

@@ -464,6 +464,18 @@ export function resumeWrites(model: SidebarModel, id: string, now: number): Reco
 }
 
 /**
+ * An Unpin's write: the row leaves the pinned rows for the top of the unpinned ones, where a Resume
+ * would put it — not back where it ranked before it was pinned, which may be far down a folder or past
+ * its cap. Taken while the row is still pinned, so the space it lands above is every other row. A row
+ * that is not pinned, or that the model does not hold, writes nothing.
+ */
+export function unpinWrites(model: SidebarModel, id: string, now: number): Record<string, number> {
+  const place = model.rows.get(id)
+  if (!place || !place.pinned) return {}
+  return { [id]: bumpRank(topRank(rankSpace(model)), now) }
+}
+
+/**
  * `buildSidebar`, holding in place every live row whose seed changed since `before` — a new Claude
  * conversation the index has just listed, whose stand-in row was seeded by its terminal's start (see
  * `holdRank`) — and its folder, when that row was what seeded it. Held in the SAME build, so the rail

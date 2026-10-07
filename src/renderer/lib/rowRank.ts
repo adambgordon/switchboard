@@ -3,10 +3,11 @@
  *
  * Every row has a rank and the rail sorts descending. A row nobody has touched ranks at its SEED — a
  * fixed number derived from the row itself (its conversation's start, see `sidebarModel`) — and
- * stores nothing. Only four events write, each one key: a drag writes the dropped row's new rank, a
- * Resume lifts its row above everything, a placeholder terminal binding to its real conversation
- * hands its rank to the real id, and a new conversation's first index keeps the rank its terminal's
- * stand-in row had. Nothing derived from the catalog is ever written, so rendering
+ * stores nothing. Only five events write, each one key: a drag writes the dropped row's new rank, a
+ * Resume lifts its row above everything, an Unpin lifts its row the same way, a placeholder terminal
+ * binding to its real conversation hands its rank to the real id, and a new conversation's first
+ * index keeps the rank its terminal's stand-in row had. Nothing derived from the catalog is ever
+ * written, so rendering
  * against a partial or empty catalog (startup, a second window) cannot lose a position.
  *
  * Ranks are ms timestamps, so a rank space is global: the same numbers order the All list and every

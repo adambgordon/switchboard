@@ -18,10 +18,13 @@
 }
 /* Bottom scroll-fade: shown only while the conversation list overflows AND isn't scrolled to the
    bottom (useOverflowFade toggles `has-fade-bottom` on .sb-rail-body). Pinned to the rail's visible
-   bottom so it doesn't scroll with the rows; pointer-events:none so it never blocks clicks/scroll. */
+   bottom so it doesn't scroll with the rows; pointer-events:none so it never blocks clicks/scroll.
+   Above the sticky folder headers (z-index 2): nothing catches a header at the bottom the way the top
+   does, so a header scrolling out there must dissolve with the rows around it. */
 .sb-rail::after {
   content: '';
   position: absolute;
+  z-index: 3;
   left: 0;
   right: 0;
   bottom: 0;
@@ -109,7 +112,7 @@
 .sb-rail-search-btn:hover,
 .sb-rail-icon-btn:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--sunken-hover);
 }
 /* An open control is told by its glyph, never a pressed tile: search draws heavier, and the filter
    takes full ink while its menu is open and draws heavier while a criterion is set. */
@@ -173,7 +176,7 @@
 }
 .sb-rail-search-clear:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--sunken-hover);
 }
 .sb-rail-body {
   flex: 1;
@@ -188,8 +191,7 @@
      --rail-inset PLUS the gutter it doesn't have to reserve; both of a row's edges then land the same
      distance from the rail's edge. Equalizing the two un-centers the rows again.
      The padding is also the only room anything may paint OUTSIDE a row, because the overflow clip edge
-     is the padding box: the white row's 2px edge, and a folder header's hover fill,
-     which hangs into the leading side (.sb-group-toggle).
+     is the padding box: a folder header's hover fill hangs into the leading side (.sb-group-toggle).
      Top also trades against .sb-rail-head's bottom padding: that pair must always sum to 17px or the
      first row moves. Bottom has no such partner, so it is the cheap one to widen. */
   padding: 6px var(--rail-inset) 12px calc(var(--rail-inset) + var(--bar-thin));
@@ -224,32 +226,14 @@
   line-height: 1.45;
 }
 
-/* Selection and hover SNAP: easing the white in on the new row and out on the old one reads as a
-   selection lag on every arrow key and click. */
+/* Selection and hover SNAP: easing the selected fill in on the new row and out on the old one reads
+   as a selection lag on every arrow key and click. */
 .sb-rail-body .sb-row {
   transition: none;
 }
-/* The focused pane's conversation — the one the keyboard acts on — is the rail's one white row
-   (.selected, sidebar.css), edged in 2px of cobalt. One row, not one per pane: the other pane's tab
-   says it is on screen by itself (tabs.css), and two white rows read as two selections. This edge is
-   the one sanctioned use of cobalt for something other than liveness: it is --live, not --dot, so a
-   user's dot color never repaints it, and it marks only the single row the keyboard acts on. */
-.sb-rail-body .sb-row.selected {
-  box-shadow: 0 0 0 2px var(--live);
-}
-/* Hovering it shifts its white a step, as a resting row's hover shifts the rail's paper. */
-.sb-rail-body .sb-row.selected:hover {
-  background: var(--rail-selected-hover);
-}
-/* A sliding row keeps its :hover the whole glide (a compositor transform doesn't re-run it — see
-   .sb-flipping in sidebar.css), so the shift is dropped for the slide. */
-.sb-rail-body .sb-row.sb-flipping.selected {
-  background: var(--paper-raised);
-}
-
 /* Lightweight inter-row dividers, Spacious only — Compact draws no lines at all, rows or folders. An
    inset hairline centered in the 3px gap between two adjacent rows, but only when both are at rest: the
-   white row and a hovered row each carry a fill, so the divider yields to both. A NATIVE border on a
+   selected row and a hovered row each carry a fill, so the divider yields to both. A NATIVE border on a
    zero-height box, not a 1px background band: at fractional zoom a band
    alternates between physical-pixel thicknesses from row to row, where a border snaps its weight. The
    + combinator re-evaluates on hover and selection, so it appears and disappears with zero reflow. */
@@ -287,9 +271,31 @@
 .sb-block + .sb-block {
   margin-top: -2px;
 }
+/* Compact packs its rows tighter, with no divider to center between them. */
+.sb-rail.compact .sb-block {
+  gap: 1.5px;
+}
+/* Compact folders sit tighter too: a name spaced from its first row as the rows are from each other,
+   folders 2px apart. The group's gap is the rows' own, so the pinned/unpinned boundary needs no
+   correction. */
+.sb-rail.compact .sb-rail-body {
+  gap: 2px;
+}
+.sb-rail.compact .sb-group {
+  gap: 1.5px;
+}
+.sb-rail.compact .sb-block + .sb-block {
+  margin-top: 0;
+}
+/* The reserved line is Compact's whole folder break: 3px below the last row, 2px above the next
+   folder. */
+.sb-rail.compact .sb-rail-more-row {
+  margin-top: 1.5px;
+  margin-bottom: 0;
+}
 /* Sticky, and inside its own group, so a header un-sticks as its group scrolls away — you always know
    which folder you are in. It paints the rail's own surface over the rows sliding beneath, and sits
-   above them (a selected or hovered row lifts to z-index 1). */
+   above them. */
 .sb-group-head {
   position: sticky;
   /* Minus .sb-rail-body's padding-top: a sticky box sticks at the scroll container's CONTENT edge, so
@@ -305,12 +311,6 @@
      the name's hover pill. */
   padding: 6px 0 0;
   background: var(--paper-sunken);
-  /* The paper reaches out across the body's side padding (14px leading, 7px trailing), past the
-     header's own box: the white row's edge paints outside the row, so a header only as wide as the
-     rows would leave its edges showing beside it as the row scrolls underneath. */
-  box-shadow:
-    -14px 0 0 var(--paper-sunken),
-    7px 0 0 var(--paper-sunken);
 }
 /* Compact already has its break: the previous folder's reserved Show more line (Sidebar.tsx), which
    ends where this box begins. Padding on top of it would only widen the break. */
@@ -369,10 +369,10 @@
 .sb-group-toggle:hover,
 .sb-group-toggle:focus-visible {
   outline: none;
-  background: var(--rail-hover);
+  background: var(--sunken-hover);
 }
 .sb-group-toggle:active {
-  background: var(--paper-active);
+  background: var(--hover-press);
 }
 /* A leader rule from the end of the name to the header's far edge, so each header doubles as the
    break between folders. --ink-ghost reads darker than the --rule
@@ -412,11 +412,22 @@
 .sb-rail.compact .sb-group-toggle {
   padding-right: 24px;
 }
+/* A folder header's ink, in a row's three tiers (.sb-row, sidebar.css): soft at rest, full ink while
+   something inside needs you, ghost when the folder is hidden — hidden last, so it wins. */
+.sb-group-toggle {
+  --rail-ink: var(--ink-rest);
+}
+.sb-group-toggle.attention {
+  --rail-ink: var(--ink);
+}
+.sb-group-head.dimmed .sb-group-toggle {
+  --rail-ink: var(--ink-hidden);
+}
 /* The folder glyph follows the name: same ink, and heavier with it. Open while the folder is
    expanded, closed while collapsed. */
 .sb-group-icon {
   flex-shrink: 0;
-  color: var(--ink);
+  color: var(--rail-ink);
 }
 .sb-group-toggle.attention .sb-group-icon {
   stroke-width: 2.3;
@@ -443,7 +454,7 @@
   font-size: calc(var(--text-base) + 0.5px);
   font-weight: 400;
   line-height: 1.35;
-  color: var(--ink);
+  color: var(--rail-ink);
 }
 .sb-group-label > span {
   grid-area: 1 / 1;
@@ -457,11 +468,6 @@
    look", and an agent working in the background is not a reason to. */
 .sb-group-toggle.attention .sb-group-label-text {
   font-weight: 800;
-}
-/* A hidden folder: the same ghost ink a hidden row's title takes, in every filter. */
-.sb-group-head.dimmed .sb-group-icon,
-.sb-group-head.dimmed .sb-group-label {
-  color: var(--ink-ghost);
 }
 
 /* New conversation in this folder (SidebarGroupHeader). The pencil shows while the pointer is anywhere
@@ -535,16 +541,16 @@
 .sb-group-agent:focus-visible {
   outline: none;
   color: var(--ink);
-  background: var(--rail-hover);
+  background: var(--sunken-hover);
 }
 .sb-group-toggle:hover ~ .sb-group-new .sb-group-pencil,
 .sb-group-toggle:focus-visible ~ .sb-group-new .sb-group-pencil {
-  background: var(--rail-hover);
+  background: var(--sunken-hover);
 }
 .sb-group-pencil:active,
 .sb-group-agent:active,
 .sb-group-toggle:active ~ .sb-group-new .sb-group-pencil {
-  background: var(--paper-active);
+  background: var(--hover-press);
 }
 /* Nothing to start from mid-drag: hidden on every folder while one moves, and in the moving copy. */
 .sb-dragging-row .sb-group-new,
@@ -585,13 +591,16 @@
   display: flex;
   gap: var(--s3);
   padding: 0 8px;
-  /* Nearer the last row above it than the next folder's header below, so it reads as the folder's
-     closing line rather than the next folder's opener — and clear of that header, whose paper would
-     otherwise cover it. */
-  margin-top: -3px;
-  margin-bottom: -1.5px;
-  /* The button's line box, so an empty reserved line (Compact's folder break) is as tall as a full one. */
-  min-height: calc(var(--text-2xs) * 1.1);
+  /* Its ink 3.5px below the last row and 3px above the next folder's header, so it reads as the
+     folder's closing line — the header's own top padding keeps the next name further off still. */
+  margin-top: -1.5px;
+  margin-bottom: -2px;
+  /* Cut to the label's ink: neither label has a descender, so the line runs from cap height to the
+     baseline (.sb-rail-more), and an empty reserved line (Compact's folder break) is as tall as a
+     full one. */
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  min-height: 1cap;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease);
 }
@@ -612,4 +621,11 @@
 }
 .sb-rail-more:hover {
   color: var(--ink);
+}
+/* The trim above, on the folder's own line only (the empty rail's buttons share the look, not the
+   line). The padding, cancelled by the margin, keeps the click target the untrimmed line's height. */
+.sb-rail-more-row .sb-rail-more {
+  text-box: trim-both cap alphabetic;
+  padding: 2px 0;
+  margin-block: -2px;
 }

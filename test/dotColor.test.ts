@@ -3,6 +3,7 @@ import {
   DEFAULT_DOT_COLOR,
   DOT_COLOR_COMMIT_MS,
   clampDotColor,
+  clampSelectedDotColor,
   contrastRatio,
   oklch,
   parseDotColor,
@@ -11,6 +12,8 @@ import {
 
 /** Mirrors the reference surfaces the clamp is solved against. */
 const SURFACE = { light: '#f4f4f4', dark: '#2a2a2a' } as const
+/** The selected rail row's fill in each theme (--row-selected), which inverts it. */
+const SELECTED_SURFACE = { light: '#2d2d2d', dark: '#d9d9d9' } as const
 
 /** Picks spanning the gamut corners, where a free-form color is most likely to disappear. */
 const PICKS = [
@@ -185,5 +188,36 @@ describe('clampDotColor', () => {
 
   it('normalizes case without otherwise altering an in-band pick', () => {
     expect(clampDotColor('#1F5AE6', 'light')).toBe('#1f5ae6')
+  })
+})
+
+describe('clampSelectedDotColor', () => {
+  it('clears the contrast floor on the selected row in both themes', () => {
+    // Against the row's own fill, which inverts the theme. Delegating to clampDotColor would solve
+    // against the wrong surface in the wrong direction, and fail here for the shipped cobalt alone.
+    for (const pick of PICKS) {
+      for (const theme of ['light', 'dark'] as const) {
+        const shown = clampSelectedDotColor(pick, theme)
+        expect(
+          contrastRatio(shown, SELECTED_SURFACE[theme]),
+          `${pick} on the ${theme} selected row rendered as ${shown}`
+        ).toBeGreaterThanOrEqual(3)
+      }
+    }
+  })
+
+  it('moves the opposite way to the theme', () => {
+    // Lighter on light's near-black row, darker on dark's light gray one. Each theme's direction is
+    // asserted on its own, so a clamp that always lightened or always darkened fails one of them.
+    const blueInLight = clampSelectedDotColor('#1f5ae6', 'light')
+    expect(oklch(blueInLight).L).toBeGreaterThan(oklch('#1f5ae6').L)
+
+    const yellowInDark = clampSelectedDotColor('#ffff00', 'dark')
+    expect(oklch(yellowInDark).L).toBeLessThan(oklch('#ffff00').L)
+  })
+
+  it('returns a pick that is already legible on the row unchanged', () => {
+    expect(clampSelectedDotColor('#ffff00', 'light')).toBe('#ffff00')
+    expect(clampSelectedDotColor('#0000ff', 'dark')).toBe('#0000ff')
   })
 })

@@ -266,15 +266,20 @@ module.exports = function installRailHelpers() {
       const row = body().querySelector('.sb-row.selected')
       return row ? keyOf(row) : null
     },
-    ring: (key) => {
+    // The selected row's paint, and the tokens it should paint from, resolved to rgb by a probe.
+    selectedFill: (key) => {
       const row = body().querySelector(`.sb-row[data-key="${CSS.escape(key)}"], .sb-row[data-session="${CSS.escape(key)}"]`)
       const rs = getComputedStyle(row)
-      const rail = document.querySelector('.sb-rail')
-      const shadow = rs.boxShadow
       const rgb = (s) => s.match(/[\d.]+/g).slice(0, 3).map(Number)
+      const probe = document.createElement('div')
+      probe.style.cssText = 'background-color: var(--row-selected); color: var(--row-selected-ink)'
+      document.body.appendChild(probe)
+      const ps = getComputedStyle(probe)
+      const token = { fill: rgb(ps.backgroundColor), ink: rgb(ps.color) }
+      probe.remove()
       return {
-        dpr: devicePixelRatio, row: row.getBoundingClientRect().toJSON(), clip: box(), selected: row.classList.contains('selected'),
-        shadow, ring: rgb(shadow), inside: rgb(rs.backgroundColor), outside: rgb(getComputedStyle(rail).backgroundColor)
+        row: row.getBoundingClientRect().toJSON(), clip: box(), selected: row.classList.contains('selected'),
+        shadow: rs.boxShadow, fill: rgb(rs.backgroundColor), title: rgb(getComputedStyle(row.querySelector('.sb-row-title')).color), token
       }
     }
   }

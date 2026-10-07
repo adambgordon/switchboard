@@ -32,6 +32,7 @@ import {
   folderRankSpace,
   rankSpace,
   resumeWrites,
+  unpinWrites,
   synthMeta,
   visibleRows,
   enteredFolders,
@@ -1918,14 +1919,20 @@ export default function App() {
   )
 
   // Pin/unpin, gated so a provisional row (no persisted identity yet) can't enter the persisted pin
-  // store under a placeholder id that would orphan once it binds to its real id.
+  // store under a placeholder id that would orphan once it binds to its real id. An unpinned row lands
+  // at the top of the unpinned rows; its rank is written in the same handler as the unpin, so the two
+  // render together and the row never shows back where it ranked before.
   const togglePinGated = useCallback(
     (id: string) => {
       if (isProvisional(id)) return
       if (!pinned.has(id)) keepTab(id)
+      else {
+        const writes = sidebarModelRef.current ? unpinWrites(sidebarModelRef.current, id, Date.now()) : {}
+        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+      }
       togglePin(id)
     },
-    [isProvisional, togglePin, pinned, keepTab]
+    [isProvisional, togglePin, pinned, keepTab, mutateRows]
   )
 
   // Option+click marks a live row unread. Gated for the same reason pins are: `useSeen` persists to

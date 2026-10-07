@@ -166,7 +166,7 @@
 }
 .sb-btn-ghost:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--pane-hover);
 }
 .sb-btn-ghost.danger:hover {
   color: var(--danger-ink);
@@ -313,7 +313,7 @@ body.sb-resizing .sb-pane {
 }
 .sb-panel-toggle:hover:not(:disabled) {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--sunken-hover);
 }
 .sb-panel-toggle:disabled {
   opacity: 0.35;
@@ -322,10 +322,10 @@ body.sb-resizing .sb-pane {
 .sb-panel-toggle.active {
   color: var(--ink-soft);
 }
-/* A filled bell rests at the open panel's ink, not the ghost: a ghost fill reads as a third, weaker
-   state. Hover still takes it to full ink. */
+/* A filled bell means something needs you, so it takes the full ink a row needing you does. Already at
+   full ink, it tells hover by the fill alone — as a row or a tab does. */
 .sb-bell.filled {
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 /* Attention dot — a small NEUTRAL ink dot marking "the app isn't up to date" (update available, or
@@ -413,7 +413,7 @@ body.sb-resizing .sb-pane {
   transition: background var(--dur-fast);
 }
 .sb-bell-item:hover {
-  background: var(--rail-hover);
+  background: var(--sunken-hover);
 }
 .sb-bell-open {
   display: flex;
@@ -476,7 +476,7 @@ body.sb-resizing .sb-pane {
 }
 .sb-bell-read:hover {
   color: var(--ink);
-  background: var(--paper-active);
+  background: var(--hover-press);
 }
 
 /* ---- keyboard-shortcuts modal ---- */
@@ -535,7 +535,11 @@ body.sb-resizing .sb-pane {
 }
 .sb-modal-close:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--raised-hover);
+}
+/* Preferences' head wears the chrome's paper, not the modal's, so its close takes the chrome's hover. */
+.sb-modal-settings .sb-modal-close:hover {
+  background: var(--sunken-hover);
 }
 .sb-modal-body {
   padding: 6px 18px 16px;
@@ -670,12 +674,12 @@ body.sb-resizing .sb-pane {
 }
 .sb-settings-nav-item:hover {
   color: var(--ink-soft);
-  background: var(--paper-hover);
+  background: var(--sunken-hover);
 }
 .sb-settings-nav-item.active {
   color: var(--ink);
   font-weight: 600;
-  background: var(--paper-active);
+  background: var(--sunken-selected);
 }
 .sb-settings-page {
   flex: 1;
@@ -1251,7 +1255,7 @@ body.sb-resizing .sb-pane {
 }
 .sb-slider-reset:hover:not(:disabled) {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--pane-hover);
 }
 .sb-slider-reset:disabled {
   opacity: 0.35;
@@ -1408,7 +1412,7 @@ body.sb-resizing .sb-pane {
   box-shadow: inset 0 0 0 1.5px var(--dot);
 }
 .sb-ctxmenu-item:hover {
-  background: var(--paper-hover);
+  background: var(--raised-hover);
   color: var(--ink);
 }
 /* faint keyboard-shortcut hint, pushed to the right edge of the item */
