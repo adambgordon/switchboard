@@ -53,7 +53,7 @@ describe('customTitle (/rename) precedence', () => {
       {
         type: 'custom-title',
         sessionId: 's',
-        customTitle: '<command-message>deep-review</command-message> <command-name>/deep-review</command-name>'
+        customTitle: '<command-message>compact</command-message> <command-name>/compact</command-name>'
       }
     ])
     const title = (await extractMeta(fp))?.title ?? ''
