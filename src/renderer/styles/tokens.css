@@ -7,7 +7,7 @@
 :root {
   /* ---- paper & ink (neutral grayscale — no warm tint) ---- */
   --paper: #fafafa; /* app field */
-  --paper-raised: #ffffff; /* raised tiles: the selected rail row, modals, menus, popovers */
+  --paper-raised: #ffffff; /* raised tiles: modals, menus, popovers */
   --paper-pane: #ffffff; /* main content surface: pane + Formatted + terminal (= raised in light) */
   --paper-sunken: #f4f4f4; /* sidebar / rail */
   --paper-code: #f6f6f6; /* unified mono surface: fenced + inline code AND tool result/JSON — midway between sunken and pane */
@@ -34,13 +34,11 @@
      both themes — a single shared fill lands as a different step on each, too faint on one and glaring
      on the next. --paper-hover stays for fills that are not hovers.
      The chrome (--paper-sunken: rail, title bar, Preferences nav): rail rows, folder headers, the
-     bell's rows, and the chrome's own icon buttons. It must never reach the rail's white row
-     (--paper-raised): in light the two part ways (hover darkens, the selection goes white); in dark
-     it stays below it. */
+     bell's rows, and the chrome's own icon buttons. */
   --sunken-hover: #e3e3e3;
-  /* A selected item on the chrome that isn't a rail row (the Preferences nav). Light goes white, as the
-     rail's selection does, so selection and hover move in opposite directions. Dark keeps a gray well
-     past the hover: its white row (--paper-raised) sits too near the hover to tell apart unaided. */
+  /* A selected item on the chrome that isn't a rail row (the Preferences nav). Light goes white, so
+     selection and hover move in opposite directions. Dark keeps a gray well past the hover:
+     --paper-raised sits too near the hover there to tell apart unaided. */
   --sunken-selected: var(--paper-raised);
   /* The pane (--paper-pane): the pane header's controls, the transcript's, the Preferences page. */
   --pane-hover: #ededed;
@@ -52,6 +50,20 @@
      step past both hovers, so it still shows on them. */
   --hover-press: #d9d9d9;
 
+  /* The rail's selected row — the focused pane's conversation — inverts its theme: a near-black fill
+     here, light gray in dark, the same lightness step off the rail in both (≈ 78 L*). What sits on it
+     takes the other theme's ink: --ink for the title, --ink-soft for the rest, --ink-faint for a
+     hidden title, and the other theme's legible cobalt for the dot, its halo at the other theme's
+     strength. A chosen dot color is placed against this fill on its own (dotColor.ts, which repeats
+     --row-selected — move the two together). */
+  --row-selected: #2d2d2d;
+  --row-selected-ink: #f2f2f2;
+  --row-selected-soft: #c0c0c0;
+  --row-selected-hidden: #8e8e8e;
+  --row-selected-press: rgba(255, 255, 255, 0.16); /* the ⋮'s hover on it */
+  --row-selected-dot: #84a7ff;
+  --row-selected-halo: 0.35;
+
   /* ---- accent 1: electric cobalt = alive ---- */
   --live: #1f5ae6;
   --live-ink: #1741b8; /* text-on-paper variant for contrast */
@@ -62,7 +74,8 @@
   /* The liveness dot alone, which Preferences -> Beta Features can recolor. Through --live rather
      than a copy of its value, so it tracks the accent per theme and needs no dark-scope twin; a
      chosen color is set inline on <html>, which outranks this, and clearing it lands back here
-     exactly. Recoloring --live instead would take the selected row's edge and Resume with it. */
+     exactly. Recoloring --live instead would take Resume and the brand marks with it. The selected
+     rail row sets its own (--row-selected-dot). */
   --dot: var(--live);
   /* Opacity of the breathing dot's halo. Theme-aware for the reason --shadow-sel-hover is: the
      same alpha does not carry the same strength across the light/dark gap. Measured as the
@@ -135,7 +148,7 @@
      Horizontal room between a rail row and the scrollport edge, and the dial for how much side space the
      rail spends: a row's visible inset on BOTH sides is this plus --bar-thin (see .sb-rail-body for why),
      so 7 + 7 = 14px. It is also the room anything painted outside a row has before .sb-rail-body's
-     overflow clip cuts it — today the focused row's 2px edge. Raising this costs row width, 1px/side. */
+     overflow clip cuts it — today a folder header's hover fill. Raising this costs row width, 1px/side. */
   --rail-inset: 7px;
   /* Where the rail's row text column starts: a row's inset, plus the gutter it doesn't reserve, plus
      .sb-row's own 8px padding. The head aligns to it, so its controls sit over the row titles. Anything
@@ -176,7 +189,7 @@
   /* ---- paper & ink (neutral) ---- *
    * Order: sunken (= app shell) < code < pane < raised < hover < active. */
   --paper: #191919; /* app shell / titlebar — the chrome (tracks --paper-sunken) */
-  --paper-raised: #2a2a2a; /* raised tiles: modals, menus, the rows on screen — lighter still */
+  --paper-raised: #2a2a2a; /* raised tiles: modals, menus — lighter still */
   --paper-pane: #212121; /* main content (pane / Formatted / terminal). The terminal's theme repeats
      this value (TerminalView) — move the two together. */
   --paper-sunken: #191919; /* left pane / rail + recessed bits — the darker chrome, below the pane */
@@ -198,12 +211,21 @@
   --rule: #2b2b2b; /* hairline */
   --rule-soft: #272727; /* softer = closer to the surface (nudged up to stay just above the lightened paper) */
   --rule-strong: #3f3f3f; /* stronger = more contrast */
-  --sunken-hover: #252525; /* a step above the chrome, and below the rail's white row — see the light note */
+  --sunken-hover: #252525; /* a step above the chrome — see the light note */
   --sunken-selected: var(--paper-active);
   --pane-hover: #2e2e2e;
   --raised-hover: #373737;
   --tab-hover: #0c0c0c; /* dips below the strip, away from the active tab's lift: the lane up to it is too narrow for a hover */
   --hover-press: var(--paper-active);
+  /* The inverted selected row (see light). Its hidden title is darker than light's --ink-faint, which
+     would barely part from this fill. */
+  --row-selected: #d9d9d9;
+  --row-selected-ink: #1a1a1a;
+  --row-selected-soft: #454545;
+  --row-selected-hidden: #7a7a7a;
+  --row-selected-press: rgba(0, 0, 0, 0.12);
+  --row-selected-dot: #1f5ae6;
+  --row-selected-halo: 0.22;
 
   /* ---- accent 1: electric cobalt = alive (brightened for dark; tints flip to dark) ---- */
   --live: #3b6cf0;

@@ -243,7 +243,7 @@ body.sb-window-drop-target .sb-tabstrip {
 /* Only the FOCUSED pane's active tab reads fully selected, so a split never shows two equally
    selected tabs. Ink weight alone carries it: full ink here, and the other pane's active tab drops to
    the resting gray like any tab at rest — the same one-conversation-at-a-time answer the rail gives,
-   where only the focused pane's row is white. The marker is deliberately not a bar along the tab's
+   where only the focused pane's row is selected. The marker is deliberately not a bar along the tab's
    edge: at the width of a tab that bar is a slab, and reads as a piece of chrome in its own right
    rather than as an attribute of the tab. */
 .sb-tab.active:not(.focused) {

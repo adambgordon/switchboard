@@ -14,7 +14,7 @@ interface Props {
   /** Compact: one line — logo, title, dot — with the rest in the hover. Spacious: title, preview and
    *  a meta line. */
   density: RailDensity
-  /** The focused pane's active tab — the one the keyboard acts on. The rail's one white row. */
+  /** The focused pane's active tab — the one the keyboard acts on. The rail's one inverted row. */
   selected: boolean
   /** The folder half of the hover's quiet third line (see `rowTipMeta`). */
   tipMeta: string

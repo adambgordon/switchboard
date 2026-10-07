@@ -16,7 +16,7 @@ const DRAG_ZOOMS = [0, 0.5]
 const GEOMETRY_ZOOMS = [-0.5, 0, 0.5]
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const results = []
-const ringRows = []
+const selectedRows = []
 const harnessNotes = []
 let win, dbg, ctx = {}, shotIndex = 0
 const js = (code) => win.webContents.executeJavaScript(code)
@@ -1351,8 +1351,11 @@ CHECKS['14-pencil'] = async () => {
   record('14-pencil', failures, details)
 }
 
-// Geometry: the selected row's 2px ring must clear the rail body's overflow clip on every side.
-async function ringCase(mode, density, position, failures) {
+// The selected row paints its inverted fill to all four edges, nothing covers any of them (the sticky
+// folder header above a first row, the next row below), it stays inside the rail body's overflow clip,
+// and its title takes the inverted ink. Sampled on screen 1 CSS px inside each edge, away from the
+// rounded corners.
+async function selectedCase(mode, density, position, failures) {
   await reset({ mode, density })
   const order = await js('window.order()')
   const rows = order.blocks.flatMap((b) => b.rows)
@@ -1361,54 +1364,39 @@ async function ringCase(mode, density, position, failures) {
   await call('scrollTo', position === 'top' ? 0 : 1e9)
   await park()
   await settle(300) // the bottom fade transitions out once scrolled to the end
-  const g = await call('ring', key)
-  if (!g.selected) { failures.push(`${mode}/${density}/${position}: row ${key} not selected`); return }
-  if (!/0px 0px 0px 2px/.test(g.shadow)) failures.push(`${mode}/${density}/${position}: unexpected ring ${g.shadow}`)
-  const shot = await screenshot(`${label()}-ring-${mode}-${density}-${position}`)
-  const s = shot.width / (await js('innerWidth'))
+  const tag = `${mode}/${density}/${position}`
+  const g = await call('selectedFill', key)
+  if (!g.selected) { failures.push(`${tag}: row ${key} not selected`); return }
+  const near = (a, b, tol) => a.every((c, i) => Math.abs(c - b[i]) <= tol)
+  if (g.shadow !== 'none') failures.push(`${tag}: the selected row draws an edge (${g.shadow})`)
+  if (!near(g.fill, g.token.fill, 0)) failures.push(`${tag}: fill ${g.fill} is not --row-selected ${g.token.fill}`)
+  if (!near(g.title, g.token.ink, 0)) failures.push(`${tag}: title ink ${g.title} is not --row-selected-ink ${g.token.ink}`)
   const { row, clip } = g
-  const dom = {
-    left: +(row.left - 2 - clip.left).toFixed(2), right: +(clip.right - (row.right + 2)).toFixed(2),
-    top: +(row.top - 2 - clip.top).toFixed(2), bottom: +(clip.bottom - (row.bottom + 2)).toFixed(2)
+  const clearance = {
+    left: +(row.left - clip.left).toFixed(2), right: +(clip.right - row.right).toFixed(2),
+    top: +(row.top - clip.top).toFixed(2), bottom: +(clip.bottom - row.bottom).toFixed(2)
   }
-  // A line of device pixels across one edge, from 4 CSS px outside the row to 1.5 inside it. Each pixel
-  // is scored as the fraction of ring it carries against the surface on ITS side of the row's (snapped)
-  // edge — the rail's paper outside, the white row inside — so a ring the rasterizer snapped a pixel
-  // either way still sums to its full width, and a clipped one comes up short.
-  const channel = (surface) => [0, 1, 2].reduce((best, c) => (Math.abs(g.ring[c] - surface[c]) > Math.abs(g.ring[best] - surface[best]) ? c : best), 0)
-  const score = (c, surface) => { const k = channel(surface); return Math.max(0, Math.min(1, (c[k] - surface[k]) / (g.ring[k] - surface[k]))) }
-  const across = (edge, outward, sampleAt) => {
-    const e = edge * s, boundary = Math.round(e)
-    let w = 0
-    for (let p = Math.floor(e - 4 * s); p <= Math.ceil(e + 4 * s); p++) {
-      const offset = outward < 0 ? boundary - (p + 1) : p - boundary // >= 0 outside the row
-      const depth = outward < 0 ? e - (p + 0.5) : (p + 0.5) - e
-      if (depth > 4 * s || depth < -1.5 * s) continue
-      w += score(sampleAt(p), offset >= 0 ? g.outside : g.inside)
-    }
-    return w
-  }
+  const shot = await screenshot(`${label()}-selected-${mode}-${density}-${position}`)
+  const s = shot.width / (await js('innerWidth'))
   const ys = Math.round((row.top + row.height / 2) * s), xs = Math.round((row.left + Math.min(40, row.width / 4)) * s)
-  const pixel = {
-    left: across(row.left, -1, (p) => shot.at(p, ys)),
-    right: across(row.right, 1, (p) => shot.at(p, ys)),
-    top: across(row.top, -1, (p) => shot.at(xs, p)),
-    bottom: across(row.bottom, 1, (p) => shot.at(xs, p))
+  const edges = {
+    left: shot.at(Math.floor((row.left + 1) * s), ys),
+    right: shot.at(Math.ceil((row.right - 1) * s) - 1, ys),
+    top: shot.at(xs, Math.floor((row.top + 1) * s)),
+    bottom: shot.at(xs, Math.ceil((row.bottom - 1) * s) - 1)
   }
-  const expected = 2 * s
   for (const side of ['left', 'right', 'top', 'bottom']) {
-    if (dom[side] < 0) failures.push(`${mode}/${density}/${position}: ring overruns the clip on the ${side} by ${(-dom[side]).toFixed(2)}px`)
-    if (Math.abs(pixel[side] - expected) > 0.75) failures.push(`${mode}/${density}/${position}: ${side} ring paints ${pixel[side].toFixed(2)} device px, expected ${expected.toFixed(2)}`)
+    if (clearance[side] < 0) failures.push(`${tag}: the row overruns the clip on the ${side} by ${(-clearance[side]).toFixed(2)}px`)
+    if (!near(edges[side].slice(0, 3), g.token.fill, 6)) failures.push(`${tag}: ${side} edge paints ${edges[side].slice(0, 3)}, expected the fill ${g.token.fill}`)
   }
-  ringRows.push({ theme: ctx.theme, zoom: ctx.zoom, mode, density, position, key, clearance: dom,
-    ringPx: Object.fromEntries(Object.entries(pixel).map(([k, v]) => [k, +v.toFixed(2)])), expectedPx: +expected.toFixed(2), shot: shot.file })
+  selectedRows.push({ theme: ctx.theme, zoom: ctx.zoom, mode, density, position, key, clearance, edges, shot: shot.file })
 }
-CHECKS['9-ring-geometry'] = async () => {
+CHECKS['9-selected-fill'] = async () => {
   const failures = []
   for (const mode of ['all', 'folders']) for (const density of ['compact', 'spacious']) for (const position of ['top', 'bottom']) {
-    await ringCase(mode, density, position, failures)
+    await selectedCase(mode, density, position, failures)
   }
-  record('9-ring-geometry', failures, {})
+  record('9-selected-fill', failures, {})
 }
 
 // The head's one row fits the rail at its minimum width (the host's 300px is PANE_LIMITS.min) in
@@ -1536,10 +1524,14 @@ app.whenReady().then(async () => {
     dbg = win.webContents.debugger
     dbg.attach('1.3')
     await js(`(${installRailHelpers.toString()})()`)
-    // Mutation self-test for the ring check: RAIL_MUTATE=clip removes the room the ring paints in, which
-    // the geometry check must then report on the top and trailing sides.
-    if (process.env.RAIL_MUTATE === 'clip') {
-      await js(`document.head.insertAdjacentHTML('beforeend', '<style>.sb-rail-body { padding-top: 1px !important; padding-right: 1px !important; }</style>')`)
+    // Mutation self-tests for the selected-row check: RAIL_MUTATE=cover paints a strip over the row's top
+    // edge, as a sticky header reaching into it would, and RAIL_MUTATE=ink gives the row the ordinary
+    // full ink, as a cascade slip would. The check must report each.
+    if (process.env.RAIL_MUTATE === 'cover') {
+      await js(`document.head.insertAdjacentHTML('beforeend', '<style>.sb-rail-body .sb-row.selected::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: red; }</style>')`)
+    }
+    if (process.env.RAIL_MUTATE === 'ink') {
+      await js(`document.head.insertAdjacentHTML('beforeend', '<style>.sb-rail-body .sb-row.selected { --rail-ink: var(--ink) !important; }</style>')`)
     }
     await settle(100)
     const booted = await js("({ rail: !!document.querySelector('.sb-rail-body'), errors: window.auditErrors })")
@@ -1552,9 +1544,9 @@ app.whenReady().then(async () => {
         await settle(150)
         await calibrate()
         if (DRAG_ZOOMS.includes(zoom)) {
-          for (const name of Object.keys(CHECKS)) if (name !== '9-ring-geometry') await runCheck(name)
+          for (const name of Object.keys(CHECKS)) if (name !== '9-selected-fill') await runCheck(name)
         }
-        await runCheck('9-ring-geometry')
+        await runCheck('9-selected-fill')
       }
     }
   } catch (error) {
@@ -1567,13 +1559,13 @@ app.whenReady().then(async () => {
       runtimeSeconds: +((Date.now() - started) / 1000).toFixed(1),
       passed: results.length - failed.length, failed: failed.length, fatal: fatal ? fatal.message : null,
       results: results.map(({ check, theme, zoom, pass, failures }) => ({ check, theme, zoom, pass, failures })),
-      ring: ringRows.map(({ theme, zoom, mode, density, position, clearance, ringPx, expectedPx }) => ({ theme, zoom, mode, density, position, clearance, ringPx, expectedPx })),
+      selected: selectedRows.map(({ theme, zoom, mode, density, position, clearance, edges }) => ({ theme, zoom, mode, density, position, clearance, edges })),
       harnessNotes
     }
-    writeFileSync(join(output, 'results.json'), JSON.stringify({ ...summaryOut, details: results, ring: ringRows }, null, 2))
+    writeFileSync(join(output, 'results.json'), JSON.stringify({ ...summaryOut, details: results, selected: selectedRows }, null, 2))
     console.log(JSON.stringify(summaryOut, null, 2))
     if (failed.length || fatal) console.error(`Rail renderer failures: ${failed.length}${fatal ? ' (fatal: ' + fatal.message + ')' : ''}`)
-    else console.log('PASS rail drag, cancel, autoscroll, wheel and ring geometry across both themes and zoom steps')
+    else console.log('PASS rail drag, cancel, autoscroll, wheel and the selected row across both themes and zoom steps')
     if (win && !win.isDestroyed()) win.destroy()
     app.exit(failed.length || fatal ? 1 : 0)
   }

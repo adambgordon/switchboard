@@ -17,7 +17,7 @@ import { isUnlinkedRow } from '../lib/rowIdentity'
 import { conversationMenu, folderMenu, type SidePlace } from '../lib/conversationMenu'
 import type { RailFilter } from '../lib/railFilter'
 import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/types'
-import { Pin, Info, NewWindow, Rename, SplitVertical, Stop, Play, Eye, EyeOff } from './icons'
+import { Pin, PinOff, Info, NewWindow, Rename, SplitVertical, Stop, Play, Eye, EyeOff } from './icons'
 
 interface Props {
   /** What to draw — built in App by `buildSidebar`, which keyboard navigation walks too. */
@@ -96,7 +96,8 @@ interface Props {
 /** The drag block holding the folders themselves, in Folders mode — the rail body. */
 const FOLDERS_BLOCK = 'folders'
 
-/** A row-menu command's glyph. The pin and the dot show what the command will make, not what is. */
+/** A row-menu command's glyph. The dot shows what the command will make, not what is; Unpin strikes
+ *  the pin through, as Hide does the eye. */
 function menuIcon(action: ConversationMenuAction): ReactNode {
   switch (action) {
     case 'resume':
@@ -108,7 +109,7 @@ function menuIcon(action: ConversationMenuAction): ReactNode {
     case 'pin':
       return <Pin size={13} filled />
     case 'unpin':
-      return <Pin size={13} />
+      return <PinOff size={13} />
     case 'markRead':
       return <span className="sb-menu-dot hollow" aria-hidden="true" />
     case 'markUnread':

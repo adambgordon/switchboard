@@ -3,8 +3,8 @@ import type { ResolvedTheme } from './theme'
 /**
  * The liveness dot's color: the value behind `--dot`, which defaults to the shipped `--live`.
  *
- * Scoped to the dot alone. Every other cobalt mark — the selected row's edge, Resume, the brand
- * marks — stays on `--live`, so this changes one signal rather than the palette.
+ * Scoped to the dot alone. Every other cobalt mark — Resume, the brand marks — stays on `--live`, so
+ * this changes one signal rather than the palette.
  *
  * Pure and DOM-free so the test suite can import it under the node tsconfig — no `window`, and no
  * `localStorage` either (which `@types/node` declares, so it would compile and still belong in the
@@ -45,11 +45,10 @@ export function shouldCommit(pending: string | null, stored: string | null): boo
 }
 
 /**
- * Surfaces the dot is held to: the rail's rows in light, the selected row (on `--paper-raised`) in
- * dark. Each is the
- * least favorable of the resting surfaces the dot sits on in that theme, since a dark-on-light dot
- * is worst on the darker surface and a light-on-dark dot on the lighter one. Both are calibrated
- * so the shipped cobalt clears the floor exactly as it does today.
+ * Surfaces the dot is held to: the rail's rows (`--paper-sunken`) in light, `--paper-raised` in dark.
+ * Each is at least as unfavorable as any resting surface the dot sits on in that theme, since a
+ * dark-on-light dot is worst on the darker surface and a light-on-dark dot on the lighter one. Both
+ * are calibrated so the shipped cobalt clears the floor.
  *
  * Literals rather than a computed read: the solve runs on every picker event, and asking for a
  * computed style there would force a layout recalc on a drag. They therefore MUST be updated by
@@ -57,6 +56,13 @@ export function shouldCommit(pending: string | null, stored: string | null): boo
  * carries for the surfaces it hands xterm.
  */
 const REFERENCE_SURFACE: Record<ResolvedTheme, string> = { light: '#f4f4f4', dark: '#2a2a2a' }
+
+/**
+ * The selected rail row's fill (`--row-selected`), which inverts its theme: near-black in light,
+ * light gray in dark. A dot on it is held to the floor the other way round, so it is solved as its
+ * own surface. Literals for the same reason as above, and under the same obligation.
+ */
+const SELECTED_SURFACE: Record<ResolvedTheme, string> = { light: '#2d2d2d', dark: '#d9d9d9' }
 
 /** WCAG 1.4.11 non-text contrast. The dot is a signal, never prose. */
 const MIN_CONTRAST = 3
@@ -199,10 +205,21 @@ export function contrastRatio(a: string, b: string): number {
  * requirement rather than a fixed lightness window, so the requirement is the code itself.
  */
 export function clampDotColor(hex: string, theme: ResolvedTheme): string {
-  const surface = REFERENCE_SURFACE[theme]
-  const lch = oklch(hex)
   // Light surfaces need a darker dot, dark surfaces a lighter one.
-  const target = theme === 'light' ? 0 : 1
+  return clampAgainst(hex, REFERENCE_SURFACE[theme], theme === 'dark')
+}
+
+/**
+ * The same placement for a dot on the selected rail row, whose fill inverts the theme — so a dot
+ * there moves the opposite way: lighter in light, darker in dark.
+ */
+export function clampSelectedDotColor(hex: string, theme: ResolvedTheme): string {
+  return clampAgainst(hex, SELECTED_SURFACE[theme], theme === 'light')
+}
+
+function clampAgainst(hex: string, surface: string, lighten: boolean): string {
+  const lch = oklch(hex)
+  const target = lighten ? 1 : 0
   let lo = lch.L
   let hi = target
   let best = renderInGamut({ ...lch, L: target })
