@@ -24,7 +24,7 @@
   container-type: inline-size;
   container-name: pane;
 }
-/* Which pane has the keyboard is shown IN the pane, never in the rail — the rail rings only the
+/* Which pane has the keyboard is shown IN the pane, never in the rail — the rail marks only the
    focused pane's active tab, so selection stays the single tier the design requires. The tab strip's
    active-tab ink is one cue (see .sb-tab.active.focused); the unfocused pane's header and body below
    carry the rest, and also cover a pane holding no tabs at all. Scoped to `.split` because a lone

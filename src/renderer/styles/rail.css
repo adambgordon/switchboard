@@ -609,11 +609,7 @@
   opacity: 1;
 }
 .sb-rail-more {
-  /* The trim above; the padding, cancelled by the margin, keeps the click target the untrimmed
-     line's height. */
-  text-box: trim-both cap alphabetic;
-  padding: 2px 0;
-  margin-block: -2px;
+  padding: 0;
   background: none;
   border: none;
   cursor: pointer;
@@ -625,4 +621,11 @@
 }
 .sb-rail-more:hover {
   color: var(--ink);
+}
+/* The trim above, on the folder's own line only (the empty rail's buttons share the look, not the
+   line). The padding, cancelled by the margin, keeps the click target the untrimmed line's height. */
+.sb-rail-more-row .sb-rail-more {
+  text-box: trim-both cap alphabetic;
+  padding: 2px 0;
+  margin-block: -2px;
 }

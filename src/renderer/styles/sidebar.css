@@ -251,6 +251,10 @@
 .sb-row.selected .sb-sep {
   background: currentColor;
 }
+/* Except the pin of a hidden row, which keeps the hidden title's gray, as it does off the selection. */
+.sb-row.selected.dimmed .sb-row-pin {
+  color: var(--row-selected-hidden);
+}
 .sb-row.selected .sb-row-menu-btn:hover {
   color: var(--row-selected-ink);
   background: var(--row-selected-press);
