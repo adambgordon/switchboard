@@ -25,13 +25,29 @@
   container-name: pane;
 }
 /* Which pane has the keyboard is shown IN the pane, never in the rail — the rail rings only the
-   focused pane's active tab, so selection stays the single tier the design requires. The primary cue
-   is the tab strip's own active-tab ink (see .sb-tab.active.focused); the header rule softens as a
-   quieter second signal, which also covers a pane holding no tabs at all. Scoped to `.split` because
-   a lone pane is always the focused one and must look untouched. Tab-row rules deliberately stay
-   constant: changing their strength when split focus is recreated reads as their weight changing. */
+   focused pane's active tab, so selection stays the single tier the design requires. The tab strip's
+   active-tab ink is one cue (see .sb-tab.active.focused); the unfocused pane's header and body below
+   carry the rest, and also cover a pane holding no tabs at all. Scoped to `.split` because a lone
+   pane is always the focused one and must look untouched. Tab-row rules deliberately stay constant:
+   changing their strength when split focus is recreated reads as their weight changing. */
 .sb-panes.split .sb-pane:not(.pane-focused) .sb-pane-header {
   border-bottom-color: var(--rule-soft);
+}
+/* …and its title takes the resting gray, as the pane's own active tab does, and its content sits
+   under a light veil of the pane's own paper: a cue the size of the pane, which a glance at either
+   side can read. Light enough to keep reading the other side. Paint only — the veil takes no pointer
+   events, so a click still lands on the content and focuses the pane. It snaps, as selection does. */
+.sb-panes.split .sb-pane:not(.pane-focused) .sb-pane-title {
+  color: var(--ink-rest);
+}
+.sb-panes.split .sb-pane:not(.pane-focused) .sb-pane-body::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3; /* above the transcript's own stacked chrome (jump pills, sticky headers) */
+  background: var(--paper-pane);
+  opacity: 0.25;
+  pointer-events: none;
 }
 /* The pane is programmatically focusable (tabIndex -1) so a conversation click can hand it the
    keyboard immediately — quiet selection — before the transcript mounts/loads. No
@@ -104,7 +120,7 @@
 .sb-pane-title-btn:hover,
 .sb-pane-title-btn:focus-visible {
   outline: none;
-  background: var(--paper-hover);
+  background: var(--pane-hover);
 }
 .sb-pane-meta {
   display: flex;
@@ -198,7 +214,7 @@
 }
 .sb-pane-pin:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--pane-hover);
 }
 .sb-pane-pin.pinned {
   color: var(--ink-soft);
@@ -527,7 +543,7 @@ kbd {
 .sb-find-nav:hover:not(:disabled),
 .sb-find-close:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--pane-hover);
 }
 .sb-find-nav:disabled {
   color: var(--ink-ghost);
@@ -549,7 +565,7 @@ kbd {
 }
 .sb-pane-find:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--pane-hover);
 }
 .sb-pane-find.active {
   color: var(--ink-soft);

@@ -20,17 +20,37 @@
   --ink-soft: #454545; /* secondary */
   --ink-faint: #8a8a8a; /* metadata, annotations */
   --ink-ghost: #b8b8b8; /* disabled, placeholders */
+  /* A conversation at rest, in the rail and the tab strip alike — the gray full ink stands out from.
+     Dark sets its own (below). */
+  --ink-rest: #555555;
+  /* A hidden conversation or folder in the rail — this gray means hidden, in every filter. Readable,
+     since the Hidden filter shows little else; a hidden row's preview drops to --ink-ghost beneath it. */
+  --ink-hidden: #9f9f9f;
 
   --rule: #e6e6e6; /* hairline */
   --rule-soft: #efefef;
   --rule-strong: #d6d6d6;
-  /* The rail's hover fill (rows, folder headers). Its own token because it must stay QUIETER than the
-     white row (--paper-raised): in light the two already part ways (hover darkens, the selection goes
-     white), but dark's shared --paper-hover is brighter than --paper-raised. */
-  --rail-hover: var(--paper-hover);
-  /* The hover fill of the white row (--paper-raised): a half-step off it — in light, midway between
-     the white and the rail (--paper-sunken), so it still reads as the selection while hovered. */
-  --rail-selected-hover: #f9f9f9;
+  /* Hover fills, one per surface, each the same lightness step (≈ 6 L*) off the surface it sits on in
+     both themes — a single shared fill lands as a different step on each, too faint on one and glaring
+     on the next. --paper-hover stays for fills that are not hovers.
+     The chrome (--paper-sunken: rail, title bar, Preferences nav): rail rows, folder headers, the
+     bell's rows, and the chrome's own icon buttons. It must never reach the rail's white row
+     (--paper-raised): in light the two part ways (hover darkens, the selection goes white); in dark
+     it stays below it. */
+  --sunken-hover: #e3e3e3;
+  /* A selected item on the chrome that isn't a rail row (the Preferences nav). Light goes white, as the
+     rail's selection does, so selection and hover move in opposite directions. Dark keeps a gray well
+     past the hover: its white row (--paper-raised) sits too near the hover to tell apart unaided. */
+  --sunken-selected: var(--paper-raised);
+  /* The pane (--paper-pane): the pane header's controls, the transcript's, the Preferences page. */
+  --pane-hover: #ededed;
+  /* Raised tiles (--paper-raised): menu items, a modal's own controls. */
+  --raised-hover: #ededed;
+  /* A background tab's hover fill, by the same rule against the active tab (--paper-pane). */
+  --tab-hover: #e3e3e3;
+  /* A control's fill on top of a hover fill — the row's ⋮, the tab's ×, a pressed folder header — a
+     step past both hovers, so it still shows on them. */
+  --hover-press: #d9d9d9;
 
   /* ---- accent 1: electric cobalt = alive ---- */
   --live: #1f5ae6;
@@ -170,12 +190,20 @@
   --ink-soft: #c0c0c0; /* secondary */
   --ink-faint: #8e8e8e; /* metadata, annotations */
   --ink-ghost: #626262; /* disabled, placeholders */
+  /* Light text on dark reads weaker than the same lightness step the other way (APCA), so dark's
+     conversation grays are set for their contrast on the rail, not mirrored from light's values. */
+  --ink-rest: #b6b6b6;
+  --ink-hidden: #848484;
 
   --rule: #2b2b2b; /* hairline */
   --rule-soft: #272727; /* softer = closer to the surface (nudged up to stay just above the lightened paper) */
   --rule-strong: #3f3f3f; /* stronger = more contrast */
-  --rail-hover: #232323; /* a step above the rail, and below the rows on screen — see the light note */
-  --rail-selected-hover: #323232; /* a step lighter than the white row at rest (--paper-raised) */
+  --sunken-hover: #252525; /* a step above the chrome, and below the rail's white row — see the light note */
+  --sunken-selected: var(--paper-active);
+  --pane-hover: #2e2e2e;
+  --raised-hover: #373737;
+  --tab-hover: #0c0c0c; /* dips below the strip, away from the active tab's lift: the lane up to it is too narrow for a hover */
+  --hover-press: var(--paper-active);
 
   /* ---- accent 1: electric cobalt = alive (brightened for dark; tints flip to dark) ---- */
   --live: #3b6cf0;

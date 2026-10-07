@@ -109,7 +109,7 @@
 .sb-rail-search-btn:hover,
 .sb-rail-icon-btn:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--sunken-hover);
 }
 /* An open control is told by its glyph, never a pressed tile: search draws heavier, and the filter
    takes full ink while its menu is open and draws heavier while a criterion is set. */
@@ -173,7 +173,7 @@
 }
 .sb-rail-search-clear:hover {
   color: var(--ink);
-  background: var(--paper-hover);
+  background: var(--sunken-hover);
 }
 .sb-rail-body {
   flex: 1;
@@ -236,15 +236,6 @@
    user's dot color never repaints it, and it marks only the single row the keyboard acts on. */
 .sb-rail-body .sb-row.selected {
   box-shadow: 0 0 0 2px var(--live);
-}
-/* Hovering it shifts its white a step, as a resting row's hover shifts the rail's paper. */
-.sb-rail-body .sb-row.selected:hover {
-  background: var(--rail-selected-hover);
-}
-/* A sliding row keeps its :hover the whole glide (a compositor transform doesn't re-run it — see
-   .sb-flipping in sidebar.css), so the shift is dropped for the slide. */
-.sb-rail-body .sb-row.sb-flipping.selected {
-  background: var(--paper-raised);
 }
 
 /* Lightweight inter-row dividers, Spacious only — Compact draws no lines at all, rows or folders. An
@@ -369,10 +360,10 @@
 .sb-group-toggle:hover,
 .sb-group-toggle:focus-visible {
   outline: none;
-  background: var(--rail-hover);
+  background: var(--sunken-hover);
 }
 .sb-group-toggle:active {
-  background: var(--paper-active);
+  background: var(--hover-press);
 }
 /* A leader rule from the end of the name to the header's far edge, so each header doubles as the
    break between folders. --ink-ghost reads darker than the --rule
@@ -412,11 +403,22 @@
 .sb-rail.compact .sb-group-toggle {
   padding-right: 24px;
 }
+/* A folder header's ink, in a row's three tiers (.sb-row, sidebar.css): soft at rest, full ink while
+   something inside needs you, ghost when the folder is hidden — hidden last, so it wins. */
+.sb-group-toggle {
+  --rail-ink: var(--ink-rest);
+}
+.sb-group-toggle.attention {
+  --rail-ink: var(--ink);
+}
+.sb-group-head.dimmed .sb-group-toggle {
+  --rail-ink: var(--ink-hidden);
+}
 /* The folder glyph follows the name: same ink, and heavier with it. Open while the folder is
    expanded, closed while collapsed. */
 .sb-group-icon {
   flex-shrink: 0;
-  color: var(--ink);
+  color: var(--rail-ink);
 }
 .sb-group-toggle.attention .sb-group-icon {
   stroke-width: 2.3;
@@ -443,7 +445,7 @@
   font-size: calc(var(--text-base) + 0.5px);
   font-weight: 400;
   line-height: 1.35;
-  color: var(--ink);
+  color: var(--rail-ink);
 }
 .sb-group-label > span {
   grid-area: 1 / 1;
@@ -457,11 +459,6 @@
    look", and an agent working in the background is not a reason to. */
 .sb-group-toggle.attention .sb-group-label-text {
   font-weight: 800;
-}
-/* A hidden folder: the same ghost ink a hidden row's title takes, in every filter. */
-.sb-group-head.dimmed .sb-group-icon,
-.sb-group-head.dimmed .sb-group-label {
-  color: var(--ink-ghost);
 }
 
 /* New conversation in this folder (SidebarGroupHeader). The pencil shows while the pointer is anywhere
@@ -535,16 +532,16 @@
 .sb-group-agent:focus-visible {
   outline: none;
   color: var(--ink);
-  background: var(--rail-hover);
+  background: var(--sunken-hover);
 }
 .sb-group-toggle:hover ~ .sb-group-new .sb-group-pencil,
 .sb-group-toggle:focus-visible ~ .sb-group-new .sb-group-pencil {
-  background: var(--rail-hover);
+  background: var(--sunken-hover);
 }
 .sb-group-pencil:active,
 .sb-group-agent:active,
 .sb-group-toggle:active ~ .sb-group-new .sb-group-pencil {
-  background: var(--paper-active);
+  background: var(--hover-press);
 }
 /* Nothing to start from mid-drag: hidden on every folder while one moves, and in the moving copy. */
 .sb-dragging-row .sb-group-new,

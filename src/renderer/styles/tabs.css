@@ -214,10 +214,10 @@ body.sb-window-drop-target .sb-tabstrip {
   max-width: 210px;
   border-right: 1px solid var(--rule);
   font-size: var(--text-sm);
-  font-weight: 500;
-  /* The three-step ink ladder used by every other control group in the app: rest --ink-faint,
-     hover --ink-soft, active --ink. */
-  color: var(--ink-faint);
+  font-weight: 400;
+  /* The rail's conversation gray, so a conversation reads the same in both places. Ink says state
+     only — focus or needing you — so hover changes the fill and never the ink, as on a rail row. */
+  color: var(--ink-rest);
   /* The whole tab is the click target, so the whole tab shows the hand — not just the close button.
      A default cursor over a control that activates on click reads as inert. */
   cursor: pointer;
@@ -228,40 +228,38 @@ body.sb-window-drop-target .sb-tabstrip {
      immediately and rendered as a separate rectangle during the same transition. */
 }
 .sb-tab:hover {
-  --tab-close-surface: var(--paper-hover);
-  color: var(--ink-soft);
-  background: var(--paper-hover);
+  --tab-close-surface: var(--tab-hover);
+  background: var(--tab-hover);
 }
 /* The active tab is lifted onto the surface of the content directly beneath it, so the tab and the
    pane read as one sheet — lighter than the strip in both themes. */
 .sb-tab.active {
   --tab-close-surface: var(--paper-pane);
   background: var(--paper-pane);
-  color: var(--ink-soft);
 }
 .sb-tab.active:hover {
   background: var(--paper-pane);
 }
 /* Only the FOCUSED pane's active tab reads fully selected, so a split never shows two equally
    selected tabs. Ink weight alone carries it: full ink here, and the other pane's active tab drops to
-   faint ink like any tab at rest — the same one-conversation-at-a-time answer the rail gives, where
-   only the focused pane's row is white. The marker is deliberately not a bar along the tab's edge: at
-   the width of a tab that bar is a slab, and reads as a piece of chrome in its own right rather than
-   as an attribute of the tab. */
+   the resting gray like any tab at rest — the same one-conversation-at-a-time answer the rail gives,
+   where only the focused pane's row is white. The marker is deliberately not a bar along the tab's
+   edge: at the width of a tab that bar is a slab, and reads as a piece of chrome in its own right
+   rather than as an attribute of the tab. */
 .sb-tab.active:not(.focused) {
-  color: var(--ink-faint);
+  color: var(--ink-rest);
 }
 .sb-tab.active.focused {
   color: var(--ink);
 }
 
 /* Selected tabs share the ACTIVE tab's surface and differ only in ink: the whole group is lifted onto
-   `--paper-pane`, inactive members use faint ink, and the one on screen keeps full ink. Selection stays
-   neutral — cobalt means a session is alive, not that a command will act on it. */
+   `--paper-pane`, inactive members use the resting gray, and the one on screen keeps full ink.
+   Selection stays neutral — cobalt means a session is alive, not that a command will act on it. */
 .sb-tab.picked {
   --tab-close-surface: var(--paper-pane);
   background: var(--paper-pane);
-  color: var(--ink-faint);
+  color: var(--ink-rest);
 }
 /* The active tab keeps full ink inside a selection: being acted on next and being the one on screen
    are separate claims, and it must not lose its place among its own group. */
@@ -312,10 +310,14 @@ body.sb-window-drop-target .sb-tabstrip {
   overflow: hidden;
   white-space: nowrap;
 }
-/* Asking or unread: the rail row's attention weight (.sb-row.attention). Weight is the one cue a tab
-   has free — the surface says active, the ink says which pane has focus — so it never hides focus. */
+/* Asking or unread: the rail row's attention weight (.sb-row.attention), and its full ink too — but
+   only on the strip's own surface. A tab on the pane's surface (the other pane's active tab, a picked
+   one) keeps its gray and goes bold alone, so full ink on that surface always means the focused pane. */
 .sb-tab.attention .sb-tab-title {
   font-weight: 800;
+}
+.sb-tab.attention:not(.active):not(.picked) {
+  color: var(--ink);
 }
 
 /* A compact, permanent slot keeps liveness from changing the title or tab width. */
@@ -360,7 +362,7 @@ body.sb-window-drop-target .sb-tabstrip {
   pointer-events: auto;
 }
 .sb-tab-close:hover {
-  background: var(--paper-active);
+  background: var(--hover-press);
   color: var(--ink);
 }
 /* With ⌥ held, a running tab's × stops the session as well as closing the tab — destructive, so it
