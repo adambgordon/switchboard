@@ -24,7 +24,9 @@ export function bootCommandFor(
 ): string {
   if (agent === 'codex') {
     const overrides = CODEX_OVERRIDES.map((value) => `-c '${value}'`).join(' ')
-    const command = `codex ${overrides}`
+    // Command-line overrides already force Codex off its shared background server; saying so
+    // explicitly keeps it from reporting that as a startup warning.
+    const command = `codex --no-daemon ${overrides}`
     return origin === 'resume' ? `${command} resume ${sessionId}` : command
   }
   return origin === 'resume' ? `claude --resume ${sessionId}` : `claude --session-id ${sessionId}`
