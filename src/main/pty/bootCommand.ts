@@ -11,6 +11,15 @@ const CODEX_OVERRIDES = [
 ]
 
 /**
+ * Command-line overrides already force Codex off its shared background server; `--no-daemon` says
+ * so explicitly, which keeps Codex from reporting it as a startup warning. Releases that predate the
+ * flag reject it outright, and which release runs can depend on the terminal's directory, so the
+ * terminal's own shell asks that Codex at launch and adds the flag only if its help lists it.
+ */
+const CODEX_NO_DAEMON_IF_SUPPORTED =
+  '$(codex --help 2>/dev/null | grep -q -e --no-daemon && echo --no-daemon)'
+
+/**
  * The shell command to type to boot an agent. Claude resumes by id (`--resume`) or starts a fresh
  * session with a PRE-ASSIGNED id (`--session-id`). Codex resumes by id (`codex resume <id>`) but
  * mints its OWN id for a new session. Codex rebuilds terminal scrollback from its source-backed
@@ -24,9 +33,7 @@ export function bootCommandFor(
 ): string {
   if (agent === 'codex') {
     const overrides = CODEX_OVERRIDES.map((value) => `-c '${value}'`).join(' ')
-    // Command-line overrides already force Codex off its shared background server; saying so
-    // explicitly keeps it from reporting that as a startup warning.
-    const command = `codex --no-daemon ${overrides}`
+    const command = `codex ${CODEX_NO_DAEMON_IF_SUPPORTED} ${overrides}`
     return origin === 'resume' ? `${command} resume ${sessionId}` : command
   }
   return origin === 'resume' ? `claude --resume ${sessionId}` : `claude --session-id ${sessionId}`
