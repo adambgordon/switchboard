@@ -528,6 +528,123 @@ describe('minimal literal escaping', () => {
     expect(complete([{ kind: 'table', align: [], children: [row([copyText('H')], [copyText('I')], [copyText('#')]),
       row([copyText('$a')], [strong('B')], [copyText('b$')])] }])).toBe('| H | I | # |\n| --- | --- | --- |\n| $a | **B** | b$ |')
   })
+  it('keeps a literal exclamation mark from turning the link after it into an image', () => {
+    const link: CopyNode = { kind: 'link', url: 'https://x.test', children: [copyText('docs')] }
+    const copied = complete([paragraph([copyText('L !'), link, copyText(' R')])])
+    expect(copied).toBe('L \\![docs](https://x.test) R')
+    expect(types(parse(copied))).toContain('link')
+    expect(types(parse(copied))).not.toContain('image')
+    expect(complete([paragraph([copyText('L ! '), link])])).toBe('L ! [docs](https://x.test)')
+  })
+  it('keeps a bare URL from absorbing the syntax or escapes after it', () => {
+    const code: CopyNode = { kind: 'code', value: 'c', block: false }
+    const cases: [CopyNode[], string, string, string][] = [
+      [[copyText('L https://example.org/'), strong('bold'), copyText(' R')], 'L https\\://example.org/**bold** R', 'strong',
+        'L https://example.org/bold R'],
+      [[copyText('L www.x.org/'), strong('b'), copyText(' R')], 'L www\\.x.org/**b** R', 'strong', 'L www.x.org/b R'],
+      [[copyText('L HTTP://x.org/'), code, copyText(' R')], 'L HTTP\\://x.org/`c` R', 'inlineCode', 'L HTTP://x.org/c R'],
+      [[copyText('L https://x.org'), { kind: 'break' }, copyText('next '), strong('B')], 'L https\\://x.org\\\nnext **B**', 'break',
+        'L https://x.org\nnext B'],
+      // An escape inside the URL would show as a backslash in the link text.
+      [[copyText('L https://x.org/*a* '), strong('B')], 'L https\\://x.org/\\*a\\* **B**', 'strong', 'L https://x.org/*a* B'],
+      // The `<` ends the URL, but the backslash inserted before it would not.
+      [[copyText('L https://x.org/<user> '), strong('B'), copyText(' R')], 'L https\\://x.org/\\<user> **B** R', 'strong',
+        'L https://x.org/<user> B R'],
+      [[strong('B'), copyText(' https://x.org/*a*')], '**B** https\\://x.org/\\*a\\*', 'strong', 'B https://x.org/*a*']
+    ]
+    for (const [children, expected, type, shown] of cases) {
+      const copied = complete([paragraph(children)])
+      expect(copied).toBe(expected)
+      expect(types(parse(copied))).toContain(type)
+      expect(characters(parse(copied)).map(char => char.text).join('')).toBe(shown)
+    }
+  })
+  it('leaves a bare URL alone where nothing it would absorb follows', () => {
+    expect(complete([paragraph([strong('see https://x.org'), copyText(', R')])])).toBe('**see https://x.org**, R')
+    expect(complete([paragraph([copyText('L https://x.org/a '), strong('B')])])).toBe('L https://x.org/a **B**')
+    expect(complete([paragraph([copyText('L https://x.org/a<'), strong('b'), copyText(' R')])])).toBe('L https://x.org/a<**b** R')
+    const link: CopyNode = { kind: 'link', url: 'https://x.org/', children: [copyText('https://x.org/'), strong('b')] }
+    expect(complete([paragraph([copyText('L '), link])])).toBe('L [https://x.org/**b**](https://x.org/)')
+  })
+  it('treats a generated marker beside an escaped literal as able to pair', () => {
+    // Once the literal beside it is escaped, the closing marker can close against a bare opener inside the span.
+    const cases: [CopyNode, string, number][] = [
+      [{ kind: 'em', children: [copyText('multiply a *b by c *')] }, 'L *multiply a \\*b by c \\** R', 1],
+      [strong('Pass *args to fields marked *'), 'L **Pass \\*args to fields marked \\*** R', 2],
+      [{ kind: 'strike', children: [copyText('c ~~b d ~')] }, 'L ~~c \\~\\~b d \\~~~ R', 4],
+      // Strikethrough pairs equal runs, so the generated opener counts apart from the literal beside it.
+      [{ kind: 'strike', children: [copyText('~a~~ b')] }, 'L ~~\\~a\\~\\~ b~~ R', 4]
+    ]
+    for (const [node, copied, style] of cases) {
+      expect(complete([paragraph([copyText('L '), node, copyText(' R')])])).toBe(copied)
+      const body = 'children' in node && 'value' in node.children[0] ? node.children[0].value : ''
+      expect(characters(parseStrict(copied)).filter(char => /\S/.test(char.text))).toEqual([{ text: 'L', styles: 0 },
+        ...Array.from(body.replace(/\s/g, ''), text => ({ text, styles: style })), { text: 'R', styles: 0 }])
+    }
+  })
+  it('counts a tilde as a marker character beside an emphasis run', () => {
+    // Strikethrough registers the tilde as an attention marker, so the first asterisk can open before it.
+    const copied = complete([paragraph([copyText('L x*~a* '), { kind: 'strike', children: [copyText('B')] }, copyText(' R')])])
+    expect(copied).toBe('L x\\*~a\\* ~~B~~ R')
+    expect(types(parseStrict(copied))).not.toContain('emphasis')
+  })
+
+  const gridCopy = (rows: CopyNode[][][]): string => {
+    const table: CopyNode = { kind: 'table', align: [], children: rows.map(cells =>
+      ({ kind: 'row', children: cells.map(children => ({ kind: 'cell', children })) })) }
+    const selection: CopySelection = new Map()
+    const select = (node: CopyNode): void => {
+      if ('children' in node) node.children.forEach(select)
+      else selection.set(node, { from: 0, to: 'value' in node ? node.value.length : 0 })
+    }
+    select(table)
+    return serializeCopy([table], { mode: 'markdown', intent: 'selection', selection })
+  }
+  it('treats the quotes around a grid field as punctuation beside its delimiters', () => {
+    const copied = gridCopy([[[copyText('*x "y"')], [copyText('* "z"')], [strong('B')]]])
+    expect(copied).toBe('"\\*x ""y"""\t"\\* ""z"""\t**B**')
+    expect(types(parseStrict(copied))).not.toContain('emphasis')
+    // A lone field is never quoted, so its first character starts the line.
+    expect(gridCopy([[[copyText('- "a" '), strong('B')]]])).toBe('\\- "a" **B**')
+  })
+  it('checks block syntax on whole grid rows, across cells and blank rows', () => {
+    const underscores = gridCopy([[[strong('B')], [copyText('A')], [copyText('C')]], [[copyText('_')], [copyText('_')], [copyText('_')]]])
+    expect(underscores).toBe('**B**\tA\tC\n\\_\t_\t_')
+    expect(types(parseStrict(underscores))).not.toContain('thematicBreak')
+    const dashes = gridCopy([[[strong('B')], [copyText('A')]], [[copyText('-')], [copyText('-')]]])
+    expect(dashes).toBe('**B**\tA\n\\-\t-')
+    expect(types(parseStrict(dashes))).not.toContain('heading')
+    const blank = gridCopy([[[strong('B')]], [[copyText('')]], [[copyText('2. item')]]])
+    expect(blank).toBe('**B**\n\n2\\. item')
+    expect(types(parseStrict(blank))).not.toContain('list')
+    // A passage that begins with a line break pastes its second line as the first.
+    expect(leading('\n5. a ')).toBe('\n5\\. a **B**')
+  })
+  it('escapes block syntax at the start of a grid row, but not after a tab', () => {
+    const copied = gridCopy([[[strong('B')], [copyText('- a')]], [[copyText('- b')], [copyText('# c')]]])
+    expect(copied).toBe('**B**\t- a\n\\- b\t# c')
+    expect(types(parseStrict(copied))).not.toContain('list')
+  })
+  // Generous ceilings, far above a linear pass and well below the quadratic one.
+  it('escapes a large grid in one pass, not one per cell', () => {
+    const rows = Array.from({ length: 400 }, (_, r) =>
+      Array.from({ length: 10 }, (_, c) => c ? [copyText(`cell ${r} a_b <c ~/p $${c}`)] : [strong(`B${r}`)]))
+    const started = performance.now()
+    expect(gridCopy(rows).split('\n')).toHaveLength(400)
+    expect(performance.now() - started).toBeLessThan(300)
+  })
+  it('finds the extent of a long run of angle brackets once', () => {
+    const text = '<='.repeat(100_000) + ' >'
+    const started = performance.now()
+    expect(complete([paragraph([copyText(text), strong('B')])])).toBe(text + '**B**')
+    expect(performance.now() - started).toBeLessThan(150)
+    const urls = 'https://'.repeat(50_000)
+    const urlStarted = performance.now()
+    expect(complete([paragraph([copyText(urls + ' '), strong('B')])])).toBe(urls + ' **B**')
+    expect(performance.now() - urlStarted).toBeLessThan(150)
+    // A closing bracket in a later chunk does not close a run that ends before it.
+    expect(complete([paragraph([copyText('if a <= b '), strong('B'), copyText(' c > d')])])).toBe('if a <= b **B** c > d')
+  })
 })
 
 describe('literal escaping fuzz', () => {
@@ -601,6 +718,37 @@ describe('literal escaping fuzz', () => {
       expect(skeleton(parsed), message).toEqual(shape)
       expect(visible(characters(parsed)), message).toEqual(visible(expected(nodes)))
       if (spaced) expect(spacing(characters(parsed)), message).toBe(spacing(expected(nodes)))
+    }
+  })
+  // Several literal slots, so a bare delimiter in one can pair with generated syntax beside another.
+  it('round-trips random punctuation across several styled and literal slots', () => {
+    const next = random(0xc0de)
+    const slot = (text: string, previous?: CopyNode): CopyNode => {
+      const kinds = ['text', 'em', 'strong', 'strike', 'code', 'link'] as const
+      const kind = kinds[Math.floor(next() * kinds.length)]
+      if (kind === 'text') return copyText(text)
+      // Source cannot place two code spans against each other.
+      if (kind === 'code') return previous?.kind === 'code' ? copyText(text) : { kind: 'code', value: 'c', block: false }
+      if (kind === 'link') return { kind: 'link', url: 'https://x.test', children: [copyText(text)] }
+      // A styled body that is only whitespace drops its markers, so give it a visible character.
+      return { kind, children: [copyText(/\S/.test(text) ? text : 'q')] }
+    }
+    const blank = (node: CopyNode): CopyNode => node.kind === 'text' ? copyText('z')
+      : 'children' in node ? { ...node, children: node.children.map(blank) } as CopyNode : node
+    // Weighted toward delimiters, so a bare one often shares a span with a literal beside generated syntax.
+    const delimiters = [...alphabet, ...'*_~*_~*_~*_~*_~*_~ ']
+    const text = (): string => Array.from({ length: 1 + Math.floor(next() * 8) },
+      () => delimiters[Math.floor(next() * delimiters.length)]).join('').replace(/\n/g, ' ')
+    for (let index = 0; index < 3000; index++) {
+      const children: CopyNode[] = []
+      for (let count = 2 + Math.floor(next() * 5); count > 0; count--) children.push(slot(text(), children[children.length - 1]))
+      const nodes = [paragraph(children)]
+      // A passage without markup is copied as written.
+      if (children.every(child => child.kind === 'text') || !/\S/.test(expected(nodes).map(char => char.text).join(''))) continue
+      const copied = complete(nodes), parsed = parseStrict(copied)
+      const message = JSON.stringify(nodes) + ' -> ' + JSON.stringify(copied)
+      expect(skeleton(parsed), message).toEqual(skeleton(parseStrict(complete(nodes.map(blank)))))
+      expect(visible(characters(parsed)), message).toEqual(visible(expected(nodes)))
     }
   })
 })

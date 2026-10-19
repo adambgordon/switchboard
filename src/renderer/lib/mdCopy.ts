@@ -1,5 +1,5 @@
 import {
-  ENTITY_AMPERSAND, INLINE_STYLE, emitInline, hasInlineMarkup, planInline, rawInline,
+  ENTITY_AMPERSAND, INLINE_STYLE, emitGrid, emitInline, hasInlineMarkup, planInline,
   type InlineContext, type InlineRun, type InlineToken
 } from './mdCopyInline'
 
@@ -259,13 +259,9 @@ function renderTable(node: CopyNode & { kind: 'table' }, ctx: Context): string {
       .map(cell => planInline(inlineRuns('children' in cell ? cell.children : [cell], ctx))) : []
   ).filter(row => row.length > 0)
   const protect = ctx.options.mode === 'markdown' && (markdown || plans.some(row => row.some(hasInlineMarkup)))
-  // Table cells parse separately and inline-only; a grid pastes as running lines whose cells can pair.
-  const raw = plans.map(row => row.map(rawInline))
-  const rows = plans.map((row, r) => row.map((tokens, c) => emitInline(tokens, protect, markdown ? { blockStart: false } : {
-    before: [...raw.slice(0, r).map(cells => cells.join('\t') + '\n'), ...raw[r].slice(0, c).map(cell => cell + '\t')].join(''),
-    after: [...raw[r].slice(c + 1).map(cell => '\t' + cell), ...raw.slice(r + 1).map(cells => '\n' + cells.join('\t'))].join('')
-  })))
-  if (!markdown) return rowsToText(rows)
+  // Table cells parse separately and inline-only.
+  if (!markdown) return rowsToText(emitGrid(plans, protect))
+  const rows = plans.map(row => row.map(tokens => emitInline(tokens, protect, { blockStart: false })))
   if (!rows.length) return ''
   const line = (row: string[]): string => '| ' + row.map(value => escapeTablePipes(value).replace(/\n/g, '<br>')).join(' | ') + ' |'
   const separator = rows[0].map((_, i) => node.align[i] === 'center' ? ':---:' : node.align[i] === 'left' ? ':---' : node.align[i] === 'right' ? '---:' : '---')
