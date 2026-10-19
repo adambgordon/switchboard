@@ -449,12 +449,12 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   font-weight: bold;
 }
 .hljs-addition {
-  color: #22863a;
-  background-color: #f0fff4;
+  color: #116329;
+  background-color: #ccf3d6;
 }
 .hljs-deletion {
-  color: #b31d28;
-  background-color: #ffeef0;
+  color: #a40e26;
+  background-color: #ffd7d5;
 }
 .hljs-link {
   text-decoration: underline;
