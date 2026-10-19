@@ -193,7 +193,7 @@ module.exports = async function checkCopyFidelity({ js, call, check, theme, agen
   for (const [source, selector, markdown] of [
     ['L **Alpha  \nBravo** R', '.md-strong', 'L **Alpha\\\nBravo** R'],
     ['L *Alpha  \nBravo* R', '.md-em', 'L *Alpha\\\nBravo* R'],
-    ['L [Alpha  \nBravo](https://example.org) R', '.md a', 'L [Alpha\\\nBravo](<https://example.org>) R']
+    ['L [Alpha  \nBravo](https://example.org) R', '.md a', 'L [Alpha\\\nBravo](https://example.org) R']
   ]) {
     await roundtrip('hard-break-roundtrip/' + selector, source)
     for (const mode of ['markdown', 'plain']) for (const joined of [false, true]) {

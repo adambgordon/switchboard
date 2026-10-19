@@ -54,7 +54,7 @@ async function run() {
     for (const [name, source, marked] of [
       ['bold', 'L **abc** R', 'L **abc** R'], ['italic', 'L *abc* R', 'L *abc* R'],
       ['strike', 'L ~~abc~~ R', 'L ~~abc~~ R'], ['code', 'L `abc` R', 'L `abc` R'],
-      ['link', 'L [abc](https://example.org/abc) R', 'L [abc](<https://example.org/abc>) R']
+      ['link', 'L [abc](https://example.org/abc) R', 'L [abc](https://example.org/abc) R']
     ]) {
       await call('mountCopy', { source, theme, agent })
       for (const mode of ['markdown', 'plain']) {
@@ -81,7 +81,7 @@ async function run() {
     for (const [source, md, plain] of [
       ['- **a** **b**', '**a** **b**', 'a b'],
       ['- `a` `b`', '`a` `b`', 'a b'],
-      ['- [a](https://example.org) **b**', '[a](<https://example.org>) **b**', 'a b'],
+      ['- [a](https://example.org) **b**', '[a](https://example.org) **b**', 'a b'],
       ['- **a**\n  **b**', '**a**\n**b**', 'a\nb'],
       ['- [x] **a** **b**', '**a** **b**', 'a b'],
       ['- **a** **b**\n  - child\n- end', '- **a** **b**\n  - child\n- end', '- a b\n  - child\n- end'],
@@ -264,7 +264,7 @@ async function run() {
     await expectContents(prefix + 'table/empty-cell', 'tbody', 'x\t\tz')
     await call('mountCopy', { source: 'L ![image label](https://example.org/image.png) R', theme, agent })
     await expectRange(prefix + 'image-partial', ['[data-copy-label]', 6], ['[data-copy-label]', 11], 'label')
-    await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](<https://example.org/image.png>) R')
+    await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](https://example.org/image.png) R')
     await call('mountCopy', { blocks: [text('L'), { kind: 'image', alt: 'uploaded image' }, text('R')], theme, agent })
     await expectContents(prefix + 'uploaded-image', '.transcript-content', 'L\n\nuploaded image\n\nR')
     await expectUnselectable(prefix + 'chrome', ['.block-chip > [data-md-skip]'])

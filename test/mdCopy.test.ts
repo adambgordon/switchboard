@@ -27,7 +27,7 @@ const wrappers: [string, () => CopyNode, string][] = [
   ['italic', () => ({ kind: 'em', children: [copyText('abc')] }), '*abc*'],
   ['strike', () => ({ kind: 'strike', children: [copyText('abc')] }), '~~abc~~'],
   ['code', () => ({ kind: 'code', value: 'abc', block: false }), '`abc`'],
-  ['link', () => ({ kind: 'link', url: 'https://example.org/abc', children: [copyText('abc')] }), '[abc](<https://example.org/abc>)']
+  ['link', () => ({ kind: 'link', url: 'https://example.org/abc', children: [copyText('abc')] }), '[abc](https://example.org/abc)']
 ]
 describe.each(wrappers)('%s selection boundaries', (_name, wrapper, marked) => {
   const document = (): CopyNode[] => [inline([copyText('L '), wrapper(), copyText(' R')])]

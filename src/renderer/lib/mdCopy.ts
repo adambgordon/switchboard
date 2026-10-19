@@ -107,9 +107,21 @@ function retained(node: CopyNode, ctx: Context): boolean {
 // Table splitting happens before inline parsing; an odd backslash run already protects a pipe.
 const escapeTablePipes = (text: string): string => text.replace(/(\\*)\|/g,
   (pipe, slashes: string) => slashes.length % 2 ? pipe : slashes + '\\|')
+// A bare destination cannot be empty (a title would become the URL), start with `<`, hold a space or control
+// character, or leave a parenthesis unpaired.
+function bareDestination(url: string): boolean {
+  if (!url || /^<|[\x00-\x20\x7f]/.test(url)) return false
+  let depth = 0
+  for (const char of url) {
+    if (char === '(') depth++
+    else if (char === ')' && --depth < 0) return false
+  }
+  return depth === 0
+}
 // An entity-shaped ampersand must stay literal in metadata; otherwise Markdown decodes the value.
-const escapeDestination = (url: string): string =>
-  '<' + url.replace(/[\\<>]/g, '\\$&').replace(ENTITY_AMPERSAND, '\\&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '>'
+const escapeDestination = (url: string): string => bareDestination(url)
+  ? url.replace(/\\/g, '\\\\').replace(ENTITY_AMPERSAND, '\\&')
+  : '<' + url.replace(/[\\<>]/g, '\\$&').replace(ENTITY_AMPERSAND, '\\&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '>'
 // Escape literal ampersands before introducing references for title line endings.
 const linkTitle = (title?: string): string => title
   ? ' "' + title.replace(/[\\"]/g, '\\$&').replace(ENTITY_AMPERSAND, '\\&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '"' : ''

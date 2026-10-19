@@ -466,7 +466,7 @@ describe('minimal literal escaping', () => {
     expect(complete([paragraph([{ kind: 'code', value: 'x$y', block: false }, copyText(' then b$ end')])]))
       .toBe('`x$y` then b\\$ end')
     expect(complete([paragraph([{ kind: 'link', url: 'https://x.test/$a', children: [copyText('l')] }, copyText(' then b$ end')])]))
-      .toBe('[l](<https://x.test/$a>) then b\\$ end')
+      .toBe('[l](https://x.test/$a) then b\\$ end')
   })
   it('treats a digit that boundary repair will encode as no longer blocking a closing dollar', () => {
     // The opener after `1` is not left-flanking, so the `1` becomes a reference that no longer follows the `$`.
@@ -493,9 +493,26 @@ describe('minimal literal escaping', () => {
   it('escapes entity-shaped ampersands only in link metadata', () => {
     const link: CopyNode = { kind: 'link', url: 'https://x.test/?a=1&b=2&amp;', title: 'T & U &copy;', children: [copyText('l')] }
     const copied = complete([paragraph([copyText('L '), link])])
-    expect(copied).toBe('L [l](<https://x.test/?a=1&b=2\\&amp;> "T & U \\&copy;")')
+    expect(copied).toBe('L [l](https://x.test/?a=1&b=2\\&amp; "T & U \\&copy;")')
     const parsed = parse(copied).children?.[0]?.children?.[1]
     expect([parsed?.url, parsed?.title]).toEqual(['https://x.test/?a=1&b=2&amp;', 'T & U &copy;'])
+  })
+  it.each([
+    ['https://x.test/a_(b)', '(https://x.test/a_(b))'], ['https://x.test/a\\b', '(https://x.test/a\\\\b)'],
+    ['https://x.test/a b', '(<https://x.test/a b>)'], ['https://x.test/a_(b', '(<https://x.test/a_(b>)'],
+    ['https://x.test/a)b(', '(<https://x.test/a)b(>)'], ['https://x.test/<a>', '(https://x.test/<a>)'],
+    ['<x', '(<\\<x>)'], ['https://x.test/a\\(b)', '(https://x.test/a\\\\(b))'],
+    ['https://x.test/a\tb', '(<https://x.test/a\tb>)'], ['', '(<>)']
+  ])('writes the destination %j bare unless it needs brackets', (url, expected) => {
+    const copied = complete([paragraph([copyText('L '), { kind: 'link', url, children: [copyText('l')] }])])
+    expect(copied).toBe('L [l]' + expected)
+    expect(parse(copied).children?.[0]?.children?.[1]?.url).toBe(url)
+  })
+  it('keeps an empty destination bracketed so a title cannot become the URL', () => {
+    const copied = complete([paragraph([copyText('L '), { kind: 'link', url: '', title: 't', children: [copyText('l')] }])])
+    expect(copied).toBe('L [l](<> "t")')
+    const link = parse(copied).children?.[0]?.children?.[1]
+    expect([link?.url, link?.title]).toEqual(['', 't'])
   })
   it('pairs literals across the cells of a Markdown-mode grid, but not a Markdown table', () => {
     const row = (...cells: CopyNode[][]): CopyNode => ({ kind: 'row', children: cells.map(children => ({ kind: 'cell', children })) })
