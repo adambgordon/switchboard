@@ -97,7 +97,72 @@ function encodeEdge(chunk: Chunk, end: boolean): void {
   chunk.value = chunk.value.slice(0, offset) + `&#${point};` + chunk.value.slice(offset + width)
 }
 
-export function emitInline(tokens: InlineToken[], protectLiterals: boolean): string {
+const ASCII_PUNCTUATION = /[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/
+const WORD = /[\p{L}\p{N}]/u
+const ENTITY = /^&(?:#\d{1,7}|#[xX][\da-fA-F]{1,6}|[A-Za-z][A-Za-z\d]{1,31});/
+const HTML_OR_AUTOLINK = /[A-Za-z\d/!?]/
+interface Pairing { dollar: boolean; tilde: boolean }
+
+const occurrences = (tokens: InlineToken[], char: string, kinds: InlineToken['kind'][]): number =>
+  tokens.reduce((n, token) => n + (kinds.includes(token.kind) && 'value' in token ? token.value.split(char).length - 1 : 0), 0)
+/** `$` and `~` form syntax only in pairs, so a lone literal stays bare. */
+function pairing(scope: InlineToken[]): Pairing {
+  return {
+    // A math opener scans through code and link metadata for its closer.
+    dollar: occurrences(scope, '$', ['text', 'atom', 'code', 'math']) >= 2,
+    // Strike delimiters pair only within text; a marker run absorbs a touching literal.
+    tilde: occurrences(scope, '~', ['text', 'marker']) >= 2
+  }
+}
+
+/** Block syntax is recognized after leading whitespace at a line start. */
+function lineStartEscapes(value: string, start: number, marks: Set<number>): void {
+  let at = start
+  while (value[at] === ' ' || value[at] === '\t') at++
+  const end = value.indexOf('\n', at)
+  const line = value.slice(at, end < 0 ? value.length : end)
+  let match: RegExpMatchArray | null
+  // A chunk end may continue with any syntax, so it counts as a possible line end.
+  if (/^(?:#{1,6}|[-+*>])(?=[ \t]|$)/.test(line) || line[0] === '>') marks.add(at)
+  else if ((match = line.match(/^\d{1,9}(?=[.)](?:[ \t]|$))/))) marks.add(at + match[0].length)
+  // Setext underlines, thematic breaks, and table delimiter rows can interrupt a paragraph.
+  if (/^[-=:|][-=:| \t]*$/.test(line) && /[-=]/.test(line)) marks.add(at + line.search(/[-=]/))
+}
+
+/** Escapes only characters that could form syntax where they sit; edges may later become references. */
+function escapeLiteral(value: string, lineStart: boolean, passageEnd: boolean, risk: Pairing): string {
+  const marks = new Set<number>()
+  if (lineStart) lineStartEscapes(value, 0, marks)
+  for (let i = value.indexOf('\n'); i >= 0; i = value.indexOf('\n', i + 1)) lineStartEscapes(value, i + 1, marks)
+  // A heading drops a final space-separated run of number signs as its closing sequence.
+  const closing = passageEnd ? value.match(/(?:^|[ \t])(#+)[ \t\n]*$/) : null
+  if (closing) marks.add(closing.index! + closing[0].indexOf('#'))
+  let out = ''
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i], next = value[i + 1]
+    let escape = marks.has(i)
+    switch (char) {
+      case '`': case '*': case '[': case ']': escape = true; break
+      // Boundary repair may turn the final character into a reference, which a bare backslash would escape.
+      case '\\': escape ||= next === undefined || next === '\n' || ASCII_PUNCTUATION.test(next) || i + 1 === value.length - 1; break
+      // An underscore between word characters can neither open nor close; edges may be re-encoded.
+      case '_': escape ||= !(i >= 2 && i <= value.length - 3 && WORD.test(value[i - 1]) && WORD.test(next)); break
+      case '<': {
+        const run = value.slice(i).match(/^\S*/)![0]
+        escape ||= next === undefined || HTML_OR_AUTOLINK.test(next) || run.includes('>') || run.length === value.length - i
+        break
+      }
+      case '&': escape ||= ENTITY.test(value.slice(i)); break
+      case '$': escape ||= risk.dollar; break
+      case '~': escape ||= risk.tilde; break
+    }
+    out += escape ? '\\' + char : char
+  }
+  return out
+}
+
+/** `scope` holds every token a destination parses as one passage, for pairing decisions. */
+export function emitInline(tokens: InlineToken[], protectLiterals: boolean, scope: InlineToken[] = tokens): string {
   const chunks: Chunk[] = []
   // A Markdown hard break needs following inline content. Terminal newlines stay literal.
   let tail = tokens.length
@@ -109,9 +174,19 @@ export function emitInline(tokens: InlineToken[], protectLiterals: boolean): str
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index]
     if (token.kind === 'break') chunks.push({ kind: 'atom', value: token.marked && index < tail ? '\\\n' : '\n' })
-    else if (token.value) chunks.push({ ...token, kind: token.kind === 'code' || token.kind === 'math' ? 'atom' : token.kind,
-      value: token.kind === 'text' && protectLiterals
-      ? token.value.replace(/[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/g, '\\$&') : token.value })
+    // Adjacent literals are one span to the parser, so escaping decisions must see across them.
+    else if (token.kind === 'text' && chunks[chunks.length - 1]?.kind === 'text') chunks[chunks.length - 1].value += token.value
+    else if (token.value) chunks.push({ ...token, kind: token.kind === 'code' || token.kind === 'math' ? 'atom' : token.kind })
+  }
+  if (protectLiterals) {
+    const risk = pairing(scope)
+    let last = chunks.length - 1
+    while (last >= 0 && !/\S/.test(chunks[last].value)) last--
+    chunks.forEach((chunk, index) => {
+      if (chunk.kind !== 'text') return
+      const lineStart = index === 0 || chunks[index - 1].value.endsWith('\n')
+      chunk.value = escapeLiteral(chunk.value, lineStart, index === last, risk)
+    })
   }
   const boundaries: Boundary[] = []
   const touching = new Map<number, number[]>()

@@ -93,7 +93,7 @@ async function run() {
       await expectContents(prefix + 'inline-list-spacing/plain/' + source, '.md', plain)
     }
     const literal = 'a*b*c _d_ `e` [f](g) \\h'
-    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\]\\(g\\) \\\\h'
+    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\](g) \\\\h'
     for (const [kind, first, second] of [
       ['unordered', '- ', '- '], ['ordered', '3. ', '4. '], ['task', '- [x] ', '- [ ] ']
     ]) {
@@ -242,8 +242,8 @@ async function run() {
     await call('copyMode', 'plain')
     await expectContents(prefix + 'table/plain', 'table', 'A\tB\tC')
     await call('mountCopy', { source: '| Topic | Finding |\n| --- | --- |\n| Config | `RuntimeOptions` only (refreshable) |\n| Note | Install-time `size-limit` silently ignored |', theme, agent })
-    await expectContents(prefix + 'table/code-at-start', 'tbody tr:nth-child(1) td:nth-child(2)', '`RuntimeOptions` only \\(refreshable\\)')
-    await expectContents(prefix + 'table/code-in-middle', 'tbody tr:nth-child(2) td:nth-child(2)', 'Install\\-time `size-limit` silently ignored')
+    await expectContents(prefix + 'table/code-at-start', 'tbody tr:nth-child(1) td:nth-child(2)', '`RuntimeOptions` only (refreshable)')
+    await expectContents(prefix + 'table/code-in-middle', 'tbody tr:nth-child(2) td:nth-child(2)', 'Install-time `size-limit` silently ignored')
     await expectContents(prefix + 'table/code-isolated', 'td code', 'RuntimeOptions')
     await call('mountCopy', { source: 'Before\n\n| A | B |\n| --- | --- |\n| C | D |\n\nAfter', theme, agent })
     await expectRange(prefix + 'table/left-only', ['.md-p', 0], ['td', 1, 1], 'Before\n\n| A | B |\n| --- | --- |\n| C | D |')

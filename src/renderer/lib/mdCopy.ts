@@ -242,7 +242,9 @@ function renderTable(node: CopyNode & { kind: 'table' }, ctx: Context): string {
       .map(cell => planInline(inlineRuns('children' in cell ? cell.children : [cell], ctx))) : []
   ).filter(row => row.length > 0)
   const protect = ctx.options.mode === 'markdown' && (markdown || plans.some(row => row.some(hasInlineMarkup)))
-  const rows = plans.map(row => row.map(tokens => emitInline(tokens, protect)))
+  // Table cells parse separately; a grid pastes as running text, so its cells can pair with each other.
+  const grid = markdown ? undefined : plans.flat(2)
+  const rows = plans.map(row => row.map(tokens => emitInline(tokens, protect, grid ?? tokens)))
   if (!markdown) return rowsToText(rows)
   if (!rows.length) return ''
   const line = (row: string[]): string => '| ' + row.map(value => escapeTablePipes(value).replace(/\n/g, '<br>')).join(' | ') + ' |'

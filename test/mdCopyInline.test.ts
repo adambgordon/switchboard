@@ -10,7 +10,7 @@ describe('inline emission boundaries', () => {
       { styles: 0, tokens: [text('x')] }, { styles: 1, tokens: [text('a')] },
       { styles: 2, tokens: [text('.')] }, { styles: 0, tokens: [text(' R')] }
     ])
-    expect(emitInline(tokens, true)).toBe('&#120;*&#97;***\\.** R')
+    expect(emitInline(tokens, true)).toBe('&#120;*&#97;***.** R')
   })
   it('repairs the two ends of a shared literal independently', () => {
     const tokens = planInline([
@@ -42,7 +42,7 @@ describe('inline emission boundaries', () => {
     expect(emitInline(tokens, true)).toBe(' \t*q*\n ')
   })
   it('protects literal punctuation only when requested', () => {
-    expect(emitInline([text('*a* &copy;')], true)).toBe('\\*a\\* \\&copy\\;')
+    expect(emitInline([text('*a* &copy;')], true)).toBe('\\*a\\* \\&copy;')
     expect(emitInline([text('*a* &copy;')], false)).toBe('*a* &copy;')
   })
 })
