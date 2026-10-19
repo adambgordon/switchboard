@@ -20,6 +20,7 @@ describe('langLabelFromClassName', () => {
     expect(langLabelFromClassName('language-zsh')).toBe('bash')
     expect(langLabelFromClassName('language-yml')).toBe('yaml')
     expect(langLabelFromClassName('language-md')).toBe('markdown')
+    expect(langLabelFromClassName('language-patch')).toBe('diff')
   })
 
   it('lowercases the token', () => {

@@ -19,7 +19,8 @@ const LANG_ALIASES: Record<string, string> = {
   zsh: 'bash',
   shell: 'bash',
   yml: 'yaml',
-  md: 'markdown'
+  md: 'markdown',
+  patch: 'diff'
 }
 
 // Language tokens can carry +, #, ., - (c++, c#, objective-c, f#), so the char class is permissive.

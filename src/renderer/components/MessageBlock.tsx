@@ -18,6 +18,7 @@ import yaml from 'highlight.js/lib/languages/yaml'
 import xml from 'highlight.js/lib/languages/xml'
 import css from 'highlight.js/lib/languages/css'
 import markdown from 'highlight.js/lib/languages/markdown'
+import diff from 'highlight.js/lib/languages/diff'
 import plaintext from 'highlight.js/lib/languages/plaintext'
 import type { TranscriptBlock } from '@shared/types'
 import type { ToolCall, ToolPair, ToolRunItem, TranscriptItem } from '../lib/messageGroups'
@@ -34,7 +35,7 @@ import { Arrow, Chevron, Person } from './icons'
 /* Syntax highlighting — a curated language subset (passed to rehype-highlight, which REPLACES lowlight's
  * default ~37 'common' grammars, keeping the bundle lean). Unknown languages are tolerated (a build-time
  * file warning, never a throw), so an unlisted ```fence just renders unstyled. NOTE: html lives in `xml`
- * and shell in `bash` (aliases ```ts / ```py / ```html resolve automatically). The token COLORS live in
+ * and shell in `bash` (aliases ```ts / ```py / ```html / ```patch resolve automatically). The token COLORS live in
  * transcript.css (.hljs-*), themed per light/dark — the one sanctioned exception to the transcript's
  * otherwise strict grayscale (see the header note there). */
 // `math` is registered as PLAINTEXT rather than left out: remark-math hands display math to rehype
@@ -42,7 +43,7 @@ import { Arrow, Chevron, Person } from './icons'
 // rehype-highlight's throw/catch + VFile-warning path before the component override replaces it.
 // Registering it makes the bypass explicit and keeps the LaTeX one untokenized text child, which is
 // what `displayMathTex` reads.
-const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, rust, sql, yaml, xml, css, markdown, math: plaintext }
+const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, rust, sql, yaml, xml, css, markdown, diff, math: plaintext }
 
 /* Minimal hast shape — enough to walk and stamp. Avoids pulling in @types/hast (and unist-util-visit)
  * for a dozen lines of tree walk. */
