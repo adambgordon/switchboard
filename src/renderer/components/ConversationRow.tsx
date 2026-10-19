@@ -6,7 +6,7 @@ import { rowTipPreview, rowTipTitle } from '../lib/rowTip'
 import { needsYou } from '../lib/sidebarModel'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { displayTitleForRow, isParkedOnlyRow, liveDotClass } from '../lib/rowIdentity'
-import { DashedCircle, Dots, NewWindow, Pin } from './icons'
+import { DashedCircle, Dots, Pin } from './icons'
 import AgentLogo from './AgentLogo'
 
 interface Props {
@@ -24,10 +24,6 @@ interface Props {
   pinned: boolean
   /** Hidden by the user, drawn grayed whatever the rail's filter. */
   dimmed?: boolean
-  /** Another window holds this conversation's tab, so clicking the row raises THAT window rather than
-   *  opening it here. Marked, because a click that brings a different window forward is startling
-   *  when nothing said it would. */
-  elsewhere?: boolean
   onSelect: (id: string) => void
   /** When set and the row is live, clicking jumps to its terminal instead of previewing. */
   onJump?: (id: string) => void
@@ -57,7 +53,6 @@ function ConversationRowImpl({
   liveState,
   pinned,
   dimmed,
-  elsewhere,
   onSelect,
   onJump,
   onStick,
@@ -93,12 +88,6 @@ function ConversationRowImpl({
     ) : (
       <AgentLogo agent={meta.agent} />
     )
-  // No label of its own: the row's hover takes over the whole row, and names this in its last line.
-  const elsewhereMark = elsewhere && (
-    <span className="sb-row-elsewhere" role="img" aria-label="Open in another window">
-      <NewWindow size={11} />
-    </span>
-  )
   return (
     <div
       className={`sb-row ${density}${selected ? ' selected' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${dimmed ? ' dimmed' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
@@ -152,7 +141,6 @@ function ConversationRowImpl({
             {pinned && <Pin size={10} filled className="sb-row-pin" />}
             {title}
           </span>
-          {elsewhereMark}
         </>
       ) : (
         <span className="sb-row-main">
@@ -182,12 +170,6 @@ function ConversationRowImpl({
             <span>{relTime(lastActive)}</span>
             <span className="sb-sep" aria-hidden="true" />
             <span>{formatCount(meta.messageCount)} msg</span>
-            {elsewhere && (
-              <>
-                <span className="sb-sep" aria-hidden="true" />
-                {elsewhereMark}
-              </>
-            )}
           </span>
         </span>
       )}

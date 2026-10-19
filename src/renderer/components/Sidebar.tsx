@@ -29,8 +29,8 @@ interface Props {
   onSetAllCollapsed: (collapsed: boolean) => void
   /** True during the initial conversation index, before the model is populated. */
   loading: boolean
-  /** Conversations another window holds tabs for — those rows are marked, since clicking one raises
-   *  that window instead of opening here. */
+  /** Conversations another window holds tabs for — those rows say so in their hover, since clicking
+   *  one raises that window instead of opening here. */
   openElsewhere: Set<string>
   selectedSessionId: string | null
   onJump: (sessionId: string) => void
@@ -501,7 +501,6 @@ export default function Sidebar({
         liveState={row.liveState}
         pinned={row.pinned}
         dimmed={row.hiddenBy !== null}
-        elsewhere={openElsewhere.has(row.sessionId)}
         onSelect={onSelect}
         onJump={onJump}
         onStick={onStick}

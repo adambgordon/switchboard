@@ -24,7 +24,7 @@
   --dot: var(--dot-on-selected, var(--row-selected-dot));
   --dot-halo: var(--row-selected-halo);
 }
-/* Compact: one line. Logo, title, then the elsewhere glyph and the dot/⋮ slot, all centered. Both
+/* Compact: one line. Logo, title, then the dot/⋮ slot, all centered. Both
    paddings are short of the spacious row's, because each end's slot is wider than the mark it holds:
    the trailing one centers the dot/⋮ under its folder's pencil, and the leading one brings the logo's
    edge about as far in as that mark's. The title sits closer to the logo than the row's gap: the
@@ -63,7 +63,7 @@
    quiet — every row has one, and a column of them at the title's gray is noise. Not on a hidden row,
    whose gray says hidden. Spacious's logo sits on the meta line instead, and always keeps its gray; the
    pin follows the logo in each. */
-.sb-row:is(.attention, .selected):not(.dimmed) :is(.sb-row-lead, .sb-row-elsewhere),
+.sb-row:is(.attention, .selected):not(.dimmed) .sb-row-lead,
 .sb-row.compact:is(.attention, .selected):not(.dimmed) .sb-row-pin {
   color: var(--rail-ink);
 }
@@ -101,15 +101,6 @@
   align-self: center;
   flex-shrink: 0;
 }
-/* Marker for a conversation whose tab lives in another window. Ink, not cobalt — it says where the
-   conversation is, which is nothing to do with whether it is alive. */
-.sb-row-elsewhere {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  color: var(--ink-ghost);
-}
-
 .sb-row .sb-dot {
   transition: opacity var(--dur-fast);
 }
@@ -245,7 +236,7 @@
    where the other rows use their quiet grays (a hidden row's included: its title says hidden). Late in
    the sheet so it wins over those grays; the full-ink marks above still win over it. */
 .sb-row.selected
-  :is(.sb-row-lead, .sb-row-elsewhere, .sb-row-pin, .sb-row-preview, .sb-row-preview-empty, .sb-row-meta, .sb-row-menu-btn) {
+  :is(.sb-row-lead, .sb-row-pin, .sb-row-preview, .sb-row-preview-empty, .sb-row-meta, .sb-row-menu-btn) {
   color: var(--row-selected-soft);
 }
 .sb-row.selected .sb-sep {
