@@ -430,15 +430,12 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
         }
       }
 
-      // Insert immediately after the active tab, so an opened conversation appears next to the one
-      // it was opened from rather than at the far end of the strip. With nothing active — an empty
-      // pane, or one showing the welcome screen — it goes at the end, which for an empty pane is
-      // index 0 either way.
-      const at = pane.activeIndex < 0 ? pane.tabs.length : pane.activeIndex + 1
-      const tabs = [...pane.tabs]
-      tabs.splice(at, 0, { sessionId: action.sessionId, preview: action.mode === 'preview' })
-      // A background open (⌘+click) must not move the selection; the insert is after the active
-      // tab, so the active index is unaffected either way.
+      // A new tab goes at the end of the strip, so the order of the strip is the order tabs were
+      // opened in.
+      const at = pane.tabs.length
+      const tabs = [...pane.tabs, { sessionId: action.sessionId, preview: action.mode === 'preview' }]
+      // A background open (⌘+click) must not move the selection; appending never shifts the active
+      // index, so it is unaffected either way.
       const next = withPane(state, target, {
         ...pane,
         tabs,

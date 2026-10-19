@@ -5,7 +5,7 @@ import type { AgentKind } from '@shared/types'
 /**
  * The new-conversation chooser, as a tab.
  *
- * A chooser occupies a slot in a pane exactly like a conversation does — it opens after the active tab,
+ * A chooser occupies a slot in a pane exactly like a conversation does — it opens at the end of the strip,
  * closes with ⌘W, and is replaced in place by the conversation started from it — so it is modeled as a
  * tab whose id is reserved rather than as a second kind of tab. Every consumer that keys on conversation
  * ids therefore has to skip it, and `isChooserTab` is the one test they use.
