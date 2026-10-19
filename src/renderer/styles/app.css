@@ -663,23 +663,27 @@ body.sb-resizing .sb-pane {
   gap: 9px;
   width: 100%;
   padding: 7px 10px;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   text-align: left;
   white-space: nowrap;
   /* The rail's row-title size, so the modal's sidebar reads like the app's. */
   font-size: var(--text-base);
   font-weight: 500;
   color: var(--ink-faint);
-  transition: all var(--dur-fast) var(--ease);
 }
+/* Hover and selection are the rail row's: hover fills without changing the ink, and the selected item
+   takes the rail's inverted fill and inks, holding them under the pointer. */
 .sb-settings-nav-item:hover {
-  color: var(--ink-soft);
   background: var(--sunken-hover);
 }
-.sb-settings-nav-item.active {
-  color: var(--ink);
-  font-weight: 600;
-  background: var(--sunken-selected);
+.sb-settings-nav-item.active,
+.sb-settings-nav-item.active:hover {
+  color: var(--row-selected-ink);
+  background: var(--row-selected);
+}
+/* The attention dot is drawn in --ink, which the inverted fill would swallow. */
+.sb-settings-nav-item.active .sb-attn-dot-nav {
+  background: var(--row-selected-ink);
 }
 .sb-settings-page {
   flex: 1;
