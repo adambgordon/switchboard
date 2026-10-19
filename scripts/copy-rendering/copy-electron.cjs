@@ -54,7 +54,7 @@ async function run() {
     for (const [name, source, marked] of [
       ['bold', 'L **abc** R', 'L **abc** R'], ['italic', 'L *abc* R', 'L *abc* R'],
       ['strike', 'L ~~abc~~ R', 'L ~~abc~~ R'], ['code', 'L `abc` R', 'L `abc` R'],
-      ['link', 'L [abc](https://example.org/abc) R', 'L [abc](<https://example.org/abc>) R']
+      ['link', 'L [abc](https://example.org/abc) R', 'L [abc](https://example.org/abc) R']
     ]) {
       await call('mountCopy', { source, theme, agent })
       for (const mode of ['markdown', 'plain']) {
@@ -81,7 +81,7 @@ async function run() {
     for (const [source, md, plain] of [
       ['- **a** **b**', '**a** **b**', 'a b'],
       ['- `a` `b`', '`a` `b`', 'a b'],
-      ['- [a](https://example.org) **b**', '[a](<https://example.org>) **b**', 'a b'],
+      ['- [a](https://example.org) **b**', '[a](https://example.org) **b**', 'a b'],
       ['- **a**\n  **b**', '**a**\n**b**', 'a\nb'],
       ['- [x] **a** **b**', '**a** **b**', 'a b'],
       ['- **a** **b**\n  - child\n- end', '- **a** **b**\n  - child\n- end', '- a b\n  - child\n- end'],
@@ -93,7 +93,7 @@ async function run() {
       await expectContents(prefix + 'inline-list-spacing/plain/' + source, '.md', plain)
     }
     const literal = 'a*b*c _d_ `e` [f](g) \\h'
-    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\]\\(g\\) \\\\h'
+    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` [f\\](g) \\\\h'
     for (const [kind, first, second] of [
       ['unordered', '- ', '- '], ['ordered', '3. ', '4. '], ['task', '- [x] ', '- [ ] ']
     ]) {
@@ -242,8 +242,8 @@ async function run() {
     await call('copyMode', 'plain')
     await expectContents(prefix + 'table/plain', 'table', 'A\tB\tC')
     await call('mountCopy', { source: '| Topic | Finding |\n| --- | --- |\n| Config | `RuntimeOptions` only (refreshable) |\n| Note | Install-time `size-limit` silently ignored |', theme, agent })
-    await expectContents(prefix + 'table/code-at-start', 'tbody tr:nth-child(1) td:nth-child(2)', '`RuntimeOptions` only \\(refreshable\\)')
-    await expectContents(prefix + 'table/code-in-middle', 'tbody tr:nth-child(2) td:nth-child(2)', 'Install\\-time `size-limit` silently ignored')
+    await expectContents(prefix + 'table/code-at-start', 'tbody tr:nth-child(1) td:nth-child(2)', '`RuntimeOptions` only (refreshable)')
+    await expectContents(prefix + 'table/code-in-middle', 'tbody tr:nth-child(2) td:nth-child(2)', 'Install-time `size-limit` silently ignored')
     await expectContents(prefix + 'table/code-isolated', 'td code', 'RuntimeOptions')
     await call('mountCopy', { source: 'Before\n\n| A | B |\n| --- | --- |\n| C | D |\n\nAfter', theme, agent })
     await expectRange(prefix + 'table/left-only', ['.md-p', 0], ['td', 1, 1], 'Before\n\n| A | B |\n| --- | --- |\n| C | D |')
@@ -264,7 +264,7 @@ async function run() {
     await expectContents(prefix + 'table/empty-cell', 'tbody', 'x\t\tz')
     await call('mountCopy', { source: 'L ![image label](https://example.org/image.png) R', theme, agent })
     await expectRange(prefix + 'image-partial', ['[data-copy-label]', 6], ['[data-copy-label]', 11], 'label')
-    await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](<https://example.org/image.png>) R')
+    await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](https://example.org/image.png) R')
     await call('mountCopy', { blocks: [text('L'), { kind: 'image', alt: 'uploaded image' }, text('R')], theme, agent })
     await expectContents(prefix + 'uploaded-image', '.transcript-content', 'L\n\nuploaded image\n\nR')
     await expectUnselectable(prefix + 'chrome', ['.block-chip > [data-md-skip]'])

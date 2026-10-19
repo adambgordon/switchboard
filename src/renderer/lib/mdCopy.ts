@@ -1,4 +1,7 @@
-import { INLINE_STYLE, emitInline, hasInlineMarkup, planInline, type InlineRun, type InlineToken } from './mdCopyInline'
+import {
+  ENTITY_AMPERSAND, INLINE_STYLE, emitGrid, emitInline, hasInlineMarkup, planInline,
+  type InlineContext, type InlineRun, type InlineToken
+} from './mdCopyInline'
 
 /** Semantic copy rules shared by the DOM selection and whole-document adapters. */
 export type CopyMode = 'markdown' | 'plain'
@@ -104,10 +107,24 @@ function retained(node: CopyNode, ctx: Context): boolean {
 // Table splitting happens before inline parsing; an odd backslash run already protects a pipe.
 const escapeTablePipes = (text: string): string => text.replace(/(\\*)\|/g,
   (pipe, slashes: string) => slashes.length % 2 ? pipe : slashes + '\\|')
-// Ampersands must stay literal in metadata; otherwise Markdown decodes entity-looking values.
-const escapeDestination = (url: string): string => '<' + url.replace(/[\\<>&]/g, '\\$&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '>'
+// A bare destination cannot be empty (a title would become the URL), start with `<`, hold a space or control
+// character, or leave a parenthesis unpaired.
+function bareDestination(url: string): boolean {
+  if (!url || /^<|[\x00-\x20\x7f]/.test(url)) return false
+  let depth = 0
+  for (const char of url) {
+    if (char === '(') depth++
+    else if (char === ')' && --depth < 0) return false
+  }
+  return depth === 0
+}
+// An entity-shaped ampersand must stay literal in metadata; otherwise Markdown decodes the value.
+const escapeDestination = (url: string): string => bareDestination(url)
+  ? url.replace(/\\/g, '\\\\').replace(ENTITY_AMPERSAND, '\\&')
+  : '<' + url.replace(/[\\<>]/g, '\\$&').replace(ENTITY_AMPERSAND, '\\&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '>'
 // Escape literal ampersands before introducing references for title line endings.
-const linkTitle = (title?: string): string => title ? ' "' + title.replace(/[\\"&]/g, '\\$&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '"' : ''
+const linkTitle = (title?: string): string => title
+  ? ' "' + title.replace(/[\\"]/g, '\\$&').replace(ENTITY_AMPERSAND, '\\&').replace(/\r/g, '&#13;').replace(/\n/g, '&#10;') + '"' : ''
 
 function longestBackticks(value: string): number {
   return (value.match(/`+/g) ?? []).reduce((longest, run) => Math.max(longest, run.length), 0)
@@ -178,9 +195,9 @@ function inlineRuns(nodes: CopyNode[], ctx: Context, inherited = 0): InlineRun[]
   visit(nodes, inherited)
   return runs
 }
-function renderInline(nodes: CopyNode[], ctx: Context, escaped = false): string {
+function renderInline(nodes: CopyNode[], ctx: Context, escaped = false, context: InlineContext = {}): string {
   const tokens = planInline(inlineRuns(nodes, ctx))
-  return emitInline(tokens, ctx.options.mode === 'markdown' && (escaped || hasInlineMarkup(tokens)))
+  return emitInline(tokens, ctx.options.mode === 'markdown' && (escaped || hasInlineMarkup(tokens)), context)
 }
 /** Separate copy units retain a paragraph boundary even when their payload is inline. */
 function renderBlocks(nodes: CopyNode[], ctx: Context): string {
@@ -242,8 +259,9 @@ function renderTable(node: CopyNode & { kind: 'table' }, ctx: Context): string {
       .map(cell => planInline(inlineRuns('children' in cell ? cell.children : [cell], ctx))) : []
   ).filter(row => row.length > 0)
   const protect = ctx.options.mode === 'markdown' && (markdown || plans.some(row => row.some(hasInlineMarkup)))
-  const rows = plans.map(row => row.map(tokens => emitInline(tokens, protect)))
-  if (!markdown) return rowsToText(rows)
+  // Table cells parse separately and inline-only.
+  if (!markdown) return rowsToText(emitGrid(plans, protect))
+  const rows = plans.map(row => row.map(tokens => emitInline(tokens, protect, { blockStart: false })))
   if (!rows.length) return ''
   const line = (row: string[]): string => '| ' + row.map(value => escapeTablePipes(value).replace(/\n/g, '<br>')).join(' | ') + ' |'
   const separator = rows[0].map((_, i) => node.align[i] === 'center' ? ':---:' : node.align[i] === 'left' ? ':---' : node.align[i] === 'right' ? '---:' : '---')
@@ -262,7 +280,8 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
     case 'flow': return renderFlow(node.children, ctx, escaped)
     case 'strong': case 'em': case 'strike': return renderInline([node], ctx, escaped)
     case 'heading': {
-      const body = renderInline(node.children, ctx, escaped || marked)
+      // Text after heading syntax cannot begin a block; a bare heading body can.
+      const body = renderInline(node.children, ctx, escaped || marked, { blockStart: !marked, heading: marked })
       return marked ? '#'.repeat(node.level) + ' ' + body : body
     }
     case 'quote': {

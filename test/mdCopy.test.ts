@@ -27,7 +27,7 @@ const wrappers: [string, () => CopyNode, string][] = [
   ['italic', () => ({ kind: 'em', children: [copyText('abc')] }), '*abc*'],
   ['strike', () => ({ kind: 'strike', children: [copyText('abc')] }), '~~abc~~'],
   ['code', () => ({ kind: 'code', value: 'abc', block: false }), '`abc`'],
-  ['link', () => ({ kind: 'link', url: 'https://example.org/abc', children: [copyText('abc')] }), '[abc](<https://example.org/abc>)']
+  ['link', () => ({ kind: 'link', url: 'https://example.org/abc', children: [copyText('abc')] }), '[abc](https://example.org/abc)']
 ]
 describe.each(wrappers)('%s selection boundaries', (_name, wrapper, marked) => {
   const document = (): CopyNode[] => [inline([copyText('L '), wrapper(), copyText(' R')])]
@@ -114,7 +114,7 @@ describe('list structure', () => {
 
 describe('literal punctuation in list copies', () => {
   const literal = 'a*b*c _d_ `e` [f](g) \\h'
-  const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\]\\(g\\) \\\\h'
+  const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` [f\\](g) \\\\h'
   const list = (start: number | null, checked?: boolean): CopyNode => ({ kind: 'list', start, children: [
     { kind: 'item', checked, children: [copyText(literal)] },
     { kind: 'item', checked, children: [copyText('second')] }
