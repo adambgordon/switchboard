@@ -93,7 +93,7 @@ async function run() {
       await expectContents(prefix + 'inline-list-spacing/plain/' + source, '.md', plain)
     }
     const literal = 'a*b*c _d_ `e` [f](g) \\h'
-    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` \\[f\\](g) \\\\h'
+    const escaped = 'a\\*b\\*c \\_d\\_ \\`e\\` [f\\](g) \\\\h'
     for (const [kind, first, second] of [
       ['unordered', '- ', '- '], ['ordered', '3. ', '4. '], ['task', '- [x] ', '- [ ] ']
     ]) {

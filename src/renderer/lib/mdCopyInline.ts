@@ -98,71 +98,205 @@ function encodeEdge(chunk: Chunk, end: boolean): void {
 }
 
 const ASCII_PUNCTUATION = /[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/
-const WORD = /[\p{L}\p{N}]/u
-const ENTITY = /^&(?:#\d{1,7}|#[xX][\da-fA-F]{1,6}|[A-Za-z][A-Za-z\d]{1,31});/
+// Sticky patterns test at a position without copying the rest of the chunk.
+const ENTITY = /&(?:#\d{1,7}|#[xX][\da-fA-F]{1,6}|[A-Za-z][A-Za-z\d]{1,31});/y
+const NON_SPACE_RUN = /\S*/y
+const at = (pattern: RegExp, value: string, index: number): RegExpExecArray | null => {
+  pattern.lastIndex = index
+  return pattern.exec(value)
+}
+/** An ampersand that a parser would read as the start of a character reference. */
+export const ENTITY_AMPERSAND = /&(?=#\d{1,7};|#[xX][\da-fA-F]{1,6};|[A-Za-z][A-Za-z\d]{1,31};)/g
 const HTML_OR_AUTOLINK = /[A-Za-z\d/!?]/
-interface Pairing { dollar: boolean; tilde: boolean }
 
-const occurrences = (tokens: InlineToken[], char: string, kinds: InlineToken['kind'][]): number =>
-  tokens.reduce((n, token) => n + (kinds.includes(token.kind) && 'value' in token ? token.value.split(char).length - 1 : 0), 0)
-/** `$` and `~` form syntax only in pairs, so a lone literal stays bare. */
-function pairing(scope: InlineToken[]): Pairing {
-  return {
-    // A math opener scans through code and link metadata for its closer.
-    dollar: occurrences(scope, '$', ['text', 'atom', 'code', 'math']) >= 2,
-    // Strike delimiters pair only within text; a marker run absorbs a touching literal.
-    tilde: occurrences(scope, '~', ['text', 'marker']) >= 2
-  }
+/** Options describing where an inline passage sits once pasted. */
+export interface InlineContext {
+  /** Raw neighboring text a destination parses together with this passage, such as the other cells of a grid. */
+  before?: string
+  after?: string
+  /** False after heading syntax or in a table cell, whose content is inline-only. */
+  blockStart?: boolean
+  /** A heading body, whose final space-separated number signs would be read as a closing sequence. */
+  heading?: boolean
 }
 
+/** The text a passage contributes before escaping, for pairing decisions in a neighboring passage. */
+export const rawInline = (tokens: InlineToken[]): string =>
+  tokens.map(token => token.kind === 'break' ? '\n' : token.value).join('')
+
+// micromark's character groups: whitespace (and passage edges), punctuation or symbol, anything else.
+const group = (char: string | undefined): number =>
+  char === undefined || /\s/.test(char) ? 1 : /[\p{P}\p{S}]/u.test(char) ? 2 : 0
+
 /** Block syntax is recognized after leading whitespace at a line start. */
-function lineStartEscapes(value: string, start: number, marks: Set<number>): void {
+function lineStartEscapes(value: string, start: number, marks: Uint8Array, opening: boolean): void {
   let at = start
   while (value[at] === ' ' || value[at] === '\t') at++
   const end = value.indexOf('\n', at)
   const line = value.slice(at, end < 0 ? value.length : end)
   let match: RegExpMatchArray | null
   // A chunk end may continue with any syntax, so it counts as a possible line end.
-  if (/^(?:#{1,6}|[-+*>])(?=[ \t]|$)/.test(line) || line[0] === '>') marks.add(at)
-  else if ((match = line.match(/^\d{1,9}(?=[.)](?:[ \t]|$))/))) marks.add(at + match[0].length)
+  if (/^(?:#{1,6}|[-+*])(?=[ \t]|$)|^>|^\$\$|^~~~|^<[A-Za-z/!?]/.test(line)) marks[at] = 1
+  // Only an ordered list starting at one can interrupt a paragraph.
+  else if ((match = line.match(opening ? /^\d{1,9}(?=[.)](?:[ \t]|$))/ : /^1(?=[.)](?:[ \t]|$))/))) marks[at + match[0].length] = 1
+  // A task box or a reference definition.
+  else if (/^\[(?:[ xX]\](?=[ \t]|$)|[^\]]*\]:)/.test(line)) marks[at] = 1
   // Setext underlines, thematic breaks, and table delimiter rows can interrupt a paragraph.
-  if (/^[-=:|][-=:| \t]*$/.test(line) && /[-=]/.test(line)) marks.add(at + line.search(/[-=]/))
+  if (/^[-=:|][-=:| \t]*$/.test(line) && /[-=]/.test(line)) marks[at + line.search(/[-=]/)] = 1
+  if (/^([*_])(?:[ \t]*\1){2,}[ \t]*$/.test(line)) marks[at] = 1
 }
 
-/** Escapes only characters that could form syntax where they sit; edges may later become references. */
-function escapeLiteral(value: string, lineStart: boolean, passageEnd: boolean, risk: Pairing): string {
-  const marks = new Set<number>()
-  if (lineStart) lineStartEscapes(value, 0, marks)
-  for (let i = value.indexOf('\n'); i >= 0; i = value.indexOf('\n', i + 1)) lineStartEscapes(value, i + 1, marks)
-  // A heading drops a final space-separated run of number signs as its closing sequence.
-  const closing = passageEnd ? value.match(/(?:^|[ \t])(#+)[ \t\n]*$/) : null
-  if (closing) marks.add(closing.index! + closing[0].indexOf('#'))
-  let out = ''
-  for (let i = 0; i < value.length; i++) {
-    const char = value[i], next = value[i + 1]
-    let escape = marks.has(i)
-    switch (char) {
-      case '`': case '*': case '[': case ']': escape = true; break
-      // Boundary repair may turn the final character into a reference, which a bare backslash would escape.
-      case '\\': escape ||= next === undefined || next === '\n' || ASCII_PUNCTUATION.test(next) || i + 1 === value.length - 1; break
-      // An underscore between word characters can neither open nor close; edges may be re-encoded.
-      case '_': escape ||= !(i >= 2 && i <= value.length - 3 && WORD.test(value[i - 1]) && WORD.test(next)); break
-      case '<': {
-        const run = value.slice(i).match(/^\S*/)![0]
-        escape ||= next === undefined || HTML_OR_AUTOLINK.test(next) || run.includes('>') || run.length === value.length - i
-        break
-      }
-      case '&': escape ||= ENTITY.test(value.slice(i)); break
-      case '$': escape ||= risk.dollar; break
-      case '~': escape ||= risk.tilde; break
-    }
-    out += escape ? '\\' + char : char
+interface Run { char: string; from: number; to: number; open: boolean; close: boolean; literal: number[] }
+
+/**
+ * Marks the literal characters of a passage that could form syntax once pasted. Delimiters are escaped only when
+ * they touch generated syntax or could pair with another delimiter under the parser's open/close rules.
+ */
+function escapePassage(chunks: Chunk[], context: InlineContext): void {
+  const before = context.before ?? '', after = context.after ?? ''
+  const parts = [before], starts: number[] = []
+  let length = before.length
+  for (const chunk of chunks) {
+    starts.push(length)
+    parts.push(chunk.value)
+    length += chunk.value.length
   }
-  return out
+  parts.push(after)
+  const text = parts.join('')
+  // The chunk owning each character of the passage, or -1 for surrounding context.
+  const source = new Int32Array(text.length).fill(-1)
+  chunks.forEach((chunk, index) => source.fill(index, starts[index], starts[index] + chunk.value.length))
+  const kind = (p: number): Chunk['kind'] | 'context' => p < 0 || p >= text.length || source[p] < 0 ? 'context' : chunks[source[p]].kind
+  // One flag per literal character; set flags are escaped.
+  const marks = chunks.map(chunk => new Uint8Array(chunk.kind === 'text' ? chunk.value.length : 0))
+  const mark = (p: number): void => { marks[source[p]][p - starts[source[p]]] = 1 }
+  // Boundary repair may later turn a literal edge beside a marker into a reference, which reads as punctuation.
+  const repairable = (p: number): boolean => {
+    if (kind(p) !== 'text') return false
+    const index = source[p], offset = p - starts[index]
+    return (offset === 0 && chunks[index - 1]?.kind === 'marker') ||
+      (offset === chunks[index].value.length - 1 && chunks[index + 1]?.kind === 'marker')
+  }
+  // The possible character groups at a position, as a bit set.
+  const groups = (p: number): number => {
+    const value = group(text[p])
+    return value === 0 && repairable(p) ? 0b101 : 1 << value
+  }
+  const counts = (q: number, char: string): boolean => text[q] === char && (char === '$' || kind(q) !== 'atom')
+
+  // Delimiter runs. Atom payloads bind tighter than emphasis, so only math pairing sees into them.
+  const runs: Run[] = []
+  const delimiter = /[*_~$]/g
+  for (let match = delimiter.exec(text); match; match = delimiter.exec(text)) {
+    const p = match.index, char = match[0]
+    if (!counts(p, char)) continue
+    let q = p
+    while (counts(q, char)) q++
+    delimiter.lastIndex = q
+    const literal: number[] = []
+    for (let i = p; i < q; i++) if (kind(i) === 'text') literal.push(i)
+    // A literal that touches generated syntax joins its delimiter run.
+    if (literal.length && literal.length < q - p) literal.forEach(mark)
+    let open = false, close = false
+    const lefts = groups(p - 1), rights = groups(q)
+    for (let left = 0; left < 3; left++) for (let right = 0; right < 3; right++) {
+      if (!(lefts & (1 << left)) || !(rights & (1 << right))) continue
+      if (char === '*' || char === '_') {
+        const opens = right === 0 || (right === 2 && left !== 0) || text[q] === '*' || text[q] === '_'
+        const closes = left === 0 || (left === 2 && right !== 0) || text[p - 1] === '*' || text[p - 1] === '_'
+        open ||= char === '*' ? opens : opens && (left !== 0 || !closes)
+        close ||= char === '*' ? closes : closes && (right !== 0 || !opens)
+      } else if (char === '~') {
+        // A run longer than two is never strikethrough.
+        if (q - p > 2) continue
+        open ||= right === 0 || (right === 2 && left !== 0)
+        close ||= left === 0 || (left === 2 && right !== 0)
+      } else if (q - p === 1) {
+        // Single-dollar math needs a non-space inside each delimiter and no digit after the closer.
+        open ||= right !== 1
+        close ||= left !== 1 && (!/\d/.test(text[q] ?? '') || repairable(q))
+      } else {
+        open = close = true
+      }
+    }
+    runs.push({ char, from: p, to: q, open, close, literal })
+  }
+  // Emphasis pairs any sizes of one marker; strikethrough and math pair equal sizes only.
+  const key = (run: Run): string => run.char === '*' || run.char === '_' ? run.char : run.char + (run.to - run.from)
+  const openBefore: boolean[] = [], closeAfter: boolean[] = []
+  const opened = new Set<string>(), closed = new Set<string>()
+  runs.forEach((run, index) => { openBefore[index] = opened.has(key(run)); if (run.open) opened.add(key(run)) })
+  for (let index = runs.length - 1; index >= 0; index--) {
+    closeAfter[index] = closed.has(key(runs[index]))
+    if (runs[index].close) closed.add(key(runs[index]))
+  }
+  runs.forEach((run, index) => {
+    if (run.literal.length === run.to - run.from && ((run.open && closeAfter[index]) || (run.close && openBefore[index]))) {
+      run.literal.forEach(mark)
+    }
+  })
+
+  let last = chunks.length - 1
+  while (last >= 0 && !/\S/.test(chunks[last].value)) last--
+  let depth = 0
+  const lastTagEnd = text.lastIndexOf('>')
+  chunks.forEach((chunk, index) => {
+    if (chunk.kind === 'atom') {
+      if (chunk.value === '[' || chunk.value === '![') depth++
+      else if (chunk.value.startsWith('](')) depth = Math.max(0, depth - 1)
+    }
+    if (chunk.kind !== 'text') return
+    const value = chunk.value, own = marks[index], offset = starts[index]
+    const previous = chunks[index - 1]
+    const lineStart = index === 0 ? context.blockStart !== false : previous.value.endsWith('\n')
+    if (lineStart) lineStartEscapes(value, 0, own, index === 0 || /\n[ \t]*\n$/.test(previous.value))
+    // A line after a blank one opens a new paragraph, where any block may start.
+    for (let previousBreak = -1, i = value.indexOf('\n'); i >= 0; previousBreak = i, i = value.indexOf('\n', i + 1)) {
+      const blank = previousBreak >= 0 && !/\S/.test(value.slice(previousBreak + 1, i))
+      lineStartEscapes(value, i + 1, own, blank || (i === 0 && lineStart))
+    }
+    const closing = context.heading && index === last ? value.match(/(?:^|[ \t])(#+)[ \t\n]*$/) : null
+    if (closing) own[closing.index! + closing[0].indexOf('#')] = 1
+    const special = /[`[\]\\<&]/g
+    for (let found = special.exec(value); found; found = special.exec(value)) {
+      const i = found.index, char = found[0], next = value[i + 1]
+      switch (char) {
+        case '`': own[i] = 1; break
+        // Inside link text any bracket may rebalance the label; elsewhere only a resource or reference can follow.
+        case '[': if (depth > 0) own[i] = 1; break
+        case ']': if (depth > 0 || text[offset + i + 1] === '(' || text[offset + i + 1] === '[') own[i] = 1; break
+        // Boundary repair may turn the final character into a reference, which a bare backslash would escape.
+        case '\\':
+          if (next === undefined || next === '\n' || ASCII_PUNCTUATION.test(next) || i + 1 === value.length - 1) own[i] = 1
+          break
+        // A tag or autolink needs a closing angle bracket.
+        case '<': {
+          if (lastTagEnd <= offset + i) break
+          const end = i + at(NON_SPACE_RUN, value, i)![0].length
+          if (HTML_OR_AUTOLINK.test(next ?? '') || value.slice(i, end).includes('>') || end === value.length) own[i] = 1
+          break
+        }
+        case '&': if (at(ENTITY, value, i)) own[i] = 1; break
+      }
+    }
+  })
+  // Escaping part of a delimiter run would leave the rest as a shorter, still active run.
+  for (const run of runs) if (run.literal.some(p => marks[source[p]][p - starts[source[p]]])) run.literal.forEach(mark)
+  chunks.forEach((chunk, index) => {
+    if (chunk.kind !== 'text' || marks[index].indexOf(1) < 0) return
+    const out: string[] = []
+    let from = 0
+    for (let offset = marks[index].indexOf(1); offset >= 0; offset = marks[index].indexOf(1, offset + 1)) {
+      out.push(chunk.value.slice(from, offset), '\\')
+      from = offset
+    }
+    out.push(chunk.value.slice(from))
+    chunk.value = out.join('')
+  })
 }
 
-/** `scope` holds every token a destination parses as one passage, for pairing decisions. */
-export function emitInline(tokens: InlineToken[], protectLiterals: boolean, scope: InlineToken[] = tokens): string {
+/** `context` describes where the passage lands once pasted, for decisions that depend on its surroundings. */
+export function emitInline(tokens: InlineToken[], protectLiterals: boolean, context: InlineContext = {}): string {
   const chunks: Chunk[] = []
   // A Markdown hard break needs following inline content. Terminal newlines stay literal.
   let tail = tokens.length
@@ -178,16 +312,7 @@ export function emitInline(tokens: InlineToken[], protectLiterals: boolean, scop
     else if (token.kind === 'text' && chunks[chunks.length - 1]?.kind === 'text') chunks[chunks.length - 1].value += token.value
     else if (token.value) chunks.push({ ...token, kind: token.kind === 'code' || token.kind === 'math' ? 'atom' : token.kind })
   }
-  if (protectLiterals) {
-    const risk = pairing(scope)
-    let last = chunks.length - 1
-    while (last >= 0 && !/\S/.test(chunks[last].value)) last--
-    chunks.forEach((chunk, index) => {
-      if (chunk.kind !== 'text') return
-      const lineStart = index === 0 || chunks[index - 1].value.endsWith('\n')
-      chunk.value = escapeLiteral(chunk.value, lineStart, index === last, risk)
-    })
-  }
+  if (protectLiterals) escapePassage(chunks, context)
   const boundaries: Boundary[] = []
   const touching = new Map<number, number[]>()
   for (let index = 0; index < chunks.length;) {
