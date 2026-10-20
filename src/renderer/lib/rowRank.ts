@@ -106,6 +106,7 @@ export function spreadWrites(
   now: number
 ): Record<string, number> {
   const k = draggedIds.length
+  if (k === 0) return {}
   const dragged = new Set(draggedIds)
   const items = space.filter((e) => !dragged.has(e.id)).sort(compareRanked)
   const higher = higherId === null ? null : items.find((e) => e.id === higherId) ?? null
@@ -122,9 +123,10 @@ export function spreadWrites(
     return writes
   }
   const values = draggedIds.map((_, i) => higher.rank - ((higher.rank - lower.rank) * (i + 1)) / (k + 1))
-  // Strictly decreasing from below `higher` is the whole test. Every value sits a (k+1)th of the gap
-  // above `lower`, and a gap holding k distinct floats is wide enough that no rounding reaches it.
-  const fits = values.every((v, i) => v < (i === 0 ? higher.rank : values[i - 1]))
+  // Both bounds, as `dropWrites` checks its midpoint: a gap one float wide rounds a value onto either
+  // neighbor, and landing ON `lower` ties it, which the id tie-break may order either way.
+  const fits =
+    values.every((v, i) => v < (i === 0 ? higher.rank : values[i - 1])) && values[k - 1] > lower.rank
   if (!fits) return respace(items, items.indexOf(lower), draggedIds)
   draggedIds.forEach((id, i) => (writes[id] = values[i]))
   return writes

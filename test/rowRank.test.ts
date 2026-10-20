@@ -247,6 +247,19 @@ describe('spreadWrites', () => {
     expect(Object.keys(writes).length).toBeGreaterThan(2)
   })
 
+  it('re-spaces rather than land on the lower neighbor when the gap is one float wide', () => {
+    // a sits one float above b, on the float whose half-way point rounds DOWN, onto b. A midpoint
+    // landing there ties x with b, and the id tie-break then puts b first.
+    const a = T + 2 ** -12
+    expect(a - (a - T) / 2).toBe(T) // the fixture really rounds onto the lower neighbor
+    const tight: Ranked[] = [
+      { id: 'a', rank: a },
+      { id: 'b', rank: T },
+      { id: 'x', rank: T - 5000 }
+    ]
+    expect(orderAfter(tight, spreadWrites(tight, ['x'], 'a', 'b', T))).toEqual(['a', 'x', 'b'])
+  })
+
   it('keeps every other row where it was in the global order', () => {
     const mixed: Ranked[] = [
       { id: 'x1', rank: T - 1000 },
