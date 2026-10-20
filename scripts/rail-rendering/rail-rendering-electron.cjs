@@ -14,6 +14,8 @@ const ONLY = new Set((process.env.RAIL_CHECKS || '').split(',').map((s) => s.tri
 const THEMES = ['light', 'dark']
 const DRAG_ZOOMS = [0, 0.5]
 const GEOMETRY_ZOOMS = [-0.5, 0, 0.5]
+// Paint checks, run at every geometry zoom step; the rest run at the drag zoom steps only.
+const GEOMETRY_CHECKS = ['9-selected-fill', '19-picked-fill']
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const results = []
 const selectedRows = []
@@ -121,6 +123,46 @@ async function release() {
   pointer.down = false
   await frames(2)
 }
+// CDP's modifier bits.
+const META = 4, SHIFT = 8
+// A press, or a whole click, with modifiers held throughout — the click's own ⌘/⇧ is read off its release.
+async function pressWith(x, y, modifiers) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await hover(x, y)
+    const before = await js('window.pointerDowns')
+    pointer.down = true
+    await send('mousePressed', x, y, { modifiers })
+    await frames(1)
+    if ((await js('window.pointerDowns')) > before) return
+    harnessNotes.push(`${label()}: modified press not delivered, retry ${attempt + 1}`)
+    await send('mouseReleased', x, y, { modifiers })
+    pointer.down = false
+    await frames(1)
+  }
+  throw new Error('harness: a modified press never reached the page')
+}
+async function releaseWith(modifiers) {
+  if (!pointer.down) return
+  await send('mouseReleased', pointer.x, pointer.y, { modifiers })
+  pointer.down = false
+  await frames(2)
+}
+async function clickWith(x, y, modifiers) {
+  await pressWith(x, y, modifiers)
+  await releaseWith(modifiers)
+}
+async function rowCenter(key) {
+  const r = await call('rowRect', key)
+  if (!r) throw new Error(`harness: no row ${key} on the rail`)
+  return { x: r.left + 60, y: r.top + r.height / 2 }
+}
+async function clickRow(key, modifiers) {
+  const c = await rowCenter(key)
+  if (modifiers) await clickWith(c.x, c.y, modifiers)
+  else { await press(c.x, c.y); await release() }
+  await settle(30)
+}
+
 async function park() {
   await release()
   await send('mouseMoved', 345, 60)
@@ -1497,6 +1539,288 @@ CHECKS['17-filter-no-drag'] = async () => {
   record('17-filter-no-drag', failures, { free })
 }
 
+
+// ---- rail multi-selection ----
+const ATLAS = 'un:/home/dev/projects/atlas'
+const ATLAS_PINS = 'pin:/home/dev/projects/atlas'
+
+// ⌘ toggles a row, ⇧ takes the run from the anchor, and neither lands on a row: no select, the selected
+// row stays where it was. ⌘ on a picked row takes it out; Escape and a plain click clear the picks; a
+// ⌘-press that moves does not drag.
+CHECKS['18-pick'] = async () => {
+  const failures = []
+  await reset({ mode: 'folders' })
+  const selected = await call('selectedKey')
+  const un = (await call('units', ATLAS)).map((u) => u.key).filter((k) => k !== selected)
+  const a = un[4], b = un[7], c = un[5]
+  await call('reveal', ATLAS, a, 120)
+  await settle(30)
+  const rows = (await js('window.order()')).blocks.flatMap((x) => x.rows)
+  const inRail = (ids) => rows.filter((id) => ids.includes(id))
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y)
+  const expectPicks = async (name, want) => {
+    const picks = await js('window.picks()')
+    const drawn = await call('pickedKeys')
+    if (!same(picks, want)) failures.push(`${name}: picks ${JSON.stringify(picks)}, expected ${JSON.stringify(want)}`)
+    if (!same(drawn, want)) failures.push(`${name}: rows drawn picked ${JSON.stringify(drawn)}, expected ${JSON.stringify(want)}`)
+  }
+  const expectNoLanding = async (name) => {
+    const calls = await js('window.selectCalls')
+    if (calls.length) failures.push(`${name}: the gesture landed on ${JSON.stringify(calls)}`)
+    if ((await call('selectedKey')) !== selected) failures.push(`${name}: the selected row moved to ${await call('selectedKey')}`)
+    const st = await call('state')
+    if (st.dragging || st.clones || st.calls) failures.push(`${name}: the gesture left drag state ${JSON.stringify(st)}`)
+  }
+
+  // A first ⌘-click picks the selected row too, as a first ⌘-click on a tab does.
+  await clickRow(a, META)
+  await expectPicks('⌘-click', inRail([selected, a]))
+  await expectNoLanding('⌘-click')
+  // ⇧ replaces the picks with the run from the anchor (a) to b, in rail order.
+  await clickRow(b, SHIFT)
+  await expectPicks('⇧-click', rows.slice(rows.indexOf(a), rows.indexOf(b) + 1))
+  await expectNoLanding('⇧-click')
+  // ⌘ on a picked row takes it out.
+  await clickRow(c, META)
+  await expectPicks('⌘-click on a pick', rows.slice(rows.indexOf(a), rows.indexOf(b) + 1).filter((k) => k !== c))
+  await expectNoLanding('⌘-click on a pick')
+  // Escape clears them.
+  await park()
+  await escapeKey()
+  await settle(30)
+  await expectPicks('Escape', [])
+  // A plain click on a picked row clears the picks and lands on it.
+  await clickRow(a, META)
+  await clickRow(b, META)
+  await js('window.selectCalls = []')
+  await clickRow(b)
+  await expectPicks('plain click', [])
+  if (!(await js('window.selectCalls')).includes(b)) failures.push(`plain click: landing on ${b} was not reported`)
+  // A ⌘-press that moves picks the row and nothing more: no drag, no drop.
+  await js('window.selectCalls = []')
+  const d = await rowCenter(c)
+  await pressWith(d.x, d.y, META)
+  await moveTo(d.x, d.y + 40, 4)
+  const st = await call('state')
+  if (st.dragging || st.clones) failures.push(`⌘-drag: a ⌘-press and move started a drag ${JSON.stringify(st)}`)
+  await releaseWith(META)
+  await delay(150)
+  if ((await js('window.dropCalls')).length) failures.push('⌘-drag: the gesture produced a drop call')
+  await park()
+  record('18-pick', failures, {})
+}
+
+// A picked row paints --row-picked to all four edges, draws no edge of its own, keeps its title's
+// resting ink, and keeps its fill under the pointer. The selected row, picked as well, still draws
+// as selected. Sampled on screen as check 9 samples the selected row.
+async function pickedCase(mode, density, position, failures) {
+  await reset({ mode, density, selected: 'none' })
+  const order = await js('window.order()')
+  // Not a row that needs you: its title would take full ink, not the resting gray this compares.
+  const rows = order.blocks.flatMap((b) => b.rows).filter((k) => !['atlas-4', 'beacon-2'].includes(k))
+  const key = position === 'top' ? rows[0] : rows[rows.length - 1]
+  const other = position === 'top' ? rows[1] : rows[rows.length - 2]
+  await call('scrollTo', position === 'top' ? 0 : 1e9)
+  await settle(60)
+  await clickRow(key, META)
+  await clickRow(other, META)
+  await configure({ selected: other })
+  await park()
+  await settle(300)
+  const tag = `${mode}/${density}/${position}`
+  const g = await call('pickedFill', key)
+  if (!g || !g.picked) { failures.push(`${tag}: row ${key} not picked`); return }
+  const near = (a, b, tol) => a.every((c, i) => Math.abs(c - b[i]) <= tol)
+  if (g.shadow !== 'none') failures.push(`${tag}: the picked row draws an edge (${g.shadow})`)
+  if (!near(g.fill, g.token.fill, 0)) failures.push(`${tag}: fill ${g.fill} is not --row-picked ${g.token.fill}`)
+  if (!near(g.title, g.token.ink, 0)) failures.push(`${tag}: title ink ${g.title} is not the resting --ink-rest ${g.token.ink}`)
+  const both = await call('pickedFill', other)
+  if (!both.picked || !both.selected) failures.push(`${tag}: ${other} should be both picked and selected`)
+  else if (!near(both.fill, both.token.selected, 0)) failures.push(`${tag}: a picked selected row fills ${both.fill}, not --row-selected ${both.token.selected}`)
+  const { row, clip } = g
+  const shot = await screenshot(`${label()}-picked-${mode}-${density}-${position}`)
+  const s = shot.width / (await js('innerWidth'))
+  const ys = Math.round((row.top + row.height / 2) * s), xs = Math.round((row.left + Math.min(40, row.width / 4)) * s)
+  const edges = {
+    left: shot.at(Math.floor((row.left + 1) * s), ys),
+    right: shot.at(Math.ceil((row.right - 1) * s) - 1, ys),
+    top: shot.at(xs, Math.floor((row.top + 1) * s)),
+    bottom: shot.at(xs, Math.ceil((row.bottom - 1) * s) - 1)
+  }
+  const clearance = { left: row.left - clip.left, right: clip.right - row.right, top: row.top - clip.top, bottom: clip.bottom - row.bottom }
+  for (const side of ['left', 'right', 'top', 'bottom']) {
+    if (clearance[side] < 0) failures.push(`${tag}: the picked row overruns the clip on the ${side} by ${(-clearance[side]).toFixed(2)}px`)
+    if (!near(edges[side].slice(0, 3), g.token.fill, 6)) failures.push(`${tag}: ${side} edge paints ${edges[side].slice(0, 3)}, expected the fill ${g.token.fill}`)
+  }
+  // Hovering it moves nothing: a selection never shifts on hover.
+  await hover(row.left + 60, row.top + row.height / 2)
+  await settle(60)
+  const hovered = await call('pickedFill', key)
+  if (!hovered.hover) harnessNotes.push(`${label()}: ${tag}: hover did not reach ${key}`)
+  else if (!near(hovered.fill, g.token.fill, 0)) failures.push(`${tag}: hovering the picked row changes its fill to ${hovered.fill}`)
+  await park()
+}
+CHECKS['19-picked-fill'] = async () => {
+  const failures = []
+  for (const mode of ['all', 'folders']) for (const density of ['compact', 'spacious']) for (const position of ['top', 'bottom']) {
+    await pickedCase(mode, density, position, failures)
+  }
+  record('19-picked-fill', failures, {})
+}
+
+// A menu opened on a pick is the group's: one list, each command counting what it would change, and
+// the command runs on exactly those rows. A menu opened on a row outside the picks is that row's own,
+// and the press that opened it drops the picks.
+CHECKS['20-group-menu'] = async () => {
+  const failures = []
+  await reset({ mode: 'folders', selected: 'none' })
+  await call('scrollTo', 0)
+  await settle(30)
+  // A pin that is not running; atlas-0 running and read; atlas-1 neither.
+  for (const key of ['atlas-7', 'atlas-0', 'atlas-1']) await clickRow(key, META)
+  const picks = await js('window.picks()')
+  if (JSON.stringify(picks) !== JSON.stringify(['atlas-7', 'atlas-0', 'atlas-1'])) failures.push(`harness: picks ${JSON.stringify(picks)}`)
+  const openMenu = async (key) => {
+    const row = await call('rowRect', key)
+    await hover(row.left + 60, row.top + row.height / 2)
+    await delay(60)
+    const btn = await call('menuButton', key)
+    if (!btn) throw new Error(`harness: no ⋮ button on ${key}`)
+    await press(btn.rect.left + btn.rect.width / 2, btn.rect.top + btn.rect.height / 2)
+    await release()
+    await settle(60)
+    return call('menuLabels')
+  }
+  const labels = await openMenu('atlas-1')
+  const want = ['Open 3 conversations to the right', 'Open 3 conversations in new window', 'Pin 2', 'Hide 3', 'Mark 1 as unread', 'Stop 1 session']
+  if (JSON.stringify(labels) !== JSON.stringify(want)) failures.push(`group menu: ${JSON.stringify(labels)}, expected ${JSON.stringify(want)}`)
+  if ((await js('window.picks()')).length !== 3) failures.push('group menu: opening the menu on a pick dropped the picks')
+  const item = await call('menuItem', 'Pin 2')
+  if (!item) failures.push('group menu: no Pin 2 item')
+  else {
+    await press(item.left + item.width / 2, item.top + item.height / 2)
+    await release()
+    await settle(60)
+    const calls = await js('window.groupCalls')
+    const wantCall = [{ action: 'pin', ids: ['atlas-0', 'atlas-1'] }]
+    if (JSON.stringify(calls) !== JSON.stringify(wantCall)) failures.push(`Pin 2 ran ${JSON.stringify(calls)}, expected ${JSON.stringify(wantCall)}`)
+    if ((await js('window.picks()')).length !== 3) failures.push('Pin 2: running the command dropped the picks')
+  }
+  await park()
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`)
+  await settle(500)
+  // The ⋮ of a row outside the picks: that row's own menu, and no picks left.
+  const single = await openMenu('atlas-5')
+  if (!single || !single.includes('Pin') || !single.includes('Rename…')) failures.push(`single menu: ${JSON.stringify(single)}`)
+  if ((await js('window.picks()')).length) failures.push(`single menu: the press on ${'atlas-5'} left picks ${JSON.stringify(await js('window.picks()'))}`)
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`)
+  await park()
+  record('20-group-menu', failures, { labels })
+}
+
+// Dragging a pick carries the picks in its own block, as one stacked clone with a count; they land
+// together, in the order they had, where the gap showed, and stay picked — as does a pick in another
+// block, which does not move. Escape cancels a group drag cleanly. Unpinned (ranks) and pinned (pin
+// order) both.
+async function groupDrag({ block, carried, grab, dy, failures, name, others = [] }) {
+  const before = (await js('window.order()')).blocks.find((x) => x.id === block).rows
+  const c = await rowCenter(grab)
+  await press(c.x, c.y)
+  await moveTo(c.x, c.y + Math.sign(dy) * 12, 4)
+  await frames(1)
+  const look = await call('groupDrag')
+  const st0 = await call('state')
+  if (!st0.dragging) { failures.push(`${name}: pressing a pick and moving did not start a drag`); await release(); return null }
+  if (!look.stacked || look.badge !== String(carried.length) || look.cards !== Math.min(2, carried.length - 1)) {
+    failures.push(`${name}: the clone does not read as a stack of ${carried.length}: ${JSON.stringify(look)}`)
+  }
+  for (const k of carried) if (!st0.hidden.includes(k)) failures.push(`${name}: carried ${k} is not hidden in place`)
+  for (const k of others) if (st0.hidden.includes(k)) failures.push(`${name}: ${k}, picked in another block, was hidden`)
+  await moveTo(c.x, c.y + dy, 4)
+  await frames(3)
+  // Where the gap shows: the widest space between two rows still drawn.
+  // The block's own box bounds a gap at either end; the rows' boxes carry their glide transforms.
+  const drawn = await call('drawn', block)
+  const edge = await call('blockRect', block)
+  let gap = { above: null, below: drawn[0]?.key ?? null, size: drawn[0] ? drawn[0].top - edge.top : 0 }
+  for (let i = 1; i < drawn.length; i++) {
+    const size = drawn[i].top - drawn[i - 1].bottom
+    if (size > gap.size) gap = { above: drawn[i - 1].key, below: drawn[i].key, size }
+  }
+  const last = drawn[drawn.length - 1]
+  if (last && edge.bottom - last.bottom > gap.size) gap = { above: last.key, below: null, size: edge.bottom - last.bottom }
+  await screenshot(`${label()}-${name}-mid`)
+  await release()
+  await delay(350)
+  const after = await waitClean()
+  const calls = await js('window.dropCalls')
+  const rows = (await js('window.order()')).blocks.find((x) => x.id === block).rows
+  const at = rows.indexOf(carried[0])
+  const landed = rows.slice(at, at + carried.length)
+  if (JSON.stringify(landed) !== JSON.stringify(carried)) failures.push(`${name}: the group did not land together and in order: ${JSON.stringify(rows)}`)
+  if ((rows[at - 1] ?? null) !== gap.above || (rows[at + carried.length] ?? null) !== gap.below) {
+    failures.push(`${name}: landed between ${rows[at - 1] ?? null} and ${rows[at + carried.length] ?? null}, the gap showed ${gap.above} and ${gap.below}`)
+  }
+  const restBefore = before.filter((k) => !carried.includes(k)), restAfter = rows.filter((k) => !carried.includes(k))
+  if (JSON.stringify(restBefore) !== JSON.stringify(restAfter)) failures.push(`${name}: the rows not carried changed order`)
+  const call0 = calls[calls.length - 1]
+  if (calls.length !== 1 || call0.kind !== 'rows' || JSON.stringify(call0.dragged) !== JSON.stringify(carried) ||
+    call0.higher !== gap.above || call0.lower !== gap.below) {
+    failures.push(`${name}: drop calls ${JSON.stringify(calls)}, expected one rows call of ${JSON.stringify(carried)} between ${gap.above} and ${gap.below}`)
+  }
+  const picks = await js('window.picks()')
+  for (const k of [...carried, ...others]) if (!picks.includes(k)) failures.push(`${name}: ${k} is no longer picked after the drop`)
+  if (!clean(after)) failures.push(`${name}: drag state not cleaned up after release: ${JSON.stringify(after)}`)
+  if (after.errors.length) failures.push(`${name}: renderer errors: ${after.errors.join('; ')}`)
+  return { gap, rows }
+}
+CHECKS['21-group-drag'] = async () => {
+  const failures = []
+  const details = {}
+  await reset({ mode: 'folders', selected: 'none' })
+  const un = (await call('units', ATLAS)).map((u) => u.key)
+  // Scattered picks in atlas's unpinned rows, and one in beacon's, which must stay where it is.
+  const carried = [un[1], un[3], un[4]]
+  await call('reveal', 'un:/home/dev/projects/beacon', 'beacon-0', 200)
+  await settle(30)
+  await clickRow('beacon-0', META)
+  await call('reveal', ATLAS, un[1], 100)
+  await settle(30)
+  for (const k of carried) await clickRow(k, META)
+  const beaconBefore = (await js('window.order()')).blocks.find((x) => x.id === 'un:/home/dev/projects/beacon').rows
+  const units = await call('units', ATLAS)
+  const stride = units[2].top - units[1].top
+  details.unpinned = await groupDrag({ block: ATLAS, carried, grab: un[3], dy: stride * 4.5, failures, name: 'unpinned', others: ['beacon-0'] })
+  const beaconAfter = (await js('window.order()')).blocks.find((x) => x.id === 'un:/home/dev/projects/beacon').rows
+  if (JSON.stringify(beaconBefore) !== JSON.stringify(beaconAfter)) failures.push('unpinned: the pick in another block moved')
+
+  // Escape cancels a group drag: nothing hidden, nothing moved, the picks kept.
+  const c = await rowCenter(un[3])
+  await press(c.x, c.y)
+  await moveTo(c.x, c.y + stride * 2, 4)
+  if (!(await call('state')).dragging) failures.push('escape: the second group drag did not start')
+  await escapeKey()
+  await release()
+  const canceled = await waitClean()
+  if (!clean(canceled)) failures.push(`escape: a canceled group drag left ${JSON.stringify(canceled)}`)
+  if ((await js('window.dropCalls')).length !== 1) failures.push('escape: the canceled group drag produced a drop call')
+  if ((await js('window.picks()')).length !== 4) failures.push(`escape: the cancel's Escape cleared the picks ${JSON.stringify(await js('window.picks()'))}`)
+
+  // Pins: atlas-7 and atlas-11 dragged above atlas-2 move as one in the pin list.
+  await reset({ mode: 'folders', selected: 'none' })
+  await call('scrollTo', 0)
+  await settle(30)
+  for (const k of ['atlas-7', 'atlas-11']) await clickRow(k, META)
+  const pinUnits = await call('units', ATLAS_PINS)
+  const pinStride = pinUnits[1].top - pinUnits[0].top
+  details.pinned = await groupDrag({ block: ATLAS_PINS, carried: ['atlas-7', 'atlas-11'], grab: 'atlas-11', dy: -pinStride * 2.5, failures, name: 'pinned' })
+  if (details.pinned && JSON.stringify(details.pinned.rows) !== JSON.stringify(['atlas-7', 'atlas-11', 'atlas-2'])) {
+    failures.push(`pinned: pins ${JSON.stringify(details.pinned.rows)}, expected atlas-7, atlas-11, atlas-2`)
+  }
+  await park()
+  record('21-group-drag', failures, details)
+}
+
 function summary(r) {
   return { key: r.key, landing: r.expect.index, gap: r.gap?.index, call: r.calls?.[0] ?? null, shot: r.shot }
 }
@@ -1544,9 +1868,9 @@ app.whenReady().then(async () => {
         await settle(150)
         await calibrate()
         if (DRAG_ZOOMS.includes(zoom)) {
-          for (const name of Object.keys(CHECKS)) if (name !== '9-selected-fill') await runCheck(name)
+          for (const name of Object.keys(CHECKS)) if (!GEOMETRY_CHECKS.includes(name)) await runCheck(name)
         }
-        await runCheck('9-selected-fill')
+        for (const name of GEOMETRY_CHECKS) await runCheck(name)
       }
     }
   } catch (error) {
@@ -1565,7 +1889,7 @@ app.whenReady().then(async () => {
     writeFileSync(join(output, 'results.json'), JSON.stringify({ ...summaryOut, details: results, selected: selectedRows }, null, 2))
     console.log(JSON.stringify(summaryOut, null, 2))
     if (failed.length || fatal) console.error(`Rail renderer failures: ${failed.length}${fatal ? ' (fatal: ' + fatal.message + ')' : ''}`)
-    else console.log('PASS rail drag, cancel, autoscroll, wheel and the selected row across both themes and zoom steps')
+    else console.log('PASS rail drag, cancel, autoscroll, wheel, the selected row and multi-selection across both themes and zoom steps')
     if (win && !win.isDestroyed()) win.destroy()
     app.exit(failed.length || fatal ? 1 : 0)
   }

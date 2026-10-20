@@ -1,11 +1,13 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import Sidebar from '@renderer/components/Sidebar'
 import TooltipLayer from '@renderer/components/TooltipLayer'
-import { buildSidebar, folderRankSpace, rankSpace } from '@renderer/lib/sidebarModel'
-import { dropWrites } from '@renderer/lib/rowRank'
-import { moveBetween } from '@renderer/lib/reorder'
+import { buildSidebar, dropNeighborsMany, folderRankSpace, rankSpace, visibleRows } from '@renderer/lib/sidebarModel'
+import { dropWrites, spreadWrites } from '@renderer/lib/rowRank'
+import { moveBetween, moveManyBetween } from '@renderer/lib/reorder'
+import { NO_PICKS, extendPicks, pickSeed, prunePicks, togglePick } from '@renderer/lib/railSelection'
+import { shouldClearSelectionOnPointerDown } from '@renderer/lib/tabSelection'
 import '@fontsource/hanken-grotesk/400.css'
 import '@fontsource/hanken-grotesk/500.css'
 import '@fontsource/hanken-grotesk/600.css'
@@ -29,6 +31,8 @@ window.addEventListener('unhandledrejection', (event) => window.auditErrors.push
 window.api = new Proxy({}, { get: () => () => undefined })
 window.dropCalls = []
 window.selectCalls = []
+// Commands chosen from a menu opened on picked rows: { action, ids } with the ids the command acts on.
+window.groupCalls = []
 // A folder header's new-conversation actions: the pencil (onNewInFolder) and each agent logo (onStartInFolder).
 window.newCalls = []
 // How many times the rail head's new-conversation button called onNewConversation.
@@ -119,6 +123,11 @@ function Fixture() {
   const [revealed, setRevealed] = useState({})
   // The catalog is state so a conversation can arrive mid-drag (window.addConversation).
   const [cat, setCat] = useState(CATALOG)
+  // The rail's multi-selection, wired as App wires it: ⌘/⇧ on a row (railSelection), a press outside
+  // the picks or a plain click clears it, so does Escape, and it is pruned to what the rail shows.
+  const [picks, setPicks] = useState(NO_PICKS)
+  const picksRef = useRef(picks)
+  picksRef.current = picks
   const searchRef = useRef(null)
 
   const search = useMemo(() => {
@@ -137,6 +146,41 @@ function Fixture() {
   }), [cfg, filter, pins, rowRanks, folderRanks, revealed, search, cat])
   const modelRef = useRef(model)
   modelRef.current = model
+  const visibleIds = useMemo(() => visibleRows(model).map((r) => r.sessionId), [model])
+  const visibleRef = useRef(visibleIds)
+  visibleRef.current = visibleIds
+  useEffect(() => setPicks((s) => prunePicks(s, visibleIds)), [visibleIds])
+  const hasPicks = picks.ids.size > 0
+  useEffect(() => {
+    if (!hasPicks) return
+    const onPointerDown = (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest('.sb-ctxmenu')) return
+      const rowId = target?.closest('.sb-rail-body .sb-row')?.dataset.session ?? null
+      if (shouldClearSelectionOnPointerDown(picksRef.current, rowId, rowId !== null && (event.metaKey || event.shiftKey))) {
+        setPicks(NO_PICKS)
+      }
+    }
+    // Escape reaches App's window listener only once a menu or a drag has not taken it.
+    const onKey = (e) => {
+      if (e.key === 'Escape' && picksRef.current.ids.size > 0) setPicks(NO_PICKS)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [hasPicks])
+  const cfgRef = useRef(cfg)
+  cfgRef.current = cfg
+  const pick = useMemo(() => (id, how) => {
+    const order = visibleRef.current
+    const seed = pickSeed(cfgRef.current.selected, order)
+    setPicks((s) => (how === 'extend' ? extendPicks(s, order, id, seed) : togglePick(s, seed, id)))
+  }, [])
+  // The picks, in rail order.
+  window.picks = () => visibleRef.current.filter((id) => picksRef.current.ids.has(id))
 
   // `only`: show just these folders, in this order — written as folder rank overrides, the way a drag
   // would place them, so a later folder drop still writes into the same space.
@@ -164,6 +208,7 @@ function Fixture() {
   window.reset = () => {
     window.dropCalls = []
     window.selectCalls = []
+    window.groupCalls = []
     window.newCalls = []
     window.headNewCalls = 0
     // Each case starts with nothing focused, so a click earlier cannot carry into it.
@@ -176,6 +221,7 @@ function Fixture() {
       setReorderTick(0)
       setRevealed({})
       setCat(CATALOG)
+      setPicks(NO_PICKS)
     })
     const body = document.querySelector('.sb-rail-body')
     if (body) body.scrollTop = 0
@@ -196,6 +242,18 @@ function Fixture() {
     }
     setReorderTick((t) => t + 1)
   }
+  // App's dropRows: picked rows of one block dropped together — the pins as one move in the pin list,
+  // every other row a rank spread across the gap.
+  const onDropRows = (block, draggedIds, higherId, lowerId) => {
+    window.dropCalls.push({ kind: 'rows', block: block.id, blockKind: block.kind, dragged: draggedIds, higher: higherId, lower: lowerId })
+    if (block.kind === 'pinned') setPins((prev) => moveManyBetween(prev, draggedIds, higherId, lowerId))
+    else {
+      const [higher, lower] = dropNeighborsMany(modelRef.current, block, draggedIds, higherId, lowerId)
+      const writes = spreadWrites(rankSpace(modelRef.current), draggedIds, higher, lower, Date.now())
+      if (Object.keys(writes).length > 0) setRowRanks((stored) => ({ ...stored, ...writes }))
+    }
+    setReorderTick((t) => t + 1)
+  }
   // App's dropFolder: one key in the folder rank space.
   const onDropFolder = (root, higherRoot, lowerRoot) => {
     window.dropCalls.push({ kind: 'folder', block: 'folders', dragged: root, higher: higherRoot, lower: lowerRoot })
@@ -203,9 +261,16 @@ function Fixture() {
     if (Object.keys(writes).length > 0) setFolderRanks((stored) => ({ ...stored, ...writes }))
     setReorderTick((t) => t + 1)
   }
+  // A plain click on a row: App lands on it, which is also the way out of a rail selection.
   const select = (id) => {
     window.selectCalls.push(id)
+    setPicks(NO_PICKS)
     setCfg((prev) => ({ ...prev, selected: id }))
+  }
+  const onGroupCommand = (action, group) => {
+    const ids = { pin: group.pin, unpin: group.unpin, hide: group.hide, unhide: group.unhide, markRead: group.markRead,
+      markUnread: group.markUnread, stop: group.stop, toSide: group.move, newWindow: group.move }[action] ?? []
+    window.groupCalls.push({ action, ids })
   }
 
   return (
@@ -214,6 +279,8 @@ function Fixture() {
         model={model} mode={cfg.mode} onModeChange={(mode) => setCfg((p) => ({ ...p, mode }))} density={cfg.density}
         onNeedsYou={noop} onSetAllCollapsed={noop} loading={false} openElsewhere={new Set()}
         selectedSessionId={cfg.selected} onJump={select} onSelect={select} onTogglePin={noop}
+        picked={picks.ids} onPick={pick} onGroupCommand={onGroupCommand}
+        onOpenToSide={noop} onOpenInNewWindow={noop} placementFor={() => ({ side: 'right', hasTabHere: false })}
         filter={filter} onFilterChange={noop} onSetConversationHidden={noop} onSetFolderHidden={noop}
         query={cfg.query} onQueryChange={(query) => setCfg((p) => ({ ...p, query }))} searchRef={searchRef}
         searchOpen={cfg.searchOpen} onSearchToggle={() => setCfg((p) => ({ ...p, searchOpen: !p.searchOpen, query: '' }))}
@@ -225,7 +292,7 @@ function Fixture() {
         onNewInFolder={(root) => window.newCalls.push({ kind: 'new', root })}
         onStartInFolder={(root, agent) => window.newCalls.push({ kind: 'start', root, agent })}
         onToggleUnread={noop} onMarkUnread={noop} onResumeSession={noop} onStopSession={noop} onShowInfo={noop}
-        onDropRow={onDropRow} onDropFolder={onDropFolder} reorderTick={reorderTick}
+        onDropRow={onDropRow} onDropRows={onDropRows} onDropFolder={onDropFolder} reorderTick={reorderTick}
       />
       {cfg.tips && <TooltipLayer />}
     </div>

@@ -262,6 +262,52 @@ module.exports = function installRailHelpers() {
       const btn = document.querySelector('.sb-rail-head .sb-rail-new-btn')
       return btn ? { rect: btn.getBoundingClientRect().toJSON(), tip: btn.getAttribute('data-tip'), label: btn.getAttribute('aria-label') } : null
     },
+    // Rows drawn as picked into the multi-selection, top to bottom.
+    pickedKeys: () => [...body().querySelectorAll('.sb-row.picked')].map(keyOf),
+    // A row's paint against the picked and selected tokens, and its title against its resting ink, each
+    // resolved to rgb by a probe. `hover` is whether the pointer is on it, for the no-shift-on-hover rule.
+    pickedFill: (key) => {
+      const row = body().querySelector(`.sb-row[data-key="${CSS.escape(key)}"], .sb-row[data-session="${CSS.escape(key)}"]`)
+      if (!row) return null
+      const rs = getComputedStyle(row)
+      const rgb = (s) => s.match(/[\d.]+/g).slice(0, 3).map(Number)
+      const probe = document.createElement('div')
+      probe.style.cssText = 'background-color: var(--row-picked); color: var(--ink-rest); border-top-color: var(--row-selected)'
+      document.body.appendChild(probe)
+      const ps = getComputedStyle(probe)
+      const token = { fill: rgb(ps.backgroundColor), ink: rgb(ps.color), selected: rgb(ps.borderTopColor) }
+      probe.remove()
+      return {
+        row: row.getBoundingClientRect().toJSON(), clip: box(), picked: row.classList.contains('picked'),
+        selected: row.classList.contains('selected'), hover: row.matches(':hover'), shadow: rs.boxShadow,
+        fill: rgb(rs.backgroundColor), title: rgb(getComputedStyle(row.querySelector('.sb-row-title')).color), token
+      }
+    },
+    // The open row menu's items, in order, or null when no menu is open.
+    menuLabels: () => {
+      const menu = document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')
+      return menu ? [...menu.querySelectorAll('.sb-ctxmenu-item span')].map((s) => s.textContent) : null
+    },
+    menuItem: (text) => {
+      const menu = document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')
+      const item = menu && [...menu.querySelectorAll('.sb-ctxmenu-item')].find((b) => b.textContent === text)
+      return item ? item.getBoundingClientRect().toJSON() : null
+    },
+    // A group drag's lifted look: the stack behind the clone and its count.
+    groupDrag: () => {
+      const clone = document.querySelector('.sb-drag-clone')
+      const host = clone && clone.closest('.sb-drag-host')
+      const badge = host && host.querySelector('.sb-row-dragcount')
+      return {
+        stacked: !!clone && clone.classList.contains('stacked'),
+        cards: host ? host.querySelectorAll('.sb-row-drag-card').length : 0,
+        badge: badge ? badge.textContent : null
+      }
+    },
+    blockRect: (block) => body().querySelector(`.sb-block[data-block="${CSS.escape(block)}"]`).getBoundingClientRect().toJSON(),
+    // The rows of a block as drawn right now, transforms included — where the gap of a drag shows.
+    drawn: (block) => unitsOf(block).filter((u) => getComputedStyle(u).visibility !== 'hidden')
+      .map((u) => ({ key: keyOf(u), top: u.getBoundingClientRect().top, bottom: u.getBoundingClientRect().bottom })),
     selectedKey: () => {
       const row = body().querySelector('.sb-row.selected')
       return row ? keyOf(row) : null
