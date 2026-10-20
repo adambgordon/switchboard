@@ -11,9 +11,9 @@ export const ONCE_TASKS_KEY = 'switchboard.once'
 export const FOLDER_SEED_TASK = 'folderSeed'
 
 /** What's new, one id per release that added to it, oldest first: tabs, the compact and folder sidebar
- *  and the bell; then hiding and filtering. A later release takes a new id, so it shows once too; a
- *  release that adds nothing to the dialog adds no id. */
-export const WHATS_NEW_RELEASES = ['whatsNew:1', 'whatsNew:2'] as const
+ *  and the bell; then hiding and filtering; then selecting several conversations. A later release takes
+ *  a new id, so it shows once too; a release that adds nothing to the dialog adds no id. */
+export const WHATS_NEW_RELEASES = ['whatsNew:1', 'whatsNew:2', 'whatsNew:3'] as const
 export type WhatsNewRelease = (typeof WHATS_NEW_RELEASES)[number]
 
 /** The releases `done` has not seen yet, newest first — the order the dialog shows them in. */

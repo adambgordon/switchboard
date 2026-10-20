@@ -896,6 +896,14 @@ body.sb-resizing .sb-pane {
   display: grid;
   padding: var(--s6) 34px var(--s3);
 }
+/* The slides and the aside under them are selectable, as Preferences is (the global body sets
+   user-select:none), and show the I-beam; their buttons keep their own cursor. The controls below
+   are not text. */
+.sb-whatsnew-deck,
+.sb-whatsnew-again {
+  user-select: text;
+  cursor: text;
+}
 .sb-whatsnew-slide {
   grid-area: 1 / 1;
   display: flex;
