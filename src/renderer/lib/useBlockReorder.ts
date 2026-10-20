@@ -311,6 +311,10 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     pendingRef.current = null
     const block = findBlock(container, pending.blockId)
     const units = block ? unitsOf(block) : []
+    // The drag's class goes before the siblings' transforms do: it is what lets them glide while the gap
+    // moves, and still on, it would glide each one back by its shift — from where the drag held it, as
+    // measured from its new place in the order.
+    document.body.classList.remove('sb-dragging-row')
     for (const u of units) u.style.transform = ''
     const real = units.find((u) => u.dataset.key === pending.key) ?? null
     if (pending.shape) {
@@ -324,7 +328,6 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     }
     const revealIn = settle(pending.lifted, real ? real.getBoundingClientRect().top : pending.lifted.clone.getBoundingClientRect().top, real)
     pending.shape?.grow?.(revealIn, revealIn > 0 ? pending.lifted.clone : null)
-    document.body.classList.remove('sb-dragging-row')
   }, [containerRef])
   const flushRef = useRef(flushPending)
   flushRef.current = flushPending

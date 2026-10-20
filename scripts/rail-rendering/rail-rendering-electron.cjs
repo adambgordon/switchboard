@@ -1875,17 +1875,25 @@ CHECKS['22-landing-handoff'] = async () => {
     const targetY = to === from ? py + 6 : centerFor(slots, from, to) - h / 2 + grab - b.scrollTop + b.top
     await moveTo(px, targetY, 4)
     await frames(3)
+    // A folder moved down passes the folders between, which the drag slid up into its old place; once
+    // they finish sliding there, the drop must not glide them anywhere. One step is allowed: a folder that
+    // becomes the first takes the first folder's spacing as the drop lands.
+    const passed = to > from ? keys[from + 1] : null
+    await delay(220)
     await js(`(() => {
       const key = ${JSON.stringify(key)}
+      const passedKey = ${JSON.stringify(passed)}
       window.__probe = []
       const t0 = performance.now()
       const tick = () => {
         const clone = document.querySelector('.sb-drag-clone .sb-group-label-text')
         const real = document.querySelector('.sb-rail-body .sb-group[data-key="' + CSS.escape(key) + '"] .sb-group-label-text')
+        const over = passedKey && document.querySelector('.sb-rail-body .sb-group[data-key="' + CSS.escape(passedKey) + '"] .sb-group-label-text')
         window.__probe.push({
           t: Math.round(performance.now() - t0),
           src: clone ? 'clone' : 'real',
           y: +(clone || real).getBoundingClientRect().top.toFixed(2),
+          passed: over ? +over.getBoundingClientRect().top.toFixed(2) : null,
         })
         if (performance.now() - t0 < 600) requestAnimationFrame(tick)
       }
@@ -1903,6 +1911,12 @@ CHECKS['22-landing-handoff'] = async () => {
     if (order.indexOf(key) !== to) failures.push(`${name}: harness: landed at ${order.indexOf(key)}, planned ${to}`)
     if (to !== from && !lastClone) failures.push(`${name}: harness: no clone frame was sampled`)
     if (jump !== null && Math.abs(jump) > 0.5) failures.push(`${name}: the label jumped ${jump}px as the clone handed over`)
+    const ys = s.map((x) => x.passed).filter((y) => y != null)
+    const steps = ys.filter((y, i) => i > 0 && Math.abs(y - ys[i - 1]) > 0.5).length
+    const span = ys.length ? +(Math.max(...ys) - Math.min(...ys)).toFixed(2) : null
+    out[name].passed = { steps, span }
+    if (passed && !ys.length) failures.push(`${name}: harness: the folder passed over was not sampled`)
+    if (steps > 1) failures.push(`${name}: the folder passed over glided ${span}px as the drop landed (${steps} frames of motion)`)
     if (!clean(await waitClean())) failures.push(`${name}: drag state not cleaned up`)
   }
   record('22-landing-handoff', failures, out)
