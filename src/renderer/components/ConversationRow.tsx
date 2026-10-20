@@ -1,4 +1,4 @@
-import { memo, type MouseEvent } from 'react'
+import { memo, useRef, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, formatCount } from '../lib/format'
 import type { RailDensity } from '../lib/sidebarPrefs'
@@ -16,6 +16,8 @@ interface Props {
   density: RailDensity
   /** The focused pane's active tab — the one the keyboard acts on. The rail's one inverted row. */
   selected: boolean
+  /** Picked into the rail's multi-selection (railSelection), which a group command acts on. */
+  picked?: boolean
   /** The folder half of the hover's quiet third line (see `rowTipMeta`). */
   tipMeta: string
   live: PtyState | null
@@ -30,12 +32,15 @@ interface Props {
   /** Double-click — open it as a KEPT tab rather than the replaceable preview one. Absent when tabs
    *  are switched off, which is what makes the gesture inert there rather than half-working. */
   onStick?: (id: string) => void
-  // There are deliberately NO ⌘/⇧ click gestures for tab placement. They were borrowed from browsers
-  // (⌘ = new tab, ⇧ = new window), but this row belongs to an editor-shaped app, and editors do not
-  // overload a click that way — so the borrowing read as arbitrary rather than familiar. Placement is
-  // on the ⋮ and right-click menus, which name what they do. ⌥ stays: marking unread is Switchboard's
-  // own idea, not an import.
-  /** Option+click on a live row — always mark it unread (never toggles). */
+  /**
+   * ⌘-click toggles the row in the rail's selection, ⇧-click selects the run up to it — what picking
+   * several out of a list means in every editor and file browser, and what the tab strip does. They
+   * never place a conversation: placement is on the ⋮ and right-click menus, which name what they do.
+   * Absent where there is no selection to make, which leaves ⌘ and ⇧ with no meaning on the row.
+   */
+  onPick?: (id: string, how: 'toggle' | 'extend') => void
+  /** Option+click on a live row — always mark it unread (never toggles). ⌥ is Switchboard's own
+   *  gesture, and wins over ⌘ and ⇧. */
   onMarkUnread?: (id: string) => void
   /** Open the row's actions menu (Pin/Unpin, read/unread, details, Stop/Resume) by clicking the ⋮
    * button; the menu anchors under it. */
@@ -48,6 +53,7 @@ function ConversationRowImpl({
   meta,
   density,
   selected,
+  picked,
   tipMeta,
   live,
   liveState,
@@ -56,6 +62,7 @@ function ConversationRowImpl({
   onSelect,
   onJump,
   onStick,
+  onPick,
   onMarkUnread,
   onOpenMenu,
   onContextMenu
@@ -88,9 +95,28 @@ function ConversationRowImpl({
     ) : (
       <AgentLogo agent={meta.agent} />
     )
+  // A ⌘- or ⇧-press is a pick, not a landing. Handled on the press, as the tab strip does, so it does
+  // not wait on a click a drag or a re-render could swallow.
+  const picks = (e: MouseEvent): boolean => !!onPick && !e.altKey && (e.metaKey || e.shiftKey)
+  // Whether the latest press picked. What follows it — its click, and a double-click it completes — is
+  // judged by the press, not by the keys still held at release: letting go of ⌘ a moment before the
+  // button would otherwise land on the row the press had just picked.
+  const pickPress = useRef(false)
   return (
     <div
-      className={`sb-row ${density}${selected ? ' selected' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${dimmed ? ' dimmed' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
+      className={`sb-row ${density}${selected ? ' selected' : ''}${picked ? ' picked' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${dimmed ? ' dimmed' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
+      onPointerDown={(e) => {
+        pickPress.current = e.button === 0 && picks(e)
+        // ⇧ before ⌘, so ⇧⌘ extends rather than toggling — as on a tab.
+        if (pickPress.current) onPick?.(meta.sessionId, e.shiftKey ? 'extend' : 'toggle')
+      }}
+      // The press only changes the selection, so it must not take focus from wherever the keyboard is —
+      // a terminal mid-sentence, say. Canceled on the compatibility mousedown rather than on the
+      // pointerdown, which would suppress that mousedown altogether, and with it the tooltip layer's
+      // dismissal of the row's hover.
+      onMouseDown={(e) => {
+        if (pickPress.current) e.preventDefault()
+      }}
       onClick={(e) => {
         if (e.altKey) {
           // Option+click = mark unread only; never navigate (selecting/engaging would trip the
@@ -98,16 +124,18 @@ function ConversationRowImpl({
           if (live && onMarkUnread) onMarkUnread(meta.sessionId)
           return
         }
+        // The press picked it. Landing on it as well would mark it read and move the selected row a
+        // range is taken from.
+        if (pickPress.current) return
         live && onJump ? onJump(meta.sessionId) : onSelect(meta.sessionId)
       }}
       // Double-click keeps the tab. The two ordinary clicks that precede it (DOM order is
       // click, click, dblclick) each re-open the same conversation, which is idempotent — the second
       // lands on the current history stop and changes nothing — so no click-count dedupe is needed.
       onDoubleClick={(e) => {
-        // Only ⌥ is excluded, because it means something else here (mark unread) and must not also
-        // keep the tab. ⌘ and ⇧ carry no meaning on a row any more, so a stray one is let through
-        // rather than silently swallowing the gesture.
-        if (e.altKey || !onStick) return
+        // ⌥ means mark unread here, and ⌘ / ⇧ pick, so none of them may also keep the tab — two
+        // ⌘-presses toggle the row in and back out, and that is all the gesture should do.
+        if (e.altKey || pickPress.current || !onStick) return
         onStick(meta.sessionId)
       }}
       onContextMenu={(e) => {

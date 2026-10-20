@@ -3,8 +3,8 @@ import type { PersistedTabLayout, PersistedTabPane } from './types'
 export const TAB_WORKSPACE_VERSION = 1
 
 /**
- * Most windows a saved workspace may reopen. Panes are already bounded to 2 a few lines down, but
- * the window list was not: this file is on disk, so a truncated write or a hand edit can present
+ * Most windows a saved workspace may reopen. Panes are bounded to 2 below; the window list needs
+ * its own bound because this file is on disk, so a truncated write or a hand edit can present
  * any number of valid-looking single-tab entries, and each one becomes a real BrowserWindow with
  * its own renderer at startup — with no in-app way back. Chosen to match the live-session cap's
  * order of magnitude, which is well past any real layout.

@@ -665,9 +665,9 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
       // no conversation, so every tab holding it follows — there is nothing left for it to mean.
       if (action.from === action.to) return state
       // Where the real id already lives, if anywhere. Searched across the WHOLE layout: consulting
-      // only the pane being visited left a hole, because a placeholder in one pane would happily
-      // rename itself while the OTHER pane already held the real id — producing two tabs for one
-      // conversation, the very state one-tab-per-conversation exists to prevent.
+      // only the pane being visited would let a placeholder in one pane rename itself while the
+      // OTHER pane already holds the real id — two tabs for one conversation, the very state
+      // one-tab-per-conversation exists to prevent.
       const already = locateTab(state, action.to)
       const selectedFrom = activeTabId(state) === action.from
       const placeholderPersistent = state.panes.some((pane) =>

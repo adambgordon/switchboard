@@ -3,6 +3,7 @@ import {
   DEFAULT_DOT_COLOR,
   DOT_COLOR_COMMIT_MS,
   clampDotColor,
+  clampPickedDotColor,
   clampSelectedDotColor,
   contrastRatio,
   oklch,
@@ -14,6 +15,8 @@ import {
 const SURFACE = { light: '#f4f4f4', dark: '#2a2a2a' } as const
 /** The selected rail row's fill in each theme (--row-selected), which inverts it. */
 const SELECTED_SURFACE = { light: '#2d2d2d', dark: '#d9d9d9' } as const
+/** A picked rail row's fill in each theme (--row-picked). */
+const PICKED_SURFACE = { light: '#d6d6d6', dark: '#333333' } as const
 
 /** Picks spanning the gamut corners, where a free-form color is most likely to disappear. */
 const PICKS = [
@@ -219,5 +222,32 @@ describe('clampSelectedDotColor', () => {
   it('returns a pick that is already legible on the row unchanged', () => {
     expect(clampSelectedDotColor('#ffff00', 'light')).toBe('#ffff00')
     expect(clampSelectedDotColor('#0000ff', 'dark')).toBe('#0000ff')
+  })
+})
+
+describe('clampPickedDotColor', () => {
+  it('clears the contrast floor on a picked row in both themes', () => {
+    // A picked row is less favorable to the dot than any resting surface, so a color placed against
+    // those alone — the shipped dark cobalt among them — would fall under the floor here.
+    for (const pick of PICKS) {
+      for (const theme of ['light', 'dark'] as const) {
+        const shown = clampPickedDotColor(pick, theme)
+        expect(
+          contrastRatio(shown, PICKED_SURFACE[theme]),
+          `${pick} on the ${theme} picked row rendered as ${shown}`
+        ).toBeGreaterThanOrEqual(3)
+      }
+    }
+  })
+
+  it('moves the way the theme does: darker in light, lighter in dark', () => {
+    expect(oklch(clampPickedDotColor('#ffff00', 'light')).L).toBeLessThan(oklch('#ffff00').L)
+    expect(oklch(clampPickedDotColor('#0000ff', 'dark')).L).toBeGreaterThan(oklch('#0000ff').L)
+  })
+
+  it('places the shipped dots as the tokens do', () => {
+    // --row-picked-dot: the light cobalt clears the picked fill as it is; the dark one moves lighter.
+    expect(clampPickedDotColor('#1f5ae6', 'light')).toBe('#1f5ae6')
+    expect(clampPickedDotColor('#3b6cf0', 'dark')).toBe('#4073f7')
   })
 })

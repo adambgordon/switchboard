@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 // node:sqlite is a recent built-in; skip the suite where the test runner's Node lacks it (the app
-// itself runs under Electron's Node 24+, which has it — verified). Guarded so the file never errors
+// itself runs under Electron's Node 24+, which has it). Guarded so the file never errors
 // on load when the module is absent.
 const require = createRequire(import.meta.url)
 let DatabaseSync: typeof import('node:sqlite').DatabaseSync | undefined

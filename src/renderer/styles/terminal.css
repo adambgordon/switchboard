@@ -31,7 +31,7 @@
 .sb-term .xterm.column-select.focus {
   cursor: text;
 }
-/* No scrollbar in the terminal — scrapped for a cleaner live surface. xterm still scrolls via
+/* No scrollbar in the terminal, for a cleaner live surface. xterm still scrolls via
    wheel / keys, and claude (the live TUI) manages its own viewport. */
 .sb-term .xterm-viewport::-webkit-scrollbar {
   width: 0;

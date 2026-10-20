@@ -115,9 +115,9 @@ export interface TipPlacement {
  *
  * The ordering is the substance: prefer BELOW when the label fits there, else ABOVE when it fits
  * there, else take whichever side has more room — and in every case clamp so the label stays inside
- * the viewport. The old code chose a side from a fixed 60px probe BEFORE the label existed, which is
- * right for a one-line label and wrong by hundreds of pixels for a wrapped one; there was no vertical
- * clamp behind it to catch the miss.
+ * the viewport. Choosing a side from a fixed probe height BEFORE the label exists is right for a
+ * one-line label and wrong by hundreds of pixels for a wrapped one, so the side comes from the
+ * measured height, and the vertical clamp catches whatever still does not fit.
  *
  * When the label is taller than the viewport no side can hold it, and the clamp pins it to the top
  * edge — still wrong, but wrong in the one direction that keeps the beginning of the text readable.

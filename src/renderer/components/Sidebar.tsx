@@ -8,13 +8,14 @@ import { placeTip } from '../lib/tooltip'
 import { useRailFlip } from '../lib/useRailFlip'
 import { useBlockReorder, type BlockDrop } from '../lib/useBlockReorder'
 import { foldFolder } from '../lib/folderFold'
+import { useFolderToggleMotion } from '../lib/folderToggle'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
 import SidebarHead from './SidebarHead'
 import SidebarGroupHeader from './SidebarGroupHeader'
-import { isUnlinkedRow } from '../lib/rowIdentity'
-import { conversationMenu, folderMenu, type SidePlace } from '../lib/conversationMenu'
+import { conversationMenu, folderMenu, type MenuGroup, type SidePlace } from '../lib/conversationMenu'
+import { dragCarry, railMenuGroup, railMenuTarget } from '../lib/railSelection'
 import type { RailFilter } from '../lib/railFilter'
 import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/types'
 import { Pin, PinOff, Info, NewWindow, Rename, SplitVertical, Stop, Play, Eye, EyeOff } from './icons'
@@ -33,15 +34,19 @@ interface Props {
    *  one raises that window instead of opening here. */
   openElsewhere: Set<string>
   selectedSessionId: string | null
+  /** The rows picked into the rail's multi-selection (railSelection). Empty, or absent, when none is. */
+  picked?: ReadonlySet<string>
+  /** ⌘-click (toggle) or ⇧-click (extend) a row. Absent where the rail offers no selection. */
+  onPick?: (sessionId: string, how: 'toggle' | 'extend') => void
   onJump: (sessionId: string) => void
   onSelect: (sessionId: string) => void
   /** Double-click a row — keep its tab. Undefined while tabs are switched off. */
   onStick?: (sessionId: string) => void
   /** The ⋮ menu's Open to the Side — show it in the other pane. */
   onOpenToSide?: (sessionId: string) => void
-  /** Where "to the side" would put the conversation (null when it cannot go), and whether this window
-   *  already holds a tab for it — what the menu needs to name its where-to commands. */
-  placementFor?: (sessionId: string) => { side: SidePlace | null; hasTabHere: boolean }
+  /** Where "to the side" would put these conversations (null when they cannot go), and whether this
+   *  window already holds a tab for each — what the menu needs to name its where-to commands. */
+  placementFor?: (sessionIds: readonly string[]) => { side: SidePlace | null; hasTabHere: boolean }
   /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
   onOpenInNewWindow?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
@@ -87,10 +92,14 @@ interface Props {
   onShowInfo: (id: string, edit: boolean) => void
   /** A row dropped between two neighbors of its block, either null at an edge. */
   onDropRow: (block: SidebarBlock, draggedId: string, higherId: string | null, lowerId: string | null) => void
+  /** Several picked rows of one block dropped together between two neighbors, in block order. */
+  onDropRows?: (block: SidebarBlock, draggedIds: string[], higherId: string | null, lowerId: string | null) => void
   /** A folder dropped between two neighboring folders, either null at an edge. */
   onDropFolder: (root: string, higherRoot: string | null, lowerRoot: string | null) => void
   /** Bumped on each drag-reorder commit; folded into controlSig so that commit settles instantly. */
   reorderTick: number
+  /** A command chosen from a menu opened on the picked rows — run on the group it names. */
+  onGroupCommand?: (action: ConversationMenuAction, group: MenuGroup, sessionId: string) => void
 }
 
 /** The drag block holding the folders themselves, in Folders mode — the rail body. */
@@ -206,6 +215,8 @@ export default function Sidebar({
   loading,
   openElsewhere,
   selectedSessionId,
+  picked,
+  onPick,
   onJump,
   onSelect,
   onStick,
@@ -238,15 +249,17 @@ export default function Sidebar({
   onStopSession,
   onShowInfo,
   onDropRow,
+  onDropRows,
   onDropFolder,
-  reorderTick
+  reorderTick,
+  onGroupCommand
 }: Props) {
   // Nothing to draw: no folder has a row, or All mode's one group is empty. A collapsed folder is not
   // empty — it has rows, just not on screen.
   const empty = model.groups.every((g) => g.blocks.length === 0 && !g.collapsed)
   const filtering = filter.size > 0
 
-  // Obsidian-style scrollbar: the thumb shows only while scrolling (+ a beat after), never at rest.
+  // Auto-hiding scrollbar: the thumb shows only while scrolling (+ a beat after), never at rest.
   const listRef = useRef<HTMLDivElement>(null)
   useAutoHideScrollbar(listRef)
   // Fade the last rows when the list overflows and isn't scrolled to the bottom (more below).
@@ -279,9 +292,11 @@ export default function Sidebar({
     (drop: BlockDrop) => {
       if (drop.block === FOLDERS_BLOCK) return onDropFolder(drop.key, drop.above, drop.below)
       const block = model.groups.flatMap((g) => g.blocks).find((b) => b.id === drop.block)
-      if (block) onDropRow(block, drop.key, drop.above, drop.below)
+      if (!block) return
+      if (drop.keys && onDropRows) onDropRows(block, drop.keys, drop.above, drop.below)
+      else onDropRow(block, drop.key, drop.above, drop.below)
     },
-    [model, onDropRow, onDropFolder]
+    [model, onDropRow, onDropRows, onDropFolder]
   )
   // Off while filtering, as while searching: the neighbors a drop reports would straddle rows the
   // filter leaves out, and only caps are accounted for there (dropNeighbors).
@@ -291,10 +306,37 @@ export default function Sidebar({
     commitKey: reorderTick,
     cancelKey: JSON.stringify([mode, density, searchOpen, searching, filtering]),
     // Moving a folder folds it to its header, so it moves as one short card.
-    reshape: (block, unit) => (block === FOLDERS_BLOCK ? foldFolder(unit) : null)
+    reshape: (block, unit) => (block === FOLDERS_BLOCK ? foldFolder(unit) : null),
+    // A picked row carries the picks in its own block; picks elsewhere stay put, and stay picked.
+    // Folders are never picked.
+    carry: (block, key, keys) =>
+      block === FOLDERS_BLOCK || !picked || !onDropRows ? [key] : dragCarry(picked, key, keys)
   })
 
+  // Opening or closing a folder from its header, or all of them at once, eases its height rather than
+  // jumping (folderToggle). Each folder about to change is read just before the toggle. Declared BEFORE
+  // useRailFlip: a toggle reversed part-way stops the last one's animation, and the flip must measure
+  // the rows after that.
+  const captureFolders = useFolderToggleMotion(listRef)
+
   useRailFlip(listRef, orderSig, controlSig)
+
+  // Not while searching: a header click is inert then (App's toggleFolder), so no render would consume
+  // the capture, and the search's next change would play it instead.
+  const toggleFolder = useCallback(
+    (root: string) => {
+      if (!searching) captureFolders([root])
+      onToggleFolder(root)
+    },
+    [captureFolders, onToggleFolder, searching]
+  )
+  const setAllCollapsed = useCallback(
+    (collapsed: boolean) => {
+      captureFolders(model.groups.filter((g) => g.header && g.collapsed !== collapsed).map((g) => g.key))
+      onSetAllCollapsed(collapsed)
+    },
+    [captureFolders, model, onSetAllCollapsed]
+  )
 
 
   // Re-evaluate the head divider when the visible content changes: collapsing a folder or running a
@@ -324,27 +366,32 @@ export default function Sidebar({
     left?: number
     right?: number
     entries: ConversationMenuEntry[]
+    /** The picked rows it was opened on, or null for a menu about this row alone. Snapshotted with the
+     *  entries, so a command runs on exactly what its label counted. */
+    group: MenuGroup | null
   } | null>(null)
   // The row's menu — the same list its tab's menu shows (conversationMenu), minus the tab's own Close.
-  const menuStateFor = (id: string): { entries: ConversationMenuEntry[] } | null => {
+  // Opened on a picked row, it is the group's menu instead, about every pick.
+  const menuStateFor = (id: string): { entries: ConversationMenuEntry[]; group: MenuGroup | null } | null => {
     const entry = entryById(id)
     if (!entry) return null
-    // A row that stands for no conversation keeps only what its terminal supports: Stop. One whose
-    // conversation is not indexed yet — a new one before its first message — can also move, but has
-    // nothing to pin, rename or show details of.
-    const movable = !isUnlinkedRow(entry.pty, entry.meta)
-    const place = placementFor?.(id) ?? { side: null, hasTabHere: false }
+    const group = picked && onGroupCommand ? railMenuGroup(picked, id, shown) : null
+    // What the where-to commands would place: the group's placeable rows, or this one if it can go.
+    const target = railMenuTarget(entry)
+    const placing = group ? group.move : target.movable ? [id] : []
+    const place = placing.length > 0 && placementFor ? placementFor(placing) : { side: null, hasTabHere: false }
     return {
+      group,
       entries: conversationMenu({
         surface: 'row',
-        count: 1,
-        linked: movable && !entry.meta.provisional,
-        live: !!entry.pty,
-        pinned: entry.pinned,
-        unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
-        hidden: entry.hiddenBy,
-        side: movable && onOpenToSide ? place.side : null,
-        newWindow: movable && !!onOpenInNewWindow,
+        group,
+        linked: target.linked,
+        live: target.live,
+        pinned: target.pinned,
+        unread: target.unread,
+        hidden: target.hidden,
+        side: placing.length > 0 && onOpenToSide ? place.side : null,
+        newWindow: placing.length > 0 && !!onOpenInNewWindow,
         hasTabHere: place.hasTabHere,
         closeOthers: false,
         reopen: 0
@@ -407,7 +454,8 @@ export default function Sidebar({
       anchorBottom: e.clientY,
       gap: 0,
       left: e.clientX,
-      entries: folderMenu(group.folderHidden)
+      entries: folderMenu(group.folderHidden),
+      group: null
     })
   }
   // The ⋮ button (click): TOGGLE — close if this row's menu is already open, else open anchored under
@@ -454,7 +502,9 @@ export default function Sidebar({
   useEffect(() => {
     if (!ctxMenu) return
     // The Escape that closes the menu is consumed: App's own Escape would also clear the rail's
-    // search or close Find.
+    // search or close Find. Captured, because the keyboard can still be in the terminal — a ⌘- or
+    // ⇧-press on the ⋮ picks, and a pick leaves focus where it was — and the terminal keeps the keys it
+    // takes for its session, an Escape included, from ever bubbling this far.
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       e.stopPropagation()
@@ -468,11 +518,11 @@ export default function Sidebar({
     // listener on the rail body fires only for rail scrolls.
     const railBody = listRef.current
     document.addEventListener('click', closeMenu)
-    document.addEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKey, true)
     railBody?.addEventListener('scroll', closeMenu)
     return () => {
       document.removeEventListener('click', closeMenu)
-      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('keydown', onKey, true)
       railBody?.removeEventListener('scroll', closeMenu)
     }
   }, [ctxMenu])
@@ -493,6 +543,9 @@ export default function Sidebar({
         meta={row.meta}
         density={density}
         selected={row.sessionId === selectedSessionId}
+        // A boolean, not the set: the row is memoized, and a new set on every pick would re-render
+        // every row in the rail rather than the ones whose pick changed.
+        picked={picked?.has(row.sessionId) ?? false}
         tipMeta={rowTipMeta(model.labels.get(root) ?? '', row.meta.cwd, root, {
         background: row.meta.agent === 'claude' && row.meta.sessionKind === 'bg',
         elsewhere: openElsewhere.has(row.sessionId)
@@ -504,6 +557,7 @@ export default function Sidebar({
         onSelect={onSelect}
         onJump={onJump}
         onStick={onStick}
+        onPick={onPick}
         // onOpenToSide / onOpenInNewWindow are deliberately NOT passed down: they are menu actions,
         // not click gestures. The rail still holds them for its own ⋮ and right-click menus below.
         onMarkUnread={onMarkUnread}
@@ -513,9 +567,18 @@ export default function Sidebar({
     )
   }
 
-  const runMenuAction = (action: ConversationMenuAction, kind: 'row' | 'folder', id: string): void => {
+  const runMenuAction = (
+    action: ConversationMenuAction,
+    kind: 'row' | 'folder',
+    id: string,
+    group: MenuGroup | null
+  ): void => {
     if (kind === 'folder') {
       if (action === 'hideFolder' || action === 'unhideFolder') onSetFolderHidden(id, action === 'hideFolder')
+      return
+    }
+    if (group) {
+      onGroupCommand?.(action, group, id)
       return
     }
     if (action === 'resume') onResumeSession(id)
@@ -539,7 +602,7 @@ export default function Sidebar({
         scrolled={scrolled}
         mode={mode}
         onModeChange={onModeChange}
-        onSetAllCollapsed={onSetAllCollapsed}
+        onSetAllCollapsed={setAllCollapsed}
         filter={filter}
         onFilterChange={onFilterChange}
         query={query}
@@ -589,7 +652,7 @@ export default function Sidebar({
                     collapsed={g.collapsed}
                     wantsAttention={g.wantsAttention}
                     dimmed={g.folderHidden}
-                    onToggle={onToggleFolder}
+                    onToggle={toggleFolder}
                     onContextMenu={openFolderMenu}
                     agents={agents}
                     onNew={onNewInFolder}
@@ -640,7 +703,7 @@ export default function Sidebar({
                 key={e.action}
                 className={`sb-ctxmenu-item${e.danger ? ' danger' : e.action === 'resume' ? ' live' : ''}`}
                 onClick={() => {
-                  runMenuAction(e.action, ctxMenu.kind, ctxMenu.id)
+                  runMenuAction(e.action, ctxMenu.kind, ctxMenu.id, ctxMenu.group)
                   closeMenu()
                 }}
               >

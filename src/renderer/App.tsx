@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type {
   AgentKind,
+  ConversationMenuAction,
   ConversationMeta,
   LiveState,
   PtyState,
@@ -28,6 +29,7 @@ import {
   DEFAULT_SIDEBAR_LIMITS,
   buildSidebarHeld,
   dropNeighbors,
+  dropNeighborsMany,
   freezeFoldersByNewest,
   folderRankSpace,
   rankSpace,
@@ -42,7 +44,7 @@ import {
   type SidebarBlock,
   type SidebarModel
 } from './lib/sidebarModel'
-import { absorbBind, absorbBindFolder, dropWrites, holdRank, type RankOverrides } from './lib/rowRank'
+import { absorbBind, absorbBindFolder, dropWrites, holdRank, liftWrites, spreadWrites, type RankOverrides } from './lib/rowRank'
 import {
   FOLDER_SEED_TASK,
   ONCE_TASKS_KEY,
@@ -86,7 +88,7 @@ import {
 import { confirmedEmpty, endedStops, stopsOnClose } from './lib/stopClose'
 import { captureClosed, pushClosed, rekeyClosed, takeReopenable, type ClosedGroup } from './lib/closedTabs'
 import { rekeyRecent, touchRecent } from './lib/recentTabs'
-import type { SidePlace } from './lib/conversationMenu'
+import type { MenuGroup, SidePlace } from './lib/conversationMenu'
 import {
   NO_SELECTION,
   actionTargets,
@@ -100,6 +102,16 @@ import {
   toggleSelected,
   type TabSelection
 } from './lib/tabSelection'
+import {
+  NO_PICKS,
+  escapeTakesPicks,
+  extendPicks,
+  pickSeed,
+  prunePicks,
+  retargetPicks,
+  togglePick,
+  type RailSelection
+} from './lib/railSelection'
 import { nextPtyHomes } from './lib/ptyHome'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
 import { chooserDirs, chooserPreselect, type ChooserFolder } from './lib/chooserDirs'
@@ -154,7 +166,7 @@ export default function App() {
   const hiddenSessionIdsRef = useRef(hiddenSessionIds)
   hiddenSessionIdsRef.current = hiddenSessionIds
   const ptys = usePtys()
-  const { pinned, order: pinnedOrder, toggle: togglePin, move: movePin } = usePins()
+  const { pinned, order: pinnedOrder, toggle: togglePin, setMany: setPins, move: movePin, moveMany: movePins } = usePins()
   // A nonce bumped on each drag-reorder commit, folded into the rail's FLIP controlSig so the commit
   // settles instantly (the drag already showed the arrangement); pin/unpin toggles don't bump it, so
   // they still glide.
@@ -173,7 +185,7 @@ export default function App() {
   } = useSidebarPrefs()
   // What the user has hidden, shared by every window; which of it this window shows is its own filter,
   // never stored, so a launch never opens onto a narrowed rail.
-  const { hidden: userHidden, setConversationHidden, setFolderHidden } = useRailHidden()
+  const { hidden: userHidden, setConversationHidden, setConversationsHidden, setFolderHidden } = useRailHidden()
   const [railFilter, setRailFilter] = useState<RailFilter>(NO_FILTER)
   // The last rendered sidebar, for handlers that write positions: a drop, a Resume and a bind all
   // need to know where rows are NOW, and must not re-subscribe on every render to find out.
@@ -219,9 +231,9 @@ export default function App() {
   // browser back — rather than a second, cut-down shell. `persist: false` is load-bearing: layout
   // lives in localStorage, which every window of the app shares, so a detached window writing its
   // collapsed rail there would hand that state to the browser window on the next launch.
-  // Optional-chained on purpose: editing the preload does not hot-reload, so a dev instance that was
-  // already running when this was added would otherwise throw here and white-screen the whole app
-  // rather than simply behaving like an ordinary window.
+  // Optional-chained on purpose: the preload does not hot-reload, so a dev instance still running an
+  // older preload has no `sbWindow`, and reading it unguarded would throw here and white-screen the
+  // whole app rather than simply behaving like an ordinary window.
   const windowInit = window.sbWindow ?? {
     sessionIds: [],
     activeSessionId: null,
@@ -248,9 +260,9 @@ export default function App() {
   })
 
   // Tabs / split / detached windows, all behind one preference. OFF is a degenerate case of the SAME
-  // model — one pane holding one preview tab, so every open replaces it — which is what the app did
-  // before tabs existed. So the flag gates only the strip's presence, the promotion gestures, and the
-  // split / window commands; nothing below asks about it. See useTabsEnabled.
+  // model — one pane holding one preview tab, so every open replaces it. So the flag gates only the
+  // strip's presence, the promotion gestures, and the split / window commands; nothing below asks
+  // about it. See useTabsEnabled.
   const { enabled: tabsEnabled, setEnabled: setTabsEnabled } = useTabsEnabled()
   const { tabLayout, setTabLayout } = useTabLayout()
   const panes = usePaneLayout(tabsEnabled ? windowInit.restoredTabs : null, hiddenSessionIds)
@@ -421,10 +433,64 @@ export default function App() {
     )
   }, [paneLayout])
 
-  // ---- the two selection gestures, on TABS only ----
-  // ⌘ and ⇧ are free here in a way they are not on a rail row: picking several out of a list is what
-  // every editor and file browser uses them for, so on a tab strip they read as the convention rather
-  // than as a borrowed browser trick.
+  // Rail rows picked as one (railSelection) — the rail's counterpart, under the same rules. App's
+  // rather than the rail's, which unmounts whenever it is collapsed. A rail selection and a tab
+  // selection never coexist: each gesture that starts one ends the other, so a group command always
+  // has one unambiguous group to act on.
+  const [railPicks, setRailPicks] = useState<RailSelection>(NO_PICKS)
+  const railPicksRef = useRef(railPicks)
+  railPicksRef.current = railPicks
+  const hasRailPicks = railPicks.ids.size > 0
+  useEffect(() => {
+    if (!hasRailPicks) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target instanceof Element ? event.target : null
+      // The rail's own menu acts on the picks; pressing its items must not drop them first.
+      if (target?.closest('.sb-ctxmenu')) return
+      const rowId = target?.closest<HTMLElement>('.sb-rail-body .sb-row')?.dataset.session ?? null
+      if (
+        shouldClearSelectionOnPointerDown(
+          railPicksRef.current,
+          rowId,
+          rowId !== null && (event.metaKey || event.shiftKey)
+        )
+      ) {
+        setRailPicks(NO_PICKS)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [hasRailPicks])
+  useEffect(() => {
+    if (shouldClearSelectionOnWindowBlur(railPicksRef.current, focused)) setRailPicks(NO_PICKS)
+  }, [focused])
+  // Escape from the terminal backs out of a selection rather than reaching the session (see
+  // escapeTakesPicks). Captured at the window, ahead of the terminal, which takes the key for itself.
+  useEffect(() => {
+    if (!hasRailPicks && !hasTabSelection) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      const target = e.target instanceof Element ? e.target : null
+      const body = document.body.classList
+      const at = {
+        inTerminal: !!target?.closest('.xterm'),
+        dragging: body.contains('sb-dragging-row') || body.contains('sb-dragging-tab'),
+        menuOpen: !!document.querySelector('.sb-ctxmenu:not(.closing)')
+      }
+      if (!escapeTakesPicks(at)) return
+      e.preventDefault()
+      e.stopPropagation()
+      setRailPicks(NO_PICKS)
+      setTabSelection(NO_SELECTION)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [hasRailPicks, hasTabSelection])
+
+  // ---- the two selection gestures ----
+  // ⌘ and ⇧ pick several out of a list — tabs here, rail rows below — because that is what every
+  // editor and file browser uses them for, so they read as the convention rather than as a borrowed
+  // browser trick. They only ever select; placement stays on the menus, which name what they do.
   //
   // Declared HERE, beside the state, rather than beside the drag handlers where they are used — the
   // group-capable actions further down all call `targetsFor`, and a `const` defined after them is not
@@ -440,6 +506,7 @@ export default function App() {
   const toggleTabSelected = useCallback((pane: number, sessionId: string) => {
     if (isChooserTab(sessionId)) return
     const active = selectableActive(pane)
+    setRailPicks(NO_PICKS)
     setTabSelection((s) => toggleSelected(s, pane, active, sessionId))
   }, [])
   const extendTabSelection = useCallback((pane: number, sessionId: string) => {
@@ -448,6 +515,7 @@ export default function App() {
     const order = p?.tabs.map((t) => t.sessionId).filter((id) => !isChooserTab(id)) ?? []
     // The active tab is the fallback anchor, so a first ⇧-click takes the run from where the user is.
     const active = selectableActive(pane)
+    setRailPicks(NO_PICKS)
     setTabSelection((s) => extendSelection(s, pane, order, sessionId, active))
   }, [])
 
@@ -644,6 +712,8 @@ export default function App() {
         else if (act.tabs === 'retarget') panes.retargetTabs(oldId, newId)
         if (act.tabSelection !== 'none') {
           setTabSelection((selection) => retargetSelection(selection, oldId, newId))
+          // The rail's picks are session-keyed the same way, and follow the same decision.
+          setRailPicks((picks) => retargetPicks(picks, oldId, newId))
         }
         if (act.view === 'move') {
           setViewBySession((prev) => {
@@ -1048,7 +1118,7 @@ export default function App() {
   // "This row stands for no conversation" (see rowIdentity), by id — the ONE place that resolution
   // lives. Every consumer of the gate routes through here rather than re-deriving it: an unlinked
   // row must not persist read state or a pin under an id that may never bind, and a gate copied per
-  // call site is how one copy ends up missing (which is what put a stranger's liveness dot on a
+  // call site invites a copy without it (a missing gate puts another transcript's liveness dot on a
   // background-agent row).
   //
   // A chooser tab stands for no conversation either, so it answers here too — which is what keeps it out
@@ -1191,6 +1261,22 @@ export default function App() {
   // Arrow-key order follows what's actually visible — the model the rail renders — so nav never lands
   // on a hidden row.
   const orderedIds = useMemo(() => visibleRows(sidebarModel).map((r) => r.sessionId), [sidebarModel])
+  const orderedIdsRef = useRef(orderedIds)
+  orderedIdsRef.current = orderedIds
+  // Picks follow what the rail shows — re-checked on every model change, so no path that takes a row
+  // off the rail can forget them. A collapsed rail shows nothing, and so keeps no picks: a selection
+  // that cannot be seen would still swallow the next Escape. Identity when nothing went.
+  useEffect(() => {
+    setRailPicks((s) => prunePicks(s, paneCollapsed ? [] : orderedIds))
+  }, [orderedIds, paneCollapsed])
+  // ⌘-click toggles a row, ⇧-click takes the run from the anchor — or the rail's selected row — to it,
+  // in the rail's order. Neither navigates; see railSelection.
+  const pickRow = useCallback((id: string, how: 'toggle' | 'extend') => {
+    const order = orderedIdsRef.current
+    const seed = pickSeed(selectedIdRef.current, order)
+    setTabSelection(NO_SELECTION)
+    setRailPicks((s) => (how === 'extend' ? extendPicks(s, order, id, seed) : togglePick(s, seed, id)))
+  }, [])
   // Each pane's chooser list, computed only while that pane shows a chooser: the list is otherwise
   // unused, and `groups` changes on every index pass of a live session.
   const preselect0 = view0.chooser ? choosers[view0.chooser]?.preselect ?? null : null
@@ -1571,9 +1657,20 @@ export default function App() {
     },
     [land, requestFocus, ptys.bySession, viewBySession, isUnlinkedId, markRead]
   )
-  const clickLive = useCallback((id: string) => openRemembered(id), [openRemembered])
-  const clickConversation = useCallback((id: string) => openRemembered(id), [openRemembered])
-  const switchTo = useCallback((id: string) => openRemembered(id), [openRemembered])
+  // A plain click on a row, and ⌥⌘↑/↓ through the rail, mean "just this one" — so they are also the
+  // way out of a rail selection, as activating a tab is out of a tab selection.
+  const clickLive = useCallback((id: string) => {
+    setRailPicks(NO_PICKS)
+    openRemembered(id)
+  }, [openRemembered])
+  const clickConversation = useCallback((id: string) => {
+    setRailPicks(NO_PICKS)
+    openRemembered(id)
+  }, [openRemembered])
+  const switchTo = useCallback((id: string) => {
+    setRailPicks(NO_PICKS)
+    openRemembered(id)
+  }, [openRemembered])
   // Double-click a row: keep it. The editor gesture for promoting a preview tab, and the reason it
   // needs no click-count dedupe is that the two ordinary clicks preceding it are idempotent here —
   // they open (or re-activate) the same conversation, and re-opening the current history stop is an
@@ -1601,18 +1698,21 @@ export default function App() {
   // What the row menu's where-to commands are called: where openToSide would put the conversation — a
   // new pane on the right, or the existing pane on one side — and whether they move a tab this window
   // already holds or open one. See conversationMenu.
-  const placementFor = useCallback((id: string): { side: SidePlace | null; hasTabHere: boolean } => {
+  //
+  // Several at once for a group: "to the side" must leave every pane they come from populated, and they
+  // move — rather than open — only when this window holds a tab for every one of them.
+  const placementFor = useCallback((ids: readonly string[]): { side: SidePlace | null; hasTabHere: boolean } => {
     const l = paneLayoutRef.current
     const split = l.panes.length > 1
     const target = split ? (l.focusIndex === 0 ? 1 : 0) : 1
-    const side: SidePlace | null = !canPlaceTabsToSide(l, [id], target)
+    const side: SidePlace | null = !canPlaceTabsToSide(l, ids, target)
       ? null
       : !split
         ? 'right'
         : target === 1
           ? 'rightPane'
           : 'leftPane'
-    return { side, hasTabHere: !!locateTab(l, id) }
+    return { side, hasTabHere: ids.length > 0 && ids.every((id) => !!locateTab(l, id)) }
   }, [])
   // Send an EXISTING tab to the other pane, creating the split when there is none. Distinct from
   // openToSide, which opens a conversation over there and leaves whatever was here alone: this is a
@@ -1718,6 +1818,7 @@ export default function App() {
       window.api.onTabDropHere(({ sessionIds, activeSessionId }) => {
         const pane = paneLayoutRef.current.focusIndex
         panes.openTabs(sessionIds, activeSessionId, pane)
+        if (sessionIds.length > 1) setRailPicks(NO_PICKS)
         setTabSelection(
           sessionIds.length > 1
             ? { pane, ids: new Set(sessionIds), anchor: activeSessionId }
@@ -2047,6 +2148,24 @@ export default function App() {
     [movePin, mutateRows]
   )
 
+  // Picked rows of one block dropped together: contiguous between the two neighbors, in the order
+  // they showed in. Pins move as one within the pin list; every other row takes a rank spread across
+  // the gap, so the group holds in both modes, as one row's drop does.
+  const dropRows = useCallback(
+    (block: SidebarBlock, draggedIds: string[], higherId: string | null, lowerId: string | null) => {
+      if (block.kind === 'pinned') movePins(draggedIds, higherId, lowerId)
+      else {
+        const model = sidebarModelRef.current
+        if (!model) return
+        const [higher, lower] = dropNeighborsMany(model, block, draggedIds, higherId, lowerId)
+        const writes = spreadWrites(rankSpace(model), draggedIds, higher, lower, Date.now())
+        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+      }
+      setReorderTick((t) => t + 1)
+    },
+    [movePins, mutateRows]
+  )
+
   // A folder dropped between two neighboring folders: one key in the folder rank space, the same
   // arithmetic as a row.
   const dropFolder = useCallback(
@@ -2162,6 +2281,104 @@ export default function App() {
       else stopSession(id)
     },
     [resumeSession, togglePinGated, toggleUnread, setConversationHidden, setFolderHidden, showInfo, stopSession]
+  )
+
+  // ---- group commands: a menu opened on picked rail rows or a tab group ----
+  // Every one is a SET, never a toggle — a toggle run over a mixed group would flip it both ways — and
+  // each re-applies the single command's gate per id, so a group can never reach what one row's menu
+  // would refuse. The ids arrive in display order from the menu's group (conversationMenu.menuGroup),
+  // the same record its labels counted.
+  const setPinnedMany = useCallback(
+    (ids: readonly string[], pin: boolean) => {
+      const targets = ids.filter((id) => !isProvisional(id))
+      if (targets.length === 0) return
+      if (pin) for (const id of targets) keepTab(id)
+      else {
+        // One write for the whole group, in display order: one lift per row, each read from the same
+        // model, would land them all on one rank and fall back to id order.
+        const model = sidebarModelRef.current
+        const lifted = model ? targets.filter((id) => model.rows.get(id)?.pinned) : []
+        const writes = model && lifted.length > 0 ? liftWrites(rankSpace(model), lifted, Date.now()) : {}
+        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+      }
+      setPins(targets, pin)
+    },
+    [isProvisional, keepTab, mutateRows, setPins]
+  )
+  const setHiddenMany = useCallback(
+    (ids: readonly string[], hidden: boolean) => {
+      const targets = ids.filter((id) => !isUnlinkedId(id))
+      if (targets.length > 0) setConversationsHidden(targets, hidden)
+    },
+    [isUnlinkedId, setConversationsHidden]
+  )
+  // Only a running conversation has a dot to mark, and an unlinked one shows none.
+  const markManyRead = useCallback(
+    (ids: readonly string[], read: boolean) => {
+      for (const id of ids) {
+        if (isUnlinkedId(id) || !ptys.bySession.has(id)) continue
+        if (read) markRead(id)
+        else markUnread(id)
+      }
+    },
+    [isUnlinkedId, ptys.bySession, markRead, markUnread]
+  )
+  // No confirmation, as for one: Stop is red and last in the menu, and its label counts what it ends.
+  const stopMany = useCallback(
+    (ids: readonly string[]) => {
+      for (const id of ids) stopSession(id)
+    },
+    [stopSession]
+  )
+  // Open several rows to the side as ONE placement: the bulk reducer action, so every tab lands in
+  // order beside the others rather than each open resolving against a layout the last one changed.
+  // `activeId` is the row the menu was opened on, which takes the focus. One another window holds is
+  // claimed first, as `land` claims one.
+  const openManyToSide = useCallback(
+    (ids: readonly string[], activeId: string) => {
+      if (ids.length === 0) return
+      beginVisit()
+      const l = paneLayoutRef.current
+      const target = l.panes.length > 1 ? (l.focusIndex === 0 ? 1 : 0) : 1
+      if (!canPlaceTabsToSide(l, ids, target)) return
+      for (const id of ids) {
+        if (openElsewhereRef.current.has(id) && !locateTab(l, id)) window.api.claimConversation(id)
+      }
+      if (l.panes.length < 2) panes.splitPane()
+      const active = ids.includes(activeId) ? activeId : ids[0]
+      panes.openTabs([...ids], active, target)
+      if (!isUnlinkedId(active)) markRead(active)
+      requestFocus(active)
+    },
+    [beginVisit, panes.splitPane, panes.openTabs, isUnlinkedId, markRead, requestFocus]
+  )
+  // ONE new window holding every row, in rail order — main claims each from whichever window holds it.
+  const openManyInNewWindow = useCallback(
+    (ids: readonly string[], activeId: string) => {
+      if (ids.length === 0) return
+      beginVisit()
+      const active = ids.includes(activeId) ? activeId : ids[0]
+      const payload = makeTabDragPayload([...ids], [...ids], active)
+      window.api.openConversationWindow(payload)
+      panes.closeTabs(payload.sessionIds)
+    },
+    [beginVisit, panes.closeTabs]
+  )
+  // The one dispatcher both menus route a group command through. The tab menu keeps its own where-to
+  // and Close, which already act on its group; everything else lands here.
+  const runGroupCommand = useCallback(
+    (action: ConversationMenuAction, group: MenuGroup, sessionId: string) => {
+      if (action === 'pin') setPinnedMany(group.pin, true)
+      else if (action === 'unpin') setPinnedMany(group.unpin, false)
+      else if (action === 'hide') setHiddenMany(group.hide, true)
+      else if (action === 'unhide') setHiddenMany(group.unhide, false)
+      else if (action === 'markRead') markManyRead(group.markRead, true)
+      else if (action === 'markUnread') markManyRead(group.markUnread, false)
+      else if (action === 'stop') stopMany(group.stop)
+      else if (action === 'toSide') openManyToSide(group.move, sessionId)
+      else if (action === 'newWindow') openManyInNewWindow(group.move, sessionId)
+    },
+    [setPinnedMany, setHiddenMany, markManyRead, stopMany, openManyToSide, openManyInNewWindow]
   )
 
   // Clear a manual "unread" mark once the user genuinely engages the open conversation — a click
@@ -2325,7 +2542,12 @@ export default function App() {
         e.preventDefault()
         goHistory(1)
       } else if (e.key === 'Escape') {
-        if (findOpen) closeFind()
+        // A multi-selection is the nearest thing an Escape can back out of, rail or tabs — whichever
+        // there is, since they never coexist. A menu, a drag and the Find field consume theirs first.
+        if (railPicksRef.current.ids.size > 0 || tabSelectionRef.current.ids.size > 0) {
+          setRailPicks(NO_PICKS)
+          setTabSelection(NO_SELECTION)
+        } else if (findOpen) closeFind()
         else if (query) setQuery('')
         else setSearchOpen(false)
       } else if (e.key === 'Enter' && !inInput && selectedId && inTranscript) {
@@ -2418,6 +2640,8 @@ export default function App() {
             onSetAllCollapsed={setAllCollapsed}
             loading={loading}
             selectedSessionId={selectedId}
+            picked={railPicks.ids}
+            onPick={pickRow}
             onJump={clickLive}
             onSelect={clickConversation}
             onStick={tabsEnabled ? stickConversation : undefined}
@@ -2451,8 +2675,10 @@ export default function App() {
             onStopSession={stopSession}
             onShowInfo={showInfo}
             onDropRow={dropRow}
+            onDropRows={dropRows}
             onDropFolder={dropFolder}
             reorderTick={reorderTick}
+            onGroupCommand={runGroupCommand}
           />
         )}
         {!paneCollapsed && (
@@ -2535,6 +2761,7 @@ export default function App() {
                   onStopAndCloseTab={stopAndCloseTab}
                   onMarkTabUnread={markUnreadGated}
                   onTabCommand={runTabCommand}
+                  onTabGroupCommand={runGroupCommand}
                   onCloseOtherTabs={closeOtherTabs}
                   reopenCount={reopenCount}
                   onReopenClosed={reopenClosed}

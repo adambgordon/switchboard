@@ -3,8 +3,8 @@ import { codeRanges, lineCodeRanges, normalizeMath } from '../src/renderer/lib/m
 
 /**
  * The fixtures below are the shapes both agents actually emit, and — just as importantly — the
- * non-math shapes that share these delimiters. Every guard here was mutation-checked: revert it in
- * the source and a NAMED test below fails.
+ * non-math shapes that share these delimiters. Every guard here has a NAMED test: revert it in the
+ * source and that test fails.
  *
  * The recurring assertion is LENGTH PRESERVATION. It is not cosmetic: the copy pipeline slices the
  * ORIGINAL text using offsets produced by parsing the rewritten text, so an unequal-length rewrite
@@ -200,9 +200,9 @@ describe('normalizeMath — the display body is left verbatim', () => {
 
 describe('normalizeMath — offsets are UTF-16, not code points', () => {
   /* An astral character is TWO UTF-16 units but ONE code point. Every offset in the module comes
-   * from UTF-16-based APIs, so a code-point-indexed buffer writes to the wrong place. Note the first
-   * case below preserved LENGTH while destroying content — which is why the invariant assertion
-   * alone was not enough, and why these fixtures exist. */
+   * from UTF-16-based APIs, so a code-point-indexed buffer writes to the wrong place. Such a rewrite
+   * can preserve LENGTH while destroying content, so the length invariant alone is not enough;
+   * these fixtures check content. */
   it('rewrites correctly with an emoji before the formula', () => {
     const out = normalized(`😀 intro\n\n${DISPLAY_LATEX}\n`)
     expect(out.hasMath).toBe(true)
@@ -273,25 +273,25 @@ describe('codeRanges', () => {
 describe('normalizeMath — scanning stays linear', () => {
   /* These guard PERFORMANCE properties. Two rules govern how:
    *
-   * 1. Assert structure, not elapsed time — WHERE possible. An earlier version timed 2,000 vs 8,000
-   *    lines and compared the ratio. It passed alone and failed intermittently under `npm test`,
-   *    where 34 files compete for CPU and the two samples are measured under different load. A ratio
-   *    of two ~1 ms measurements is not a signal. Never reintroduce one.
+   * 1. Assert structure, not elapsed time — WHERE possible. A ratio of two ~1 ms timings (say 2,000
+   *    vs 8,000 lines) is not a signal: under `npm test`, where many files compete for CPU, the two
+   *    samples are measured under different load, so it passes alone and fails intermittently. Do
+   *    not assert one.
    *
    * 2. Assert it on the function where the property LIVES. The blowups share a cause: every
    *    delimiter and backtick tests itself against the protected-range list, so a list that grows per
    *    code LINE makes the work (candidates × lines). Merging bounds it — but `codeRanges`' output is
    *    merged whether the merge runs before the backtick scan or at the return, and only the former
-   *    is correct. So the assertion belongs on `lineCodeRanges`, the list the scan consumes. An
-   *    earlier version of this suite asserted on `codeRanges` and passed under exactly the mutant it
-   *    claimed to guard. */
+   *    is correct. So the assertion belongs on `lineCodeRanges`, the list the scan consumes.
+   *    Asserting on `codeRanges` instead passes under exactly the mutant this guards against. */
   const LINES = 4000
   const openers = (n: number): string[] => Array.from({ length: n }, () => '\\[')
 
   for (const [label, src] of [
     ['fenced', ['```latex', ...openers(LINES), '```'].join('\n')],
     ['indented', openers(LINES).map((l) => `    ${l}`).join('\n')],
-    // A blank line used to END an indented block, so a separated sample never became contiguous.
+    // A blank line inside an indented block must not END it, or a separated sample never becomes
+    // contiguous.
     ['blank-separated indented', openers(LINES).flatMap((l) => [`    ${l}`, '']).join('\n')],
     /* A backtick on every fenced line — the shape that needs the merge to precede the scan.
      * The leading display block is load-bearing in the fixture: without a line that trims to a bare
@@ -315,7 +315,7 @@ describe('normalizeMath — scanning stays linear', () => {
    * identical blocks and differ only in time, so this is the one place a wall-clock assertion earns
    * its keep. Made robust by scale and headroom rather than by comparing two samples — 20,000
    * unmatched openers cost ~3 ms paired in one pass and ~2.7 s with a rescan per opener, so the
-   * ceiling sits ~100x above correct and well below the regression. */
+   * ceiling sits ~100x above correct and well below the per-opener rescan. */
   it('pairs display delimiters in one pass, not a rescan per opener', () => {
     const src = openers(20_000).join('\n')
     const started = performance.now()

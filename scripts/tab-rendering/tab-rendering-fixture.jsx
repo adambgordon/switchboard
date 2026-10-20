@@ -39,7 +39,7 @@ function Fixture() {
     onPromote: noAction, onShowInfo: noAction, onSplitRight: noAction, onMoveToOtherPane: noAction,
     onOpenInNewWindow: noAction, onMoveTab: () => window.dragCalls.push('move'), onTabLeftWindow: noAction,
     selectedIds: new Set(), onMoveTabGroup: () => window.dragCalls.push('moveGroup'), onResolveTargets: (_, id) => [id],
-    onToggleSelect: noAction, onExtendSelect: noAction, onStopAndClose: noAction, onCommand: noAction,
+    onToggleSelect: noAction, onExtendSelect: noAction, onStopAndClose: noAction, onCommand: noAction, onGroupCommand: noAction,
     reopenCount: () => 0, onReopenClosed: noAction
   }
   return <div id="fixture" style={{ margin: 16, border: '1px solid var(--rule)', background: 'var(--paper-pane)' }}>

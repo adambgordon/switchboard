@@ -16,8 +16,8 @@
  *
  * 2. MATH IS OPT-IN PER BLOCK, VIA A DISPLAY BLOCK. These delimiters are not reliable math
  *    markers in coding-agent prose, because they all mean something else far more often:
- *      • `\[DEBUG\]` is how CommonMark writes a LITERAL `[DEBUG]` — it renders correctly
- *        today, and treating it as math turns a log tag into a centered equation.
+ *      • `\[DEBUG\]` is how CommonMark writes a LITERAL `[DEBUG]` — it renders as plain
+ *        brackets, and treating it as math turns a log tag into a centered equation.
  *      • `sed` capture groups (`s/x\([0-9]*\)/\1/p`) and `jq` interpolation (`"\(.name)"`).
  *      • `$PATH`, `${dir}`, `$(cmd)` — shell sigils.
  *    So nothing is math unless the block contains a DISPLAY block whose delimiters sit alone
@@ -102,7 +102,7 @@ function mergeRanges(ranges: readonly Range[]): Range[] {
  * merely before the return. Asserting on `codeRanges`' output cannot tell the two apart: deferring
  * the merge to the return leaves the returned value merged either way, while the per-backtick lookup
  * silently goes quadratic. A test on THIS function's output can tell, because moving the merge out
- * of here is exactly what the regression looks like.
+ * of here is exactly the mistake it has to catch.
  *
  * Indented code deliberately OVER-matches — "any line indented four or more spaces" rather than
  * CommonMark's real rules (which depend on preceding blank lines, paragraph continuation, and list
@@ -230,9 +230,9 @@ function displayBlocks(text: string, ranges: readonly Range[]): DisplayBlock[] {
   const closes = (i: number, kind: DisplayBlock['kind']): boolean =>
     kind === 'latex' ? /^\s*\\\]\s*$/.test(lines[i]) : /^\s*\$\$\s*$/.test(lines[i])
 
-  /* ONE pass. An earlier version rescanned every remaining line for each unmatched opener, which is
-   * quadratic — a block of a few thousand stray `\[` lines cost most of a second inside a synchronous
-   * render. Carrying the pending opener instead makes it linear, and removes the nested loop. */
+  /* ONE pass, carrying the pending opener, so the scan is linear with no nested loop. Rescanning
+   * every remaining line for each unmatched opener would be quadratic — a block of a few thousand
+   * stray `\[` lines would cost most of a second inside a synchronous render. */
   const found: DisplayBlock[] = []
   let pending: { kind: DisplayBlock['kind']; line: number; at: number } | null = null
 

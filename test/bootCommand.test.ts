@@ -122,9 +122,9 @@ describe('bootPayloadFor', () => {
     }
   })
 
-  it('prevents the two-command fusion bug: the payload begins by killing the line', () => {
-    // Regression guard for the observed `claude --session-id <id>claude --resume <id>` corruption,
-    // where a recalled history line prefixed the boot command and claude rejected the combination.
+  it('begins the payload by killing the line, so a recalled history line cannot prefix it', () => {
+    // A recalled history line left on the input would prefix the boot command
+    // (`claude --session-id <id>claude --resume <id>`), and claude rejects the combination.
     // The leading Ctrl-U kills anything already on the line, so it can never prefix our command.
     expect(bootPayloadFor('claude', 'resume', ID)).toBe(`\x05\x15claude --resume ${ID}\r`)
   })

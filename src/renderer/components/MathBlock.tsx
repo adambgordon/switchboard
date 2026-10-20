@@ -18,8 +18,8 @@ type KatexEngine = {
  * KaTeX's parser is by far the largest thing this view could pull in, and math appears in a tiny
  * fraction of conversations — so it is NOT in the startup bundle. It is fetched the first time a
  * formula mounts, once per session, and every waiting formula re-renders when it lands. Until then
- * (and forever, if the import fails) the LaTeX source stands in, which is what the view showed
- * before math was supported — so the degraded state is the old state, not a blank.
+ * (and forever, if the import fails) the LaTeX source stands in, so the degraded state is readable
+ * source, not a blank.
  * ------------------------------------------------------------------ */
 let engine: KatexEngine | null = null
 let pending: Promise<void> | null = null

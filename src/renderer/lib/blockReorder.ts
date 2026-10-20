@@ -128,3 +128,29 @@ export function dropNeighbors(
   const moved = reorderArray(keys.slice(), from, to)
   return { above: moved[to - 1] ?? null, below: moved[to + 1] ?? null }
 }
+
+// ---- a group drag: several units of one block carried together ----
+// The carried units other than the grabbed one leave the layout for the drag, so the drag itself is the
+// grabbed unit's own, among the units not carried. `carried` is the carried units' indices in the full
+// block, ascending; `target` is where the single-unit drag left the grabbed unit, which is an index
+// into the units not carried.
+
+/**
+ * Where a group dropped at `target` lands: the keys it sits between, either null at the block's edge,
+ * and whether that changes the block's order at all. Carried units already contiguous and dropped back
+ * where they were change nothing, which is what lets a release at the origin commit nothing.
+ */
+export function groupLanding(
+  keys: readonly string[],
+  carried: readonly number[],
+  target: number
+): { above: string | null; below: string | null; moved: boolean } {
+  const rest = keys.filter((_, i) => !carried.includes(i))
+  const group = carried.map((i) => keys[i])
+  const order = [...rest.slice(0, target), ...group, ...rest.slice(target)]
+  return {
+    above: rest[target - 1] ?? null,
+    below: rest[target] ?? null,
+    moved: order.some((k, i) => k !== keys[i])
+  }
+}

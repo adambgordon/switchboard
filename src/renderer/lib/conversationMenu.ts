@@ -10,15 +10,72 @@ import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/type
  * closing, end it.
  * Resume heads the menu because it is the command a finished conversation's menu is most often opened
  * for; Stop is last because it is destructive, and red.
+ *
+ * A menu opened on a multi-selection — picked rail rows, or a tab group — is the same list for the
+ * group, minus what only makes sense for one: no Resume, no Rename, no Session details. Every command
+ * it keeps acts on the targets it would actually change, and says how many.
  */
 
 /** Where "to the side" lands: a new pane on the right, or the pane that already exists on one side. */
 export type SidePlace = 'right' | 'rightPane' | 'leftPane'
 
+/** One conversation a group menu acts on, as the menu needs to know it. */
+export interface MenuTarget {
+  id: string
+  /** An indexed conversation stands behind it — what pin, hide and read act on (see `linked`). */
+  linked: boolean
+  /** It can be placed: a terminal that stands for no conversation has nowhere else to show. */
+  movable: boolean
+  live: boolean
+  pinned: boolean
+  unread: boolean
+  hidden: 'folder' | 'self' | null
+}
+
+/**
+ * A multi-selection, resolved per command: for each command, the targets it would change, in the
+ * group's order. The label's count and the ids the command runs on come from this one record, so
+ * "Pin 2 conversations" cannot pin three.
+ */
+export interface MenuGroup {
+  /** Everything picked — what a tab group's Close acts on. */
+  size: number
+  /** What the where-to commands place. */
+  move: string[]
+  pin: string[]
+  unpin: string[]
+  hide: string[]
+  unhide: string[]
+  markRead: string[]
+  markUnread: string[]
+  stop: string[]
+}
+
+/**
+ * The per-command targets of a group. Pin, hide and read act only on what has a conversation behind
+ * it, as the single menu offers them only there; read also needs it live, since a finished
+ * conversation has no dot to mark. A row hidden by its folder is neither hidden nor unhidden here —
+ * only its folder can bring it back. Stop acts on every running terminal, linked or not.
+ */
+export function menuGroup(targets: readonly MenuTarget[]): MenuGroup {
+  const ids = (keep: (t: MenuTarget) => boolean): string[] => targets.filter(keep).map((t) => t.id)
+  return {
+    size: targets.length,
+    move: ids((t) => t.movable),
+    pin: ids((t) => t.linked && !t.pinned),
+    unpin: ids((t) => t.linked && t.pinned),
+    hide: ids((t) => t.linked && t.hidden === null),
+    unhide: ids((t) => t.linked && t.hidden === 'self'),
+    markRead: ids((t) => t.linked && t.live && t.unread),
+    markUnread: ids((t) => t.linked && t.live && !t.unread),
+    stop: ids((t) => t.live)
+  }
+}
+
 export interface ConversationMenuState {
   surface: 'row' | 'tab'
-  /** How many tabs the where-to and close commands act on: more than 1 only for a multi-selection. */
-  count: number
+  /** The multi-selection the menu was opened on, or null for a menu about this one conversation. */
+  group: MenuGroup | null
   /** There is an indexed conversation behind it. A chooser tab, a terminal not yet bound to one, and a
    *  new conversation before its first message have none. */
   linked: boolean
@@ -46,25 +103,50 @@ const SIDE_TARGET: Record<SidePlace, { open: string; move: string }> = {
   leftPane: { open: 'in left pane', move: 'to left pane' }
 }
 
+/** `3 tabs`, `1 conversation`. */
+function counted(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
+}
+
 export function conversationMenu(s: ConversationMenuState): ConversationMenuEntry[] {
-  const many = s.count > 1
+  const g = s.group
   const move = s.surface === 'tab' || s.hasTabHere
-  const what = many ? ` ${s.count} tabs` : ''
   const item = (action: ConversationMenuAction, label: string, danger = false): ConversationMenuEntry =>
     danger ? { action, label, danger } : { action, label }
 
   const groups: ConversationMenuEntry[][] = []
-  if (!many && s.linked && !s.live) groups.push([item('resume', 'Resume session')])
+  if (!g && s.linked && !s.live) groups.push([item('resume', 'Resume session')])
 
   const where: ConversationMenuEntry[] = []
-  if (s.side) {
-    const t = SIDE_TARGET[s.side]
-    where.push(item('toSide', move ? `Move${what} ${t.move}` : `Open ${t.open}`))
+  // A group names how many it places, by what they are on the surface it was opened from. With
+  // nothing in it that can be placed, there is nothing to say where.
+  const noun = s.surface === 'tab' ? 'tab' : 'conversation'
+  const what = g ? ` ${counted(g.move.length, noun)}` : ''
+  if (!g || g.move.length > 0) {
+    if (s.side) {
+      const t = SIDE_TARGET[s.side]
+      where.push(item('toSide', move ? `Move${what} ${t.move}` : `Open${what} ${t.open}`))
+    }
+    if (s.newWindow) {
+      where.push(item('newWindow', move ? `Move${what} to new window` : `Open${what} in new window`))
+    }
   }
-  if (s.newWindow) where.push(item('newWindow', move ? `Move${what} to new window` : 'Open in new window'))
   groups.push(where)
 
-  if (!many && s.linked) {
+  if (g) {
+    // Each is a SET, never a toggle, offered in the direction that changes something: Pin while any is
+    // unpinned, Unpin once all are, and the same for hide and read. Counted by what it would change,
+    // not by the selection, and named by what they are on this surface, as the where-to commands are.
+    const filing: ConversationMenuEntry[] = []
+    const n = (ids: readonly string[]): string => counted(ids.length, noun)
+    if (g.pin.length > 0) filing.push(item('pin', `Pin ${n(g.pin)}`))
+    else if (g.unpin.length > 0) filing.push(item('unpin', `Unpin ${n(g.unpin)}`))
+    if (g.hide.length > 0) filing.push(item('hide', `Hide ${n(g.hide)}`))
+    else if (g.unhide.length > 0) filing.push(item('unhide', `Unhide ${n(g.unhide)}`))
+    if (g.markUnread.length > 0) filing.push(item('markUnread', `Mark ${n(g.markUnread)} as unread`))
+    else if (g.markRead.length > 0) filing.push(item('markRead', `Mark ${n(g.markRead)} as read`))
+    groups.push(filing)
+  } else if (s.linked) {
     const filing = [item(s.pinned ? 'unpin' : 'pin', s.pinned ? 'Unpin' : 'Pin')]
     filing.push(
       s.hidden === 'folder'
@@ -79,7 +161,7 @@ export function conversationMenu(s: ConversationMenuState): ConversationMenuEntr
   }
 
   if (s.surface === 'tab') {
-    const close = [item('close', many ? `Close${what}` : 'Close tab')]
+    const close = [item('close', g ? `Close ${counted(g.size, 'tab')}` : 'Close tab')]
     if (s.closeOthers) close.push(item('closeOthers', 'Close other tabs'))
     // It acts on the window's history, not on this tab, so it counts what it would bring back rather
     // than the selection.
@@ -89,7 +171,9 @@ export function conversationMenu(s: ConversationMenuState): ConversationMenuEntr
     groups.push(close)
   }
 
-  if (!many && s.live) groups.push([item('stop', 'Stop session', true)])
+  if (g) {
+    if (g.stop.length > 0) groups.push([item('stop', `Stop ${counted(g.stop.length, 'session')}`, true)])
+  } else if (s.live) groups.push([item('stop', 'Stop session', true)])
 
   return joinGroups(groups)
 }

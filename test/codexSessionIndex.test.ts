@@ -117,16 +117,16 @@ describe('resolveCodexTitle', () => {
   })
 
   it('falls back to the session-index name when the DB title reverted to the first message', () => {
-    // The "Renaming bug" scenario: a resume re-derived threads.title back to the first message,
-    // but the durable rename still lives in session_index.jsonl.
+    // A resume re-derives threads.title back to the first message, but the durable rename still
+    // lives in session_index.jsonl.
     expect(
       resolveCodexTitle({
         rolloutTitle: 'first message',
         dbTitle: 'first message',
         dbFirstUserMessage: 'first message',
-        sessionName: 'Renaming bug'
+        sessionName: 'Durable name'
       })
-    ).toBe('Renaming bug')
+    ).toBe('Durable name')
   })
 
   it('keeps the DB auto-title when there is no session-index name', () => {

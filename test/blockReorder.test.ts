@@ -8,6 +8,7 @@ import {
   dragStride,
   dropIndex,
   dropNeighbors,
+  groupLanding,
   siblingsResized,
   slotShift
 } from '../src/renderer/lib/blockReorder'
@@ -197,5 +198,34 @@ describe('siblingsResized', () => {
 
   it('tolerates sub-pixel rounding', () => {
     expect(siblingsResized([24.4, 24, 40, 24], slots, 1)).toBe(false)
+  })
+})
+
+describe('a group drag', () => {
+  it('lands where the grabbed unit\'s own drag left it, among the units not carried', () => {
+    // The hook takes every carried unit but the grabbed one out of the layout and runs a single-unit
+    // drag over what is left; that drop's neighbors must be the group's. Scattered picks, grabbed by
+    // the middle one, so an index taken from the full block rather than the rest would be off by one.
+    const keys = ['a', 'b', 'c', 'd', 'e', 'f']
+    const carried = [1, 3, 4]
+    const grabbed = 3
+    const rest = keys.filter((_, i) => !carried.includes(i) || i === grabbed)
+    const from = rest.indexOf(keys[grabbed])
+    for (let target = 0; target < rest.length; target++) {
+      const single = dropNeighbors(rest, from, target)
+      const landing = groupLanding(keys, carried, target)
+      expect({ above: landing.above, below: landing.below }, `target ${target}`).toEqual(single)
+    }
+  })
+
+  it('lands between the rows the gap sat between, and says whether that moves anything', () => {
+    const keys = ['a', 'b', 'c', 'd', 'e']
+    expect(groupLanding(keys, [1, 3], 1)).toEqual({ above: 'a', below: 'c', moved: true })
+    expect(groupLanding(keys, [1, 3], 3)).toEqual({ above: 'e', below: null, moved: true })
+    expect(groupLanding(keys, [1, 3], 0)).toEqual({ above: null, below: 'a', moved: true })
+    // Already together and dropped back where they were: nothing to commit.
+    expect(groupLanding(keys, [1, 2], 1)).toEqual({ above: 'a', below: 'd', moved: false })
+    // Scattered and dropped at the first one's place: they close up, which is a move.
+    expect(groupLanding(keys, [1, 3], 1).moved).toBe(true)
   })
 })

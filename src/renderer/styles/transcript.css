@@ -34,8 +34,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 }
 
 /* Chrome exempted from the selectable region above. The invariant: NOTHING HERE IS LIFTED FROM THE DOM
-   BY A COPY, SO NOTHING HERE HIGHLIGHTS — otherwise a drag promises text it can't deliver (the timestamp
-   used to sweep into the highlight and then be absent from the paste).
+   BY A COPY, SO NOTHING HERE HIGHLIGHTS — otherwise a drag promises text it can't deliver (a timestamp
+   would sweep into the highlight and then be absent from the paste).
    The speaker tag and Sub-agent tag are on this list even though attribution DOES appear in a copy,
    because the copy generates it from the section's `data-speaker` / `data-sidechain` attributes rather
    than reading these elements — so `**You:**` / `**Claude (Sub-agent):**` still come through with the
@@ -535,12 +535,12 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   background-color: #67060c;
 }
 
-/* ---- YAML exception — YAML keeps the ORIGINAL One Light/Dark palette; everything else uses GitHub
+/* ---- YAML exception — YAML uses the One Light/Dark palette; everything else uses GitHub
    above. Scoped to the block's normalized language (CodeBlock stamps data-lang on .md-pre-wrap, and
    codeLang() folds yml→yaml, so ```yaml and ```yml both match). The extra classes outspecify the
    GitHub rules; dark mirrors with the [data-theme] scope (comment/deletion stay on theme-aware ink/
-   danger tokens, so they flip for free — no dark override needed, same as the original). ---- */
-/* light — One Light (original) */
+   danger tokens, so they flip for free — no dark override needed). ---- */
+/* light — One Light */
 .md-pre-wrap[data-lang='yaml'] .hljs-comment,
 .md-pre-wrap[data-lang='yaml'] .hljs-quote {
   color: var(--ink-faint);
@@ -582,7 +582,7 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 .md-pre-wrap[data-lang='yaml'] .hljs-selector-id {
   color: #4078f2;
 }
-/* dark — One Dark (original) */
+/* dark — One Dark */
 :root[data-theme='dark'] .md-pre-wrap[data-lang='yaml'] .hljs-keyword,
 :root[data-theme='dark'] .md-pre-wrap[data-lang='yaml'] .hljs-selector-tag,
 :root[data-theme='dark'] .md-pre-wrap[data-lang='yaml'] .hljs-tag,
@@ -764,8 +764,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   align-items: center;
   gap: var(--s2);
   font-size: var(--text-xs);
-  /* Rest one step lighter than before (ghost icon / faint name) so hovering — which darkens to
-     soft / ink below — reads as a bigger strengthening. */
+  /* Rest a step lighter (ghost icon / faint name) than the soft / ink that hover darkens to below,
+     so hovering reads as a clear strengthening. */
   color: var(--ink-ghost);
   /* the tool name is a click target (toggle) — never let repeated clicks select its text */
   user-select: none;
@@ -776,8 +776,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 }
 
 /* The icon+label cluster inside a disclosure summary — the tooltip host (carries data-tip), so the
-   label anchors beside the cursor rather than centering on the full-width summary. Inline-flex keeps
-   the icon↔label gap the summary's own flex used to provide. */
+   label anchors beside the cursor rather than centering on the full-width summary. Inline-flex
+   supplies the icon↔label gap inside the label. */
 .disclosure-label {
   display: inline-flex;
   align-items: center;
@@ -826,7 +826,7 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   overflow-wrap: anywhere;
 }
 
-/* the result body sits alone now (the Result/Error label moved to the header). Padding is symmetric
+/* the result body sits alone (the Result/Error label is in the header). Padding is symmetric
    top/bottom (the shared --s3 above) so a short result reads evenly boxed; the clamped-tail case
    relies on the .is-faded gradient mask below to soften the 6th-line cut. */
 .tool-result-body {
@@ -835,8 +835,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 
 /* The collapsed result is clamped to 6 RENDERED (wrapped) lines by an inner clip element that has
    NO padding of its own — so the cut lands exactly on the 6th line boundary, and the panel's own
-   bottom padding sits below it as breathing room. (line-clamp was dropped: with pre-wrap it cut
-   mid-line AND broke the scrollHeight check that gates "Expand".) */
+   bottom padding sits below it as breathing room. (Not line-clamp: with pre-wrap it cuts
+   mid-line AND breaks the scrollHeight check that gates "Expand".) */
 .tool-result-clip.is-clamped {
   max-height: calc(6 * 1.55em);
   overflow: hidden;
@@ -1188,7 +1188,7 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 .md-pre-wrap:hover .copy-block,
 .md-table-outer:hover .copy-block,
 .tool-card:hover .copy-block,
-/* A call's input block has no .tool-card ancestor (the run is the only <details> now), so reveal its
+/* A call's input block has no .tool-card ancestor (the run is the only <details>), so reveal its
    copy button on the json wrapper directly. */
 .tool-json-wrap:hover .copy-block,
 .copy-btn.copied {

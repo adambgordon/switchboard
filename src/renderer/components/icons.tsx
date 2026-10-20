@@ -1,3 +1,5 @@
+// Many of these icons' paths are taken or adapted from Lucide (ISC) and Feather (MIT); their
+// license notices are in THIRD_PARTY_NOTICES.md at the repo root.
 interface IconProps {
   size?: number
   className?: string
@@ -228,10 +230,10 @@ export const SplitVertical = (p: IconProps) =>
   svg(
     <>
       {/* TWO separate frames with a gap between them. What this must not be is one rectangle with a
-          single interior stroke — that was a near-copy of PanelLeft, differing only in where the stroke
-          sat, so the rail toggle and the split toggle read as the same control two positions apart. Two
-          detached panes is a distinct silhouette at 16px, which is the only size that matters. Drawn to
-          PanelLeft's 3→21 box so it does not also look a size smaller than its neighbors. */}
+          single interior stroke — that is a near-copy of PanelLeft, differing only in where the stroke
+          sits, and the rail toggle and the split toggle would read as the same control two positions
+          apart. Two detached panes is a distinct silhouette at 16px, which is the only size that matters.
+          Drawn to PanelLeft's 3→21 box so it does not also look a size smaller than its neighbors. */}
       <rect x="3" y="3" width="8" height="18" rx="2" />
       <rect x="13" y="3" width="8" height="18" rx="2" />
     </>,
@@ -291,6 +293,18 @@ export const EyeOff = (p: IconProps) =>
       <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" />
       <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" />
       <path d="m2 2 20 20" />
+    </>,
+    p
+  )
+// A pointer mid-click — What's new's slide on selecting several conversations.
+export const PointerClick = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M14 4.1 12 6" />
+      <path d="m5.1 8-2.9-.8" />
+      <path d="m6 12-1.9 2" />
+      <path d="M7.2 2.2 8 5.1" />
+      <path d="M9.037 9.69a.498.498 0 0 1 .653-.653l11 4.5a.5.5 0 0 1-.074.949l-4.349 1.041a1 1 0 0 0-.74.739l-1.04 4.35a.5.5 0 0 1-.95.074z" />
     </>,
     p
   )

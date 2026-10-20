@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationGroup, ConversationMeta, LiveState, PtyState } from '../src/shared/types'
-import { absorbBind, absorbBindFolder, dropWrites, holdRank } from '../src/renderer/lib/rowRank'
+import { absorbBind, absorbBindFolder, dropWrites, holdRank, spreadWrites } from '../src/renderer/lib/rowRank'
 import {
   buildSidebar,
   conversationSeed,
@@ -11,6 +11,7 @@ import {
   rankSpace,
   buildSidebarHeld,
   dropNeighbors,
+  dropNeighborsMany,
   resumeWrites,
   unpinWrites,
   visibleRows,
@@ -750,6 +751,36 @@ describe('a drop beside a row shown past the cap', () => {
     const block = model.groups[0].blocks[0]
     expect(dropNeighbors(model, block, 'c1', null, 'c0')).toEqual([null, 'c0'])
     expect(dropNeighbors(model, block, 'c5', 'c0', 'c1')).toEqual(['c0', 'c1'])
+  })
+})
+
+describe('a group dropped beside a row shown past the cap', () => {
+  // As above: c0 newest … c5 oldest, a cap of 2, so the folder shows c0, c1 and then the live c5.
+  const convs = [0, 1, 2, 3, 4, 5].map((i) => conv(`c${i}`, T - i * 1000))
+  const build = (live: string[], rowRanks: Record<string, number> = {}): SidebarModel =>
+    buildSidebar(input({ groups: [group('/w/r', convs)], ptys: live.map((id) => pty(id)), rowRanks }))
+  const shownRows = (model: SidebarModel): string[] => model.groups[0].blocks[0].rows.map((r) => r.sessionId)
+
+  it('carrying every capped row, lands at the top rather than out of sight under the live row', () => {
+    const model = build(['c5'])
+    const block = model.groups[0].blocks[0]
+    expect(shownRows(model)).toEqual(['c0', 'c1', 'c5'])
+    const [h, l] = dropNeighborsMany(model, block, ['c0', 'c1'], 'c5', null)
+    expect([h, l]).toEqual([null, 'c2'])
+    expect(shownRows(build(['c5'], spreadWrites(rankSpace(model), ['c0', 'c1'], h, l, T)))).toEqual(['c0', 'c1', 'c5'])
+  })
+
+  it('lands below the last capped row it does not carry, skipping the rows it carries', () => {
+    const model = build(['c4', 'c5'])
+    const block = model.groups[0].blocks[0]
+    expect(shownRows(model)).toEqual(['c0', 'c1', 'c4', 'c5'])
+    expect(dropNeighborsMany(model, block, ['c1', 'c4'], 'c0', 'c5')).toEqual(['c0', 'c2'])
+  })
+
+  it('takes a group entirely past the cap as it is', () => {
+    const model = build(['c4', 'c5'])
+    const block = model.groups[0].blocks[0]
+    expect(dropNeighborsMany(model, block, ['c4', 'c5'], 'c0', 'c1')).toEqual(['c0', 'c1'])
   })
 })
 

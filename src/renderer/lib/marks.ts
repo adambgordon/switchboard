@@ -9,9 +9,8 @@
  *
  * That identity contract is the load-bearing part. These maps are shared by every window through one
  * localStorage area, and the store is read-modify-WRITTEN rather than overwritten from memory: each
- * mutation re-reads what is there, folds in one change, and puts it back. So a window's write can no
- * longer revert changes it never knew about — which is exactly what a whole-map write from stale
- * in-memory state did.
+ * mutation re-reads what is there, folds in one change, and puts it back. So a window's write cannot
+ * revert changes it never knew about, as a whole-map write from stale in-memory state would.
  */
 
 /** sessionId -> ms epoch. */

@@ -2,7 +2,7 @@ const { app, BrowserWindow, Menu, nativeImage } = require('electron')
 const assert = require('node:assert/strict')
 const { writeFileSync } = require('node:fs')
 const { join } = require('node:path')
-const checkDragScrolling = require('./drag-regression.cjs')
+const checkDragScrolling = require('./drag-scrolling.cjs')
 
 const output = process.argv[2]
 app.setPath('userData', join(output, 'profile'))

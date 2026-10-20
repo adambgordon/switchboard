@@ -4,7 +4,7 @@
  * node-typecheckable for the test suite; everything here touches DOM/web globals and is
  * renderer-only. Used by main.tsx (pre-render bootstrap) and useTheme.
  */
-import { DOT_COLOR_KEY, clampDotColor, clampSelectedDotColor, parseDotColor } from './dotColor'
+import { DOT_COLOR_KEY, clampDotColor, clampPickedDotColor, clampSelectedDotColor, parseDotColor } from './dotColor'
 import { THEME_KEY, type ResolvedTheme, type ThemeMode } from './theme'
 
 /** Read the persisted mode, tolerating an absent or garbage value (→ 'system'). */
@@ -62,15 +62,18 @@ export function readDotColor(): string | null {
  * Takes the resolved theme because the color is placed relative to the surface the dot sits on,
  * so callers must re-apply on a theme flip as well as on a change of color. The selected rail row
  * inverts its theme, so it gets its own placement, `--dot-on-selected`; with none set it falls back
- * to the shipped dot for that fill (`--row-selected-dot`).
+ * to the shipped dot for that fill (`--row-selected-dot`). A picked rail row's fill is the least
+ * favorable surface in its theme, so it gets one too: `--dot-on-picked`, else `--row-picked-dot`.
  */
 export function applyDotColor(color: string | null, resolved: ResolvedTheme): void {
   const root = document.documentElement
   if (!color) {
     root.style.removeProperty('--dot')
     root.style.removeProperty('--dot-on-selected')
+    root.style.removeProperty('--dot-on-picked')
     return
   }
   root.style.setProperty('--dot', clampDotColor(color, resolved))
   root.style.setProperty('--dot-on-selected', clampSelectedDotColor(color, resolved))
+  root.style.setProperty('--dot-on-picked', clampPickedDotColor(color, resolved))
 }

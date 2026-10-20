@@ -21,7 +21,7 @@
  * 3. Anything else — typically a file a live session is writing → parsed now, ahead of the queue.
  *
  * On a very first launch there is nothing to serve, so (2) does not apply: every file is parsed
- * before the first answer, and the first conversation list is complete, as it has always been.
+ * before the first answer, and the first conversation list is complete.
  *
  * Pure Node — no Electron. Persistence is best-effort: a lost or corrupt file only costs a slow
  * launch, never a wrong answer.

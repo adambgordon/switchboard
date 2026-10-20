@@ -24,6 +24,15 @@
   --dot: var(--dot-on-selected, var(--row-selected-dot));
   --dot-halo: var(--row-selected-halo);
 }
+/* A row picked into the rail's multi-selection (railSelection): a quiet fill of its own, hovered or
+   not, since a selection never shifts on hover. It keeps its ink — only the one selected row inverts,
+   and a picked row that is also the selected one draws as selected. Its dot is the one for this fill,
+   or a chosen color placed against it (applyDotColor). */
+.sb-row.picked:not(.selected),
+.sb-row.picked:not(.selected):hover {
+  background: var(--row-picked);
+  --dot: var(--dot-on-picked, var(--row-picked-dot));
+}
 /* Compact: one line. Logo, title, then the dot/⋮ slot, all centered. Both
    paddings are short of the spacious row's, because each end's slot is wider than the mark it holds:
    the trailing one centers the dot/⋮ under its folder's pencil, and the leading one brings the logo's
@@ -219,9 +228,9 @@
 }
 /* Same stuck-:hover problem, for the row body and its dot: a compositor transform doesn't re-run
    :hover, so a row that begins its slide under the cursor would carry the hover fill, with its dot
-   swapped out, the whole glide. Revert both to the resting look while .sb-flipping. The selected row
-   needs no revert: hover never changes its fill. */
-.sb-row.sb-flipping:not(.selected) {
+   swapped out, the whole glide. Revert both to the resting look while .sb-flipping. The selected and
+   picked rows need no revert: hover never changes their fill. */
+.sb-row.sb-flipping:not(.selected):not(.picked) {
   background: transparent;
 }
 .sb-row.sb-flipping .sb-dot {
@@ -230,6 +239,10 @@
 .sb-row-menu-btn:hover {
   color: var(--ink);
   background: var(--hover-press);
+}
+/* On a picked row the ⋮'s press steps past the picked fill, which already sits past the hover. */
+.sb-row.picked:not(.selected) .sb-row-menu-btn:hover {
+  background: var(--row-picked-press);
 }
 
 /* The rest of the selected row — preview, meta line, the marks, the ⋮ — in its softer inverted ink,
@@ -267,6 +280,68 @@
 /* The selected row keeps its fill while it moves, or its inverted ink would sit on white. */
 .sb-row.selected.dragging {
   background: var(--row-selected) !important;
+}
+/* Carrying picked rows: a stack of cards behind the clone and a count over its corner, as a tab
+   group's drag shows (tabs.css) — faked rather than N clones, since only the top one is legible and
+   the count says the rest. Built as the tab strip builds it: one transparent shell the clone's size
+   moves the whole visual, and its pseudo-elements are the cards, the clone's own box offset, so every
+   corner shares one geometry. They take the lifted row's surface and ring, so the stack reads as more
+   of the same; the shadow moves to the bottom card, under the whole stack. */
+.sb-row.dragging.stacked {
+  box-shadow: 0 0 0 1px var(--rule-strong) !important;
+}
+.sb-row-drag-shell::before,
+.sb-row-drag-shell::after {
+  content: none;
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border-radius: var(--r-md);
+  background: var(--paper-sunken);
+  box-shadow: 0 0 0 1px var(--rule-strong);
+  pointer-events: none;
+}
+.sb-row-drag-shell.stacked::before {
+  content: '';
+  z-index: 1;
+  transform: translate(3px, 3px);
+  box-shadow:
+    0 0 0 1px var(--rule-strong),
+    var(--shadow-pane);
+}
+.sb-row-drag-shell.stacked-many::before {
+  box-shadow: 0 0 0 1px var(--rule-strong);
+}
+.sb-row-drag-shell.stacked-many::after {
+  content: '';
+  z-index: 0;
+  transform: translate(6px, 6px);
+  box-shadow:
+    0 0 0 1px var(--rule-strong),
+    var(--shadow-pane);
+}
+/* The count. Ink on paper, never an accent — this is a quantity, not a live session. Straddles the
+   clone's top-right corner, as a tab group's does. */
+.sb-row-drag-shell > .sb-row-dragcount {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 3;
+}
+.sb-row-dragcount {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 /* The whole window shows the grab cursor for the duration, not just the dragged row: the pointer is
    captured and passes over rows and buttons whose own `cursor: pointer` would otherwise win. */

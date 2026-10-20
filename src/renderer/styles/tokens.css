@@ -59,6 +59,15 @@
   --row-selected-press: rgba(255, 255, 255, 0.16); /* the ⋮'s hover on it */
   --row-selected-dot: #84a7ff;
   --row-selected-halo: 0.35;
+  /* A row picked into the rail's multi-selection: a quiet fill a step past the rail's hover, so
+     hovering a row never reads as picking it, and far short of the inverted selected row, which stays
+     the one row the keyboard acts on. Its ink keeps the row's own tier. It is the least favorable
+     surface in the theme for the dot, so the dot is solved against it too (dotColor.ts repeats
+     --row-picked — move the two together); the shipped cobalt already clears it here. The ⋮'s
+     hover on it takes --row-picked-press, a step past the fill. */
+  --row-picked: #d6d6d6;
+  --row-picked-press: #c8c8c8;
+  --row-picked-dot: var(--live);
 
   /* ---- accent 1: electric cobalt = alive ---- */
   --live: #1f5ae6;
@@ -221,6 +230,11 @@
   --row-selected-press: rgba(0, 0, 0, 0.12);
   --row-selected-dot: #1f5ae6;
   --row-selected-halo: 0.22;
+  /* The picked row (see light). Lighter than the chrome, so the shipped dot moves lighter on it to
+     keep its floor — clampPickedDotColor's answer for --live. */
+  --row-picked: #333333;
+  --row-picked-press: #404040;
+  --row-picked-dot: #4073f7;
 
   /* ---- accent 1: electric cobalt = alive (brightened for dark; tints flip to dark) ---- */
   --live: #3b6cf0;

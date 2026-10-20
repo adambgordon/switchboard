@@ -1,11 +1,12 @@
 /**
- * Move-one-item reorder, shared by the pinned list and the live-session list.
+ * Reordering and membership for ordered id lists — the pinned list above all, and the live-session
+ * list.
  *
  * Its own module rather than an export from `usePins`, so the unit tests can reach it without pulling
  * a React hook — and, more to the point, without pulling that hook's browser globals into the node
- * tsconfig, which has no DOM. (`localStorage` alone slipped past for a long while because @types/node
- * happens to declare it; `window` does not, so the first `window` reference in that file broke the
- * build for a test that never used it.)
+ * tsconfig, which has no DOM. (`localStorage` alone compiles there because @types/node declares it;
+ * `window` does not, so any `window` reference in that file breaks the build for every test that
+ * imports it, whether it uses the hook or not.)
  */
 
 /** Returns the SAME array on a no-op, so callers can skip a write and a re-render by identity. */
@@ -37,4 +38,38 @@ export function moveBetween<T>(order: T[], id: T, higherId: T | null, lowerId: T
   if (at === from) return order
   rest.splice(at, 0, id)
   return rest
+}
+
+/**
+ * `moveBetween` for several items at once — a dragged group. They land contiguous, directly above
+ * `lowerId` (or directly below `higherId` when dropped last), in the order they already had in
+ * `order`; every other item keeps its relative order. Items not in `order` are ignored.
+ *
+ * Returns the SAME array when nothing moves.
+ */
+export function moveManyBetween<T>(order: T[], ids: readonly T[], higherId: T | null, lowerId: T | null): T[] {
+  const moving = order.filter((x) => ids.includes(x))
+  const rest = order.filter((x) => !ids.includes(x))
+  let at: number
+  if (lowerId !== null && rest.includes(lowerId)) at = rest.indexOf(lowerId)
+  else if (higherId !== null && rest.includes(higherId)) at = rest.indexOf(higherId) + 1
+  else return order
+  const next = [...rest.slice(0, at), ...moving, ...rest.slice(at)]
+  return next.every((x, i) => x === order[i]) ? order : next
+}
+
+/**
+ * The pin list with several conversations pinned or unpinned at once. Pinning appends the ones not
+ * already pinned, in the order given — the order they show in — as one pin at a time would; unpinning
+ * removes them. A SET, never a toggle: a pin that is already in the state asked for is left alone.
+ *
+ * Returns the SAME array when nothing changes, so a caller can skip the write.
+ */
+export function withPins(order: string[], ids: readonly string[], pinned: boolean): string[] {
+  if (pinned) {
+    const add = ids.filter((id, i) => !order.includes(id) && ids.indexOf(id) === i)
+    return add.length === 0 ? order : [...order, ...add]
+  }
+  const drop = new Set(ids)
+  return order.some((id) => drop.has(id)) ? order.filter((id) => !drop.has(id)) : order
 }

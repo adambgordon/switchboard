@@ -10,7 +10,7 @@ import { listCodexRollouts } from '../src/main/sessions/codexParser'
 /** Base for test temp dirs. */
 const TMP_BASE = tmpdir()
 
-/** A nonexistent Codex sessions root, so these Claude-focused tests stay hermetic — the indexer now
+/** A nonexistent Codex sessions root, so these Claude-focused tests stay hermetic — the indexer
  *  also scans `~/.codex/sessions` by default, which would otherwise pull whatever Codex
  *  conversations happen to exist on the host into these assertions. */
 const NO_CODEX = path.join(TMP_BASE, 'switchboard-no-codex-DOES-NOT-EXIST')

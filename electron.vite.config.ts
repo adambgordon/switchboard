@@ -43,8 +43,8 @@ function sessionParserFingerprint(): Plugin {
   }
 }
 
-// The commit this build was packaged from — baked into the main bundle so the updater can ask GitHub
-// how many commits `main` is ahead of it (src/main/updater.ts). Computed at build time; 'dev' when not
+// The commit this build was packaged from — baked into the main bundle so the updater can compare it
+// with `main`'s tip (src/main/updater.ts). Computed at build time; 'dev' when not
 // a git checkout. Runs for `npm run dev` too (yields the working-tree HEAD, but the in-app update is
 // gated to the packaged app regardless).
 function buildSha(): string {

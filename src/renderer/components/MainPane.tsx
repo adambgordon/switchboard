@@ -9,13 +9,14 @@ import {
   type ReactNode,
   type RefObject
 } from 'react'
-import type { ConversationMeta, PtyState, Transcript } from '@shared/types'
+import type { ConversationMenuAction, ConversationMeta, PtyState, Transcript } from '@shared/types'
 import PaneHeader from './PaneHeader'
 import TabStrip, { type TabConversationCommand, type TabDescriptor } from './TabStrip'
 import TranscriptView, { type TranscriptScrollState } from './TranscriptView'
 import { Play } from './icons'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import type { TabLayout } from '../lib/tabLayoutPreference'
+import type { MenuGroup } from '../lib/conversationMenu'
 
 type View = 'transcript' | 'terminal'
 
@@ -45,6 +46,8 @@ interface Props {
   onStopAndCloseTab: (pane: number, index: number) => void
   onMarkTabUnread: (sessionId: string) => void
   onTabCommand: (command: TabConversationCommand, sessionId: string) => void
+  /** A command chosen from a menu opened on a tab group — run on the group it names. */
+  onTabGroupCommand: (action: ConversationMenuAction, group: MenuGroup, sessionId: string) => void
   onCloseOtherTabs: (pane: number, index: number) => void
   /** See TabStrip: what Reopen would bring back, read when a tab's menu opens. */
   reopenCount: () => number
@@ -178,6 +181,7 @@ export default function MainPane(props: Props) {
     onStopAndCloseTab,
     onMarkTabUnread,
     onTabCommand,
+    onTabGroupCommand,
     onCloseOtherTabs,
     reopenCount,
     onReopenClosed,
@@ -260,8 +264,8 @@ export default function MainPane(props: Props) {
   // Closing the bar clears the search. activeIndex is deliberately NOT reset here: the [deferredQuery]
   // effect below already resets it on every query change (including this clear-to-empty), coupled to the
   // DEFERRED query. Resetting it here — immediately, while deferredQuery still lags on the old query —
-  // made the search hook briefly see (index 0, old query, still-live ranges) and scroll back to match #0
-  // on close (the "snap back to where I opened search" bug).
+  // would let the search hook briefly see (index 0, old query, still-live ranges) and scroll back to
+  // match #0 on close.
   useEffect(() => {
     if (!findOpen) {
       setFindQuery('')
@@ -377,6 +381,7 @@ export default function MainPane(props: Props) {
           onStopAndClose={onStopAndCloseTab}
           onMarkUnread={onMarkTabUnread}
           onCommand={onTabCommand}
+          onGroupCommand={onTabGroupCommand}
           onCloseOthers={onCloseOtherTabs}
           reopenCount={reopenCount}
           onReopenClosed={onReopenClosed}

@@ -20,11 +20,12 @@ describe('tabPersistAction', () => {
     expect(tabPersistAction(true, false)).toBe('clear')
   })
 
-  // The regression this exists for. Every launch now starts with the preference off by default, so
-  // treating "off" as "just switched off" deleted a saved layout on the first such launch — the
-  // user loses tabs they never asked to lose, and no amount of turning the feature back on returns
-  // them. `ignore` must be its own outcome: persisting here would overwrite the saved multi-tab
-  // layout with the single preview tab the off-path holds, which loses the data just as surely.
+  // The preference is on by default, but any launch can start with it off — the user switched it off
+  // earlier, or the default flips. Treating "off" as "just switched off" would delete a saved layout on
+  // every such launch — the user would lose tabs they never asked to lose, and no amount of turning the
+  // feature back on would return them. `ignore` must be its own outcome: persisting here would
+  // overwrite the saved multi-tab layout with the single preview tab the off-path holds, which loses
+  // the data just as surely.
   it('leaves the saved workspace untouched while the preference is simply off', () => {
     expect(tabPersistAction(false, false)).toBe('ignore')
   })

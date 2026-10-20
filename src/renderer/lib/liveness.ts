@@ -100,6 +100,6 @@ export function resolveLiveState(
   // No transcript turn-state yet (freshly spawned, nothing written): the session is live but
   // idle at its prompt. Quiet, NOT working — PTY output (incl. keystroke echo) is not a turn.
   // Unless Claude says otherwise: this is the case where a subagent is running and the parent's
-  // transcript has nothing in it, which read as an idle terminal before the registry was consulted.
+  // transcript has nothing in it, which would read as an idle terminal without the registry.
   return upgrade('quiet')
 }

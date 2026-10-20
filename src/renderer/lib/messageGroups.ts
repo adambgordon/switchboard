@@ -97,8 +97,7 @@ const isToolResult = (b: TranscriptBlock): b is ToolResultBlockT => b.kind === '
  * accumulator that flushes whenever prose / a human turn / an interrupt / a sidechain switch breaks
  * the run. Pairs calls to results by id at flush time.
  *
- * `agent` selects the assistant label ('Claude' / 'Codex'); defaults to 'claude' so legacy callers
- * (and tests) work unchanged.
+ * `agent` selects the assistant label ('Claude' / 'Codex'); defaults to 'claude' when none is given.
  */
 export function buildRenderItems(
   messages: TranscriptMessage[],

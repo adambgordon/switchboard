@@ -3,7 +3,7 @@
  *
  * Each entry remembers the revision it was fetched for, so re-opening a conversation whose file the
  * index has not seen change skips the fetch — and the second full render a fresh object graph would
- * cost (it defeats every memoized block). A changed revision refetches as before, and so does a
+ * cost (it defeats every memoized block). A changed revision refetches, and so does a
  * conversation the index has not listed yet: with no revision to compare, a match proves nothing.
  *
  * Least-recently-used entries fall off past the cap, so browsing many conversations cannot grow

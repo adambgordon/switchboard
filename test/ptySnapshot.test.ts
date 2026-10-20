@@ -139,7 +139,7 @@ describe('serialized PTY handoff', () => {
     const restored = await handOff(source)
     // Pin that the handoff itself worked before blaming the saved cursor. Without this, a handoff
     // that replayed NOTHING would also land `SAVED` at column 0 of an empty row 0 and the test
-    // would pass for entirely the wrong reason — verified by mutation.
+    // would pass for entirely the wrong reason.
     expect(visible(restored.term)[0]).toBe('ABC')
 
     await write(source.term, '\r\n\x1b[uSAVED')

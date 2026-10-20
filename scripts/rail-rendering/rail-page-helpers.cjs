@@ -74,7 +74,8 @@ module.exports = function installRailHelpers() {
             (getComputedStyle(c).position === 'fixed' || getComputedStyle(host).position === 'fixed')
         }),
         cloneRects: clones.map((c) => c.getBoundingClientRect().toJSON()),
-        hidden: all.filter((el) => el.style.visibility === 'hidden' || (getComputedStyle(el).visibility === 'hidden' &&
+        // A group drag's other carried rows fold out of the layout (groupCollapse), so they count as hidden too.
+        hidden: all.filter((el) => el.style.visibility === 'hidden' || el.style.height === '0px' || (getComputedStyle(el).visibility === 'hidden' &&
           !el.parentElement.closest('[style*="visibility"]'))).map(keyOf),
         transformed: all.filter((el) => el.style.transform && el.style.transform !== 'none').map((el) => keyOf(el) + ':' + el.style.transform),
         scrollTop: body().scrollTop,
@@ -262,6 +263,66 @@ module.exports = function installRailHelpers() {
       const btn = document.querySelector('.sb-rail-head .sb-rail-new-btn')
       return btn ? { rect: btn.getBoundingClientRect().toJSON(), tip: btn.getAttribute('data-tip'), label: btn.getAttribute('aria-label') } : null
     },
+    // Rows drawn as picked into the multi-selection, top to bottom.
+    pickedKeys: () => [...body().querySelectorAll('.sb-row.picked')].map(keyOf),
+    // A row's paint against the picked and selected tokens, and its title against its resting ink, each
+    // resolved to rgb by a probe. `hover` is whether the pointer is on it, for the no-shift-on-hover rule.
+    pickedFill: (key) => {
+      const row = body().querySelector(`.sb-row[data-key="${CSS.escape(key)}"], .sb-row[data-session="${CSS.escape(key)}"]`)
+      if (!row) return null
+      const rs = getComputedStyle(row)
+      const rgb = (s) => s.match(/[\d.]+/g).slice(0, 3).map(Number)
+      const probe = document.createElement('div')
+      probe.style.cssText = 'background-color: var(--row-picked); color: var(--ink-rest); border-top-color: var(--row-selected)'
+      document.body.appendChild(probe)
+      const ps = getComputedStyle(probe)
+      const token = { fill: rgb(ps.backgroundColor), ink: rgb(ps.color), selected: rgb(ps.borderTopColor) }
+      probe.remove()
+      return {
+        row: row.getBoundingClientRect().toJSON(), clip: box(), picked: row.classList.contains('picked'),
+        selected: row.classList.contains('selected'), hover: row.matches(':hover'), shadow: rs.boxShadow,
+        fill: rgb(rs.backgroundColor), title: rgb(getComputedStyle(row.querySelector('.sb-row-title')).color), token
+      }
+    },
+    // The open row menu's items, in order, or null when no menu is open.
+    menuLabels: () => {
+      const menu = document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')
+      // The label is the item's own text span; the read/unread glyph is a span too, but aria-hidden.
+      return menu ? [...menu.querySelectorAll('.sb-ctxmenu-item > span:not([aria-hidden])')].map((s) => s.textContent) : null
+    },
+    menuItem: (text) => {
+      const menu = document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')
+      const item = menu && [...menu.querySelectorAll('.sb-ctxmenu-item')].find((b) => b.textContent === text)
+      return item ? item.getBoundingClientRect().toJSON() : null
+    },
+    // A group drag's lifted look: the stack behind the clone, its count, and whether the cards share
+    // the clone's exact box and corners (they are pseudo-elements of the shell the clone fills).
+    groupDrag: () => {
+      const clone = document.querySelector('.sb-drag-clone')
+      const shell = clone && clone.closest('.sb-row-drag-shell')
+      const badge = shell && shell.querySelector('.sb-row-dragcount')
+      const cards = !shell ? 0 : shell.classList.contains('stacked-many') ? 2 : shell.classList.contains('stacked') ? 1 : 0
+      let aligned = false
+      if (shell) {
+        const a = clone.getBoundingClientRect()
+        const b = shell.getBoundingClientRect()
+        const radius = getComputedStyle(clone).borderTopLeftRadius
+        const pseudos = ['::before', '::after'].slice(0, cards)
+        aligned = a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height &&
+          pseudos.every((p) => getComputedStyle(shell, p).borderTopLeftRadius === radius)
+      }
+      return {
+        stacked: !!clone && clone.classList.contains('stacked'),
+        cards,
+        badge: badge ? badge.textContent : null,
+        plain: !!clone && !clone.classList.contains('selected') && !clone.classList.contains('picked'),
+        aligned
+      }
+    },
+    blockRect: (block) => body().querySelector(`.sb-block[data-block="${CSS.escape(block)}"]`).getBoundingClientRect().toJSON(),
+    // The rows of a block as drawn right now, transforms included — where the gap of a drag shows.
+    drawn: (block) => unitsOf(block).filter((u) => getComputedStyle(u).visibility !== 'hidden' && u.style.height !== '0px')
+      .map((u) => ({ key: keyOf(u), top: u.getBoundingClientRect().top, bottom: u.getBoundingClientRect().bottom })),
     selectedKey: () => {
       const row = body().querySelector('.sb-row.selected')
       return row ? keyOf(row) : null

@@ -88,8 +88,7 @@ describe('PtyManager Codex identity probing', () => {
    * Both event names in ONE sequence, because their relative order is itself a contract: the
    * renderer uses `bound` to keep a Live row in its slot before `active-changed` delivers the new
    * sessionId, and the order sync would otherwise read the same terminal as newly live and prepend
-   * it. Recorded in separate arrays this was untestable — swapping the two emissions left all 572
-   * tests green.
+   * it. Recorded in separate arrays, swapping the two emissions would leave every test green.
    */
   let events: string[]
   let active: number
@@ -264,7 +263,7 @@ describe('PtyManager Codex identity probing', () => {
   })
 
   it("keeps a live PTY's own conversation in the candidate set", async () => {
-    // Load-bearing, and the opposite of what this did before. The resolver refuses to answer for a
+    // Load-bearing. The resolver refuses to answer for a
     // terminal holding two eligible rollouts, because Codex really does hold several open at once and
     // picking one would be a guess. Subtracting the id a terminal already owns hides one side of that
     // pair, so a settled, correct terminal holding its own rollout plus one other would look like it
@@ -703,8 +702,8 @@ describe('PtyManager Codex identity probing', () => {
 
   it('tells the re-index path that a bound Codex terminal still needs probing', async () => {
     // The gate `reindexAndBroadcast` actually calls. Every behavior above reaches probeCodexIdentity
-    // directly, so if this narrowed back to provisional-only the entire re-validation path would be
-    // dead in the shipped app while the whole suite stayed green.
+    // directly, so a gate narrowed to provisional terminals would disable re-validation in the app
+    // while every test above still passed.
     expect(mgr.hasCodexToProbe()).toBe(false)
     mgr.startNew(CWD, 'claude')
     expect(mgr.hasCodexToProbe()).toBe(false)
@@ -738,9 +737,9 @@ describe('PtyManager Codex identity probing', () => {
   // --- write() carries no identity bookkeeping ---
 
   it('write() is a transparent passthrough', async () => {
-    // Four timing heuristics inspected keystrokes here; every one was defeated by a real
-    // counterexample (a bracketed paste's rewritten newlines, an Enter on an empty composer, a first
-    // turn processed late). Nothing typed may influence identity now — including a bare Enter.
+    // Keystrokes are no evidence of identity: a bracketed paste rewrites newlines, an Enter can land
+    // on an empty composer, and a first turn can be processed late. Nothing typed may influence
+    // identity — including a bare Enter.
     const a = mgr.startNew(CWD, 'codex')
     mgr.write(a.ptyId, '\r')
     mgr.write(a.ptyId, '\x1b[200~pasted\rlines\x1b[201~')

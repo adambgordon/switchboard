@@ -14,6 +14,8 @@ const ONLY = new Set((process.env.RAIL_CHECKS || '').split(',').map((s) => s.tri
 const THEMES = ['light', 'dark']
 const DRAG_ZOOMS = [0, 0.5]
 const GEOMETRY_ZOOMS = [-0.5, 0, 0.5]
+// Paint checks, run at every geometry zoom step; the rest run at the drag zoom steps only.
+const GEOMETRY_CHECKS = ['9-selected-fill', '19-picked-fill']
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const results = []
 const selectedRows = []
@@ -121,6 +123,46 @@ async function release() {
   pointer.down = false
   await frames(2)
 }
+// CDP's modifier bits.
+const META = 4, SHIFT = 8
+// A press, or a whole click, with modifiers held throughout — the click's own ⌘/⇧ is read off its release.
+async function pressWith(x, y, modifiers) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await hover(x, y)
+    const before = await js('window.pointerDowns')
+    pointer.down = true
+    await send('mousePressed', x, y, { modifiers })
+    await frames(1)
+    if ((await js('window.pointerDowns')) > before) return
+    harnessNotes.push(`${label()}: modified press not delivered, retry ${attempt + 1}`)
+    await send('mouseReleased', x, y, { modifiers })
+    pointer.down = false
+    await frames(1)
+  }
+  throw new Error('harness: a modified press never reached the page')
+}
+async function releaseWith(modifiers) {
+  if (!pointer.down) return
+  await send('mouseReleased', pointer.x, pointer.y, { modifiers })
+  pointer.down = false
+  await frames(2)
+}
+async function clickWith(x, y, modifiers) {
+  await pressWith(x, y, modifiers)
+  await releaseWith(modifiers)
+}
+async function rowCenter(key) {
+  const r = await call('rowRect', key)
+  if (!r) throw new Error(`harness: no row ${key} on the rail`)
+  return { x: r.left + 60, y: r.top + r.height / 2 }
+}
+async function clickRow(key, modifiers) {
+  const c = await rowCenter(key)
+  if (modifiers) await clickWith(c.x, c.y, modifiers)
+  else { await press(c.x, c.y); await release() }
+  await settle(30)
+}
+
 async function park() {
   await release()
   await send('mouseMoved', 345, 60)
@@ -943,7 +985,10 @@ CHECKS['12-clone-padding'] = async () => {
     }
     await screenshot(`${label()}-clone-padding-${density}`)
     await release()
-    await delay(400)
+    // Released where it was picked up: the clone eases home, and nothing of the drag is left behind.
+    const after = await waitClean()
+    if (!clean(after)) failures.push(`${density}: a release in place left drag state behind: ${JSON.stringify(after)}`)
+    await delay(100)
   }
   record('12-clone-padding', failures, details)
 }
@@ -1466,6 +1511,31 @@ CHECKS['16-menu-escape'] = async () => {
     await release()
     await settle(60)
     await escapeCloses('row menu', `!!document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')`)
+    // With the keyboard in a terminal, which keeps the keys it takes from bubbling, as xterm does — the
+    // case after a ⌘- or ⇧-press on the ⋮, which picks and leaves focus where it was.
+    await delay(500)
+    await hover(row.left + 60, row.top + row.height / 2)
+    await delay(60)
+    const again = await call('menuButton', key)
+    await press(again.rect.left + again.rect.width / 2, again.rect.top + again.rect.height / 2)
+    await release()
+    await settle(60)
+    await js(`(() => {
+      const t = document.createElement('textarea')
+      t.id = 'terminal-standin'
+      window.terminalKeys = 0
+      t.addEventListener('keydown', (e) => { window.terminalKeys++; e.stopPropagation() })
+      document.body.appendChild(t)
+      t.focus()
+    })()`)
+    const openMenu = `!!document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')`
+    if (!(await js(openMenu))) failures.push('row menu over a terminal: no menu opened')
+    else {
+      await escapeKey()
+      if (await js(openMenu)) failures.push('row menu over a terminal: Escape left the menu open')
+      if (await js('window.terminalKeys')) failures.push('row menu over a terminal: the Escape reached the terminal')
+    }
+    await js(`document.getElementById('terminal-standin')?.remove()`)
   }
   await park()
   record('16-menu-escape', failures, {})
@@ -1497,8 +1567,573 @@ CHECKS['17-filter-no-drag'] = async () => {
   record('17-filter-no-drag', failures, { free })
 }
 
+
+// ---- rail multi-selection ----
+const ATLAS = 'un:/home/dev/projects/atlas'
+const ATLAS_PINS = 'pin:/home/dev/projects/atlas'
+
+// ⌘ toggles a row, ⇧ takes the run from the anchor, and neither lands on a row: no select, the selected
+// row stays where it was. ⌘ on a picked row takes it out; Escape and a plain click clear the picks; a
+// ⌘-press that moves does not drag.
+CHECKS['18-pick'] = async () => {
+  const failures = []
+  await reset({ mode: 'folders' })
+  const selected = await call('selectedKey')
+  const un = (await call('units', ATLAS)).map((u) => u.key).filter((k) => k !== selected)
+  const a = un[4], b = un[7], c = un[5]
+  await call('reveal', ATLAS, a, 120)
+  await settle(30)
+  const rows = (await js('window.order()')).blocks.flatMap((x) => x.rows)
+  const inRail = (ids) => rows.filter((id) => ids.includes(id))
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y)
+  const expectPicks = async (name, want) => {
+    const picks = await js('window.picks()')
+    const drawn = await call('pickedKeys')
+    if (!same(picks, want)) failures.push(`${name}: picks ${JSON.stringify(picks)}, expected ${JSON.stringify(want)}`)
+    if (!same(drawn, want)) failures.push(`${name}: rows drawn picked ${JSON.stringify(drawn)}, expected ${JSON.stringify(want)}`)
+  }
+  const expectNoLanding = async (name) => {
+    const calls = await js('window.selectCalls')
+    if (calls.length) failures.push(`${name}: the gesture landed on ${JSON.stringify(calls)}`)
+    if ((await call('selectedKey')) !== selected) failures.push(`${name}: the selected row moved to ${await call('selectedKey')}`)
+    const st = await call('state')
+    if (st.dragging || st.clones || st.calls) failures.push(`${name}: the gesture left drag state ${JSON.stringify(st)}`)
+  }
+
+  // A first ⌘-click picks the selected row too, as a first ⌘-click on a tab does.
+  await clickRow(a, META)
+  await expectPicks('⌘-click', inRail([selected, a]))
+  await expectNoLanding('⌘-click')
+  // ⇧ replaces the picks with the run from the anchor (a) to b, in rail order.
+  await clickRow(b, SHIFT)
+  await expectPicks('⇧-click', rows.slice(rows.indexOf(a), rows.indexOf(b) + 1))
+  await expectNoLanding('⇧-click')
+  // ⌘ on a picked row takes it out.
+  await clickRow(c, META)
+  await expectPicks('⌘-click on a pick', rows.slice(rows.indexOf(a), rows.indexOf(b) + 1).filter((k) => k !== c))
+  await expectNoLanding('⌘-click on a pick')
+  // ⌘ let go of a moment before the button: the press picked, so its click must not land.
+  const e = un[8]
+  const ec = await rowCenter(e)
+  await pressWith(ec.x, ec.y, META)
+  await releaseWith(0)
+  await settle(30)
+  await expectPicks('⌘ let go before the button', inRail([...rows.slice(rows.indexOf(a), rows.indexOf(b) + 1).filter((k) => k !== c), e]))
+  await expectNoLanding('⌘ let go before the button')
+  // Escape clears them.
+  await park()
+  await escapeKey()
+  await settle(30)
+  await expectPicks('Escape', [])
+  // A plain click on a picked row clears the picks and lands on it.
+  await clickRow(a, META)
+  await clickRow(b, META)
+  await js('window.selectCalls = []')
+  await clickRow(b)
+  await expectPicks('plain click', [])
+  if (!(await js('window.selectCalls')).includes(b)) failures.push(`plain click: landing on ${b} was not reported`)
+  // A ⌘-press that moves picks the row and nothing more: no drag, no drop.
+  await js('window.selectCalls = []')
+  const d = await rowCenter(c)
+  await pressWith(d.x, d.y, META)
+  await moveTo(d.x, d.y + 40, 4)
+  const st = await call('state')
+  if (st.dragging || st.clones) failures.push(`⌘-drag: a ⌘-press and move started a drag ${JSON.stringify(st)}`)
+  await releaseWith(META)
+  await delay(150)
+  if ((await js('window.dropCalls')).length) failures.push('⌘-drag: the gesture produced a drop call')
+  await park()
+  record('18-pick', failures, {})
+}
+
+// A picked row paints --row-picked to all four edges, draws no edge of its own, keeps its title's
+// resting ink, and keeps its fill under the pointer. The selected row, picked as well, still draws
+// as selected. Sampled on screen as check 9 samples the selected row.
+async function pickedCase(mode, density, position, failures) {
+  await reset({ mode, density, selected: 'none' })
+  const order = await js('window.order()')
+  // Not a row that needs you: its title would take full ink, not the resting gray this compares.
+  const rows = order.blocks.flatMap((b) => b.rows).filter((k) => !['atlas-4', 'beacon-2'].includes(k))
+  const key = position === 'top' ? rows[0] : rows[rows.length - 1]
+  const other = position === 'top' ? rows[1] : rows[rows.length - 2]
+  await call('scrollTo', position === 'top' ? 0 : 1e9)
+  await settle(60)
+  await clickRow(key, META)
+  await clickRow(other, META)
+  await configure({ selected: other })
+  await park()
+  await settle(300)
+  const tag = `${mode}/${density}/${position}`
+  const g = await call('pickedFill', key)
+  if (!g || !g.picked) { failures.push(`${tag}: row ${key} not picked`); return }
+  const near = (a, b, tol) => a.every((c, i) => Math.abs(c - b[i]) <= tol)
+  if (g.shadow !== 'none') failures.push(`${tag}: the picked row draws an edge (${g.shadow})`)
+  if (!near(g.fill, g.token.fill, 0)) failures.push(`${tag}: fill ${g.fill} is not --row-picked ${g.token.fill}`)
+  if (!near(g.title, g.token.ink, 0)) failures.push(`${tag}: title ink ${g.title} is not the resting --ink-rest ${g.token.ink}`)
+  const both = await call('pickedFill', other)
+  if (!both.picked || !both.selected) failures.push(`${tag}: ${other} should be both picked and selected`)
+  else if (!near(both.fill, both.token.selected, 0)) failures.push(`${tag}: a picked selected row fills ${both.fill}, not --row-selected ${both.token.selected}`)
+  const { row, clip } = g
+  const shot = await screenshot(`${label()}-picked-${mode}-${density}-${position}`)
+  const s = shot.width / (await js('innerWidth'))
+  const ys = Math.round((row.top + row.height / 2) * s), xs = Math.round((row.left + Math.min(40, row.width / 4)) * s)
+  const edges = {
+    left: shot.at(Math.floor((row.left + 1) * s), ys),
+    right: shot.at(Math.ceil((row.right - 1) * s) - 1, ys),
+    top: shot.at(xs, Math.floor((row.top + 1) * s)),
+    bottom: shot.at(xs, Math.ceil((row.bottom - 1) * s) - 1)
+  }
+  const clearance = { left: row.left - clip.left, right: clip.right - row.right, top: row.top - clip.top, bottom: clip.bottom - row.bottom }
+  for (const side of ['left', 'right', 'top', 'bottom']) {
+    if (clearance[side] < 0) failures.push(`${tag}: the picked row overruns the clip on the ${side} by ${(-clearance[side]).toFixed(2)}px`)
+    if (!near(edges[side].slice(0, 3), g.token.fill, 6)) failures.push(`${tag}: ${side} edge paints ${edges[side].slice(0, 3)}, expected the fill ${g.token.fill}`)
+  }
+  // Hovering it moves nothing: a selection never shifts on hover.
+  await hover(row.left + 60, row.top + row.height / 2)
+  await settle(60)
+  const hovered = await call('pickedFill', key)
+  if (!hovered.hover) harnessNotes.push(`${label()}: ${tag}: hover did not reach ${key}`)
+  else if (!near(hovered.fill, g.token.fill, 0)) failures.push(`${tag}: hovering the picked row changes its fill to ${hovered.fill}`)
+  await park()
+}
+CHECKS['19-picked-fill'] = async () => {
+  const failures = []
+  for (const mode of ['all', 'folders']) for (const density of ['compact', 'spacious']) for (const position of ['top', 'bottom']) {
+    await pickedCase(mode, density, position, failures)
+  }
+  record('19-picked-fill', failures, {})
+}
+
+// A menu opened on a pick is the group's: one list, each command counting what it would change, and
+// the command runs on exactly those rows. A menu opened on a row outside the picks is that row's own,
+// and the press that opened it drops the picks.
+CHECKS['20-group-menu'] = async () => {
+  const failures = []
+  await reset({ mode: 'folders', selected: 'none' })
+  await call('scrollTo', 0)
+  await settle(30)
+  // A pin that is not running; atlas-0 running and read; atlas-1 neither.
+  for (const key of ['atlas-7', 'atlas-0', 'atlas-1']) await clickRow(key, META)
+  const picks = await js('window.picks()')
+  if (JSON.stringify(picks) !== JSON.stringify(['atlas-7', 'atlas-0', 'atlas-1'])) failures.push(`harness: picks ${JSON.stringify(picks)}`)
+  const openMenu = async (key) => {
+    const row = await call('rowRect', key)
+    await hover(row.left + 60, row.top + row.height / 2)
+    await delay(60)
+    const btn = await call('menuButton', key)
+    if (!btn) throw new Error(`harness: no ⋮ button on ${key}`)
+    await press(btn.rect.left + btn.rect.width / 2, btn.rect.top + btn.rect.height / 2)
+    await release()
+    await settle(60)
+    return call('menuLabels')
+  }
+  const labels = await openMenu('atlas-1')
+  const want = ['Open 3 conversations to the right', 'Open 3 conversations in new window', 'Pin 2 conversations', 'Hide 3 conversations', 'Mark 1 conversation as unread', 'Stop 1 session']
+  if (JSON.stringify(labels) !== JSON.stringify(want)) failures.push(`group menu: ${JSON.stringify(labels)}, expected ${JSON.stringify(want)}`)
+  if ((await js('window.picks()')).length !== 3) failures.push('group menu: opening the menu on a pick dropped the picks')
+  const item = await call('menuItem', 'Pin 2 conversations')
+  if (!item) failures.push('group menu: no Pin 2 item')
+  else {
+    await press(item.left + item.width / 2, item.top + item.height / 2)
+    await release()
+    await settle(60)
+    const calls = await js('window.groupCalls')
+    const wantCall = [{ action: 'pin', ids: ['atlas-0', 'atlas-1'] }]
+    if (JSON.stringify(calls) !== JSON.stringify(wantCall)) failures.push(`Pin 2 ran ${JSON.stringify(calls)}, expected ${JSON.stringify(wantCall)}`)
+    if ((await js('window.picks()')).length !== 3) failures.push('Pin 2: running the command dropped the picks')
+  }
+  await park()
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`)
+  await settle(500)
+  // The ⋮ of a row outside the picks: that row's own menu, and no picks left.
+  const single = await openMenu('atlas-5')
+  if (!single || !single.includes('Pin') || !single.includes('Rename…')) failures.push(`single menu: ${JSON.stringify(single)}`)
+  if ((await js('window.picks()')).length) failures.push(`single menu: the press on ${'atlas-5'} left picks ${JSON.stringify(await js('window.picks()'))}`)
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`)
+  await park()
+  record('20-group-menu', failures, { labels })
+}
+
+// Dragging a pick carries the picks in its own block, as one stacked clone with a count; they land
+// together, in the order they had, where the gap showed, and stay picked — as does a pick in another
+// block, which does not move. Escape cancels a group drag cleanly. Unpinned (ranks) and pinned (pin
+// order) both.
+async function groupDrag({ block, carried, grab, dy, failures, name, others = [] }) {
+  const before = (await js('window.order()')).blocks.find((x) => x.id === block).rows
+  const c = await rowCenter(grab)
+  const grabbed = await call('rowRect', grab)
+  await press(c.x, c.y)
+  await moveTo(c.x, c.y + Math.sign(dy) * 12, 4)
+  await frames(1)
+  const look = await call('groupDrag')
+  const st0 = await call('state')
+  if (!st0.dragging) { failures.push(`${name}: pressing a pick and moving did not start a drag`); await release(); return null }
+  if (!look.stacked || look.badge !== String(carried.length) || look.cards !== Math.min(2, carried.length - 1)) {
+    failures.push(`${name}: the clone does not read as a stack of ${carried.length}: ${JSON.stringify(look)}`)
+  }
+  if (!look.plain) failures.push(`${name}: the group's clone kept a selected or picked look`)
+  if (!look.aligned) failures.push(`${name}: the stack's cards do not share the clone's box and corners: ${JSON.stringify(look)}`)
+  for (const k of carried) if (!st0.hidden.includes(k)) failures.push(`${name}: carried ${k} is not hidden in place`)
+  for (const k of others) if (st0.hidden.includes(k)) failures.push(`${name}: ${k}, picked in another block, was hidden`)
+  // The other carried rows fold away over the rail's motion duration; read the gap once they have.
+  await delay(260)
+  await moveTo(c.x, c.y + dy, 4)
+  await frames(3)
+  // Where the gap shows: the widest space between two rows still drawn.
+  // The block's own box bounds a gap at either end; the rows' boxes carry their glide transforms.
+  const drawn = await call('drawn', block)
+  const edge = await call('blockRect', block)
+  let gap = { above: null, below: drawn[0]?.key ?? null, size: drawn[0] ? drawn[0].top - edge.top : 0 }
+  for (let i = 1; i < drawn.length; i++) {
+    const size = drawn[i].top - drawn[i - 1].bottom
+    if (size > gap.size) gap = { above: drawn[i - 1].key, below: drawn[i].key, size }
+  }
+  const last = drawn[drawn.length - 1]
+  if (last && edge.bottom - last.bottom > gap.size) gap = { above: last.key, below: null, size: edge.bottom - last.bottom }
+  // One row's room, however many it carries: the clone is one row tall, and the count says the rest.
+  if (gap.size >= 2 * grabbed.height) failures.push(`${name}: the gap is ${gap.size}px for a ${grabbed.height}px row`)
+  await screenshot(`${label()}-${name}-mid`)
+  await release()
+  // The settling clone wears its row's own fill from the moment it lands, as the rest of the group does.
+  const settling = await js(`(() => { const c = document.querySelector('.sb-drag-clone'); return c ? getComputedStyle(c).backgroundColor : null })()`)
+  await delay(350)
+  const after = await waitClean()
+  const restingFill = await js(`getComputedStyle(document.querySelector('.sb-rail-body [data-key="${grab}"]')).backgroundColor`)
+  if (settling !== null && settling !== restingFill) failures.push(`${name}: the settling clone showed ${settling}, its row rests at ${restingFill}`)
+  const calls = await js('window.dropCalls')
+  const rows = (await js('window.order()')).blocks.find((x) => x.id === block).rows
+  const at = rows.indexOf(carried[0])
+  const landed = rows.slice(at, at + carried.length)
+  if (JSON.stringify(landed) !== JSON.stringify(carried)) failures.push(`${name}: the group did not land together and in order: ${JSON.stringify(rows)}`)
+  if ((rows[at - 1] ?? null) !== gap.above || (rows[at + carried.length] ?? null) !== gap.below) {
+    failures.push(`${name}: landed between ${rows[at - 1] ?? null} and ${rows[at + carried.length] ?? null}, the gap showed ${gap.above} and ${gap.below}`)
+  }
+  const restBefore = before.filter((k) => !carried.includes(k)), restAfter = rows.filter((k) => !carried.includes(k))
+  if (JSON.stringify(restBefore) !== JSON.stringify(restAfter)) failures.push(`${name}: the rows not carried changed order`)
+  const call0 = calls[calls.length - 1]
+  if (calls.length !== 1 || call0.kind !== 'rows' || JSON.stringify(call0.dragged) !== JSON.stringify(carried) ||
+    call0.higher !== gap.above || call0.lower !== gap.below) {
+    failures.push(`${name}: drop calls ${JSON.stringify(calls)}, expected one rows call of ${JSON.stringify(carried)} between ${gap.above} and ${gap.below}`)
+  }
+  const picks = await js('window.picks()')
+  for (const k of [...carried, ...others]) if (!picks.includes(k)) failures.push(`${name}: ${k} is no longer picked after the drop`)
+  if (!clean(after)) failures.push(`${name}: drag state not cleaned up after release: ${JSON.stringify(after)}`)
+  if (after.errors.length) failures.push(`${name}: renderer errors: ${after.errors.join('; ')}`)
+  return { gap, rows }
+}
+CHECKS['21-group-drag'] = async () => {
+  const failures = []
+  const details = {}
+  await reset({ mode: 'folders', selected: 'none' })
+  const un = (await call('units', ATLAS)).map((u) => u.key)
+  // Scattered picks in atlas's unpinned rows, and one in beacon's, which must stay where it is.
+  const carried = [un[1], un[3], un[4]]
+  await call('reveal', 'un:/home/dev/projects/beacon', 'beacon-0', 200)
+  await settle(30)
+  await clickRow('beacon-0', META)
+  await call('reveal', ATLAS, un[1], 100)
+  await settle(30)
+  for (const k of carried) await clickRow(k, META)
+  const beaconBefore = (await js('window.order()')).blocks.find((x) => x.id === 'un:/home/dev/projects/beacon').rows
+  const units = await call('units', ATLAS)
+  const stride = units[2].top - units[1].top
+  details.unpinned = await groupDrag({ block: ATLAS, carried, grab: un[3], dy: stride * 4.5, failures, name: 'unpinned', others: ['beacon-0'] })
+  const beaconAfter = (await js('window.order()')).blocks.find((x) => x.id === 'un:/home/dev/projects/beacon').rows
+  if (JSON.stringify(beaconBefore) !== JSON.stringify(beaconAfter)) failures.push('unpinned: the pick in another block moved')
+
+  // Escape cancels a group drag: nothing hidden, nothing moved, the picks kept.
+  const c = await rowCenter(un[3])
+  await press(c.x, c.y)
+  await moveTo(c.x, c.y + stride * 2, 4)
+  if (!(await call('state')).dragging) failures.push('escape: the second group drag did not start')
+  await escapeKey()
+  await release()
+  const canceled = await waitClean()
+  if (!clean(canceled)) failures.push(`escape: a canceled group drag left ${JSON.stringify(canceled)}`)
+  if ((await js('window.dropCalls')).length !== 1) failures.push('escape: the canceled group drag produced a drop call')
+  if ((await js('window.picks()')).length !== 4) failures.push(`escape: the cancel's Escape cleared the picks ${JSON.stringify(await js('window.picks()'))}`)
+
+  // Pins: atlas-7 and atlas-11 dragged above atlas-2 move as one in the pin list.
+  await reset({ mode: 'folders', selected: 'none' })
+  await call('scrollTo', 0)
+  await settle(30)
+  for (const k of ['atlas-7', 'atlas-11']) await clickRow(k, META)
+  const pinUnits = await call('units', ATLAS_PINS)
+  const pinStride = pinUnits[1].top - pinUnits[0].top
+  details.pinned = await groupDrag({ block: ATLAS_PINS, carried: ['atlas-7', 'atlas-11'], grab: 'atlas-11', dy: -pinStride * 2.5, failures, name: 'pinned' })
+  if (details.pinned && JSON.stringify(details.pinned.rows) !== JSON.stringify(['atlas-7', 'atlas-11', 'atlas-2'])) {
+    failures.push(`pinned: pins ${JSON.stringify(details.pinned.rows)}, expected atlas-7, atlas-11, atlas-2`)
+  }
+  await park()
+  // A row arriving in a folder above, mid-drag, moves the dragged block without changing anything in it.
+  // The drag's slots no longer describe the screen, so it ends, and its release commits nothing.
+  {
+    await reset({ mode: 'folders' })
+    const DELTA_ROOT = '/home/dev/projects/delta', DELTA = `un:${DELTA_ROOT}`
+    const groups = (await js('window.order()')).groups
+    const aboveRoot = groups[groups.indexOf(DELTA_ROOT) - 1]
+    const dk = (await call('units', DELTA)).map((u) => u.key)
+    await call('reveal', DELTA, dk[0], 120)
+    await settle(30)
+    await clickRow(dk[0], META)
+    await clickRow(dk[2], META)
+    await js('window.dropCalls = []')
+    const grabbed = await rowCenter(dk[2])
+    await press(grabbed.x, grabbed.y)
+    await moveTo(grabbed.x, grabbed.y + 12, 4)
+    await frames(1)
+    if (!aboveRoot || !(await call('state')).dragging) failures.push(`block-shift: harness: no group drag under a folder (${aboveRoot})`)
+    else {
+      await delay(260)
+      const height = async () => (await call('folderShape')).sections.find((x) => x.key === aboveRoot).height
+      const before = await height()
+      await js(`window.addConversation(${JSON.stringify(aboveRoot)})`)
+      await frames(2)
+      await delay(120)
+      if ((await height()) - before < 10) failures.push(`block-shift: harness: ${aboveRoot} did not grow`)
+      const during = await call('state')
+      if (during.dragging) failures.push(`block-shift: the group drag survived its block moving: ${JSON.stringify(during)}`)
+      await moveTo(grabbed.x, pointer.y + 40, 4)
+      await release()
+      await delay(350)
+      const calls = await js('window.dropCalls')
+      if (calls.length) failures.push(`block-shift: the release after the cancel committed ${JSON.stringify(calls)}`)
+      if (!clean(await waitClean())) failures.push('block-shift: drag state not cleaned up')
+    }
+    await park()
+  }
+  // A carried row leaving the block mid-drag — rebound, hidden from another window — ends the drag, and
+  // its release commits nothing: the group the drop would submit is no longer the one on screen.
+  {
+    await reset({ mode: 'folders' })
+    const DELTA = 'un:/home/dev/projects/delta'
+    const dk = (await call('units', DELTA)).map((u) => u.key)
+    await call('reveal', DELTA, dk[0], 120)
+    await settle(30)
+    await clickRow(dk[0], META)
+    await clickRow(dk[2], META)
+    await js('window.dropCalls = []')
+    const grabbed = await rowCenter(dk[2])
+    await press(grabbed.x, grabbed.y)
+    await moveTo(grabbed.x, grabbed.y + 12, 4)
+    await frames(1)
+    if (!(await call('state')).dragging) failures.push('carried-leaves: harness: no group drag')
+    else {
+      await delay(260)
+      await js(`window.removeConversation(${JSON.stringify(dk[0])})`)
+      await frames(2)
+      await delay(80)
+      const during = await call('state')
+      if (during.dragging) failures.push(`carried-leaves: the group drag survived a carried row leaving: ${JSON.stringify(during)}`)
+      await moveTo(grabbed.x, pointer.y + 60, 4)
+      await release()
+      await delay(350)
+      const calls = await js('window.dropCalls')
+      if (calls.length) failures.push(`carried-leaves: the release after the cancel committed ${JSON.stringify(calls)}`)
+      if (!clean(await waitClean())) failures.push('carried-leaves: drag state not cleaned up')
+    }
+    await park()
+  }
+  record('21-group-drag', failures, details)
+}
+
 function summary(r) {
   return { key: r.key, landing: r.expect.index, gap: r.gap?.index, call: r.calls?.[0] ?? null, shot: r.shot }
+}
+
+// A conversation arriving at the top of the last folder, once the rail is at rest: the rows below it in
+// that folder slide down by one row, and nothing else moves. A row sliding from anywhere else means the
+// rail recorded where rows stood mid-motion — under an animation the last change had left running.
+async function arrival() {
+  const keys = (await call('units', 'folders')).map((u) => u.key)
+  const id = await js(`window.addConversation(${JSON.stringify(keys[keys.length - 1])})`)
+  return js(`(() => {
+    const body = document.querySelector('.sb-rail-body')
+    const row = body.querySelector('.sb-row[data-key="' + CSS.escape(${JSON.stringify(id)}) + '"]')
+    const sibs = Array.from(row.parentElement.children).filter((e) => e.matches('.sb-row[data-key]'))
+    const after = sibs.slice(sibs.indexOf(row) + 1)
+    const stride = after.length > 1 ? after[1].offsetTop - after[0].offsetTop : null
+    const slid = []
+    for (const el of body.querySelectorAll('.sb-row[data-key]')) {
+      const a = el === row ? null : el.getAnimations().find((x) => x.id === 'sb-flip')
+      const m = a && /translateY\\((-?[\\d.]+)px\\)/.exec(a.effect.getKeyframes()[0].transform)
+      if (a) slid.push({ key: el.dataset.key, dy: m ? +(+m[1]).toFixed(2) : null })
+    }
+    return { stride, expected: after.map((e) => e.dataset.key), slid }
+  })()`)
+}
+
+function judgeArrival(name, r, failures) {
+  if (r.stride == null) return failures.push(`${name}: harness: the last folder has too few rows below an arrival`)
+  const stray = r.slid.filter((s) => !r.expected.includes(s.key) || s.dy == null || Math.abs(s.dy + r.stride) > 1)
+  const still = r.expected.filter((k) => !r.slid.some((s) => s.key === k))
+  if (stray.length) failures.push(`${name}: an arrival slid rows from where they stood mid-motion: ${JSON.stringify(stray.slice(0, 3))} (a row is ${r.stride}px)`)
+  if (still.length) failures.push(`${name}: harness: ${still.length} rows below the arrival did not slide`)
+}
+
+// A dropped folder's clone hands over to the real folder without a jump: the label where the clone
+// last drew it is where the real folder first draws it, sampled every frame across the release. Moves
+// into and out of the first slot are the ones that can jump — the first folder's header is spaced
+// differently from every other — with a middle move and a release in place as controls. After each, a
+// later arrival slides only the rows it pushes down (`arrival`).
+CHECKS['22-landing-handoff'] = async () => {
+  const failures = []
+  const out = {}
+  const cases = [
+    ['intoFirst', (keys) => [FOLDER_KEY, 0]],
+    ['outOfFirst', (keys) => [keys[0], 2]],
+    ['middle', (keys) => [FOLDER_KEY, keys.indexOf(FOLDER_KEY) + 1]],
+    ['inPlaceFirst', (keys) => [keys[0], 0]],
+    // Let go off the slot's center, so the folder settles the rest of the way after the drop.
+    ['offCenter', (keys) => [FOLDER_KEY, 0], 9]
+  ]
+  for (const [name, pick, nudge = 0] of cases) {
+    await reset({ mode: 'folders' })
+    await call('scrollTo', 0)
+    await settle(30)
+    const keys0 = (await call('units', 'folders')).map((u) => u.key)
+    const [key, to] = pick(keys0)
+    await call('reveal', 'folders', key, 60)
+    await settle(30)
+    const r = await call('unitRect', 'folders', key)
+    const px = r.handle.left + Math.min(60, r.handle.width / 3), py = r.handle.top + Math.min(r.handle.height / 2, 12)
+    await press(px, py)
+    await moveTo(px, py + 6, 3)
+    await frames(1)
+    await delay(260)
+    await frames(2)
+    const slots = await call('units', 'folders')
+    const keys = slots.map((u) => u.key), from = keys.indexOf(key)
+    const h = slots[from].height
+    const b = await call('box')
+    const grab = py - r.unit.top
+    const targetY = to === from ? py + 6 : centerFor(slots, from, to) - h / 2 + grab - b.scrollTop + b.top + nudge
+    await moveTo(px, targetY, 4)
+    await frames(3)
+    // A folder moved down passes the folders between, which the drag slid up into its old place; once
+    // they finish sliding there, the drop must not glide them anywhere. One step is allowed: a folder that
+    // becomes the first takes the first folder's spacing as the drop lands.
+    const passed = to > from ? keys[from + 1] : null
+    await delay(220)
+    await js(`(() => {
+      const key = ${JSON.stringify(key)}
+      const passedKey = ${JSON.stringify(passed)}
+      window.__probe = []
+      const t0 = performance.now()
+      const tick = () => {
+        const clone = document.querySelector('.sb-drag-clone .sb-group-label-text')
+        const real = document.querySelector('.sb-rail-body .sb-group[data-key="' + CSS.escape(key) + '"] .sb-group-label-text')
+        const over = passedKey && document.querySelector('.sb-rail-body .sb-group[data-key="' + CSS.escape(passedKey) + '"] .sb-group-label-text')
+        window.__probe.push({
+          t: Math.round(performance.now() - t0),
+          src: clone ? 'clone' : 'real',
+          y: +(clone || real).getBoundingClientRect().top.toFixed(2),
+          passed: over ? +over.getBoundingClientRect().top.toFixed(2) : null,
+        })
+        if (performance.now() - t0 < 600) requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })()`)
+    await delay(40)
+    await release()
+    await delay(700)
+    const s = await js('window.__probe')
+    const lastClone = [...s].reverse().find((x) => x.src === 'clone')
+    const firstReal = s.find((x) => x.src === 'real' && s.indexOf(x) > s.indexOf(lastClone))
+    const order = (await call('units', 'folders')).map((u) => u.key)
+    const jump = lastClone && firstReal ? +(firstReal.y - lastClone.y).toFixed(2) : null
+    out[name] = { key, from, to, landedAt: order.indexOf(key), jump }
+    if (order.indexOf(key) !== to) failures.push(`${name}: harness: landed at ${order.indexOf(key)}, planned ${to}`)
+    if (to !== from && !lastClone) failures.push(`${name}: harness: no clone frame was sampled`)
+    if (jump !== null && Math.abs(jump) > 0.5) failures.push(`${name}: the label jumped ${jump}px as the clone handed over`)
+    const ys = s.map((x) => x.passed).filter((y) => y != null)
+    const steps = ys.filter((y, i) => i > 0 && Math.abs(y - ys[i - 1]) > 0.5).length
+    const span = ys.length ? +(Math.max(...ys) - Math.min(...ys)).toFixed(2) : null
+    out[name].passed = { steps, span }
+    if (passed && !ys.length) failures.push(`${name}: harness: the folder passed over was not sampled`)
+    if (steps > 1) failures.push(`${name}: the folder passed over glided ${span}px as the drop landed (${steps} frames of motion)`)
+    if (!clean(await waitClean())) failures.push(`${name}: drag state not cleaned up`)
+    const a = await arrival()
+    out[name].arrival = { stride: a.stride, slid: a.slid.length }
+    judgeArrival(name, a, failures)
+  }
+  record('22-landing-handoff', failures, out)
+}
+
+// Opening or closing a folder from its header eases its height, and reversing it part-way turns the
+// animation around rather than finishing the old one and then jumping.
+CHECKS['23-folder-toggle'] = async () => {
+  const failures = []
+  const details = {}
+  await reset({ mode: 'folders' })
+  await call('reveal', 'folders', FOLDER_KEY, 60)
+  await settle(30)
+  const height = async () => (await call('folderShape')).sections.find((x) => x.key === FOLDER_KEY).height
+  const head = (await call('unitRect', 'folders', FOLDER_KEY)).handle
+  const hx = head.left + Math.min(60, head.width / 3), hy = head.top + Math.min(head.height / 2, 12)
+  const toggle = async () => { await press(hx, hy); await release() }
+  const open = await height()
+  await toggle()
+  await delay(60)
+  const closing = await height()
+  await delay(400)
+  const closed = await height()
+  if (!(closed < open - 10)) failures.push(`harness: the folder did not close (${open} → ${closed})`)
+  if (!(closing < open - 0.5 && closing > closed + 0.5)) failures.push(`close: not eased — ${closing} at 60ms, between ${closed} and ${open}`)
+  // Reopened, closed again, and reopened part-way through that close. Every frame is recorded in the page,
+  // since the pointer's own round trips take longer than the move being judged: 40ms after the reopening
+  // click, while the close would still be running, the folder is taller than it was at the click.
+  await toggle()
+  await delay(400)
+  if (Math.abs((await height()) - open) > 0.5) failures.push(`reopen: ended at ${await height()}, open is ${open}`)
+  await js(`(() => {
+    const f = document.querySelector('.sb-rail-body > .sb-group[data-key="' + CSS.escape(${JSON.stringify(FOLDER_KEY)}) + '"]')
+    window.__toggleFrames = []
+    window.__toggleClicks = []
+    const t0 = performance.now()
+    const onClick = () => window.__toggleClicks.push({ t: performance.now() - t0, h: f.getBoundingClientRect().height })
+    document.addEventListener('click', onClick, true)
+    const tick = () => {
+      window.__toggleFrames.push({ t: performance.now() - t0, h: f.getBoundingClientRect().height })
+      if (performance.now() - t0 < 700) requestAnimationFrame(tick)
+      else document.removeEventListener('click', onClick, true)
+    }
+    requestAnimationFrame(tick)
+  })()`)
+  await toggle()
+  await delay(30)
+  await toggle()
+  await delay(700)
+  const clicks = await js('window.__toggleClicks')
+  const recorded = await js('window.__toggleFrames')
+  const reopen = clicks[1]
+  const later = reopen && recorded.find((x) => x.t >= reopen.t + 40)
+  const atReverse = reopen ? +reopen.h.toFixed(1) : null, after = later ? +later.h.toFixed(1) : null
+  if (!reopen || !later) failures.push(`harness: reverse: clicks ${JSON.stringify(clicks)}, ${recorded.length} frames`)
+  else if (!(after > atReverse + 0.5)) failures.push(`reverse: still closing after reopening part-way (${atReverse} at the click → ${after} 40ms on)`)
+  await delay(400)
+  const end = await height()
+  if (Math.abs(end - open) > 0.5) failures.push(`reverse: ended at ${end}, open is ${open}`)
+  judgeArrival('reverse', await arrival(), failures)
+  details.heights = { open, closing, closed, atReverse, after, end }
+  // A header click while searching does nothing, as the app has it, and leaves nothing behind for the
+  // search's next change to animate: that change stays instant.
+  await reset({ mode: 'folders', searchOpen: true, query: 'atlas' })
+  const found = (await call('unitRect', 'folders', '/home/dev/projects/atlas')).handle
+  await press(found.left + Math.min(60, found.width / 3), found.top + Math.min(found.height / 2, 12))
+  await release()
+  await delay(60)
+  await configure({ query: 'atlas 1' })
+  await frames(2)
+  const stray = await js(`(() => ({
+    ghosts: document.querySelectorAll('.sb-rail-body .sb-folder-ghost').length,
+    folds: [...document.querySelectorAll('.sb-rail-body > .sb-group')].flatMap((g) => g.getAnimations()).filter((a) => a.id === 'sb-fold').length
+  }))()`)
+  details.search = stray
+  if (stray.ghosts || stray.folds) failures.push(`search: a header click while searching animated the search's next change: ${JSON.stringify(stray)}`)
+  if (!clean(await waitClean())) failures.push('toggling left drag state behind')
+  await park()
+  record('23-folder-toggle', failures, details)
 }
 
 async function runCheck(name) {
@@ -1544,9 +2179,9 @@ app.whenReady().then(async () => {
         await settle(150)
         await calibrate()
         if (DRAG_ZOOMS.includes(zoom)) {
-          for (const name of Object.keys(CHECKS)) if (name !== '9-selected-fill') await runCheck(name)
+          for (const name of Object.keys(CHECKS)) if (!GEOMETRY_CHECKS.includes(name)) await runCheck(name)
         }
-        await runCheck('9-selected-fill')
+        for (const name of GEOMETRY_CHECKS) await runCheck(name)
       }
     }
   } catch (error) {
@@ -1565,7 +2200,7 @@ app.whenReady().then(async () => {
     writeFileSync(join(output, 'results.json'), JSON.stringify({ ...summaryOut, details: results, selected: selectedRows }, null, 2))
     console.log(JSON.stringify(summaryOut, null, 2))
     if (failed.length || fatal) console.error(`Rail renderer failures: ${failed.length}${fatal ? ' (fatal: ' + fatal.message + ')' : ''}`)
-    else console.log('PASS rail drag, cancel, autoscroll, wheel and the selected row across both themes and zoom steps')
+    else console.log('PASS rail drag, cancel, autoscroll, wheel, the selected row and multi-selection across both themes and zoom steps')
     if (win && !win.isDestroyed()) win.destroy()
     app.exit(failed.length || fatal ? 1 : 0)
   }

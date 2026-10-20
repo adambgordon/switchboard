@@ -121,7 +121,7 @@ describe('resolveLiveState — the agent reporting itself busy', () => {
 
   it('breathes for a live session with nothing in its transcript', () => {
     // The case this exists for: work went into a subagent inside this session's process, so the
-    // parent has written nothing and the row read as an idle terminal.
+    // parent has written nothing and the row would otherwise read as an idle terminal.
     expect(resolveLiveState(undefined, 0, false, false, SPAWN, null, true)).toBe('working')
     expect(resolveLiveState(undefined, 0, false, false, SPAWN, null, false)).toBe('quiet')
   })

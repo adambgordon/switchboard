@@ -81,7 +81,7 @@ const rehypePlugins: ComponentPropsWithoutRef<typeof ReactMarkdown>['rehypePlugi
 
 /* Remark plugin sets — three, chosen per block by `normalizeMath` (see lib/mathDelimiters.ts).
  *
- * A block with no math parses EXACTLY as it always has: the math extension never runs, so no `$`
+ * A block with no math parses with GFM alone: the math extension never runs, so no `$`
  * in it can be reinterpreted. That is the point of selecting rather than always enabling — the
  * math parser only ever sees a block that proved it wants math, which is also why blocks full of
  * `$PATH` and `${dir}` are untouchable.
@@ -130,7 +130,7 @@ export type CopyCtxRef = MutableRefObject<{ enabled: boolean }>
  * property — including `className`, and it lands after ours. remark-gfm sets `contains-task-list` on a
  * task list's `<ul>` and `task-list-item` on each `<li>`, and footnotes get `sr-only` / `data-footnote-backref`,
  * so an unmerged spread silently strips `md-ul` / `md-li` / `md-h2` / `md-a` from exactly the content
- * agents emit most. Same trick the `code` override has always used for rehype-highlight's classes.
+ * agents emit most. The `code` override merges rehype-highlight's classes the same way.
  */
 const cx = (ours: string, theirs?: string): string => [ours, theirs].filter(Boolean).join(' ')
 
@@ -433,8 +433,8 @@ function ToolResultBlock({ text, isError }: { text: string; isError: boolean }):
   const clipRef = useRef<HTMLDivElement>(null)
   const textRef = useRef<HTMLPreElement>(null)
   // Show the toggle only when the clamp actually hides content: scrollHeight (full text) beats the
-  // clip's clamped clientHeight. A single mount-time read raced the layout (clamp height not settled
-  // → looked like "fits" → no button), so re-measure via a ResizeObserver on the text — it fires once
+  // clip's clamped clientHeight. A single mount-time read races the layout (clamp height not settled
+  // → reads as "fits" → no button), so re-measure via a ResizeObserver on the text — it fires once
   // the text lays out, on font load, and on re-wrap. Collapsed only; expanded keeps the flag so
   // "Show less" stays.
   useLayoutEffect(() => {
@@ -594,7 +594,7 @@ function renderBlock(block: TranscriptBlock, key: string, copyCtxRef: CopyCtxRef
  * stretch: the agent's prose beats + tool runs, or the human turn), or
  * the interrupt sentinel (a standalone muted note). Consecutive same-
  * author content shares the single header; the You↔agent divider marks
- * the section break. (Keeps the name MessageBlock — the map unit.)
+ * the section break. (Named MessageBlock as the map unit.)
  * ------------------------------------------------------------------ */
 function MessageBlock({
   item,

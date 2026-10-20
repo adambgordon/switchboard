@@ -8,7 +8,7 @@ import type { AgentAvailability } from '@shared/types'
  * The probe is warmed at app start, so it has almost always resolved by the time the user opens the
  * menu. Until it does we optimistically assume BOTH are available — the neutral default avoids
  * hiding an agent the user actually has, and a spawn of a genuinely-missing binary surfaces that
- * agent's own error (acceptable per the design).
+ * agent's own error, which is an acceptable outcome.
  */
 const ASSUME_BOTH: AgentAvailability = { claude: true, codex: true }
 

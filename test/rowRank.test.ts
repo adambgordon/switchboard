@@ -4,7 +4,9 @@ import {
   bumpRank,
   compareRanked,
   dropWrites,
+  liftWrites,
   parseRanks,
+  spreadWrites,
   rankOf,
   topRank,
   type Ranked
@@ -196,6 +198,99 @@ describe('dropWrites', () => {
       lastInserted = id
     }
     expect(respaced).toBe(true)
+  })
+})
+
+describe('spreadWrites', () => {
+  const space: Ranked[] = [
+    { id: 'a', rank: T - 1000 },
+    { id: 'b', rank: T - 2000 },
+    { id: 'c', rank: T - 3000 },
+    { id: 'd', rank: T - 4000 },
+    { id: 'e', rank: T - 5000 }
+  ]
+
+  it('divides an interior gap evenly, in the order given rather than rank order', () => {
+    // e and c dropped between a and b, e first: the group lands contiguous and keeps e above c.
+    const writes = spreadWrites(space, ['e', 'c'], 'a', 'b', T)
+    expect(writes).toEqual({ e: T - 1000 - 1000 / 3, c: T - 1000 - 2000 / 3 })
+    expect(orderAfter(space, writes)).toEqual(['a', 'e', 'c', 'b', 'd'])
+  })
+
+  it('drops at the top like a Resume, the lowest where one row would land and the rest above it', () => {
+    const writes = spreadWrites(space, ['d', 'c'], null, 'a', T)
+    expect(writes).toEqual({ d: T + 1, c: T })
+    expect(orderAfter(space, writes)).toEqual(['d', 'c', 'a', 'b', 'e'])
+  })
+
+  it('drops at the bottom stepping down from the row above', () => {
+    const writes = spreadWrites(space, ['b', 'a'], 'e', null, T)
+    expect(writes).toEqual({ b: T - 5001, a: T - 5002 })
+    expect(orderAfter(space, writes)).toEqual(['c', 'd', 'e', 'b', 'a'])
+  })
+
+  it('writes nothing with no neighbors, or nothing to drop', () => {
+    expect(spreadWrites([{ id: 'a', rank: T }, { id: 'b', rank: T - 1 }], ['a', 'b'], null, null, T)).toEqual({})
+    expect(spreadWrites(space, [], 'a', 'b', T)).toEqual({})
+  })
+
+  it('re-spaces when the gap is too narrow for every row dropped into it', () => {
+    // Room for one float between a and b, not for two.
+    const tight: Ranked[] = [
+      { id: 'a', rank: T },
+      { id: 'b', rank: T - 2 * 2 ** -12 },
+      { id: 'x', rank: T - 5000 },
+      { id: 'y', rank: T - 6000 }
+    ]
+    const writes = spreadWrites(tight, ['y', 'x'], 'a', 'b', T)
+    expect(orderAfter(tight, writes)).toEqual(['a', 'y', 'x', 'b'])
+    expect(Object.keys(writes).length).toBeGreaterThan(2)
+  })
+
+  it('re-spaces rather than land on the lower neighbor when the gap is one float wide', () => {
+    // a sits one float above b, on the float whose half-way point rounds DOWN, onto b. A midpoint
+    // landing there ties x with b, and the id tie-break then puts b first.
+    const a = T + 2 ** -12
+    expect(a - (a - T) / 2).toBe(T) // the fixture really rounds onto the lower neighbor
+    const tight: Ranked[] = [
+      { id: 'a', rank: a },
+      { id: 'b', rank: T },
+      { id: 'x', rank: T - 5000 }
+    ]
+    expect(orderAfter(tight, spreadWrites(tight, ['x'], 'a', 'b', T))).toEqual(['a', 'x', 'b'])
+  })
+
+  it('keeps every other row where it was in the global order', () => {
+    const mixed: Ranked[] = [
+      { id: 'x1', rank: T - 1000 },
+      { id: 'y1', rank: T - 1200 },
+      { id: 'y2', rank: T - 1800 },
+      { id: 'x2', rank: T - 2000 },
+      { id: 'x3', rank: T - 9000 },
+      { id: 'x4', rank: T - 9500 }
+    ]
+    const after = orderAfter(mixed, spreadWrites(mixed, ['x3', 'x4'], 'x1', 'x2', T))
+    expect(after.filter((id) => id.startsWith('y'))).toEqual(['y1', 'y2'])
+    expect(after.filter((id) => id.startsWith('x'))).toEqual(['x1', 'x3', 'x4', 'x2'])
+  })
+})
+
+describe('liftWrites', () => {
+  it('lifts several rows above every row, keeping the order given and giving each its own rank', () => {
+    // Listed b before a, so a tie broken by id would put them the wrong way round.
+    const space: Ranked[] = [
+      { id: 'z', rank: T - 1000 },
+      { id: 'y', rank: T + 40 }
+    ]
+    const writes = liftWrites(space, ['b', 'a'], T)
+    expect(writes).toEqual({ b: T + 42, a: T + 41 })
+    expect(orderAfter([...space, { id: 'a', rank: 0 }, { id: 'b', rank: 0 }], writes)).toEqual(['b', 'a', 'y', 'z'])
+  })
+
+  it('lands its lowest row where a single lift would: on the clock when everything is older', () => {
+    const space: Ranked[] = [{ id: 'z', rank: T - 1000 }]
+    expect(liftWrites(space, ['a'], T)).toEqual({ a: bumpRank(topRank(space), T) })
+    expect(liftWrites([], ['a', 'b'], T)).toEqual({ a: T + 1, b: T })
   })
 })
 

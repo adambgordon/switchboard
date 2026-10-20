@@ -13,7 +13,7 @@ import { advanceMark, clearMark, rekeyMark, setMark } from '../src/renderer/lib/
  * The IDENTITY contract: every function returns its input object itself when nothing changed. That is
  * not a micro-optimization — the caller applies these to what is on DISK, and uses `next === stored`
  * to decide whether to write at all. A merge that returned a fresh equal object would make every
- * no-op mutation write the whole map back and re-render, which is precisely the behavior that let one
+ * no-op mutation write the whole map back and re-render, which is precisely the behavior that lets one
  * window's save revert another's markers.
  */
 

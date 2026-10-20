@@ -432,18 +432,35 @@ export function dropNeighbors(
   higherId: string | null,
   lowerId: string | null
 ): [higher: string | null, lower: string | null] {
-  const at = block.rows.findIndex((r) => r.sessionId === draggedId)
-  if (higherId === null || at >= block.capped) return [higherId, lowerId]
-  // The capped rows other than the dragged one, top first.
-  const capped = block.rows.slice(0, block.capped).filter((r) => r.sessionId !== draggedId)
-  const higher = capped.some((r) => r.sessionId === higherId) ? higherId : capped[capped.length - 1]?.sessionId
-  if (higher === undefined) return [higherId, lowerId]
+  return dropNeighborsMany(model, block, [draggedId], higherId, lowerId)
+}
+
+/**
+ * `dropNeighbors` for several rows dropped together. The group is taken as it is only when every row
+ * in it is past the cap; otherwise it lands below the last capped row that is not itself carried. When
+ * the group carries every capped row there is no such row, and it lands at the top of the block, the
+ * lowest place that still shows them all.
+ */
+export function dropNeighborsMany(
+  model: SidebarModel,
+  block: SidebarBlock,
+  draggedIds: readonly string[],
+  higherId: string | null,
+  lowerId: string | null
+): [higher: string | null, lower: string | null] {
+  const dragged = new Set(draggedIds)
+  const pastCap = draggedIds.every((id) => block.rows.findIndex((r) => r.sessionId === id) >= block.capped)
+  if (higherId === null || pastCap) return [higherId, lowerId]
+  // The capped rows other than the dragged ones, top first.
+  const capped = block.rows.slice(0, block.capped).filter((r) => !dragged.has(r.sessionId))
   const root = block.id.slice('un:'.length)
   const full: Ranked[] = []
   for (const [id, p] of model.rows) {
-    if (id !== draggedId && !p.pinned && (root === '*' || p.root === root)) full.push({ id, rank: p.rank })
+    if (!dragged.has(id) && !p.pinned && (root === '*' || p.root === root)) full.push({ id, rank: p.rank })
   }
   const order = full.sort(compareRanked).map((e) => e.id)
+  const higher = capped.some((r) => r.sessionId === higherId) ? higherId : capped[capped.length - 1]?.sessionId
+  if (higher === undefined) return [null, order[0] ?? null]
   return [higher, order[order.indexOf(higher) + 1] ?? null]
 }
 
