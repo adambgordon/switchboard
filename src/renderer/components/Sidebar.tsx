@@ -337,7 +337,7 @@ export default function Sidebar({
     return {
       entries: conversationMenu({
         surface: 'row',
-        count: 1,
+        group: null,
         linked: movable && !entry.meta.provisional,
         live: !!entry.pty,
         pinned: entry.pinned,

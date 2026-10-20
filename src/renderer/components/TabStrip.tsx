@@ -5,7 +5,7 @@ import type { TabLayout } from '../lib/tabLayoutPreference'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { useTabReorder } from '../lib/useTabReorder'
 import type { LiveDotClass } from '../lib/rowIdentity'
-import { conversationMenu } from '../lib/conversationMenu'
+import { conversationMenu, menuGroup, type MenuTarget } from '../lib/conversationMenu'
 import { isChooserTab } from '../lib/chooserTab'
 import type { ConversationMenuAction } from '@shared/types'
 import { Close } from './icons'
@@ -41,6 +41,19 @@ export interface TabDescriptor {
   unread: boolean
   /** Why the user's hide covers it, as its rail row's menu reads it. */
   hidden: 'folder' | 'self' | null
+}
+
+/** A tab as a group menu needs to know it — the same facts its own menu reads. Any tab can be moved. */
+function tabMenuTarget(tab: TabDescriptor): MenuTarget {
+  return {
+    id: tab.sessionId,
+    linked: tab.indexed,
+    movable: true,
+    live: tab.running,
+    pinned: tab.pinned,
+    unread: tab.unread,
+    hidden: tab.hidden
+  }
 }
 
 /** The conversation commands a tab's menu shares with its rail row, resolved by App. */
@@ -341,15 +354,18 @@ export default function TabStrip({
     e.stopPropagation()
     const tab = tabs[index]
     if (!tab) return
-    // How many tabs the chosen command will act on, so the menu can say so rather than quietly
+    // The group the chosen command will act on, so the menu can say how many rather than quietly
     // closing five conversations under a label that reads like it means one.
-    const groupSize = selectedIds.has(tab.sessionId) && selectedIds.size > 1 ? selectedIds.size : 1
+    const group =
+      selectedIds.has(tab.sessionId) && selectedIds.size > 1
+        ? menuGroup(tabs.filter((t) => selectedIds.has(t.sessionId)).map(tabMenuTarget))
+        : null
     // A chooser stands for no conversation yet, so it can only be closed.
     const chooser = isChooserTab(tab.sessionId)
     const choice = await window.api.tabContextMenu(
       conversationMenu({
         surface: 'tab',
-        count: groupSize,
+        group,
         linked: tab.indexed,
         live: tab.running,
         pinned: tab.pinned,

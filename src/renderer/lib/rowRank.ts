@@ -3,11 +3,11 @@
  *
  * Every row has a rank and the rail sorts descending. A row nobody has touched ranks at its SEED — a
  * fixed number derived from the row itself (its conversation's start, see `sidebarModel`) — and
- * stores nothing. Only five events write, each one key: a drag writes the dropped row's new rank, a
- * Resume lifts its row above everything, an Unpin lifts its row the same way, a placeholder terminal
- * binding to its real conversation hands its rank to the real id, and a new conversation's first
- * index keeps the rank its terminal's stand-in row had. Nothing derived from the catalog is ever
- * written, so rendering
+ * stores nothing. Only five events write, each only the rows it moves: a drag writes the dropped
+ * row's new rank (or a dropped group's), a Resume lifts its row above everything, an Unpin lifts its
+ * rows the same way, a placeholder terminal binding to its real conversation hands its rank to the
+ * real id, and a new conversation's first index keeps the rank its terminal's stand-in row had.
+ * Nothing derived from the catalog is ever written, so rendering
  * against a partial or empty catalog (startup, a second window) cannot lose a position.
  *
  * Ranks are ms timestamps, so a rank space is global: the same numbers order the All list and every
@@ -88,21 +88,73 @@ export function dropWrites(
   if (!lower) return { [draggedId]: higher.rank - 1 }
   const mid = higher.rank / 2 + lower.rank / 2
   if (mid < higher.rank && mid > lower.rank) return { [draggedId]: mid }
-  return respace(items, items.indexOf(lower), draggedId)
+  return respace(items, items.indexOf(lower), [draggedId])
 }
 
 /**
- * Re-rank a window of `items` (sorted, dragged row excluded) around insertion index `at`, inserting
- * `draggedId` there. Widens symmetrically until evenly spaced values fit strictly between the ranks
- * bounding the window. At a list end the missing bound is taken one step per value past the extreme
- * rank, so once the window spans everything the spacing is at least one and always representable.
+ * `dropWrites` for several rows dropped together — a dragged group — landing contiguous between the
+ * two neighbors in the order `draggedIds` lists them, top first. The same three cases, spread: at the
+ * top the lowest of them lands where a single row would and the rest stack above it one apart; at the
+ * bottom they step down from the row above; between, they divide the gap evenly, re-spacing the rows
+ * around it when it is too narrow for all of them.
  */
-function respace(items: readonly Ranked[], at: number, draggedId: string): Record<string, number> {
+export function spreadWrites(
+  space: readonly Ranked[],
+  draggedIds: readonly string[],
+  higherId: string | null,
+  lowerId: string | null,
+  now: number
+): Record<string, number> {
+  const k = draggedIds.length
+  const dragged = new Set(draggedIds)
+  const items = space.filter((e) => !dragged.has(e.id)).sort(compareRanked)
+  const higher = higherId === null ? null : items.find((e) => e.id === higherId) ?? null
+  const lower = lowerId === null ? null : items.find((e) => e.id === lowerId) ?? null
+  if (!higher && !lower) return {}
+  const writes: Record<string, number> = {}
+  if (!higher) {
+    const base = bumpRank(lower!.rank, now)
+    draggedIds.forEach((id, i) => (writes[id] = base + (k - 1 - i)))
+    return writes
+  }
+  if (!lower) {
+    draggedIds.forEach((id, i) => (writes[id] = higher.rank - 1 - i))
+    return writes
+  }
+  const values = draggedIds.map((_, i) => higher.rank - ((higher.rank - lower.rank) * (i + 1)) / (k + 1))
+  // Strictly decreasing from below `higher` is the whole test. Every value sits a (k+1)th of the gap
+  // above `lower`, and a gap holding k distinct floats is wide enough that no rounding reaches it.
+  const fits = values.every((v, i) => v < (i === 0 ? higher.rank : values[i - 1]))
+  if (!fits) return respace(items, items.indexOf(lower), draggedIds)
+  draggedIds.forEach((id, i) => (writes[id] = values[i]))
+  return writes
+}
+
+/**
+ * Several rows lifted above every row in `space` at once, keeping the order `ids` lists them in — an
+ * Unpin of a group, which `unpinWrites` would give one rank each, the same rank, read from the same
+ * model. The lowest lands where a single lift would; the rest stack above it one apart.
+ */
+export function liftWrites(space: readonly Ranked[], ids: readonly string[], now: number): Record<string, number> {
+  const base = bumpRank(topRank(space), now)
+  const writes: Record<string, number> = {}
+  ids.forEach((id, i) => (writes[id] = base + (ids.length - 1 - i)))
+  return writes
+}
+
+/**
+ * Re-rank a window of `items` (sorted, dragged rows excluded) around insertion index `at`, inserting
+ * `draggedIds` there in order. Widens symmetrically until evenly spaced values fit strictly between the
+ * ranks bounding the window. At a list end the missing bound is taken one step per value past the
+ * extreme rank, so once the window spans everything the spacing is at least one and always
+ * representable.
+ */
+function respace(items: readonly Ranked[], at: number, draggedIds: readonly string[]): Record<string, number> {
   const n = items.length
   for (let radius = 1; ; radius++) {
     const lo = Math.max(0, at - radius)
     const hi = Math.min(n, at + radius)
-    const ids = [...items.slice(lo, at).map((e) => e.id), draggedId, ...items.slice(at, hi).map((e) => e.id)]
+    const ids = [...items.slice(lo, at).map((e) => e.id), ...draggedIds, ...items.slice(at, hi).map((e) => e.id)]
     const k = ids.length
     const upper = lo > 0 ? items[lo - 1].rank : items[0].rank + k + 1
     const lowerBound = hi < n ? items[hi].rank : items[n - 1].rank - (k + 1)
