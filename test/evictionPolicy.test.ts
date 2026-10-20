@@ -7,7 +7,7 @@ import {
 } from '../src/main/pty/evictionPolicy'
 
 /**
- * Which live PTYs the cap may stop. Extracted from PtyManager so the decision is reachable: it is
+ * Which live PTYs the cap may stop. Kept out of PtyManager so the decision is reachable: it is
  * the only thing standing between reclaiming a forgotten terminal and killing work in flight, and
  * inside a private method on a stateful class no test could distinguish the two.
  *
@@ -91,7 +91,7 @@ describe('chooseEvictionTargets', () => {
   })
 
   it('takes an idle terminal that is still emitting output', () => {
-    // The case the previous output-based rule could never reach: an agent that repaints on a timer
+    // An output-based rule could never reach this: an agent that repaints on a timer
     // keeps its PTY permanently "busy", so nothing about it ever looked idle. `activity` is resolved
     // from the transcript, so output cannot mask it.
     expect(choose([idle('repainting', 100), doing('other', 200, 'working')], 2)).toEqual([
@@ -145,8 +145,7 @@ describe('chooseEvictionTargets', () => {
   })
 
   it('cannot be made unreclaimable by using every terminal', () => {
-    // The shape of the original bug AND of its first attempted fix: any categorical protection is a
-    // way to exceed the cap without limit.
+    // Any categorical protection is a way to exceed the cap without limit.
     const used = [100, 200, 300, 400].map((at) => unsent(`t${at}`, at))
     expect(choose(used, 2)).toEqual(['t100', 't200', 't300'])
   })
@@ -190,10 +189,10 @@ describe('chooseEvictionTargets', () => {
   })
 
   it('releases an abandoned question instead of protecting it for good', () => {
-    // The bug this bound exists for: a Codex prompt is detected from output and cleared by nothing
-    // if the user DECLINES it — accepting lets the transcript overtake it, declining leaves no trace
-    // — so the terminal read as blocked on the user for as long as it lived. Asserted from both
-    // sides, because a permanent veto and a long one look identical from one sample.
+    // What this bound exists for: a Codex prompt is detected from output and cleared by nothing if the
+    // user DECLINES it — accepting lets the transcript overtake it, declining leaves no trace — so
+    // without a bound the terminal would read as blocked on the user for as long as it lived. Asserted
+    // from both sides, because a permanent veto and a long one look identical from one sample.
     const asked = { ...idle('asked', 100), activity: 'asking' as const, askedAt: 0 }
     const busy = doing('busy', NOW, 'working')
     expect(choose([asked, busy], 2, STALE_REQUEST_MS - 1)).toEqual([])

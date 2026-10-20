@@ -72,7 +72,7 @@ describe('ptyStream', () => {
     expect(got).toEqual(['one', 'two'])
   })
 
-  it('does not serialize on detach now that pane moves preserve the xterm', async () => {
+  it('does not serialize on detach, since pane moves preserve the xterm', async () => {
     const s = await freshStream()
     const first: string[] = []
     let snapshots = 0

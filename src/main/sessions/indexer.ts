@@ -280,7 +280,7 @@ export const EXISTENCE_MAX_INFLIGHT = 2
  * project root: a directory deleted mid-launch must drop out of the new-conversation chooser on the
  * next pass, not the next launch.
  *
- * Bounded three ways, because existence is optional metadata and a historical cwd on an unresponsive
+ * Bounded four ways, because existence is optional metadata and a historical cwd on an unresponsive
  * volume can leave its check pending indefinitely:
  * - a pass waits at most `deadlineMs`, so no check can withhold the index;
  * - at most `maxInflight` checks are unsettled at once, so hung ones cannot starve the thread pool;

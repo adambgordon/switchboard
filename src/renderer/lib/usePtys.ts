@@ -28,8 +28,8 @@ export function usePtys(): PtyIndex {
 
   return useMemo(() => {
     // Order by spawn time (immutable), NOT lastActivity — sorting on a live
-    // timestamp made rows jump to the top whenever a session emitted output or
-    // its terminal was opened. startedAt is stable, so positions hold and a
+    // timestamp would make rows jump to the top whenever a session emits output
+    // or its terminal is opened. startedAt is stable, so positions hold and a
     // newly-spawned session simply appends at the bottom.
     const sorted = [...active].sort((a, b) => a.startedAt - b.startedAt)
     const bySession = new Map<string, PtyState>()

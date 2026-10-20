@@ -7,7 +7,7 @@
  * `threads.title`) — not the rollout. So this write pairs with a read of that DB (codexThreadsDb.ts)
  * for the rename to actually surface.
  *
- * Transport (verified empirically against codex-cli 0.142.2): JSON-RPC-like messages, newline-
+ * Transport (as of codex-cli 0.142.2): JSON-RPC-like messages, newline-
  * delimited (NDJSON), over the app-server's stdio. Handshake:
  *   1. -> initialize { clientInfo: { name, version } }
  *   2. <- result { ... }

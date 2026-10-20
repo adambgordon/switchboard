@@ -4,9 +4,9 @@
  *
  * Its own module rather than an export from `usePins`, so the unit tests can reach it without pulling
  * a React hook — and, more to the point, without pulling that hook's browser globals into the node
- * tsconfig, which has no DOM. (`localStorage` alone slipped past for a long while because @types/node
- * happens to declare it; `window` does not, so the first `window` reference in that file broke the
- * build for a test that never used it.)
+ * tsconfig, which has no DOM. (`localStorage` alone compiles there because @types/node declares it;
+ * `window` does not, so any `window` reference in that file breaks the build for every test that
+ * imports it, whether it uses the hook or not.)
  */
 
 /** Returns the SAME array on a no-op, so callers can skip a write and a re-render by identity. */

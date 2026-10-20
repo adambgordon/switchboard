@@ -3,7 +3,7 @@ import { bindActions, boundTabAdoption, type BindEvent } from '../src/renderer/l
 import { initialLayout, paneReducer } from '../src/renderer/lib/paneModel'
 
 /**
- * The renderer's `pty:bound` policy. Extracted from App's effect precisely so it can be tested: the
+ * The renderer's `pty:bound` policy. Kept out of App's effect precisely so it can be tested: the
  * branch that separates an initial bind from a drift correction is the only thing preventing a
  * correction from deleting one real conversation's persisted read marker and overwriting another's,
  * and left inside the hook no test could reach it.

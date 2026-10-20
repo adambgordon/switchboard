@@ -104,7 +104,7 @@ function openExternalLink(_event: MouseEvent, uri: string): void {
 
 // Escape a filesystem path for insertion into the prompt line the way a real
 // terminal does on drag-drop: backslash-escape spaces + shell metacharacters so
-// paths resolve correctly. (Native drag-drop uses this escaping and "never fails".)
+// paths resolve correctly. (This matches the escaping native terminal drag-drop uses.)
 function escapePath(p: string): string {
   return p.replace(/([\s'"\\$`!&;|*?<>(){}[\]#~])/g, '\\$1')
 }
@@ -114,9 +114,9 @@ function escapePath(p: string): string {
 // resize/replay — or after the buffer grew while this terminal was hidden (display:none) — xterm's own
 // scroll-area sync can lag, leaving the range short (at worst collapsed to a single screen). The newest
 // rows then sit BELOW what the wheel/drag can reach: you can only get to the bottom via Enter or a
-// resize (the reported "can't scroll to the bottom" on a live Codex session). This is Codex-only —
-// claude runs on the alternate screen (no scrollback), so its range never grows. `true` recomputes
-// synchronously; it re-syncs scrollTop to the CURRENT ydisp, so it never moves the view (no yank).
+// resize. This is Codex-only — claude runs on the alternate screen (no scrollback), so its range
+// never grows. `true` recomputes synchronously; it re-syncs scrollTop to the CURRENT ydisp, so it
+// never moves the view (no yank).
 // `_core.viewport` is private xterm API, guarded with optional chaining like the _renderService unpause.
 function syncScrollArea(term: Terminal): void {
   const vp = (
@@ -200,10 +200,10 @@ export default function TerminalView({
   // (display:none on the inactive conversation) reports a 0×0 host, yet FitAddon still derives a
   // bogus ~13×5 grid from the host's height/width:100% *computed* style (parseInt("100%") → 100px,
   // ÷ cell size). Pushing that to the PTY makes claude reflow its whole TUI into a tiny grid and
-  // back when you switch away and return — stranding real blank rows in the buffer (the "whitespace
-  // after tool calls" gap). The ResizeObserver firing on hide (size → 0) is the actual trigger, so
-  // the 0×0 guard neutralizes it (and the same guard means a hidden mount no longer boots claude at
-  // a bogus size). Suppressing no-op resizes keeps conversation/view switches from spamming SIGWINCH
+  // back when you switch away and return — stranding real blank rows in the buffer. The
+  // ResizeObserver fires on hide (size → 0), so the 0×0 guard is what prevents it, and the same
+  // guard keeps a hidden mount from booting claude at a bogus size. Suppressing no-op resizes
+  // keeps conversation/view switches from spamming SIGWINCH
   // for no size change.
   const fitAndResize = useCallback(() => {
     const host = hostRef.current
@@ -237,7 +237,7 @@ export default function TerminalView({
       // 1.3, not a rounder value: 11.5×1.3≈15px keeps the cell height ~integer. WebGL (the
       // primary renderer) doesn't need this, but the canvas FALLBACK (loaded on GPU-context
       // loss) strands blank rows during rapid live redraws at a fractional cell — so 1.3 stays
-      // for that path. It was 1.32 (15.18px) and showed whitespace gaps — don't bump back.
+      // for that path. A value such as 1.32 (a 15.18px cell) strands whitespace gaps there.
       lineHeight: 1.3,
       letterSpacing: 0,
       // Switchboard's own terminal cursor is hidden (transparent `theme.cursor` above): we defer
@@ -246,8 +246,8 @@ export default function TerminalView({
       // 'block') guards the glyph under the caret from being recolored should the color ever be
       // made visible; blink off avoids a needless (invisible) blink timer. Trade-off: no visible
       // cursor at a bare shell prompt — but this terminal exists to host a live `claude`, which
-      // owns the caret. (This also subsumes the old `cursorInactiveStyle: 'none'` — a transparent
-      // cursor is invisible focused or not, so arrow-preview shows no stray cursor box either.)
+      // owns the caret. A transparent cursor is invisible focused or not, so arrow-preview shows
+      // no stray cursor box either.
       cursorBlink: false,
       cursorStyle: 'bar',
       allowProposedApi: true,
@@ -271,16 +271,15 @@ export default function TerminalView({
     // so widths match claude from the first paint. (Needs allowProposedApi, set above.)
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
-    // GPU (WebGL) renderer, loaded post-open as xterm requires — now the PRIMARY renderer.
-    // It composites cells on the GPU (a glyph texture atlas + batched draws), far more robust
-    // than the canvas addon under the rapid partial repaints a live `claude` emits — which is
-    // what caused the intermittent scroll jitter and the stranded-whitespace rows (the canvas
-    // text-layer repaint desync we'd only half-patched via lineHeight). WebGL also draws every
-    // glyph every frame WITHOUT clipping it to its cell (canvas clips per row), so box-drawing
-    // joins / tall glyphs that overflow a cell render cleanly. `customGlyphs` (default true) is
-    // honored here too, so claude's table/box borders stay continuous vector lines as before.
-    // xterm.js and VS Code are both consolidating onto WebGL and phasing the canvas addon out,
-    // so this is the forward path, not a stopgap.
+    // GPU (WebGL) renderer, loaded post-open as xterm requires — the PRIMARY renderer. It
+    // composites cells on the GPU (a glyph texture atlas + batched draws), far more robust than
+    // the canvas addon under the rapid partial repaints a live `claude` emits, where the canvas
+    // text layer's repaint desync shows as scroll jitter and stranded whitespace rows (lineHeight
+    // only partly mitigates it). WebGL also draws every glyph every frame WITHOUT clipping it to
+    // its cell (canvas clips per row), so box-drawing joins / tall glyphs that overflow a cell
+    // render cleanly. `customGlyphs` (default true) is honored here too, so claude's table/box
+    // borders stay continuous vector lines. xterm.js and VS Code are both consolidating onto
+    // WebGL and phasing the canvas addon out, so this is the forward path.
     //
     // Fallback: on GPU-context loss — a driver reset, or Chromium evicting the least-recently-
     // used context past its ~16-per-page ceiling — swap to the CANVAS addon (NOT xterm's
@@ -358,9 +357,9 @@ export default function TerminalView({
     // Size the terminal to its container BEFORE the PTY backlog floods in. On resume the host is
     // already visible (display:block) and measurable, so this synchronous fit resizes the still-
     // empty renderer once, up front — instead of letting claude's replay flood paint at the
-    // default 80×24 and then paying a ~170ms WebGL resize mid-flood (the trace's single worst
-    // main-thread task on resume, ~950ms in). The rAF + ResizeObserver below stay as the fallback
-    // for when the host isn't measurable yet (created while hidden) and for later/window resizes.
+    // default 80×24 and then paying a WebGL resize (~170ms) mid-flood. The rAF + ResizeObserver
+    // below stay as the fallback for when the host isn't measurable yet (created while hidden)
+    // and for later/window resizes.
     if (!stagedSnapshot) fitAndResize()
 
     const snapshot = (): PtySnapshot => {
@@ -431,9 +430,9 @@ export default function TerminalView({
     const onRealKey = term.onKey(markUsed)
     // Those all surface as an `input` on xterm's own textarea, and nothing else does — the
     // automatic replies to terminal queries are generated in JS and never touch it, so this cannot
-    // reintroduce the boot-time false positive. Paste and composition keep their explicit reports
-    // below as well: whether a paste reaches the textarea at all depends on a third party not
-    // calling preventDefault, and this is not an area to rest correctness on that.
+    // mistake the boot-time query replies for user input. Paste and composition keep their
+    // explicit reports below as well: whether a paste reaches the textarea at all depends on a
+    // third party not calling preventDefault, and this is not an area to rest correctness on that.
     const onTextInput = (e: Event): void => {
       if ((e as InputEvent).data || (e.target as HTMLTextAreaElement | null)?.value) markUsed()
     }
@@ -581,12 +580,12 @@ export default function TerminalView({
   // deliver that on a pure display:none→block toggle (it recomputes intersection on scroll/layout),
   // so the terminal can sit frozen on its last painted frame — e.g. claude's mid-thought spinner —
   // until a manual scroll nudges the observer. A blind term.refresh() here is therefore dropped
-  // whenever the observer hasn't fired yet (the old two-rAF approach only worked when it happened to
-  // fire within ~2 frames). So we clear `_isPaused` ourselves — before the fit, so the fit's
+  // whenever the observer hasn't fired yet, and waiting a frame or two only helps when it happens
+  // to fire in time. So we clear `_isPaused` ourselves — before the fit, so the fit's
   // handleResize runs now instead of being queued — then refresh, guaranteeing the repaint. The
   // observer later sets `_isPaused` correctly (visible ⇒ false), a no-op. Reaching into
   // `_core._renderService` is private xterm API, guarded with optional chaining so a future rename
-  // degrades to the old observer-dependent behavior rather than throwing. One-time on navigation —
+  // degrades to observer-dependent repainting rather than throwing. One-time on navigation —
   // no per-frame cost. Focus is handled separately (below) so that merely becoming visible — e.g.
   // via arrow-preview or back/forward — does NOT grab the keyboard.
   useEffect(() => {

@@ -12,13 +12,13 @@ import {
 /**
  * Cover for OS-backed Codex identity. The rules are deliberately unforgiving, so most of this file is
  * the NO-BIND matrix: every shape of missing, duplicated, or contradictory evidence must produce zero
- * bindings rather than a plausible guess. Four timing heuristics were shipped and rolled back before
- * this design, each defeated by one counterexample, so the ambiguity cases are the point — not the
- * happy path.
+ * bindings rather than a plausible guess. Timing heuristics are each defeated by a single
+ * counterexample, so the ambiguity cases are the point — not the happy path.
  *
- * `REAL_CAPTURE` is verbatim `lsof -n -p <shell> -c codex -F0pcfn` output from a live Codex session
- * (lsof 4.91, macOS), trimmed to the load-bearing records with their real ordering, fd numbers, and
- * name oddities intact. Everything else is built by `lsofText` so a rule can be isolated.
+ * `CODEX_LSOF_SAMPLE` has the shape `lsof -n -p <shell> -c codex -F0pcfn` produces for a live Codex
+ * session (lsof 4.91, macOS), with generic paths: real record ordering, fd numbers, and name
+ * oddities, trimmed to the load-bearing records. Everything else is built by `lsofText` so a rule can
+ * be isolated.
  *
  * The `resolveCodexBindings` block runs the REAL exec path against stub binaries, because the branches
  * that decide whether output is trustworthy are the ones that prevent a wrong bind — and they can only
@@ -37,13 +37,13 @@ const rollout = (id: string, day = '2026/08/04'): string =>
   `${ROOT}/${day}/rollout-2026-08-04T11-25-20-${id}.jsonl`
 
 /**
- * Verbatim capture. Note what a real `-p <shellPid> -c codex` probe does and does not contain: the
+ * Note what a real `-p <shellPid> -c codex` probe does and does not contain: the
  * shell (via -p), the real `codex` process and the `codex-code-mode-host` helper (both via the -c
  * PREFIX match) — but NOT the intermediate `node` wrapper, which neither selector matches. The
  * helper's fd 0 is a socket while it holds the terminal on fd 31, which is precisely why only fd 0
  * may be read as "owns this terminal".
  */
-const REAL_CAPTURE =
+const CODEX_LSOF_SAMPLE =
   [
     'p2202\0czsh\0',
     'f0\0n/dev/ttys001\0',
@@ -103,7 +103,7 @@ const resolve = (
 
 describe('parseLsof', () => {
   it('parses the real capture into processes and their files', () => {
-    const procs = parseLsof(REAL_CAPTURE)
+    const procs = parseLsof(CODEX_LSOF_SAMPLE)
     expect(procs.map((p) => [p.pid, p.command])).toEqual([
       [2202, 'zsh'],
       [2218, 'codex'],
@@ -154,7 +154,7 @@ describe('parseLsof', () => {
 
 describe('resolveBindings — exact evidence binds', () => {
   it('binds the real capture: one shell, one terminal, one open eligible rollout', () => {
-    expect(resolve(parseLsof(REAL_CAPTURE), [{ ptyId: 'A', shellPid: 2202 }], new Set([S1]))).toEqual([
+    expect(resolve(parseLsof(CODEX_LSOF_SAMPLE), [{ ptyId: 'A', shellPid: 2202 }], new Set([S1]))).toEqual([
       { ptyId: 'A', sessionId: S1 }
     ])
   })
@@ -176,9 +176,9 @@ describe('resolveBindings — exact evidence binds', () => {
     ])
   })
 
-  it('is immune to use order — the case every timing heuristic got wrong', () => {
+  it('is immune to use order, which defeats any timing heuristic', () => {
     // Terminal A was created first but its rollout is the NEWER one, because the user typed in B
-    // first. Timing/order matching swapped these two; open-file evidence cannot, since there is no
+    // first. Timing/order matching would swap these two; open-file evidence cannot, since there is no
     // ordering input at all. Proven by feeding the pairs in the opposite order and getting the same
     // answer, keyed by pid rather than position.
     const procs = parseOf([...terminal(100, '/dev/ttys001', [S2]), ...terminal(200, '/dev/ttys002', [S1])])
@@ -207,7 +207,7 @@ describe('resolveBindings — exact evidence binds', () => {
   })
 
   it('binds the top-level rollout while Codex also holds subagent rollouts open', () => {
-    // Observed in reality: one Codex process had its own rollout plus three subagent rollouts open.
+    // Codex holds its own rollout open alongside its subagents' rollouts.
     // Subagent threads are dropped by the indexer, so they never reach the eligible set — which is
     // what keeps this unambiguous rather than a four-way tie.
     const procs = parseOf(terminal(100, '/dev/ttys001', [S1, SUB]))
@@ -500,7 +500,7 @@ describe('resolveCodexBindings — the exec path', () => {
 
   beforeAll(() => {
     mkdirSync(DIR, { recursive: true })
-    writeFileSync(FIXTURE, REAL_CAPTURE)
+    writeFileSync(FIXTURE, CODEX_LSOF_SAMPLE)
     // A CONTESTED terminal — two eligible rollouts open — cut cleanly between them, at a record
     // boundary so the trailing-newline check can't catch it. This shape is deliberate: truncating away
     // the *only* rollout would make "no bind" the right answer either way, proving nothing. Here the
@@ -510,7 +510,7 @@ describe('resolveCodexBindings — the exec path', () => {
     const cut = contested.slice(0, contested.indexOf('f39'))
     expect(cut.endsWith('\n')).toBe(true)
     writeFileSync(PARTIAL, cut)
-    writeFileSync(NO_NEWLINE, REAL_CAPTURE.replace(/\n$/, ''))
+    writeFileSync(NO_NEWLINE, CODEX_LSOF_SAMPLE.replace(/\n$/, ''))
     const script = (body: string): string => `#!/bin/sh\n${body}\n`
     writeFileSync(STUB_EXIT1, script(`printf '%s' "$*" > ${ARGV_LOG}\ncat ${FIXTURE}\nexit 1`))
     writeFileSync(STUB_HANG, script(`cat ${PARTIAL}\nsleep 30`))

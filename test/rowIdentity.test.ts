@@ -61,8 +61,8 @@ describe('isParkedOnlyRow', () => {
   })
 
   it('is FALSE once the session has a conversation of its own', () => {
-    // The case that broke: an ordinary conversation that merely launched a background agent keeps the
-    // marker forever, so the marker alone must never be enough.
+    // An ordinary conversation that merely launched a background agent keeps the marker forever, so the
+    // marker alone must never be enough.
     expect(isParkedOnlyRow(pty({ parkedJob: PARKED }), meta({ messageCount: 3 }))).toBe(false)
   })
 
@@ -128,7 +128,7 @@ describe('resolveRowLiveState', () => {
   const synth = { messageCount: 0, title: 'New conversation' }
 
   it('gives a parked-only row no state, even when one would otherwise resolve', () => {
-    // The reported bug. A runtime input notification resolves to `asking` straight off the pty,
+    // A runtime input notification resolves to `asking` straight off the pty,
     // without consulting the transcript at all — so an ungated parked row pulses for work that is
     // not its own. Asserting `null` here is only meaningful because the same row WITHOUT the parked
     // marker resolves to something (next assertion).
@@ -145,8 +145,8 @@ describe('resolveRowLiveState', () => {
   })
 
   it('still resolves normally for a conversation that merely launched an agent', () => {
-    // The regression this row exists to avoid re-introducing: the parked marker is never cleared, so
-    // an ordinary conversation keeps it for life and must go on getting a real dot.
+    // The parked marker is never cleared, so an ordinary conversation keeps it for life and must go
+    // on getting a real dot.
     const launcher = pty({ parkedJob: PARKED })
     const working = meta({ messageCount: 3, turnState: 'in_progress', lastActivityAt: 50 })
     expect(resolveRowLiveState(launcher, working, 0, false, undefined)).toBe('working')

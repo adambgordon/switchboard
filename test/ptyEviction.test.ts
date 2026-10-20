@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 /**
  * Cover for the WIRING of the live-session cap — the seam the pure `evictionPolicy` tests cannot
  * reach. The policy decides which terminal may be stopped; this decides what the manager tells it,
- * and that translation is where the bug lived: `write()` once counted every byte as user input, but
- * xterm answers an agent's startup terminal queries through the very same channel, so every
- * terminal was marked used within milliseconds of booting and no untouched one was ever reclaimed.
+ * and that translation is where it can go wrong: xterm answers an agent's startup terminal queries
+ * through the same channel as keystrokes, so counting every written byte as user input would mark
+ * every terminal used within milliseconds of booting, and no untouched one would ever be reclaimed.
  *
  * Driving the real PtyManager is the point. A fake would just restate the assumption under test.
  *
@@ -94,8 +94,8 @@ describe('PtyManager live-session cap', () => {
   })
 
   it('does not treat written bytes as use, so a terminal an agent queried stays reclaimable', () => {
-    // THE REGRESSION. xterm replies to an agent's DA1/CPR queries through the same `sendInput`
-    // channel a keystroke uses, so this is what a brand-new terminal looks like a few ms after boot.
+    // xterm replies to an agent's DA1/CPR queries through the same `sendInput` channel a keystroke
+    // uses, so this is what a brand-new terminal looks like a few ms after boot.
     const first = mgr.startNew(CWD, 'codex')
     mgr.write(first.ptyId, '\x1b[?1;2c')
     mgr.write(first.ptyId, '\x1b[1;1R')
@@ -144,7 +144,7 @@ describe('PtyManager live-session cap', () => {
   it('reclaims a resumed session whose in_progress turn belongs to a previous process', () => {
     // Quitting mid-turn leaves a dangling `in_progress` that no later process ever finishes, so
     // resuming produces a resting session the raw turn-state calls busy. Passing that field through
-    // protected every such session permanently — an ineffective cap for anyone who resumes
+    // would protect every such session permanently — an ineffective cap for anyone who resumes
     // interrupted conversations. The spawn times below postdate the recorded activity, which is the
     // only thing that reveals it.
     const first = mgr.resume('s1', CWD, 'claude')
@@ -189,9 +189,9 @@ describe('PtyManager live-session cap', () => {
   })
 
   it('stays silent for ordinary use, with no question outstanding', () => {
-    // The same call on the same terminal, differing only in whether a request was pending — so a
-    // fix that simply announces on every input report fails here. This arrives on the typing path,
-    // and rebroadcasting the whole active set to every window while someone types would be a real
+    // The same call on the same terminal, differing only in whether a request was pending — so an
+    // implementation that simply announces on every input report fails here. This arrives on the typing
+    // path, and rebroadcasting the whole active set to every window while someone types would be a real
     // cost for a value no consumer reads.
     const plain = mgr.resume('s1', CWD, 'codex')
     indexed({ s1: { turnState: 'awaiting', lastActivityAt: plain.startedAt - 60_000 } })
@@ -223,10 +223,10 @@ describe('PtyManager live-session cap', () => {
   })
 
   it('stops protecting a question once the user has responded to it', () => {
-    // The bug: a request detected from output is cleared by nothing if the user DECLINES. Accepting
-    // lets the transcript overtake the timestamp; declining leaves no trace at all, so the terminal
-    // read as blocked on the user for the rest of its life — and `asking` is protection the cap
-    // never overrides. A person typing here IS the response.
+    // A request detected from output is cleared by nothing else if the user DECLINES. Accepting lets
+    // the transcript overtake the timestamp; declining leaves no trace at all, so without this the
+    // terminal would read as blocked on the user for the rest of its life — and `asking` is protection
+    // the cap never overrides. A person typing here IS the response.
     //
     // Driven through the real scanner and the real markUsed, because the clearing has to survive the
     // path production takes: the notification is parsed out of genuine terminal output, and the clear
@@ -237,7 +237,7 @@ describe('PtyManager live-session cap', () => {
     // and the clock has to be moved past it. And the OTHER terminal has to be taken out of the
     // running, because both are idle afterwards and it is the least recently used of the two — so it
     // would be chosen first whether or not the request was ever cleared, and the test would pass
-    // against the bug.
+    // against an implementation that never clears it.
     vi.useFakeTimers()
     try {
       const base = Date.now()
@@ -325,8 +325,7 @@ describe('PtyManager live-session cap — Claude reporting itself busy', () => {
 
   it('reclaims that same session once Claude reports it idle', () => {
     // Identical fixture but for the one value, because "protected while busy" is otherwise satisfied
-    // by an implementation that protects an unattributable terminal unconditionally — which is the
-    // rule that was just removed from this policy.
+    // by an implementation that protects an unattributable terminal unconditionally.
     registryRecord(1000, S1, 'idle')
     const m = build()
     const host = m.resume(S1, CWD, 'claude')

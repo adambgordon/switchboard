@@ -76,7 +76,7 @@ export interface CodexTitleSources {
  *   1. The DB title when it is DISTINCT (non-empty and != the first user message) — a real rename
  *      still present in the column (e.g. just renamed, not yet reverted by a resume).
  *   2. Else the session-index name — the durable rename, used once the DB title has been re-derived
- *      back to the first message on resume. This is the case the prior DB-title-only read missed.
+ *      back to the first message on resume.
  *   3. Else a cleaned, bounded DB auto-title.
  *   4. Else the rollout-derived title.
  */

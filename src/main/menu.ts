@@ -20,8 +20,8 @@ const REFRESH_ZOOM_NUDGE = 0.5
  * This is what ⌘R is bound to INSTEAD of `reload`. A renderer reload would destroy every xterm
  * buffer — the main process keeps no PTY output to replay (PtyManager only streams live bytes), so
  * the freshly-mounted terminals attach to an empty backlog and an idle claude emits nothing →
- * every live terminal goes blank, recoverable only by a real dimension change (which is why a
- * manual zoom "fixed" it). Repurposing ⌘R gives the "reload to fix rendering" instinct an action
+ * every live terminal goes blank, recoverable only by a real dimension change, such as a manual
+ * zoom. Repurposing ⌘R gives the "reload to fix rendering" instinct an action
  * that actually fixes rendering, with none of the destruction.
  */
 function refreshFocused(): void {

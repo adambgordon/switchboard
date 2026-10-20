@@ -7,7 +7,7 @@
  * un-renamed sessions, the custom name once renamed), keeping Switchboard's display in sync with
  * what Codex itself shows.
  *
- * `state_N.sqlite` is WAL-mode; `node:sqlite` opened read-only honors the `-wal` (verified), so a
+ * `state_N.sqlite` is WAL-mode; `node:sqlite` opened read-only honors the `-wal`, so a
  * fresh rename is visible immediately even before a checkpoint. The filename is versioned, so we glob
  * `state_*.sqlite` and pick the newest. Every failure mode degrades to an empty map — the read must
  * never crash the index — including a readonly-open race: while Codex is actively writing, a

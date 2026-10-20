@@ -66,15 +66,16 @@
   flex-shrink: 0;
   background: var(--paper-pane);
   /* A FIXED height, so two panes' headers line up by construction instead of by their contents
-     happening to measure the same. They did not: the action row never shrinks, so a narrow pane
-     squeezed it until a button label wrapped to a second line, and that pane's header grew while its
-     neighbor's did not — the content areas beside each other then started at different heights. */
+     happening to measure the same. They need not: the action row never shrinks, so a narrow pane
+     squeezes it until a button label wraps to a second line, and that pane's header would grow while
+     its neighbor's does not — the content areas beside each other would then start at different
+     heights. */
   height: 66px;
   box-sizing: border-box;
 }
 /* NOTHING in the header may wrap — not the action row, not the meta line, not a unit label. Scoped to
-   the whole subtree rather than to the controls, because the first attempt covered only the actions and
-   a meta item still broke ("8 msg" split across two lines under pressure). Text that runs out of room
+   the whole subtree rather than to the controls, because covering only the actions still lets a meta
+   item break ("8 msg" split across two lines under pressure). Text that runs out of room
    truncates or is dropped by a stage below; it never reflows. */
 .sb-pane-header,
 .sb-pane-header * {

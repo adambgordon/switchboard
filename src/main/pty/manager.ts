@@ -134,7 +134,7 @@ interface Live {
  *   ~/.local/bin, no Homebrew), so invoking `claude` directly would fail with
  *   ENOENT. A login shell sources the user's profile and gets the real PATH — and
  *   it gives a genuine terminal: when claude exits, you're back at a prompt.
- * - Busy vs idle is inferred from output activity (debounced) and is now only a coarse status
+ * - Busy vs idle is inferred from output activity (debounced) and is only a coarse status
  *   reported to the renderer as a FALLBACK for the live dot. It drives no decision here: terminal
  *   output cannot separate a working agent from a resting one, because an agent TUI may repaint on
  *   a fixed timer whether or not anything is happening — which leaves such a PTY permanently
@@ -285,7 +285,7 @@ export class PtyManager extends EventEmitter {
       sessionId: randomUUID(), // placeholder; swapped for the real rollout id on bind
       cwd,
       // Same wording as a new Claude session: at this point neither has done anything, and the row
-      // already carries the agent's logo — spelling the agent out here only made the two look unlike.
+      // already carries the agent's logo — spelling the agent out here would make the two look unlike.
       title: 'New conversation',
       origin: 'new',
       agent: 'codex',
@@ -296,10 +296,9 @@ export class PtyManager extends EventEmitter {
 
   /**
    * Type renderer input into a PTY. Deliberately a transparent passthrough with NO identity
-   * bookkeeping: keystrokes were once inspected here to time-correlate a new Codex PTY to its
-   * rollout, and every variant of that (a bare `\r`, a discrete post-boot Enter, nearest-timestamp
-   * pairing) was defeated by a real counterexample. Identity now comes from the OS instead — see
-   * codexIdentity — so this is back to being the hot path it should be.
+   * bookkeeping: keystroke timing (a bare `\r`, a discrete post-boot Enter, nearest-timestamp
+   * pairing) cannot prove which rollout a new Codex PTY owns, so identity comes from the OS — see
+   * codexIdentity — and this stays a hot path.
    *
    * In particular it does NOT record that the terminal was used: this channel also carries xterm's
    * automatic answers to an agent's startup terminal queries, so treating everything here as input
@@ -466,11 +465,11 @@ export class PtyManager extends EventEmitter {
    * and that write is exactly what wakes both the file watcher and the live poll — so the probe rides
    * indexing that already happens.
    *
-   * Every live Codex PTY is asked about, not just the provisional ones. Identity was previously proven
-   * once and then assumed permanent, which is wrong for two reasons: a resumed PTY's id came from a
-   * click and was never observed at all, and a bound terminal is a login shell that outlives the Codex
-   * process it was bound against — quit Codex, `cd`, start it again, and the row keeps naming a
-   * conversation the terminal is no longer running.
+   * Every live Codex PTY is asked about, not just the provisional ones. Identity cannot be proven once
+   * and then assumed permanent, for two reasons: a resumed PTY's id comes from a click and is never
+   * observed at all, and a bound terminal is a login shell that outlives the Codex process it was
+   * bound against — quit Codex, `cd`, start it again, and the row keeps naming a conversation the
+   * terminal is no longer running.
    *
    * `eligibleSessionIds` must be the FULLY FILTERED indexed set, so archived, non-interactive,
    * zero-message and delegated subagent/review rollouts can never become bind targets even while
@@ -544,7 +543,7 @@ export class PtyManager extends EventEmitter {
    * Apply a probe result, re-checking that the world it described still exists. `lsof` runs
    * asynchronously, so between the snapshot and here a PTY can exit or be replaced, and the user can
    * have resumed the very conversation the result names — and applying a stale identity is the exact
-   * failure this whole rewrite exists to prevent.
+   * failure this path exists to prevent.
    *
    * Only checks `bindCodex` CANNOT make are made here. Ownership and still-provisional are its job, so
    * they live there once rather than in two places that could drift apart — and a duplicate guard is
@@ -563,8 +562,8 @@ export class PtyManager extends EventEmitter {
     for (const { ptyId, sessionId } of bindings) {
       // A result naming one PTY twice is contradictory. Take the first usable entry and refuse the
       // rest: a second one would otherwise overwrite a binding just applied from the same answer.
-      // Previously this fell out of `provisional` being cleared by the first bind — a correction has
-      // no such flag to spend, so the rule has to be stated.
+      // A first bind could lean on `provisional` being cleared by it; a correction has no such flag
+      // to spend, so the rule has to be stated explicitly.
       if (applied.has(ptyId)) continue
       const e = this.live.get(ptyId)
       if (!e) continue // exited while the probe ran
@@ -588,7 +587,7 @@ export class PtyManager extends EventEmitter {
    *
    * Serves both the FIRST identification of a provisional terminal and the CORRECTION of one that has
    * drifted to another conversation. There is deliberately no `provisional` gate here — refusing to
-   * move an established id is exactly what let a stale identity outlive the process it described.
+   * move an established id would let a stale identity outlive the process it describes.
    *
    * The two are NOT the same operation downstream, which is why `kind` is emitted rather than left
    * for the renderer to infer: an initial bind migrates everything off a placeholder that is ceasing

@@ -230,10 +230,10 @@ export const SplitVertical = (p: IconProps) =>
   svg(
     <>
       {/* TWO separate frames with a gap between them. What this must not be is one rectangle with a
-          single interior stroke — that was a near-copy of PanelLeft, differing only in where the stroke
-          sat, so the rail toggle and the split toggle read as the same control two positions apart. Two
-          detached panes is a distinct silhouette at 16px, which is the only size that matters. Drawn to
-          PanelLeft's 3→21 box so it does not also look a size smaller than its neighbors. */}
+          single interior stroke — that is a near-copy of PanelLeft, differing only in where the stroke
+          sits, and the rail toggle and the split toggle would read as the same control two positions
+          apart. Two detached panes is a distinct silhouette at 16px, which is the only size that matters.
+          Drawn to PanelLeft's 3→21 box so it does not also look a size smaller than its neighbors. */}
       <rect x="3" y="3" width="8" height="18" rx="2" />
       <rect x="13" y="3" width="8" height="18" rx="2" />
     </>,

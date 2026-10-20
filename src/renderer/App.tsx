@@ -231,9 +231,9 @@ export default function App() {
   // browser back — rather than a second, cut-down shell. `persist: false` is load-bearing: layout
   // lives in localStorage, which every window of the app shares, so a detached window writing its
   // collapsed rail there would hand that state to the browser window on the next launch.
-  // Optional-chained on purpose: editing the preload does not hot-reload, so a dev instance that was
-  // already running when this was added would otherwise throw here and white-screen the whole app
-  // rather than simply behaving like an ordinary window.
+  // Optional-chained on purpose: the preload does not hot-reload, so a dev instance still running an
+  // older preload has no `sbWindow`, and reading it unguarded would throw here and white-screen the
+  // whole app rather than simply behaving like an ordinary window.
   const windowInit = window.sbWindow ?? {
     sessionIds: [],
     activeSessionId: null,
@@ -260,9 +260,9 @@ export default function App() {
   })
 
   // Tabs / split / detached windows, all behind one preference. OFF is a degenerate case of the SAME
-  // model — one pane holding one preview tab, so every open replaces it — which is what the app did
-  // before tabs existed. So the flag gates only the strip's presence, the promotion gestures, and the
-  // split / window commands; nothing below asks about it. See useTabsEnabled.
+  // model — one pane holding one preview tab, so every open replaces it. So the flag gates only the
+  // strip's presence, the promotion gestures, and the split / window commands; nothing below asks
+  // about it. See useTabsEnabled.
   const { enabled: tabsEnabled, setEnabled: setTabsEnabled } = useTabsEnabled()
   const { tabLayout, setTabLayout } = useTabLayout()
   const panes = usePaneLayout(tabsEnabled ? windowInit.restoredTabs : null, hiddenSessionIds)
@@ -1118,7 +1118,7 @@ export default function App() {
   // "This row stands for no conversation" (see rowIdentity), by id — the ONE place that resolution
   // lives. Every consumer of the gate routes through here rather than re-deriving it: an unlinked
   // row must not persist read state or a pin under an id that may never bind, and a gate copied per
-  // call site is how one copy ends up missing (which is what put a stranger's liveness dot on a
+  // call site invites a copy without it (a missing gate puts another transcript's liveness dot on a
   // background-agent row).
   //
   // A chooser tab stands for no conversation either, so it answers here too — which is what keeps it out

@@ -83,7 +83,7 @@ function scrollRangeIntoView(range: Range, scroll: HTMLElement | null): void {
  *
  * Tool sections are excluded regardless of their expansion state, along with transcript chrome and
  * hidden LaTeX source. Matches are found within a single text node, so a phrase spanning element
- * boundaries (e.g. across a bold run) won't match — a deliberate Phase-1 limitation.
+ * boundaries (e.g. across a bold run) won't match — a deliberate limitation.
  */
 export function useTranscriptSearch({
   contentRef,

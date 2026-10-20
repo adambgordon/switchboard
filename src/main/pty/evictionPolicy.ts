@@ -72,7 +72,7 @@ export interface EvictionCandidate {
  * limit: whatever the rule is, a user can keep making terminals that satisfy it.
  *
  * The protected cases are protected because stopping them destroys something that exists nowhere
- * else: `working` is a turn mid-flight — which now includes work only the agent itself reports, so a
+ * else: `working` is a turn mid-flight — including work only the agent itself reports, so a
  * subagent running inside the session's process counts even while its transcript sits unwritten —
  * `asking` is a question whose prompt lives only in that terminal, and an on-screen terminal is one
  * being looked at, where a pane going blank reads as a glitch even when nothing is lost.

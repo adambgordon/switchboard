@@ -429,9 +429,9 @@ export function useTabReorder(
         // `to.index` needs NO adjustment for the removal that precedes the insertion. `tabDropIndex`
         // was given the dragged tab as `skipIndex`, so it never counted it — its result is already an
         // index into the list without it, which is exactly what the reducer splices into (it removes
-        // first, then inserts at `to.index`). Subtracting one here shifted every rightward drag by a
-        // slot. For the same reason the only no-op is landing back on its own index: one past that is
-        // a genuine move, and treating it as a no-op silently swallowed it.
+        // first, then inserts at `to.index`). Subtracting one here would shift every rightward drag by
+        // a slot. For the same reason the only no-op is landing back on its own index: one past that
+        // is a genuine move, and treating it as a no-op would silently swallow it.
         if (landed.pane !== from.pane || landed.index !== from.index) {
           optsRef.current.onMove(from, landed)
         }

@@ -53,12 +53,12 @@ const SESSION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12
 /**
  * Backstop interval for the registry read — NOT the path that makes it feel responsive.
  *
- * The directory watch delivers a change in ~12 ms (measured; macOS FSEvents coalesces at ~10 ms and
+ * The directory watch delivers a change in ~12 ms (macOS FSEvents coalesces at ~10 ms and
  * that floor, not this interval, is the latency the user sees). This exists for when the watch is
  * unavailable or has failed, so the signal degrades to slower rather than to absent. Every pass is
  * SYNCHRONOUS on the main process's event loop — the same loop pumping terminal bytes — so it is
  * kept well clear of the poll rates that would start competing with keystroke echo: one pass
- * measured 0.1 ms against two records and projects to ~1 ms against twenty.
+ * costs about 0.1 ms against two records and scales to ~1 ms against twenty.
  */
 const REGISTRY_POLL_MS = 150
 /**
@@ -70,7 +70,7 @@ const REGISTRY_POLL_MS = 150
  * the indexer's 400 ms debounce. Report the marker first and the row shows the agent's name for the
  * gap, then corrects to an ordinary conversation — the flash this exists to prevent.
  *
- * It is a WINDOW, not a count of observations. Counting was the first attempt and does not work:
+ * It is a WINDOW, not a count of observations. A count does not work:
  * `refresh()` runs on registry-directory events AND on every `register()`, so an unrelated Claude
  * terminal opening can supply a second observation in the same millisecond as the first, confirming
  * nothing. Elapsed time is the only thing the index path can be outrun by.

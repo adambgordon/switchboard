@@ -264,8 +264,8 @@ export default function MainPane(props: Props) {
   // Closing the bar clears the search. activeIndex is deliberately NOT reset here: the [deferredQuery]
   // effect below already resets it on every query change (including this clear-to-empty), coupled to the
   // DEFERRED query. Resetting it here — immediately, while deferredQuery still lags on the old query —
-  // made the search hook briefly see (index 0, old query, still-live ranges) and scroll back to match #0
-  // on close (the "snap back to where I opened search" bug).
+  // would let the search hook briefly see (index 0, old query, still-live ranges) and scroll back to
+  // match #0 on close.
   useEffect(() => {
     if (!findOpen) {
       setFindQuery('')

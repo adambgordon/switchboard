@@ -128,13 +128,14 @@
   border-radius: var(--r-sm);
   /* A real BORDER, not just a shadow. The clone travels over every surface in the window — the
      transcript, the terminal, another pane — and a soft shadow against a light surface leaves it
-     edgeless: over the terminal's own paper it read as nothing at all. A 1px rule is the only thing
+     edgeless: over the terminal's own paper it reads as nothing at all. A 1px rule is the only thing
      that holds an edge against an arbitrary background. */
   border: 1px solid var(--rule-strong);
   background: var(--tab-drag-surface, var(--paper-raised));
   color: var(--ink);
   box-shadow: var(--shadow-pop);
-  /* Fully opaque: at 0.92 the surface beneath showed through and undid the border's whole job. */
+  /* Fully opaque: any translucency (even 0.92) lets the surface beneath show through and undoes the
+     border's whole job. */
   opacity: 1;
 }
 /* Carrying several: a fake stack behind the clone plus a count, so the drag says how much it holds.
@@ -224,8 +225,8 @@ body.sb-window-drop-target .sb-tabstrip {
   user-select: none;
   position: relative;
   /* Hover and activation are one atomic paint. Letting the old active background fade after its rule
-     disappeared produced a visible borderless frame, while the new tab's close fade changed surface
-     immediately and rendered as a separate rectangle during the same transition. */
+     disappears shows a borderless frame, while the new tab's close button, changing surface at once,
+     renders as a separate rectangle during the same transition. */
 }
 .sb-tab:hover {
   --tab-close-surface: var(--tab-hover);

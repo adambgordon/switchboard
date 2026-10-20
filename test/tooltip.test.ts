@@ -56,9 +56,9 @@ describe('clampTipText', () => {
     //
     // THE BUDGET'S PARITY DECIDES WHETHER THIS TEST CAN FAIL AT ALL. A UTF-16 implementation only
     // splits a pair when a slice length is ODD, so `max` has to be chosen to produce one: 22 gives
-    // head = ceil(21/2) = 11, which cuts the 6th emoji in half. An earlier version of this test used
-    // 21 — head and tail both 10, both even — and passed against a deliberately broken `split('')`
-    // implementation. It was asserting nothing.
+    // head = ceil(21/2) = 11, which cuts the 6th emoji in half. A budget of 21 gives head and tail
+    // 10 each, both even, and passes against a UTF-16 `split('')` implementation, so it would
+    // assert nothing.
     for (const max of [22, 23, 41]) {
       const out = clampTipText('🎉'.repeat(400), max)
       // A HIGH surrogate not followed by a low one, and a LOW one not preceded by a high one. The
@@ -93,7 +93,7 @@ describe('placeTip', () => {
   })
 
   it('flips ABOVE when the label is too tall to fit below', () => {
-    // The case the old 60px probe got wrong: plenty of room by its test, nowhere near enough in fact.
+    // A fixed-height probe misjudges this: it sees plenty of room, and there is nowhere near enough.
     const p = placeTip(box(300, { hostTop: 700, hostBottom: 720 }))
     expect(p.side).toBe('top')
     // `top` is in the -100% transform's frame, so it is the host's edge minus the gap.

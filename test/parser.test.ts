@@ -887,7 +887,7 @@ describe('extractTurnState', () => {
     expect(r.lastActivityAt).toBeNull()
   })
 
-  // --- non-conversational trailing user lines must NOT read as in_progress (Issue 1) ---
+  // --- non-conversational trailing user lines must NOT read as in_progress ---
 
   it('stays awaiting when a finished turn is followed by /model command output', () => {
     // Running `/model` after an end_turn appends user lines (caveat + command + stdout) that are
@@ -970,7 +970,7 @@ describe('extractTurnState', () => {
     expect(r.turnState).toBe('awaiting')
   })
 
-  it('treats an interrupt sentinel as awaiting, aborting a dangling tool_use (closes the interrupted-reads-as-working gap)', () => {
+  it('treats an interrupt sentinel as awaiting, aborting a dangling tool_use', () => {
     const r = extractTurnState(
       jsonl([
         {

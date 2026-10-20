@@ -11,15 +11,14 @@
  * outlives the Codex process it was matched against, so every live Codex PTY is a target here —
  * including resumed and already-confirmed ones. See `CodexPtyTarget`.
  *
- * Why it uses the OS rather than time. Four successive timing heuristics were tried and each was
- * broken by a real counterexample: spawn order (an untouched older tab stole a used tab's rollout),
- * "input contained \r" (a bracketed paste looked like a submit), a discrete post-boot Enter (Enter on
- * an empty composer produces no rollout, yet still competed), and nearest-timestamp pairing (nearest
- * is not causal — a first turn processed late loses to the next tab's submit). The lesson, stated
- * once so it isn't relearned: TIMING CAN SUGGEST IDENTITY BUT CANNOT PROVE IT. A missed bind is a
- * terminal that works but isn't linked to its row — visible, bounded, recoverable. A WRONG bind puts
- * a row's Terminal on one conversation and its Formatted view on another, and feeds the liveness dot
- * another process's timestamps, so every view lies at once.
+ * Why it uses the OS rather than time. TIMING CAN SUGGEST IDENTITY BUT CANNOT PROVE IT, and every
+ * timing heuristic has a counterexample: spawn order (an untouched older tab steals a used tab's
+ * rollout), "input contained \r" (a bracketed paste looks like a submit), a discrete post-boot Enter
+ * (Enter on an empty composer produces no rollout, yet still competes), and nearest-timestamp pairing
+ * (nearest is not causal — a first turn processed late loses to the next tab's submit). A missed
+ * bind is a terminal that works but isn't linked to its row — visible, bounded, recoverable. A WRONG
+ * bind puts a row's Terminal on one conversation and its Formatted view on another, and feeds the
+ * liveness dot another process's timestamps, so every view lies at once.
  *
  * So identity comes from evidence the OS already owns: a live Codex process holds its rollout file
  * open, and both that process and the shell Switchboard spawned expose file descriptor 0 as the same
@@ -82,7 +81,7 @@ export interface ProbeOptions {
 }
 
 const LSOF_PATH = '/usr/sbin/lsof'
-/** The measured probe is ~40ms; this is a generous ceiling, not a typical value. Bounded so a wedged
+/** A probe takes ~40ms; this is a generous ceiling, not a typical value. Bounded so a wedged
  *  lsof can never stall the re-index path that schedules it. */
 const LSOF_TIMEOUT_MS = 2000
 /** Bounded so pathological output can't balloon main's memory. A two-process probe is ~5KB. */
@@ -99,8 +98,8 @@ const FD_ZERO_RE = /^0[rwu\-]?$/
  * The bare `/dev/tty` is excluded, and that exclusion is load-bearing rather than tidy-mindedness:
  * `/dev/tty` is not a device, it is an alias meaning "whichever terminal the calling process is
  * attached to" — so it names a DIFFERENT terminal for every process that opens it. lsof reports it
- * verbatim without resolving it (verified: a process showed `f0 /dev/ttys004` and `f3 /dev/tty`
- * simultaneously). Used as a map key it would make two processes on two unrelated terminals look like
+ * verbatim without resolving it, so one process can show `f0 /dev/ttys004` and `f3 /dev/tty` at
+ * once. Used as a map key it would make two processes on two unrelated terminals look like
  * one, which is exactly the cross-terminal wrong bind this module exists to make impossible. Today's
  * Codex inherits its stdin so it reports a real device, but reopening `/dev/tty` as stdin is a common
  * TUI pattern — one upstream change away.
@@ -194,8 +193,9 @@ export function parseLsof(raw: string): LsofProcess[] {
 }
 
 /** The distinct `/dev/tty…` names this process exposes on fd 0 — its controlling terminal. Only fd 0
- *  counts: the same device also shows up on fds 1, 2 and (observed) 31, and on helper processes that
- *  merely INHERITED the terminal, so widening this would let a helper impersonate the session owner. */
+ *  counts: the same device also shows up on fds 1, 2 and higher descriptors, and on helper processes
+ *  that merely INHERITED the terminal, so widening this would let a helper impersonate the session
+ *  owner. */
 function fdZeroTtys(proc: LsofProcess): Set<string> {
   const ttys = new Set<string>()
   for (const f of proc.files) {
@@ -343,9 +343,9 @@ export async function resolveCodexBindings(
 /**
  * Run the probe and return stdout, or null when the output can't be trusted.
  *
- * The central trap, verified against lsof 4.91 on macOS: **lsof exits 1 whenever ANY requested pid no
- * longer exists**, while still printing complete, correct output for the ones that do (measured: one
- * live + one dead pid → exit 1, 347 bytes, all live records present, empty stderr). Target pids are
+ * The central trap (as of lsof 4.91 on macOS): **lsof exits 1 whenever ANY requested pid no longer
+ * exists**, while still printing complete, correct output for the ones that do, with empty stderr
+ * (one live + one dead pid → exit 1, all live records present). Target pids are
  * snapshotted before the probe, so a terminal closing mid-probe makes that routine — and treating
  * a nonzero exit as failure would disable binding at random. So a clean nonzero exit IS parsed.
  *
@@ -361,7 +361,7 @@ export async function resolveCodexBindings(
  *
  * Residual, stated rather than papered over: lsof can skip an individual fd it cannot stat, warn, and
  * still exit cleanly — record loss indistinguishable from the file simply not being open. stderr is
- * not a usable signal for it (measured empty even for permission-denied probes of root processes).
+ * not a usable signal for it: it stays empty even for permission-denied probes of root processes.
  * This is accepted: it needs a fd we own to become unstattable, and it degrades to a missed bind
  * unless it lands on the second rollout of a contested terminal.
  */

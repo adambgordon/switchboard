@@ -3,7 +3,8 @@ import { startFocusSync } from '../src/renderer/lib/focusSync'
 
 /**
  * Drives startFocusSync with the seed held open, so the window between "subscribed" and "seed
- * resolved" — the window the real defect lived in — is directly reachable.
+ * resolved" — the window where an ordering mistake would drop a transition — is directly
+ * reachable.
  */
 function harness() {
   const order: string[] = []

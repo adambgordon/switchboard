@@ -121,9 +121,9 @@ describe('installScrollbackSafeScrollUp', () => {
     //
     // It does NOT prove the shim declined. `BufferService.scroll()` branches on `scrollTop`
     // itself and performs the same in-place rotation when it is non-zero, so intercepting here
-    // yields an identical buffer. Verified by mutation: neutering the `scrollTop` guard leaves
-    // this case green. The guard is covered by the fail-closed test of the same name below, which
-    // asserts the handler's return value directly — the only place that distinction is visible.
+    // yields an identical buffer, and this case stays green with the `scrollTop` guard neutered. The
+    // guard is covered by the fail-closed test of the same name below, which asserts the handler's
+    // return value directly — the only place that distinction is visible.
     expect(rowText(term, 2)).toBe('5')
   })
 
@@ -219,8 +219,8 @@ describe('installScrollbackSafeScrollUp fail-closed guards', () => {
     }
     const bufferService = overrides.omit === 'buffer' ? {} : { buffer: privateBuffer }
     const core = {
-      // The default advances the PUBLIC base, as a committing scroll does. That is what makes a
-      // revert to the private `ybase` observable: such a mutant would read `undefined` on both
+      // The default advances the PUBLIC base, as a committing scroll does. That is what makes
+      // reading the private `ybase` observable: an implementation doing so would read `undefined` on both
       // sides of the per-iteration delta and write NaN into `savedY`, while still returning true.
       scroll:
         'scroll' in overrides
@@ -253,9 +253,9 @@ describe('installScrollbackSafeScrollUp fail-closed guards', () => {
     const result = invokeWith({})
     expect(result.handled).toBe(true)
     expect(result.baseY).toBe(1)
-    // The assertion that pins the public-`baseY` migration. Reading the private `ybase` instead
+    // The assertion that pins reading the public `baseY`. Reading the private `ybase` instead
     // would leave this NaN — the fake has no such field — while `handled` and `baseY` stay correct,
-    // so a return-value-only assertion cannot see that revert.
+    // so a return-value-only assertion cannot see that mistake.
     expect(result.savedY).toBe(1)
   })
 

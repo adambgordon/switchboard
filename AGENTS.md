@@ -6,7 +6,7 @@ Stack: Electron 42 (pinned as `latest`, so it tracks upstream) · electron-vite 
 
 ## Set up Switchboard (first run)
 
-When the user asks to **"Set up Switchboard"** (typically from a fresh clone — this is the phrase the public README's "Set up" section points them at), run the one-shot setup and then open the built app:
+When the user asks to **"Set up Switchboard"** (typically from a fresh clone — this is the phrase the README's "Set up" section points them at), run the one-shot setup and then open the built app:
 
 ```bash
 npm run setup
@@ -17,7 +17,7 @@ open dist/mac-arm64/Switchboard.app
 
 ## Update Switchboard
 
-When the user asks to **"Update Switchboard"** (the phrase the public README's "Updates" section points them at), pull the latest and re-run the one-shot build, then reopen:
+When the user asks to **"Update Switchboard"** (the phrase the README's "Updates" section points them at), pull the latest and re-run the one-shot build, then reopen:
 
 ```bash
 git pull
@@ -56,7 +56,7 @@ Set `SWITCHBOARD_FAKE_UPDATE=current|behind|unknown` before `npm run dev` to for
 The detailed implementation lore lives in `docs/` so it isn't loaded into every session. Mention the relevant path and the file is pulled in on demand — these are intentionally *not* `@`-imported (which would re-expand them into context). Read the one that covers what you're about to touch:
 
 - **[`docs/architecture.md`](docs/architecture.md)** — module map, the IPC contract (`src/shared/types.ts`), main-process layout (including project-root resolution), the rail's model and ranks, renderer state hooks, the liveness model, the rename / info modal, navigation & focus, Preferences, find-in-conversation, tooltips, theming. *Read before touching `src/main/**`, IPC, or any renderer state/behavior — liveness, navigation/focus, find, theming, modals.*
-- **[`docs/gotchas.md`](docs/gotchas.md)** — subsystem traps that have bitten before: node-pty rebuild, the ⌘R-refresh custom menu, terminal/xterm rendering (WebGL/canvas, lineHeight, Unicode v11, cursor, hidden-repaint, the 0×0-resize trap, initial-fit ordering), font warming, packaging, localStorage, the macOS Option key. *Read before touching the terminal, the menu, fonts, the build, or the Formatted view.*
+- **[`docs/gotchas.md`](docs/gotchas.md)** — subsystem traps worth knowing: node-pty rebuild, the ⌘R-refresh custom menu, terminal/xterm rendering (WebGL/canvas, lineHeight, Unicode v11, cursor, hidden-repaint, the 0×0-resize trap, initial-fit ordering), font warming, packaging, localStorage, the macOS Option key. *Read before touching the terminal, the menu, fonts, the build, or the Formatted view.*
 - **[`docs/design.md`](docs/design.md)** — visual & UX invariants: the two-accent color system, the rail's rows, ordering and caps, single-family type, preview≠spawn, the read-only Formatted view, transcript rendering, design tokens, the two-theme rules. *Read before any change to visual appearance — CSS, color, layout, the two-accent / two-theme rules.*
 
 ## Conventions

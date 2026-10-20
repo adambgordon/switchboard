@@ -15,9 +15,9 @@ import { advanceMark, clearMark, rekeyMark, setMark, type Marks } from './marks'
  *
  * EVERY WINDOW SHARES THIS STORE, and none of them is the owner. Two consequences shape the code
  * below. Mutations are applied to what is on DISK, not to what this window last rendered: each one
- * re-reads, folds in a single change, and writes back — so a window can no longer revert changes it
- * never saw. (It previously serialized its whole in-memory map, which meant one window's save undid
- * every marker another had touched since it loaded, not just the one they disagreed about.) And a
+ * re-reads, folds in a single change, and writes back — so a window cannot revert changes it never
+ * saw. (Serializing the whole in-memory map would let one window's save undo every marker another
+ * had touched since it loaded, not just the one they disagreed about.) And a
  * `storage` subscription keeps the rendered copy current when another window writes, so two windows
  * do not sit showing different dots for the same conversation.
  *

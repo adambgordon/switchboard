@@ -164,10 +164,10 @@ input::placeholder {
   pointer-events: none;
   /* Size to the TEXT, capped — never to the room left beside it. A fixed box carrying a `left` and no
      width shrink-wraps to whatever space remains on that side, which near the right edge is a few
-     pixels; that is why this rule once said `white-space: nowrap`, to stop a label by the title-bar
-     gear collapsing into a one-character-per-line column. But nowrap only moved the failure: the box
-     still obeyed `max-width` while the text ran straight out of it, so a long label painted past its
-     own background as pale text on the page and read as though it had been cut off mid-word.
+     pixels, collapsing a label by the title-bar gear into a one-character-per-line column.
+     `white-space: nowrap` does not cure that: the box still obeys `max-width` while the text runs
+     straight out of it, so a long label paints past its own background as pale text on the page and
+     reads as though it had been cut off mid-word.
      `max-content` makes the width a property of the text rather than of the position, so a short
      label is one tight line and a long one wraps at the cap — with no overflow either way. */
   width: max-content;

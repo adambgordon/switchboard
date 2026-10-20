@@ -6,9 +6,9 @@ export type TabPersistAction = 'activate' | 'persist' | 'clear' | 'ignore'
  *
  * Clearing the saved workspace is the right response to the user actively switching the feature
  * off — the tabs they had are not coming back and should not reappear later. It is the wrong
- * response to the feature merely BEING off, which is the state every launch starts in now that the
- * default is off. Deciding on the current value alone conflates the two, so the first launch with
- * the toggle off deletes a layout the user never asked to lose.
+ * response to the feature merely BEING off, which is the state a launch starts in whenever the
+ * preference is off. Deciding on the current value alone conflates the two, so a launch with the
+ * toggle off would delete a layout the user never asked to lose.
  *
  * `ignore` is therefore a distinct outcome from `clear`, not a variant of it: while the feature is
  * off the window holds a single preview tab, so persisting that would overwrite a saved multi-tab

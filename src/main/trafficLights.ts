@@ -9,8 +9,8 @@ import { BrowserWindow } from 'electron'
  * "Switchboard" wordmark drifts. We can't resize the native buttons (Slack's don't either), but we
  * can reposition them per zoom so they stay centered + proportionally gapped — "zoom in place".
  *
- * The renderer pings `syncTrafficLights` on every `resize` (which fires on every zoom change —
- * verified), and we re-read the authoritative `webContents.getZoomFactor()` here.
+ * The renderer pings `syncTrafficLights` on every `resize` (which fires on every zoom change),
+ * and we re-read the authoritative `webContents.getZoomFactor()` here.
  */
 
 // Resting inset at 100% zoom: a hair higher and to the left of where macOS would center the lights in

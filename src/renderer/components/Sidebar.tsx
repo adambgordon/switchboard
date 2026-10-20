@@ -259,7 +259,7 @@ export default function Sidebar({
   const empty = model.groups.every((g) => g.blocks.length === 0 && !g.collapsed)
   const filtering = filter.size > 0
 
-  // Obsidian-style scrollbar: the thumb shows only while scrolling (+ a beat after), never at rest.
+  // Auto-hiding scrollbar: the thumb shows only while scrolling (+ a beat after), never at rest.
   const listRef = useRef<HTMLDivElement>(null)
   useAutoHideScrollbar(listRef)
   // Fade the last rows when the list overflows and isn't scrolled to the bottom (more below).

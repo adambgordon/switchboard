@@ -71,8 +71,8 @@ function expectInvariants(l: PaneLayout): void {
   // that can introduce an id (`open`, `move`, `rekey`, `retarget`), and each asserts it directly. It is
   // deliberately NOT a blanket invariant here, because two tests below start from a duplicate fixture
   // ON PURPOSE: they pin that `promote` and `rekey` are pane-scoped, and the only way to show a pane
-  // was left alone is to give it something to leave alone. Those fixtures are states the reducer can
-  // no longer produce, which is exactly why they have to be built by hand.
+  // was left alone is to give it something to leave alone. Those fixtures are states the reducer
+  // cannot produce, which is exactly why they have to be built by hand.
 }
 
 /** Apply one action and assert the invariants survived it. */
@@ -865,7 +865,7 @@ describe('rekey — a placeholder id became real', () => {
   })
 
   it('drops the placeholder when the real id is open in the OTHER pane', () => {
-    // The hole a per-pane collision check left. Renaming here would have produced two tabs for one
+    // A per-pane collision check misses this: renaming here would produce two tabs for one
     // conversation, one in each pane — which is precisely the state one-tab-per-conversation exists to
     // prevent, arrived at by a route that never went through `open`.
     const before = layout(
@@ -968,8 +968,8 @@ describe('retarget — a live terminal moved to another real conversation', () =
   })
 
   it('follows an existing tab for the new id into the OTHER pane', () => {
-    // Same hole as rekey's, by the same route: the collision check looked only at the focused pane, so
-    // this renamed p0's tab onto an id p1 already held. Asserted on the whole window, and on focus
+    // Same case as rekey's, by the same route: a collision check limited to the focused pane would
+    // rename p0's tab onto an id p1 already holds. Asserted on the whole window, and on focus
     // moving — the conversation the terminal is now running is over there, so that is where the user
     // has to end up for the selection to keep meaning what it says.
     const before = layout([pane('p0', [t('S1')], 0), pane('p1', [t('S2')], 0)], 0)
@@ -987,7 +987,7 @@ describe('collapseToSingle — the feature switched off', () => {
   it('keeps exactly what is on screen, as a preview tab, in the pane the user was in', () => {
     // The surviving pane is the FOCUSED one, so the terminals most likely to be live and visible keep
     // their home and are not remounted. Everything else goes: with tabs off there is one slot and the
-    // next open replaces it, which is the pre-tabs behavior exactly.
+    // next open replaces it.
     const before = layout([pane('p0', [t('A'), t('B')], 1), pane('p1', [t('C'), t('D')], 0)], 1)
     const after = step(before, { type: 'collapseToSingle' })
     expect(after).toEqual({

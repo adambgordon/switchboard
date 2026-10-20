@@ -71,7 +71,7 @@ describe('sessionStatusFromRegistry', () => {
 
   it('reads a record that carries no parked marker at all', () => {
     // The common shape, and the one the parked parser rejects. Asserted explicitly because reusing
-    // that parser would have made every ordinary session statusless.
+    // that parser would make every ordinary session statusless.
     const plain = record({ parkedJobId: undefined, status: 'busy' })
     expect(parkedJobFromRegistry(plain)).toBeNull()
     expect(sessionStatusFromRegistry(plain)?.status).toBe('busy')
@@ -136,8 +136,8 @@ describe('ClaudeParkedJobMonitor', () => {
 
   /**
    * Drive one more refresh without moving the clock, the way production does when an unrelated Claude
-   * terminal registers. This is the path that used to satisfy the old two-observation counter
-   * instantly; a fresh id each time so it registers rather than replacing.
+   * terminal registers. This is the path that would satisfy a count of observations instantly; a
+   * fresh id each time so it registers rather than replacing.
    */
   function observeAgain(m: ClaudeParkedJobMonitor): void {
     m.register(`pty-other-${nth++}`, B)
@@ -218,8 +218,8 @@ describe('ClaudeParkedJobMonitor', () => {
   })
 
   it('does not confirm on a second observation that costs no time', () => {
-    // The regression. Confirmation used to be a COUNT of observations, and `refresh()` runs on every
-    // register(), so an unrelated Claude terminal opening in the same millisecond supplied the second
+    // Confirmation is a duration, not a COUNT of observations: `refresh()` runs on every register(),
+    // so an unrelated Claude terminal opening in the same millisecond would supply a second
     // observation for free — reporting the marker well inside the ~600 ms the transcript needs to be
     // indexed, which is the flash the window exists to prevent.
     writeFileSync(join(root, '4242.json'), record())
@@ -277,7 +277,7 @@ describe('ClaudeParkedJobMonitor', () => {
   })
 
   it('ignores a record whose process is gone, so a resumed id inherits nothing', () => {
-    // Claude leaves the registry file behind when a session dies — observed in practice.
+    // Claude leaves the registry file behind when a session dies.
     alive.clear()
     writeFileSync(join(root, '4242.json'), record())
     const m = build()

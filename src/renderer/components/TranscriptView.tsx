@@ -88,8 +88,8 @@ const WINDOW = 60
 const GROW_STEP = 120
 const REFRESH_SCROLL_SETTLE_MS = 100
 // Reverse infinite-scroll: start mounting the next-older chunk once the user scrolls within this many
-// px of the top, so it's in place before they reach it. Replaces the old eager idle-grow, which
-// prepended while pinned to the bottom and caused the open-time shake.
+// px of the top, so it's in place before they reach it. Growth waits for a scroll-up: prepending
+// while pinned to the bottom shakes the view on open.
 const GROW_TRIGGER_PX = 1500
 // Most loads land well inside this, and a skeleton shown for a frame or two reads as a flicker; the
 // pane stays blank until a load has visibly taken a while.
@@ -292,8 +292,8 @@ export default function TranscriptView({
       //  • the user scrolled UP — scrollTop DECREASES — which releases the pin; vs
       //  • content GREW beneath a fixed scrollTop (tool results clamping, the window growing) —
       //    scrollTop is UNCHANGED — which must NOT release it.
-      // Mistaking the latter for the former was the large-conversation bug: a single >NEAR_BOTTOM_PX
-      // post-pin height settle latched near=false and stranded the view mid-history. So only an actual
+      // Mistaking the latter for the former lets a single >NEAR_BOTTOM_PX post-pin height settle
+      // latch near=false and strand the view mid-history. So only an actual
       // decrease releases the pin; an unchanged scrollTop with a gap means re-assert the bottom.
       if (top < prev - 0.5) {
         nearBottomRef.current = false
@@ -306,8 +306,8 @@ export default function TranscriptView({
       nearBottomRef.current = true
     }
     // Reverse infinite-scroll: mount the next-older chunk as the user nears the top. Gated to AFTER
-    // they've scrolled up off the bottom (never the initial pinned open — that was the eager-grow
-    // shake), one chunk at a time. The compensation effect preserves position on the prepend.
+    // they've scrolled up off the bottom (never the initial pinned open, where a prepend shakes the
+    // view), one chunk at a time. The compensation effect preserves position on the prepend.
     if (
       !nearBottomRef.current &&
       !searchingRef.current &&
@@ -548,9 +548,9 @@ export default function TranscriptView({
     growPendingRef.current = false
     growHeightRef.current = null
   }
-  // The window grows ON SCROLL-UP now (handleScroll), not eagerly: eager idle-grow prepended chunks
-  // while pinned to the bottom, and chasing the bottom through each prepend produced the open-time
-  // shake. Search and jump-to-top still force a full mount on demand (effects below / jumpToEdge).
+  // The window grows ON SCROLL-UP (handleScroll), never while pinned: prepending chunks while pinned
+  // to the bottom, and chasing the bottom through each prepend, shakes the view on open. Search and
+  // jump-to-top still force a full mount on demand (effects below / jumpToEdge).
   // A search must reach matches in older messages, so mount everything while searching — and leave it
   // mounted (bump visibleCount, don't just override the slice) so clearing the search doesn't shrink
   // the list back and yank the scroll position.
@@ -637,8 +637,7 @@ export default function TranscriptView({
     if (!el) return
     // A jump is an explicit pin choice. Jumping to the TOP must release the bottom-stick: otherwise the
     // scroll handler, still pinned, reads the resulting gap to the bottom as content-grew-beneath and
-    // snaps right back down (the jump only "worked" once you'd scrolled up first, which already cleared
-    // the stick). Jumping to the BOTTOM resumes sticking.
+    // snaps right back down. Jumping to the BOTTOM resumes sticking.
     nearBottomRef.current = !toTop
     // Jump-to-top needs the whole transcript mounted first (the window may hold only the tail): flag it
     // and let the layout effect scroll to the true top once the grow-to-full completes.

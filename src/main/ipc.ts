@@ -318,10 +318,10 @@ function endTabDrag(): void {
  *
  * `excludeId` is load-bearing, and the reason is that **`getAllWindows` does not promise z-order** —
  * Electron exposes no z-order for all windows. Detached windows are cascaded off the first
- * one, so they overlap it: hit-testing in creation order finds the SOURCE window under the cursor and
- * concludes the drag never left it, which made every cross-window drop cancel. The source renderer
- * knows the one thing main cannot — whether the pointer is still inside its own viewport — so when it
- * says the pointer is out, that window is excluded from the test entirely rather than guessed about.
+ * one, so they overlap it: hit-testing in creation order would find the SOURCE window under the
+ * cursor and conclude the drag never left it, canceling every cross-window drop. So the tab-drag
+ * handlers always pass the source's id, and that window is excluded from the test entirely rather
+ * than guessed about. The source renderer is never asked where the pointer is (see the handlers).
  */
 function windowUnderCursor(excludeId?: number): BrowserWindow | null {
   const { x, y } = screen.getCursorScreenPoint()
@@ -488,8 +488,8 @@ let lastBroadcastSig: string | null = null
  *
  * We keep polling for LIVE_INDEX_WINDOW_MS after the LAST output byte (not just while strictly
  * "busy"), so the turn-END marker — which Codex writes a beat after the visible output stops — is
- * caught by this fast poll instead of waiting on the slower watcher path (which is what left the dot
- * breathing ~2-3s too long). A truly idle session (no output for the window) still costs nothing.
+ * caught by this fast poll instead of waiting on the slower watcher path, which would leave the dot
+ * breathing ~2-3s too long. A truly idle session (no output for the window) still costs nothing.
  */
 const LIVE_TICK_MS = 500
 const LIVE_INDEX_WINDOW_MS = 2500
@@ -539,7 +539,7 @@ const conversationIndex = new LatestTask(
     // Deliberately NOT awaited, and deliberately ABOVE the identical-groups early return: the probe
     // shells out to lsof, which must never delay the session-list broadcast, and a pass whose groups
     // are byte-identical to the last one is still a pass where a rollout may have just become
-    // observable — returning early before scheduling it would strand exactly the case this fixes.
+    // observable — returning early before scheduling it would strand exactly the case this handles.
     // The hasCodexToProbe() gate keeps the id set from being built when no Codex session is live at
     // all; this function runs twice a second while anything is live. The manager itself is what stays
     // quiet once every terminal is confirmed, so a settled app does no lsof work.
@@ -1003,11 +1003,10 @@ export function registerIpc(): void {
     if (!payload) return
     tabDrag = { sourceId: e.sender.id, payload, hoveringId: null }
   })
-  // Resolved from the cursor and window bounds alone. An earlier version asked the source renderer
-  // whether the pointer had left its own viewport and only looked for a target when it said yes — which
-  // breaks precisely where it matters: a detached window is CASCADED off the one that spawned it, so
-  // the two overlap, and a pointer over the second is still inside the first's rectangle. The answer
-  // came back "no", and every cross-window drop canceled.
+  // Resolved from the cursor and window bounds alone, never by asking the source renderer whether the
+  // pointer has left its own viewport: a detached window is CASCADED off the one that spawned it, so
+  // the two overlap, and a pointer over the second is still inside the first's rectangle. The renderer
+  // would answer "no", and every cross-window drop would cancel.
   //
   // So: the source is excluded from the search, and any OTHER window containing the cursor wins. The
   // one case this reads wrongly is a source window sitting ON TOP of another and the release landing
@@ -1229,7 +1228,7 @@ export function registerIpc(): void {
 
   // --- live turn-state: recent-activity-gated periodic re-index ---
   // The watcher catches structural changes, but Codex's lazy / boundary-clustered rollout flushes
-  // mean a change event often arrives only once a turn is already complete (verified empirically). So
+  // mean a change event often arrives only once a turn is already complete. So
   // re-index on a timer while a live session produced output within LIVE_INDEX_WINDOW_MS — the active
   // turn AND a short tail after it (so the turn-end marker is caught by this fast poll). The gate
   // makes a truly idle session free; the in-flight guard keeps a slow re-index from stacking.

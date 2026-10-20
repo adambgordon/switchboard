@@ -45,11 +45,11 @@ export function displayTitleForRow(pty: PtyState | null, meta: ConversationMeta)
  * terminal's. Callers that bucket rows can therefore read `null` as unlinked whenever they already
  * know the pty is live, rather than re-testing the predicate.
  *
- * This composition — gate, then resolve — was previously hand-copied at three call sites in `App`,
- * and one of them had been written without the gate, which is how a background-agent row came to
- * show a liveness dot for someone else's transcript. It lives in `lib/` so it is reachable from the
- * unit tests (`App` is not, being React), and in THIS module rather than `liveness` because the gate
- * is the identity concern: the dependency runs one way, so liveness stays ignorant of identity.
+ * This composition — gate, then resolve — lives in one place so every caller gets the gate:
+ * resolving without it would give a background-agent row a liveness dot for a transcript that is
+ * not its own. It lives in `lib/` so it is reachable from the unit tests (`App` is not, being
+ * React), and in THIS module rather than `liveness` because the gate is the identity concern: the
+ * dependency runs one way, so liveness stays ignorant of identity.
  */
 export function resolveRowLiveState(
   pty: PtyState | null,
@@ -81,8 +81,8 @@ export type LiveDotClass = 'busy' | 'asking' | 'quiet' | 'awaiting' | 'unlinked'
  * Every surface that draws a session's dot MUST come through here. That is not tidiness: the same
  * session is drawn in two places at once (a rail row and a tab), and a viewer reads them as one claim
  * about one session. Two derivations are two claims, and the moment they disagree the app is lying in
- * at least one of them — which is precisely how a tab came to show a solid "finished, unseen" dot
- * beside a row showing the hollow "idle" one, for the same session, at the same moment.
+ * at least one of them: a tab showing a solid "finished, unseen" dot beside a row showing the hollow
+ * "idle" one, for the same session, at the same moment.
  *
  * `unlinked` is resolved from the pty and meta rather than accepted as an argument, so a caller cannot
  * pass a flag that disagrees with {@link isUnlinkedRow}.

@@ -257,8 +257,8 @@
 /* ---- resizable pane dividers ---- */
 /* The divider IS a flush 1px rule: the element is 1px wide and carries the line as
    its own background, so the rail (left) and main pane (right) — and their horizontal
-   hairlines — meet it with no gap. (Previously a 5px-wide handle floated a centered
-   1px line, leaving 2px of --paper on each side that broke the connection.) The grab
+   hairlines — meet it with no gap. (A wider handle carrying a centered 1px line would
+   leave a strip of --paper on each side and break that connection.) The grab
    target is a transparent overlay spilling onto both panes, taking no layout width. */
 .sb-resize-handle {
   flex: 0 0 1px;
@@ -551,8 +551,8 @@ body.sb-resizing .sb-pane {
 .sb-modal-group:first-child {
   margin-top: 0;
 }
-/* Shortcuts-page section header (the App page no longer renders labels): Hanken display, bold —
-   not the mono/caps `label-caps` utility. */
+/* Shortcuts-page section header: Hanken display, bold — not the mono/caps `label-caps`
+   utility. */
 .sb-modal-group-label {
   font-family: var(--font-display);
   font-size: var(--text-md);
@@ -1238,9 +1238,9 @@ body.sb-resizing .sb-pane {
   color: var(--ink);
 }
 
-/* live-sessions cap — a compact slider sitting flush-right in the setting head (where the stepper
-   was): slider, value, reset. Neutral INK fill + thumb only (never cobalt — the two-accent
-   invariant; matches the ink toggle). */
+/* live-sessions cap — a compact slider, left-aligned in its setting (see `.sb-setting
+   .sb-slider-control`): slider, value, reset. Neutral INK fill + thumb only (never cobalt —
+   the two-accent invariant; matches the ink toggle). */
 .sb-slider-control {
   display: flex;
   align-items: center;

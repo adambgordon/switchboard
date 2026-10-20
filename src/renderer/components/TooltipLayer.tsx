@@ -65,8 +65,8 @@ function tipText(el: Element): string | null {
 
 /**
  * App-wide tooltips. One fixed-positioned label driven by `data-tip` attributes anywhere in the
- * tree — the replacement for native `title`, which lags ~1s and resets on the slightest pointer
- * move (so it rarely showed). Delegated off document mouseover/out, so any element opts in with a
+ * tree — used instead of native `title`, which lags ~1s and resets on the slightest pointer
+ * move. Delegated off document mouseover/out, so any element opts in with a
  * single `data-tip`; fixed positioning escapes scroll/overflow containers (the rail list, the modal).
  * Ink-on-paper — never an accent, per the two-color invariant.
  *
@@ -109,12 +109,11 @@ export default function TooltipLayer() {
       // Preferences copy is never truncated. The clamp exists for strings the app does not author and
       // cannot bound — a link's tip is its raw href, a row's is a conversation title — where losing
       // the middle is the lesser harm. Every tooltip in Preferences is prose written to be read, and
-      // cutting it mid-sentence produced exactly the nonsense the clamp is meant to prevent
-      // ("starting another recl…s is intended to prevent").
+      // cutting it mid-sentence produces exactly the nonsense the clamp is meant to prevent.
       //
-      // Scoped by CONTAINER, not by an opt-in attribute, and deliberately so: the failure being fixed
-      // is that authored copy got truncated at all, and an attribute someone must remember to add
-      // reintroduces it for the next setting written. `data-tip-wide` is NOT the signal here — a
+      // Scoped by CONTAINER, not by an opt-in attribute, and deliberately so: authored copy must
+      // never be truncated, and an attribute someone must remember to add would leave the next
+      // setting written unprotected. `data-tip-wide` is NOT the signal here — a
       // markdown link carries it alongside a thousand-character href (see MessageBlock), which is the
       // case the clamp most needs to keep.
       //
@@ -154,10 +153,10 @@ export default function TooltipLayer() {
     }
     const onOver = (e: MouseEvent): void => {
       // Never while a button is held. A drag sweeps the pointer across the whole window, so every
-      // `data-tip` host it passes would arm a tooltip — and one duly appeared over a tab being
-      // dragged, describing a conversation the user was in the middle of moving. Stated as "no
-      // tooltips during any drag" rather than as a check for this particular one: a label explaining
-      // what is under the pointer is meaningless while the pointer is carrying something.
+      // `data-tip` host it passes would arm a tooltip — over a dragged tab, one would describe the
+      // conversation being moved. The rule is "no tooltips during any drag", not a check for any
+      // one case: a label explaining what is under the pointer is meaningless while the pointer is
+      // carrying something.
       if (e.buttons !== 0) return
       const el = hostOf(e.target)
       if (!el || el === activeRef.current) return

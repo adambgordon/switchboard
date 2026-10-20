@@ -343,9 +343,8 @@ const BACKGROUND_HANDOFF = 'Backgrounding after the current tool finishes'
 
 /**
  * Name of the LAST `tool_use` block in an assistant message's content, or null if it has
- * none. Blocking tools are emitted as a lone, terminal tool_use (verified across every
- * occurrence on disk), so the last tool_use is the one that decides whether the turn is
- * parked on the user.
+ * none. Blocking tools are emitted as a lone, terminal tool_use, so the last tool_use is
+ * the one that decides whether the turn is parked on the user.
  */
 function lastToolUseName(message: unknown): string | null {
   if (!message || typeof message !== 'object') return null

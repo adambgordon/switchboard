@@ -66,7 +66,7 @@ describe('tab workspace sanitizing', () => {
     })
   })
 
-  // Panes were already bounded; windows were not. Every surviving entry becomes a real
+  // Panes are bounded by the split; windows need their own cap. Every surviving entry becomes a real
   // BrowserWindow at startup, so a truncated write or hand edit could bury the app under windows
   // with no way back. Uses distinct ids per window so the global dedup cannot be what trims the
   // list — otherwise this would pass even with no cap at all.

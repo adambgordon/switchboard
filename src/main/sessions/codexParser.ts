@@ -540,7 +540,7 @@ async function readCodexHead(filePath: string): Promise<string | null> {
  * are a large share of what is on disk. The head goes through the same extractor as the full file,
  * and every field the hidden path needs is either set by the first `session_meta` line that carries
  * it or only ever switched on — so a positive answer from the head is the full file's answer. A
- * head that does not say "subagent" proves nothing, and the whole file is read as before.
+ * head that does not say "subagent" proves nothing, and the whole file is read.
  */
 export async function extractCodexMeta(filePath: string): Promise<ConversationMeta | null> {
   const sessionId = sessionIdFromPath(filePath)

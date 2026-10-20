@@ -784,14 +784,12 @@ export const CONFIG = {
   /**
    * Bounds for the user-configurable cap (the Preferences slider clamps to these; the PtyManager
    * re-clamps defensively). The range is deliberately ASYMMETRIC about the default — 6 below, 8 above —
-   * so the slider maps it piecewise to keep the default mid-track (see lib/maxLiveScale.ts). An earlier
-   * 2–14 got that centering for free from symmetry, which is the only reason it was 14.
+   * so the slider maps it piecewise to keep the default mid-track (see lib/maxLiveScale.ts).
    *
-   * The ceiling now REACHES Chromium's ~16 WebGL-context limit rather than staying under it. That's a
+   * The ceiling REACHES Chromium's ~16 WebGL-context limit rather than staying under it. That's a
    * soft edge, not a cliff: at the top of the range the oldest live terminals lose their GL context and
-   * fall back to the canvas renderer (see TerminalView's onContextLoss), which costs some of the repaint
-   * smoothness WebGL was adopted for. The Preferences tooltip already frames high values as
-   * increase-at-your-own-risk.
+   * fall back to the canvas renderer (see TerminalView's onContextLoss), which costs some of WebGL's
+   * repaint smoothness. The Preferences tooltip frames high values as increase-at-your-own-risk.
    */
   liveSessionsMin: 2,
   liveSessionsMax: 16,

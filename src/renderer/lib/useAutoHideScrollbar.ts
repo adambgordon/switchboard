@@ -4,7 +4,7 @@ import { useEffect, type RefObject } from 'react'
 const HIDE_DELAY = 1100
 
 /**
- * Core of the Obsidian-style auto-hiding scrollbar: while `el` scrolls, add `is-scrolling` (CSS
+ * Core of the auto-hiding scrollbar: while `el` scrolls, add `is-scrolling` (CSS
  * reveals the thumb), then remove it a beat after scrolling stops. Returns a cleanup that detaches
  * the listener. Pair with the shared `.sb-autoscroll` CSS (thumb transparent at rest).
  *
