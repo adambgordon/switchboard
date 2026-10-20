@@ -130,55 +130,10 @@ export function dropNeighbors(
 }
 
 // ---- a group drag: several units of one block carried together ----
-// `carried` is the carried units' indices in the block, ascending. The rest keep their order, and the
-// group opens ONE gap among them at `target` — an index into the rest, 0 to `rest.length` — the size
-// of every carried unit stacked. Where each carried unit started does not matter once it is lifted,
-// so scattered picks close up the moment the drag begins.
-
-/** Where a group's gap starts: below every unit not carried that sits above the grabbed one. */
-export function groupAnchor(carried: readonly number[], from: number): number {
-  return from - carried.filter((i) => i < from).length
-}
-
-/**
- * The midpoints a group drag targets against: the units NOT carried, in order, as they stand once the
- * group's gap has closed up around `anchor` — the gap's place when the drag began, the number of them
- * above the grabbed unit. Fixed for the drag, as a single unit's slots are, so the gap moves only when
- * the clone's center crosses a row where that row was drawn at the start, and never oscillates.
- */
-export function groupMidpoints(slots: readonly Slot[], carried: readonly number[], anchor: number): number[] {
-  const shifts = groupShifts(slots, carried, anchor)
-  return slots.flatMap((s, i) => (carried.includes(i) ? [] : [s.top + shifts[i] + s.height / 2]))
-}
-
-/** Where a group's gap sits for a center: how many of `groupMidpoints` lie above it. */
-export function groupDropIndex(center: number, mids: readonly number[]): number {
-  let index = 0
-  for (const m of mids) if (center > m) index++
-  return index
-}
-
-/**
- * Where every unit is translated while the group's gap sits at `target`: the rest laid out in order
- * from the block's top, one gap between each as measured, and the group's gap at `target`. Carried
- * units are hidden in place and are not moved. The single-unit glide (`slotShift`) is this layout for
- * one unit, so the two read the same.
- */
-export function groupShifts(slots: readonly Slot[], carried: readonly number[], target: number): number[] {
-  const gap = slots.length > 1 ? slots[1].top - (slots[0].top + slots[0].height) : 0
-  const groupHeight = carried.reduce((h, i) => h + slots[i].height, 0) + gap * (carried.length - 1)
-  const shifts = slots.map(() => 0)
-  let y = slots[0]?.top ?? 0
-  let rest = 0
-  slots.forEach((s, i) => {
-    if (carried.includes(i)) return
-    if (rest === target) y += groupHeight + gap
-    shifts[i] = y - s.top
-    y += s.height + gap
-    rest++
-  })
-  return shifts
-}
+// The carried units other than the grabbed one leave the layout for the drag, so the drag itself is the
+// grabbed unit's own, among the units not carried. `carried` is the carried units' indices in the full
+// block, ascending; `target` is where the single-unit drag left the grabbed unit, which is an index
+// into the units not carried.
 
 /**
  * Where a group dropped at `target` lands: the keys it sits between, either null at the block's edge,

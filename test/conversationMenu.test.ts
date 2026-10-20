@@ -146,9 +146,9 @@ describe('the tab menu', () => {
       'Move 3 tabs to the right',
       'Move 3 tabs to new window',
       '—',
-      'Pin 2',
-      'Hide 3',
-      'Mark 2 as unread',
+      'Pin 2 tabs',
+      'Hide 3 tabs',
+      'Mark 2 tabs as unread',
       '—',
       'Close 3 tabs',
       'Close other tabs',
@@ -168,8 +168,8 @@ describe('the tab menu', () => {
       'Move 2 tabs to the right',
       'Move 2 tabs to new window',
       '—',
-      'Pin 2',
-      'Hide 2',
+      'Pin 2 tabs',
+      'Hide 2 tabs',
       '—',
       'Close 2 tabs'
     ])
@@ -266,8 +266,8 @@ describe('a group of rail rows', () => {
       'Open 3 conversations to the right',
       'Open 3 conversations in new window',
       '—',
-      'Pin 3',
-      'Hide 3'
+      'Pin 3 conversations',
+      'Hide 3 conversations'
     ])
   })
 
@@ -287,9 +287,9 @@ describe('a group of rail rows', () => {
         target('c', { pinned: true, hidden: 'folder' })
       )
     )
-    expect(labels).toContain('Unpin 3')
-    expect(labels).toContain('Unhide 2')
-    expect(labels).toContain('Mark 2 as read')
+    expect(labels).toContain('Unpin 3 conversations')
+    expect(labels).toContain('Unhide 2 conversations')
+    expect(labels).toContain('Mark 2 conversations as read')
     expect(labels).toContain('Stop 2 sessions!')
   })
 
@@ -300,7 +300,7 @@ describe('a group of rail rows', () => {
         target('b', { live: true })
       )
     )
-    expect(labels.slice(3)).toEqual(['Pin 1', 'Hide 1', 'Mark 1 as unread', '—', 'Stop 2 sessions!'])
+    expect(labels.slice(3)).toEqual(['Pin 1 conversation', 'Hide 1 conversation', 'Mark 1 conversation as unread', '—', 'Stop 2 sessions!'])
   })
 
   it('drops hide altogether when only folders hide them, and read when none is running', () => {
@@ -308,7 +308,7 @@ describe('a group of rail rows', () => {
       'Open 2 conversations to the right',
       'Open 2 conversations in new window',
       '—',
-      'Pin 2'
+      'Pin 2 conversations'
     ])
   })
 

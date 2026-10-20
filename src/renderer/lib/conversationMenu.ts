@@ -35,7 +35,7 @@ export interface MenuTarget {
 /**
  * A multi-selection, resolved per command: for each command, the targets it would change, in the
  * group's order. The label's count and the ids the command runs on come from this one record, so
- * "Pin 2" cannot pin three.
+ * "Pin 2 conversations" cannot pin three.
  */
 export interface MenuGroup {
   /** Everything picked — what a tab group's Close acts on. */
@@ -120,7 +120,8 @@ export function conversationMenu(s: ConversationMenuState): ConversationMenuEntr
   const where: ConversationMenuEntry[] = []
   // A group names how many it places, by what they are on the surface it was opened from. With
   // nothing in it that can be placed, there is nothing to say where.
-  const what = g ? ` ${counted(g.move.length, s.surface === 'tab' ? 'tab' : 'conversation')}` : ''
+  const noun = s.surface === 'tab' ? 'tab' : 'conversation'
+  const what = g ? ` ${counted(g.move.length, noun)}` : ''
   if (!g || g.move.length > 0) {
     if (s.side) {
       const t = SIDE_TARGET[s.side]
@@ -135,14 +136,15 @@ export function conversationMenu(s: ConversationMenuState): ConversationMenuEntr
   if (g) {
     // Each is a SET, never a toggle, offered in the direction that changes something: Pin while any is
     // unpinned, Unpin once all are, and the same for hide and read. Counted by what it would change,
-    // not by the selection.
+    // not by the selection, and named by what they are on this surface, as the where-to commands are.
     const filing: ConversationMenuEntry[] = []
-    if (g.pin.length > 0) filing.push(item('pin', `Pin ${g.pin.length}`))
-    else if (g.unpin.length > 0) filing.push(item('unpin', `Unpin ${g.unpin.length}`))
-    if (g.hide.length > 0) filing.push(item('hide', `Hide ${g.hide.length}`))
-    else if (g.unhide.length > 0) filing.push(item('unhide', `Unhide ${g.unhide.length}`))
-    if (g.markUnread.length > 0) filing.push(item('markUnread', `Mark ${g.markUnread.length} as unread`))
-    else if (g.markRead.length > 0) filing.push(item('markRead', `Mark ${g.markRead.length} as read`))
+    const n = (ids: readonly string[]): string => counted(ids.length, noun)
+    if (g.pin.length > 0) filing.push(item('pin', `Pin ${n(g.pin)}`))
+    else if (g.unpin.length > 0) filing.push(item('unpin', `Unpin ${n(g.unpin)}`))
+    if (g.hide.length > 0) filing.push(item('hide', `Hide ${n(g.hide)}`))
+    else if (g.unhide.length > 0) filing.push(item('unhide', `Unhide ${n(g.unhide)}`))
+    if (g.markUnread.length > 0) filing.push(item('markUnread', `Mark ${n(g.markUnread)} as unread`))
+    else if (g.markRead.length > 0) filing.push(item('markRead', `Mark ${n(g.markRead)} as read`))
     groups.push(filing)
   } else if (s.linked) {
     const filing = [item(s.pinned ? 'unpin' : 'pin', s.pinned ? 'Unpin' : 'Pin')]

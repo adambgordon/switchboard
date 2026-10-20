@@ -8,11 +8,7 @@ import {
   dragStride,
   dropIndex,
   dropNeighbors,
-  groupAnchor,
-  groupDropIndex,
   groupLanding,
-  groupMidpoints,
-  groupShifts,
   siblingsResized,
   slotShift,
   type Slot
@@ -49,9 +45,10 @@ import { dragScrollFeedback, dragScrollRequest, type EdgeMotion } from './edgeSc
  * re-targets on its own, since a wheel moves the rows under a pointer that has not moved.
  *
  * A unit can carry others of its block with it (`carry`) — rail rows picked together. They lift as
- * one stacked clone with a count, every carried unit hides in place, and the rest close up around a
- * single gap the size of the group; on drop they land together, in the order they had, between the
- * two keys the gap sat between. One unit alone takes the single-unit path unchanged.
+ * one stacked clone with a count, and every carried unit but the grabbed one leaves the layout, so the
+ * block closes up around the grabbed unit and the drag is that unit's own: one gap the clone's size,
+ * gliding as a single unit's does. On drop they land together, in the order they had, between the two
+ * keys the gap sat between.
  *
  * Escape cancels a drag, and the release that follows does nothing.
  *
@@ -126,23 +123,18 @@ interface Drag {
   /** The reshaping this drag applied, and the scroll it started from. */
   shape: DragReshape | null
   startScroll: number
-  /** A group drag's carried units, by index ascending (`from` among them); empty for a single unit. */
-  carried: number[]
-  /** What a group drag targets against (`groupMidpoints`), measured once at its start. */
-  mids: number[]
+  /** A group drag: the block's every key, the carried ones' indices in it (ascending, the grabbed
+   *  one's among them), and the carried units other than the grabbed one, out of the layout for the
+   *  drag. `els`, `keys` and `slots` above leave those out. Null for a single unit. */
+  group: { keys: string[]; carried: number[]; others: HTMLElement[] } | null
 }
 
 interface Lifted {
   host: HTMLElement
   clone: HTMLElement
-  /** A group's backing cards and its count, which follow the clone at a fixed vertical offset. */
-  stack: { el: HTMLElement; offset: number }[]
+  /** A group's shell: the clone, its backing cards and its count, moved as one. Null for one unit. */
+  shell: HTMLElement | null
 }
-
-// A group's backing cards sit this far behind the clone, down and to the right, as a tab group's do.
-const STACK_STEP = 3
-// The count sits this far above the clone's top edge, straddling its corner.
-const BADGE_OFFSET = -7
 
 const blockSelector = (id: string): string => `[data-block="${CSS.escape(id)}"]`
 const unitsOf = (block: HTMLElement): HTMLElement[] =>
@@ -185,41 +177,44 @@ function lift(container: HTMLElement, unit: HTMLElement, rect: DOMRect, count = 
   // card is widened, and padded back by the same amount so its content does not move.
   const inset = unit.classList.contains('sb-row') ? 0 : FOLDER_CARD_INSET
   const pad = inset ? `padding:0 ${inset}px;` : ''
-  clone.style.cssText = `position:fixed;top:${rect.top}px;left:${rect.left - inset}px;width:${rect.width + 2 * inset}px;height:${rect.height + grow}px;margin:0;${pad}box-sizing:border-box;overflow:hidden;pointer-events:none`
+  const fixed = `position:fixed;top:${rect.top}px;left:${rect.left - inset}px;width:${rect.width + 2 * inset}px;height:${rect.height + grow}px;`
+  const box = `margin:0;${pad}box-sizing:border-box;overflow:hidden;pointer-events:none`
+  if (count <= 1) {
+    clone.style.cssText = fixed + box
+    body.appendChild(clone)
+    host.appendChild(body)
+    document.body.appendChild(host)
+    return { host, clone, shell: null }
+  }
   // A group reads as a small stack with a count, as a tab group's drag does: one backing card for two,
   // two for more. Faked rather than N clones — only the top one is ever legible, and the count says
-  // the rest. The cards are siblings behind the clone, which clips its own overflow.
-  const stack: Lifted['stack'] = []
-  if (count > 1) {
-    for (let n = Math.min(2, count - 1); n >= 1; n--) {
-      const card = document.createElement('div')
-      card.className = 'sb-row-drag-card'
-      const offset = n * STACK_STEP
-      card.style.cssText = `position:fixed;top:${rect.top + offset}px;left:${rect.left + offset}px;width:${rect.width}px;height:${rect.height}px;pointer-events:none`
-      body.appendChild(card)
-      stack.push({ el: card, offset })
-    }
-    clone.classList.add('stacked')
-  }
-  body.appendChild(clone)
-  if (count > 1) {
-    // Over the clone's top-right corner, outside the clone, whose own box clips.
-    const badge = document.createElement('span')
-    badge.className = 'sb-row-dragcount'
-    badge.textContent = String(count)
-    badge.style.cssText = `position:fixed;top:${rect.top + BADGE_OFFSET}px;left:${rect.right}px;transform:translateX(-70%);pointer-events:none`
-    body.appendChild(badge)
-    stack.push({ el: badge, offset: BADGE_OFFSET })
-  }
+  // the rest. The tab strip's construction, for the same reason: the cards are pseudo-elements of ONE
+  // shell, the clone's own size, so every corner shares one geometry and one rasterization, and only
+  // the shell moves. Separately placed cards at fractional positions round each on their own, and
+  // their corners never quite line up with the clone's.
+  // It drops the selection's inverted look: one inverted card heading a stack of plain ones reads as
+  // a different kind of thing rather than more of the same, and the rows land with their own looks.
+  clone.classList.remove('selected', 'picked')
+  clone.classList.add('stacked')
+  clone.style.cssText = `position:absolute;inset:0;width:100%;height:100%;z-index:2;${box}`
+  const shell = document.createElement('div')
+  shell.className = `sb-row-drag-shell stacked${count > 2 ? ' stacked-many' : ''}`
+  shell.style.cssText = `${fixed}pointer-events:none`
+  shell.appendChild(clone)
+  // Over the clone's top-right corner, on the shell, since the clone clips its own overflow.
+  const badge = document.createElement('span')
+  badge.className = 'sb-row-dragcount'
+  badge.textContent = String(count)
+  shell.appendChild(badge)
+  body.appendChild(shell)
   host.appendChild(body)
   document.body.appendChild(host)
-  return { host, clone, stack }
+  return { host, clone, shell }
 }
 
-/** Place a lifted clone, with its stack, at a viewport top. */
+/** Place a lifted clone — a group's whole shell — at a viewport top. */
 function placeLifted(lifted: Lifted, top: number): void {
-  lifted.clone.style.top = `${top}px`
-  for (const card of lifted.stack) card.el.style.top = `${top + card.offset}px`
+  ;(lifted.shell ?? lifted.clone).style.top = `${top}px`
 }
 
 /**
@@ -228,9 +223,18 @@ function placeLifted(lifted: Lifted, top: number): void {
  * is removed first because its `!important` outranks an animation keyframe — the lifted values are
  * captured before that, then animated from.
  */
-function settle({ host, clone, stack }: Lifted, slotTop: number, real: HTMLElement | null): void {
-  // The group has landed as rows of its own, so its stack goes at once; the clone settles alone.
-  for (const card of stack) card.el.remove()
+function settle({ host, clone, shell }: Lifted, slotTop: number, real: HTMLElement | null): void {
+  // The group has landed as rows of its own, so its stack and count go at once and the clone settles
+  // alone, taken out of the shell where it stood. It keeps the plain look it was carried in, so its
+  // fill does not ease toward an inverted one under ink that was never inverted; the real row snaps
+  // to its own on reveal, as a selection does.
+  const plain = shell !== null
+  if (shell) {
+    const r = shell.getBoundingClientRect()
+    clone.style.cssText = `position:fixed;top:${r.top}px;left:${r.left}px;width:${r.width}px;height:${r.height}px;margin:0;box-sizing:border-box;overflow:hidden;pointer-events:none`
+    clone.classList.remove('stacked')
+    shell.replaceWith(clone)
+  }
   const reveal = (): void => {
     host.remove()
     if (real) real.style.visibility = ''
@@ -244,7 +248,10 @@ function settle({ host, clone, stack }: Lifted, slotTop: number, real: HTMLEleme
   const lifted = getComputedStyle(clone)
   const from = { backgroundColor: lifted.backgroundColor, boxShadow: lifted.boxShadow }
   const rest = real ? getComputedStyle(real) : null
-  const to = { backgroundColor: rest ? rest.backgroundColor : 'transparent', boxShadow: rest ? rest.boxShadow : 'none' }
+  const to = {
+    backgroundColor: plain ? from.backgroundColor : rest ? rest.backgroundColor : 'transparent',
+    boxShadow: rest ? rest.boxShadow : 'none'
+  }
   clone.classList.remove('dragging')
   const anim = clone.animate(
     [
@@ -281,12 +288,13 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     const block = findBlock(container, pending.blockId)
     const units = block ? unitsOf(block) : []
     for (const u of units) u.style.transform = ''
-    for (const u of pending.others) u.style.visibility = ''
     const real = units.find((u) => u.dataset.key === pending.key) ?? null
-    if (pending.shape) {
-      // Open the rail again, holding the dropped unit where it landed.
+    if (pending.shape || pending.others.length > 0) {
+      // Open the rail again — a folder unfolded, a group's other units back — holding the dropped unit
+      // where it landed.
       const landed = real?.getBoundingClientRect().top ?? 0
-      pending.shape.revert()
+      pending.shape?.revert()
+      for (const u of pending.others) u.style.display = ''
       if (real) container.scrollTop += real.getBoundingClientRect().top - landed
     }
     settle(pending.lifted, real ? real.getBoundingClientRect().top : pending.lifted.clone.getBoundingClientRect().top, real)
@@ -302,7 +310,8 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     const drag = dragRef.current
     const container = containerRef.current
     if (!drag || !container) return
-    const units = drag.block.isConnected ? unitsOf(drag.block) : []
+    // A group's other units are out of the layout, and out of what the drag measured.
+    const units = (drag.block.isConnected ? unitsOf(drag.block) : []).filter((u) => !drag.group?.others.includes(u))
     const same = units.length === drag.els.length && units.every((u, i) => u === drag.els[i])
     const resized = same && siblingsResized(units.map((u) => u.getBoundingClientRect().height), drag.slots, drag.from)
     const r = container.getBoundingClientRect()
@@ -332,14 +341,6 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     const applyShift = (drag: Drag, target: number): void => {
       if (target === drag.target) return
       drag.target = target
-      if (drag.carried.length > 0) {
-        const shifts = groupShifts(drag.slots, drag.carried, target)
-        drag.els.forEach((u, i) => {
-          if (drag.carried.includes(i)) return
-          u.style.transform = shifts[i] ? `translateY(${shifts[i]}px)` : ''
-        })
-        return
-      }
       drag.els.forEach((u, i) => {
         if (i === drag.from) return
         const shift = slotShift(i, drag.from, target, drag.stride)
@@ -357,11 +358,7 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
       const top = contentY(latestY, r.top, scroll) - drag.grab
       const view = { top: scroll, bottom: scroll + el.clientHeight }
       if (lifted) placeLifted(lifted, cloneTop(top, drag.slots, drag.height, drag.overshoot, view) - scroll + r.top)
-      const center = clampCenter(top + drag.height / 2, drag.slots)
-      applyShift(
-        drag,
-        drag.carried.length > 0 ? groupDropIndex(center, drag.mids) : dropIndex(center, drag.slots, drag.from)
-      )
+      applyShift(drag, dropIndex(clampCenter(top + drag.height / 2, drag.slots), drag.slots, drag.from))
     }
 
     const stopEdgeScroll = (): void => {
@@ -416,6 +413,13 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
       if (drag && !keepShift) for (const u of drag.els) u.style.transform = ''
     }
 
+    // Put a group's other units back where they were, and the scroll with them.
+    const regroup = (drag: Drag): void => {
+      if (!drag.group) return
+      for (const u of drag.group.others) u.style.display = ''
+      if (!drag.shape) el.scrollTop = drag.startScroll
+    }
+
     // Undo the drag's reshaping of the rail, back to the scroll it started from.
     const unshape = (drag: Drag): void => {
       if (!drag.shape) return
@@ -428,7 +432,7 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
       reset()
       if (drag) {
         drag.unit.style.visibility = ''
-        for (const i of drag.carried) drag.els[i].style.visibility = ''
+        regroup(drag)
         unshape(drag)
       }
       lifted?.host.remove()
@@ -440,17 +444,27 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     const begin = (e: PointerEvent): boolean => {
       if (!pressed) return false
       const { unit, handle, block } = pressed
-      const els = unitsOf(block)
-      const from = els.indexOf(unit)
+      const all = unitsOf(block)
       const blockId = block.dataset.block
-      if (els.length < 2 || from < 0 || !blockId) return false
+      if (all.length < 2 || !all.includes(unit) || !blockId) return false
+      const allKeys = all.map((u) => u.dataset.key ?? '')
+      const carriedKeys = optsRef.current.carry?.(blockId, allKeys[all.indexOf(unit)], allKeys) ?? []
+      const carried = allKeys.flatMap((k, i) => (carriedKeys.includes(k) ? [i] : []))
+      const others = carried.length > 1 && carried.includes(all.indexOf(unit)) ? carried.map((i) => all[i]).filter((u) => u !== unit) : []
+      const els = all.filter((u) => !others.includes(u))
+      // Nothing left to move among: every unit in the block is carried.
+      if (els.length < 2) return false
+      const from = els.indexOf(unit)
       // The HANDLE is what sits under the pointer: for a folder, its header, which may be stuck to the
       // rail's top while the folder's own top has scrolled far above it.
       const pressedAt = handle.getBoundingClientRect().top
       const startScroll = el.scrollTop
       const shape = optsRef.current.reshape?.(blockId, unit) ?? null
-      if (shape) {
-        shape.apply()
+      shape?.apply()
+      // A group closes up: its other units leave the layout, and the block reflows around the grabbed
+      // one, so what is measured below is a single unit's drag.
+      for (const u of others) u.style.display = 'none'
+      if (shape || others.length > 0) {
         // Hold the handle under the pointer while the rail reshapes around it — as far as the scroll
         // range allows: a reshape that removes the overflow clamps the scroll, and the handle moves.
         el.scrollTop += handle.getBoundingClientRect().top - pressedAt
@@ -467,9 +481,7 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
       const grab = pressed.startY - pressedAt + (handle.getBoundingClientRect().top - rect.top)
       const isRow = unit.classList.contains('sb-row')
       const keys = els.map((u) => u.dataset.key ?? '')
-      const carriedKeys = optsRef.current.carry?.(blockId, keys[from], keys) ?? []
-      const carried = keys.flatMap((k, i) => (carriedKeys.includes(k) ? [i] : []))
-      const group = carried.length > 1 && carried.includes(from)
+      const group = others.length > 0 ? { keys: allKeys, carried, others } : null
       dragRef.current = {
         unit,
         block,
@@ -478,24 +490,20 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
         keys,
         slots,
         from,
-        // A group's gap is placed by the first update, which closes up the picks around it.
-        target: group ? -1 : from,
+        target: from,
         stride: dragStride(slots, from),
         height: rect.height,
         overshoot: isRow ? rect.height * ROW_OVERSHOOT_RATIO : FOLDER_OVERSHOOT,
         grab,
         shape,
         startScroll,
-        carried: group ? carried : [],
-        // The gap starts where the grabbed unit is: below every unit not carried above it.
-        mids: group ? groupMidpoints(slots, carried, groupAnchor(carried, from)) : []
+        group
       }
       el.setPointerCapture(e.pointerId)
       lifted = lift(el, unit, rect, group ? carried.length : 1)
       // Measured; now the reshape may animate toward the layout just measured.
       shape?.play()
       unit.style.visibility = 'hidden'
-      if (group) for (const i of carried) els[i].style.visibility = 'hidden'
       document.body.classList.add('sb-dragging-row')
       return true
     }
@@ -567,25 +575,27 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
       update()
       // A real drag ends in a click on the unit; swallow it so it does not also select or collapse.
       swallowNextClick()
-      const { from, target, keys, blockId, carried } = drag
-      const landing = carried.length > 0 ? groupLanding(keys, carried, target) : null
+      const { from, target, keys, blockId, group } = drag
+      // A single unit's drop target is its index among the rest, which for a group is where the carried
+      // units land among the units not carried.
+      const landing = group ? groupLanding(group.keys, group.carried, target) : null
       const moves = landing ? landing.moved : target !== from
       const held = lifted
       lifted = null
       reset(moves)
       if (!held) return
-      const others = carried.filter((i) => i !== from).map((i) => drag.els[i])
+      const others = group?.others ?? []
       if (moves) {
         // The layout effect above settles the clone once this drop has re-rendered.
         pendingRef.current = { blockId, key: keys[from], lifted: held, shape: drag.shape, others }
         optsRef.current.onDrop(
           landing
-            ? { block: blockId, key: keys[from], above: landing.above, below: landing.below, keys: carried.map((i) => keys[i]) }
+            ? { block: blockId, key: keys[from], above: landing.above, below: landing.below, keys: group!.carried.map((i) => group!.keys[i]) }
             : { block: blockId, key: keys[from], ...dropNeighbors(keys, from, target) }
         )
       } else {
+        regroup(drag)
         unshape(drag)
-        for (const u of others) u.style.visibility = ''
         settle(held, drag.unit.getBoundingClientRect().top, drag.unit)
         document.body.classList.remove('sb-dragging-row')
       }

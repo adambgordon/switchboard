@@ -1692,10 +1692,10 @@ CHECKS['20-group-menu'] = async () => {
     return call('menuLabels')
   }
   const labels = await openMenu('atlas-1')
-  const want = ['Open 3 conversations to the right', 'Open 3 conversations in new window', 'Pin 2', 'Hide 3', 'Mark 1 as unread', 'Stop 1 session']
+  const want = ['Open 3 conversations to the right', 'Open 3 conversations in new window', 'Pin 2 conversations', 'Hide 3 conversations', 'Mark 1 conversation as unread', 'Stop 1 session']
   if (JSON.stringify(labels) !== JSON.stringify(want)) failures.push(`group menu: ${JSON.stringify(labels)}, expected ${JSON.stringify(want)}`)
   if ((await js('window.picks()')).length !== 3) failures.push('group menu: opening the menu on a pick dropped the picks')
-  const item = await call('menuItem', 'Pin 2')
+  const item = await call('menuItem', 'Pin 2 conversations')
   if (!item) failures.push('group menu: no Pin 2 item')
   else {
     await press(item.left + item.width / 2, item.top + item.height / 2)
@@ -1725,6 +1725,7 @@ CHECKS['20-group-menu'] = async () => {
 async function groupDrag({ block, carried, grab, dy, failures, name, others = [] }) {
   const before = (await js('window.order()')).blocks.find((x) => x.id === block).rows
   const c = await rowCenter(grab)
+  const grabbed = await call('rowRect', grab)
   await press(c.x, c.y)
   await moveTo(c.x, c.y + Math.sign(dy) * 12, 4)
   await frames(1)
@@ -1734,6 +1735,8 @@ async function groupDrag({ block, carried, grab, dy, failures, name, others = []
   if (!look.stacked || look.badge !== String(carried.length) || look.cards !== Math.min(2, carried.length - 1)) {
     failures.push(`${name}: the clone does not read as a stack of ${carried.length}: ${JSON.stringify(look)}`)
   }
+  if (!look.plain) failures.push(`${name}: the group's clone kept a selected or picked look`)
+  if (!look.aligned) failures.push(`${name}: the stack's cards do not share the clone's box and corners: ${JSON.stringify(look)}`)
   for (const k of carried) if (!st0.hidden.includes(k)) failures.push(`${name}: carried ${k} is not hidden in place`)
   for (const k of others) if (st0.hidden.includes(k)) failures.push(`${name}: ${k}, picked in another block, was hidden`)
   await moveTo(c.x, c.y + dy, 4)
@@ -1749,6 +1752,8 @@ async function groupDrag({ block, carried, grab, dy, failures, name, others = []
   }
   const last = drawn[drawn.length - 1]
   if (last && edge.bottom - last.bottom > gap.size) gap = { above: last.key, below: null, size: edge.bottom - last.bottom }
+  // One row's room, however many it carries: the clone is one row tall, and the count says the rest.
+  if (gap.size >= 2 * grabbed.height) failures.push(`${name}: the gap is ${gap.size}px for a ${grabbed.height}px row`)
   await screenshot(`${label()}-${name}-mid`)
   await release()
   await delay(350)
