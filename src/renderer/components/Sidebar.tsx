@@ -14,7 +14,7 @@ import ConversationRow from './ConversationRow'
 import SidebarHead from './SidebarHead'
 import SidebarGroupHeader from './SidebarGroupHeader'
 import { conversationMenu, folderMenu, type MenuGroup, type SidePlace } from '../lib/conversationMenu'
-import { railMenuGroup, railMenuTarget } from '../lib/railSelection'
+import { dragCarry, railMenuGroup, railMenuTarget } from '../lib/railSelection'
 import type { RailFilter } from '../lib/railFilter'
 import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/types'
 import { Pin, PinOff, Info, NewWindow, Rename, SplitVertical, Stop, Play, Eye, EyeOff } from './icons'
@@ -91,6 +91,8 @@ interface Props {
   onShowInfo: (id: string, edit: boolean) => void
   /** A row dropped between two neighbors of its block, either null at an edge. */
   onDropRow: (block: SidebarBlock, draggedId: string, higherId: string | null, lowerId: string | null) => void
+  /** Several picked rows of one block dropped together between two neighbors, in block order. */
+  onDropRows?: (block: SidebarBlock, draggedIds: string[], higherId: string | null, lowerId: string | null) => void
   /** A folder dropped between two neighboring folders, either null at an edge. */
   onDropFolder: (root: string, higherRoot: string | null, lowerRoot: string | null) => void
   /** Bumped on each drag-reorder commit; folded into controlSig so that commit settles instantly. */
@@ -246,6 +248,7 @@ export default function Sidebar({
   onStopSession,
   onShowInfo,
   onDropRow,
+  onDropRows,
   onDropFolder,
   reorderTick,
   onGroupCommand
@@ -288,9 +291,11 @@ export default function Sidebar({
     (drop: BlockDrop) => {
       if (drop.block === FOLDERS_BLOCK) return onDropFolder(drop.key, drop.above, drop.below)
       const block = model.groups.flatMap((g) => g.blocks).find((b) => b.id === drop.block)
-      if (block) onDropRow(block, drop.key, drop.above, drop.below)
+      if (!block) return
+      if (drop.keys && onDropRows) onDropRows(block, drop.keys, drop.above, drop.below)
+      else onDropRow(block, drop.key, drop.above, drop.below)
     },
-    [model, onDropRow, onDropFolder]
+    [model, onDropRow, onDropRows, onDropFolder]
   )
   // Off while filtering, as while searching: the neighbors a drop reports would straddle rows the
   // filter leaves out, and only caps are accounted for there (dropNeighbors).
@@ -300,7 +305,11 @@ export default function Sidebar({
     commitKey: reorderTick,
     cancelKey: JSON.stringify([mode, density, searchOpen, searching, filtering]),
     // Moving a folder folds it to its header, so it moves as one short card.
-    reshape: (block, unit) => (block === FOLDERS_BLOCK ? foldFolder(unit) : null)
+    reshape: (block, unit) => (block === FOLDERS_BLOCK ? foldFolder(unit) : null),
+    // A picked row carries the picks in its own block; picks elsewhere stay put, and stay picked.
+    // Folders are never picked.
+    carry: (block, key, keys) =>
+      block === FOLDERS_BLOCK || !picked || !onDropRows ? [key] : dragCarry(picked, key, keys)
   })
 
   useRailFlip(listRef, orderSig, controlSig)

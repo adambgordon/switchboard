@@ -281,6 +281,40 @@
 .sb-row.selected.dragging {
   background: var(--row-selected) !important;
 }
+/* Carrying picked rows: a stack of cards behind the clone and a count over its corner, as a tab
+   group's drag shows (tabs.css) — faked rather than N clones, since only the top one is legible and
+   the count says the rest. The cards are the lifted row's own surface and ring, so the stack reads as
+   more of the same; the shadow moves to the bottom card, under the whole stack. */
+.sb-row.dragging.stacked {
+  box-shadow: 0 0 0 1px var(--rule-strong) !important;
+}
+.sb-row-drag-card {
+  box-sizing: border-box;
+  border-radius: var(--r-md);
+  background: var(--paper-sunken);
+  box-shadow: 0 0 0 1px var(--rule-strong);
+}
+.sb-row-drag-card:first-child {
+  box-shadow:
+    0 0 0 1px var(--rule-strong),
+    var(--shadow-pane);
+}
+/* The count. Ink on paper, never an accent — this is a quantity, not a live session. */
+.sb-row-dragcount {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 /* The whole window shows the grab cursor for the duration, not just the dragged row: the pointer is
    captured and passes over rows and buttons whose own `cursor: pointer` would otherwise win. */
 body.sb-dragging-row,

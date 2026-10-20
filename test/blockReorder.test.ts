@@ -8,6 +8,11 @@ import {
   dragStride,
   dropIndex,
   dropNeighbors,
+  groupAnchor,
+  groupDropIndex,
+  groupLanding,
+  groupMidpoints,
+  groupShifts,
   siblingsResized,
   slotShift
 } from '../src/renderer/lib/blockReorder'
@@ -197,5 +202,58 @@ describe('siblingsResized', () => {
 
   it('tolerates sub-pixel rounding', () => {
     expect(siblingsResized([24.4, 24, 40, 24], slots, 1)).toBe(false)
+  })
+})
+
+describe('a group drag', () => {
+  // Rail rows: one gap between each, and one taller row, so a rule that sums the wrong heights shows.
+  const rows = [
+    { top: 0, height: 24 },
+    { top: 27, height: 24 },
+    { top: 54, height: 40 },
+    { top: 97, height: 24 },
+    { top: 124, height: 24 }
+  ]
+
+  it('closes the rest up around one gap the size of every carried row', () => {
+    // Carrying 1 and 3, scattered: the gap is 24 + 3 + 24 = 51 tall.
+    expect(groupShifts(rows, [1, 3], 0)).toEqual([54, 0, 27, 0, 0])
+    expect(groupShifts(rows, [1, 3], 1)).toEqual([0, 0, 27, 0, 0])
+    expect(groupShifts(rows, [1, 3], 3)).toEqual([0, 0, -27, 0, -54])
+  })
+
+  it('is the single-unit glide when it carries one', () => {
+    for (let from = 0; from < rows.length; from++) {
+      for (let to = 0; to < rows.length; to++) {
+        const single = rows.map((_, i) => (i === from ? 0 : slotShift(i, from, to, dragStride(rows, from))))
+        expect(groupShifts(rows, [from], to).map((v) => v + 0), `${from} to ${to}`).toEqual(single.map((v) => v + 0))
+      }
+    }
+  })
+
+  it('starts its gap below every row not carried above the grabbed one', () => {
+    expect(groupAnchor([1, 3], 3)).toBe(2)
+    expect(groupAnchor([1, 3], 1)).toBe(1)
+    expect(groupAnchor([0, 4], 4)).toBe(3)
+  })
+
+  it('targets against the rest as drawn with the gap where it started', () => {
+    const mids = groupMidpoints(rows, [1, 3], groupAnchor([1, 3], 3))
+    expect(mids).toEqual([12, 47, 136])
+    expect(groupDropIndex(10, mids)).toBe(0)
+    expect(groupDropIndex(47, mids)).toBe(1)
+    expect(groupDropIndex(100, mids)).toBe(2)
+    expect(groupDropIndex(140, mids)).toBe(3)
+  })
+
+  it('lands between the rows the gap sat between, and says whether that moves anything', () => {
+    const keys = ['a', 'b', 'c', 'd', 'e']
+    expect(groupLanding(keys, [1, 3], 1)).toEqual({ above: 'a', below: 'c', moved: true })
+    expect(groupLanding(keys, [1, 3], 3)).toEqual({ above: 'e', below: null, moved: true })
+    expect(groupLanding(keys, [1, 3], 0)).toEqual({ above: null, below: 'a', moved: true })
+    // Already together and dropped back where they were: nothing to commit.
+    expect(groupLanding(keys, [1, 2], 1)).toEqual({ above: 'a', below: 'd', moved: false })
+    // Scattered and dropped at the first one's place: they close up, which is a move.
+    expect(groupLanding(keys, [1, 3], 1).moved).toBe(true)
   })
 })

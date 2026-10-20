@@ -29,6 +29,7 @@ import {
   DEFAULT_SIDEBAR_LIMITS,
   buildSidebarHeld,
   dropNeighbors,
+  dropNeighborsMany,
   freezeFoldersByNewest,
   folderRankSpace,
   rankSpace,
@@ -43,7 +44,7 @@ import {
   type SidebarBlock,
   type SidebarModel
 } from './lib/sidebarModel'
-import { absorbBind, absorbBindFolder, dropWrites, holdRank, liftWrites, type RankOverrides } from './lib/rowRank'
+import { absorbBind, absorbBindFolder, dropWrites, holdRank, liftWrites, spreadWrites, type RankOverrides } from './lib/rowRank'
 import {
   FOLDER_SEED_TASK,
   ONCE_TASKS_KEY,
@@ -164,7 +165,7 @@ export default function App() {
   const hiddenSessionIdsRef = useRef(hiddenSessionIds)
   hiddenSessionIdsRef.current = hiddenSessionIds
   const ptys = usePtys()
-  const { pinned, order: pinnedOrder, toggle: togglePin, setMany: setPins, move: movePin } = usePins()
+  const { pinned, order: pinnedOrder, toggle: togglePin, setMany: setPins, move: movePin, moveMany: movePins } = usePins()
   // A nonce bumped on each drag-reorder commit, folded into the rail's FLIP controlSig so the commit
   // settles instantly (the drag already showed the arrangement); pin/unpin toggles don't bump it, so
   // they still glide.
@@ -2124,6 +2125,24 @@ export default function App() {
     [movePin, mutateRows]
   )
 
+  // Picked rows of one block dropped together: contiguous between the two neighbors, in the order
+  // they showed in. Pins move as one within the pin list; every other row takes a rank spread across
+  // the gap, so the group holds in both modes, as one row's drop does.
+  const dropRows = useCallback(
+    (block: SidebarBlock, draggedIds: string[], higherId: string | null, lowerId: string | null) => {
+      if (block.kind === 'pinned') movePins(draggedIds, higherId, lowerId)
+      else {
+        const model = sidebarModelRef.current
+        if (!model) return
+        const [higher, lower] = dropNeighborsMany(model, block, draggedIds, higherId, lowerId)
+        const writes = spreadWrites(rankSpace(model), draggedIds, higher, lower, Date.now())
+        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+      }
+      setReorderTick((t) => t + 1)
+    },
+    [movePins, mutateRows]
+  )
+
   // A folder dropped between two neighboring folders: one key in the folder rank space, the same
   // arithmetic as a row.
   const dropFolder = useCallback(
@@ -2633,6 +2652,7 @@ export default function App() {
             onStopSession={stopSession}
             onShowInfo={showInfo}
             onDropRow={dropRow}
+            onDropRows={dropRows}
             onDropFolder={dropFolder}
             reorderTick={reorderTick}
             onGroupCommand={runGroupCommand}
