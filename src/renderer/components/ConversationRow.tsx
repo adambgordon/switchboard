@@ -134,7 +134,7 @@ function ConversationRowImpl({
       // lands on the current history stop and changes nothing — so no click-count dedupe is needed.
       onDoubleClick={(e) => {
         // ⌥ means mark unread here, and ⌘ / ⇧ pick, so none of them may also keep the tab — two
-        // ⌘-presses toggled the row in and back out, and that is all the gesture should do.
+        // ⌘-presses toggle the row in and back out, and that is all the gesture should do.
         if (e.altKey || pickPress.current || !onStick) return
         onStick(meta.sessionId)
       }}
