@@ -61,6 +61,23 @@ describe('rowTipMeta', () => {
     expect(out.startsWith('app · ddd')).toBe(true)
     expect(out.endsWith('…')).toBe(true)
   })
+
+  it('clamps only the location, so a long path never drops a note', () => {
+    // The other-window note is the row's only warning that a click raises another window.
+    const out = rowTipMeta('app', `/w/app/${'d'.repeat(400)}`, '/w/app', {
+      background: true,
+      elsewhere: true
+    })
+    expect(Array.from(out)).toHaveLength(TIP_META_MAX)
+    expect(out.startsWith('app · ddd')).toBe(true)
+    expect(out.endsWith('d… · Background session · In another window')).toBe(true)
+  })
+
+  it('leads with the notes when there is no location to name', () => {
+    expect(rowTipMeta('', '/w/app', '/w/app', { background: false, elsewhere: true })).toBe(
+      'In another window'
+    )
+  })
 })
 
 describe('rowTipTitle / rowTipPreview', () => {
