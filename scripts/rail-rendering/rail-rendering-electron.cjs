@@ -985,7 +985,10 @@ CHECKS['12-clone-padding'] = async () => {
     }
     await screenshot(`${label()}-clone-padding-${density}`)
     await release()
-    await delay(400)
+    // Released where it was picked up: the clone eases home, and nothing of the drag is left behind.
+    const after = await waitClean()
+    if (!clean(after)) failures.push(`${density}: a release in place left drag state behind: ${JSON.stringify(after)}`)
+    await delay(100)
   }
   record('12-clone-padding', failures, details)
 }
@@ -1834,6 +1837,75 @@ CHECKS['21-group-drag'] = async () => {
 
 function summary(r) {
   return { key: r.key, landing: r.expect.index, gap: r.gap?.index, call: r.calls?.[0] ?? null, shot: r.shot }
+}
+
+// A dropped folder's clone hands over to the real folder without a jump: the label where the clone
+// last drew it is where the real folder first draws it, sampled every frame across the release. Moves
+// into and out of the first slot are the ones that can jump — the first folder's header is spaced
+// differently from every other — with a middle move and a release in place as controls.
+CHECKS['22-landing-handoff'] = async () => {
+  const failures = []
+  const out = {}
+  const cases = [
+    ['intoFirst', (keys) => [FOLDER_KEY, 0]],
+    ['outOfFirst', (keys) => [keys[0], 2]],
+    ['middle', (keys) => [FOLDER_KEY, keys.indexOf(FOLDER_KEY) + 1]],
+    ['inPlaceFirst', (keys) => [keys[0], 0]]
+  ]
+  for (const [name, pick] of cases) {
+    await reset({ mode: 'folders' })
+    await call('scrollTo', 0)
+    await settle(30)
+    const keys0 = (await call('units', 'folders')).map((u) => u.key)
+    const [key, to] = pick(keys0)
+    await call('reveal', 'folders', key, 60)
+    await settle(30)
+    const r = await call('unitRect', 'folders', key)
+    const px = r.handle.left + Math.min(60, r.handle.width / 3), py = r.handle.top + Math.min(r.handle.height / 2, 12)
+    await press(px, py)
+    await moveTo(px, py + 6, 3)
+    await frames(1)
+    await delay(260)
+    await frames(2)
+    const slots = await call('units', 'folders')
+    const keys = slots.map((u) => u.key), from = keys.indexOf(key)
+    const h = slots[from].height
+    const b = await call('box')
+    const grab = py - r.unit.top
+    const targetY = to === from ? py + 6 : centerFor(slots, from, to) - h / 2 + grab - b.scrollTop + b.top
+    await moveTo(px, targetY, 4)
+    await frames(3)
+    await js(`(() => {
+      const key = ${JSON.stringify(key)}
+      window.__probe = []
+      const t0 = performance.now()
+      const tick = () => {
+        const clone = document.querySelector('.sb-drag-clone .sb-group-label-text')
+        const real = document.querySelector('.sb-rail-body .sb-group[data-key="' + CSS.escape(key) + '"] .sb-group-label-text')
+        window.__probe.push({
+          t: Math.round(performance.now() - t0),
+          src: clone ? 'clone' : 'real',
+          y: +(clone || real).getBoundingClientRect().top.toFixed(2),
+        })
+        if (performance.now() - t0 < 600) requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })()`)
+    await delay(40)
+    await release()
+    await delay(700)
+    const s = await js('window.__probe')
+    const lastClone = [...s].reverse().find((x) => x.src === 'clone')
+    const firstReal = s.find((x) => x.src === 'real' && s.indexOf(x) > s.indexOf(lastClone))
+    const order = (await call('units', 'folders')).map((u) => u.key)
+    const jump = lastClone && firstReal ? +(firstReal.y - lastClone.y).toFixed(2) : null
+    out[name] = { key, from, to, landedAt: order.indexOf(key), jump }
+    if (order.indexOf(key) !== to) failures.push(`${name}: harness: landed at ${order.indexOf(key)}, planned ${to}`)
+    if (to !== from && !lastClone) failures.push(`${name}: harness: no clone frame was sampled`)
+    if (jump !== null && Math.abs(jump) > 0.5) failures.push(`${name}: the label jumped ${jump}px as the clone handed over`)
+    if (!clean(await waitClean())) failures.push(`${name}: drag state not cleaned up`)
+  }
+  record('22-landing-handoff', failures, out)
 }
 
 async function runCheck(name) {

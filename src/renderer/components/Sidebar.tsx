@@ -8,6 +8,7 @@ import { placeTip } from '../lib/tooltip'
 import { useRailFlip } from '../lib/useRailFlip'
 import { useBlockReorder, type BlockDrop } from '../lib/useBlockReorder'
 import { foldFolder } from '../lib/folderFold'
+import { useFolderToggleMotion } from '../lib/folderToggle'
 import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar'
 import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
@@ -314,6 +315,24 @@ export default function Sidebar({
 
   useRailFlip(listRef, orderSig, controlSig)
 
+  // Opening or closing a folder from its header, or all of them at once, eases its height rather than
+  // jumping (folderToggle). Each folder about to change is read just before the toggle.
+  const captureFolders = useFolderToggleMotion(listRef)
+  const toggleFolder = useCallback(
+    (root: string) => {
+      captureFolders([root])
+      onToggleFolder(root)
+    },
+    [captureFolders, onToggleFolder]
+  )
+  const setAllCollapsed = useCallback(
+    (collapsed: boolean) => {
+      captureFolders(model.groups.filter((g) => g.header && g.collapsed !== collapsed).map((g) => g.key))
+      onSetAllCollapsed(collapsed)
+    },
+    [captureFolders, model, onSetAllCollapsed]
+  )
+
 
   // Re-evaluate the head divider when the visible content changes: collapsing a folder or running a
   // search can shrink the list back within the viewport (scrollTop snaps to 0) WITHOUT firing a scroll
@@ -576,7 +595,7 @@ export default function Sidebar({
         scrolled={scrolled}
         mode={mode}
         onModeChange={onModeChange}
-        onSetAllCollapsed={onSetAllCollapsed}
+        onSetAllCollapsed={setAllCollapsed}
         filter={filter}
         onFilterChange={onFilterChange}
         query={query}
@@ -626,7 +645,7 @@ export default function Sidebar({
                     collapsed={g.collapsed}
                     wantsAttention={g.wantsAttention}
                     dimmed={g.folderHidden}
-                    onToggle={onToggleFolder}
+                    onToggle={toggleFolder}
                     onContextMenu={openFolderMenu}
                     agents={agents}
                     onNew={onNewInFolder}
