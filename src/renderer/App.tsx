@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type {
   AgentKind,
+  ConversationMenuAction,
   ConversationMeta,
   LiveState,
   PtyState,
@@ -42,7 +43,7 @@ import {
   type SidebarBlock,
   type SidebarModel
 } from './lib/sidebarModel'
-import { absorbBind, absorbBindFolder, dropWrites, holdRank, type RankOverrides } from './lib/rowRank'
+import { absorbBind, absorbBindFolder, dropWrites, holdRank, liftWrites, type RankOverrides } from './lib/rowRank'
 import {
   FOLDER_SEED_TASK,
   ONCE_TASKS_KEY,
@@ -86,7 +87,7 @@ import {
 import { confirmedEmpty, endedStops, stopsOnClose } from './lib/stopClose'
 import { captureClosed, pushClosed, rekeyClosed, takeReopenable, type ClosedGroup } from './lib/closedTabs'
 import { rekeyRecent, touchRecent } from './lib/recentTabs'
-import type { SidePlace } from './lib/conversationMenu'
+import type { MenuGroup, SidePlace } from './lib/conversationMenu'
 import {
   NO_SELECTION,
   actionTargets,
@@ -163,7 +164,7 @@ export default function App() {
   const hiddenSessionIdsRef = useRef(hiddenSessionIds)
   hiddenSessionIdsRef.current = hiddenSessionIds
   const ptys = usePtys()
-  const { pinned, order: pinnedOrder, toggle: togglePin, move: movePin } = usePins()
+  const { pinned, order: pinnedOrder, toggle: togglePin, setMany: setPins, move: movePin } = usePins()
   // A nonce bumped on each drag-reorder commit, folded into the rail's FLIP controlSig so the commit
   // settles instantly (the drag already showed the arrangement); pin/unpin toggles don't bump it, so
   // they still glide.
@@ -182,7 +183,7 @@ export default function App() {
   } = useSidebarPrefs()
   // What the user has hidden, shared by every window; which of it this window shows is its own filter,
   // never stored, so a launch never opens onto a narrowed rail.
-  const { hidden: userHidden, setConversationHidden, setFolderHidden } = useRailHidden()
+  const { hidden: userHidden, setConversationHidden, setConversationsHidden, setFolderHidden } = useRailHidden()
   const [railFilter, setRailFilter] = useState<RailFilter>(NO_FILTER)
   // The last rendered sidebar, for handlers that write positions: a drop, a Resume and a bind all
   // need to know where rows are NOW, and must not re-subscribe on every render to find out.
@@ -1673,18 +1674,21 @@ export default function App() {
   // What the row menu's where-to commands are called: where openToSide would put the conversation — a
   // new pane on the right, or the existing pane on one side — and whether they move a tab this window
   // already holds or open one. See conversationMenu.
-  const placementFor = useCallback((id: string): { side: SidePlace | null; hasTabHere: boolean } => {
+  //
+  // Several at once for a group: "to the side" must leave every pane they come from populated, and they
+  // move — rather than open — only when this window holds a tab for every one of them.
+  const placementFor = useCallback((ids: readonly string[]): { side: SidePlace | null; hasTabHere: boolean } => {
     const l = paneLayoutRef.current
     const split = l.panes.length > 1
     const target = split ? (l.focusIndex === 0 ? 1 : 0) : 1
-    const side: SidePlace | null = !canPlaceTabsToSide(l, [id], target)
+    const side: SidePlace | null = !canPlaceTabsToSide(l, ids, target)
       ? null
       : !split
         ? 'right'
         : target === 1
           ? 'rightPane'
           : 'leftPane'
-    return { side, hasTabHere: !!locateTab(l, id) }
+    return { side, hasTabHere: ids.length > 0 && ids.every((id) => !!locateTab(l, id)) }
   }, [])
   // Send an EXISTING tab to the other pane, creating the split when there is none. Distinct from
   // openToSide, which opens a conversation over there and leaves whatever was here alone: this is a
@@ -2237,6 +2241,104 @@ export default function App() {
     [resumeSession, togglePinGated, toggleUnread, setConversationHidden, setFolderHidden, showInfo, stopSession]
   )
 
+  // ---- group commands: a menu opened on picked rail rows or a tab group ----
+  // Every one is a SET, never a toggle — a toggle run over a mixed group would flip it both ways — and
+  // each re-applies the single command's gate per id, so a group can never reach what one row's menu
+  // would refuse. The ids arrive in display order from the menu's group (conversationMenu.menuGroup),
+  // the same record its labels counted.
+  const setPinnedMany = useCallback(
+    (ids: readonly string[], pin: boolean) => {
+      const targets = ids.filter((id) => !isProvisional(id))
+      if (targets.length === 0) return
+      if (pin) for (const id of targets) keepTab(id)
+      else {
+        // One write for the whole group, in display order: one lift per row, each read from the same
+        // model, would land them all on one rank and fall back to id order.
+        const model = sidebarModelRef.current
+        const lifted = model ? targets.filter((id) => model.rows.get(id)?.pinned) : []
+        const writes = model && lifted.length > 0 ? liftWrites(rankSpace(model), lifted, Date.now()) : {}
+        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+      }
+      setPins(targets, pin)
+    },
+    [isProvisional, keepTab, mutateRows, setPins]
+  )
+  const setHiddenMany = useCallback(
+    (ids: readonly string[], hidden: boolean) => {
+      const targets = ids.filter((id) => !isUnlinkedId(id))
+      if (targets.length > 0) setConversationsHidden(targets, hidden)
+    },
+    [isUnlinkedId, setConversationsHidden]
+  )
+  // Only a running conversation has a dot to mark, and an unlinked one shows none.
+  const markManyRead = useCallback(
+    (ids: readonly string[], read: boolean) => {
+      for (const id of ids) {
+        if (isUnlinkedId(id) || !ptys.bySession.has(id)) continue
+        if (read) markRead(id)
+        else markUnread(id)
+      }
+    },
+    [isUnlinkedId, ptys.bySession, markRead, markUnread]
+  )
+  // No confirmation, as for one: Stop is red and last in the menu, and its label counts what it ends.
+  const stopMany = useCallback(
+    (ids: readonly string[]) => {
+      for (const id of ids) stopSession(id)
+    },
+    [stopSession]
+  )
+  // Open several rows to the side as ONE placement: the bulk reducer action, so every tab lands in
+  // order beside the others rather than each open resolving against a layout the last one changed.
+  // `activeId` is the row the menu was opened on, which takes the focus. One another window holds is
+  // claimed first, as `land` claims one.
+  const openManyToSide = useCallback(
+    (ids: readonly string[], activeId: string) => {
+      if (ids.length === 0) return
+      beginVisit()
+      const l = paneLayoutRef.current
+      const target = l.panes.length > 1 ? (l.focusIndex === 0 ? 1 : 0) : 1
+      if (!canPlaceTabsToSide(l, ids, target)) return
+      for (const id of ids) {
+        if (openElsewhereRef.current.has(id) && !locateTab(l, id)) window.api.claimConversation(id)
+      }
+      if (l.panes.length < 2) panes.splitPane()
+      const active = ids.includes(activeId) ? activeId : ids[0]
+      panes.openTabs([...ids], active, target)
+      if (!isUnlinkedId(active)) markRead(active)
+      requestFocus(active)
+    },
+    [beginVisit, panes.splitPane, panes.openTabs, isUnlinkedId, markRead, requestFocus]
+  )
+  // ONE new window holding every row, in rail order — main claims each from whichever window holds it.
+  const openManyInNewWindow = useCallback(
+    (ids: readonly string[], activeId: string) => {
+      if (ids.length === 0) return
+      beginVisit()
+      const active = ids.includes(activeId) ? activeId : ids[0]
+      const payload = makeTabDragPayload([...ids], [...ids], active)
+      window.api.openConversationWindow(payload)
+      panes.closeTabs(payload.sessionIds)
+    },
+    [beginVisit, panes.closeTabs]
+  )
+  // The one dispatcher both menus route a group command through. The tab menu keeps its own where-to
+  // and Close, which already act on its group; everything else lands here.
+  const runGroupCommand = useCallback(
+    (action: ConversationMenuAction, group: MenuGroup, sessionId: string) => {
+      if (action === 'pin') setPinnedMany(group.pin, true)
+      else if (action === 'unpin') setPinnedMany(group.unpin, false)
+      else if (action === 'hide') setHiddenMany(group.hide, true)
+      else if (action === 'unhide') setHiddenMany(group.unhide, false)
+      else if (action === 'markRead') markManyRead(group.markRead, true)
+      else if (action === 'markUnread') markManyRead(group.markUnread, false)
+      else if (action === 'stop') stopMany(group.stop)
+      else if (action === 'toSide') openManyToSide(group.move, sessionId)
+      else if (action === 'newWindow') openManyInNewWindow(group.move, sessionId)
+    },
+    [setPinnedMany, setHiddenMany, markManyRead, stopMany, openManyToSide, openManyInNewWindow]
+  )
+
   // Clear a manual "unread" mark once the user genuinely engages the open conversation — a click
   // or keystroke in the pane body (see MainPane's listener). Gated on an existing flag so plain
   // typing in the terminal doesn't churn state past the first keystroke.
@@ -2533,6 +2635,7 @@ export default function App() {
             onDropRow={dropRow}
             onDropFolder={dropFolder}
             reorderTick={reorderTick}
+            onGroupCommand={runGroupCommand}
           />
         )}
         {!paneCollapsed && (
@@ -2615,6 +2718,7 @@ export default function App() {
                   onStopAndCloseTab={stopAndCloseTab}
                   onMarkTabUnread={markUnreadGated}
                   onTabCommand={runTabCommand}
+                  onTabGroupCommand={runGroupCommand}
                   onCloseOtherTabs={closeOtherTabs}
                   reopenCount={reopenCount}
                   onReopenClosed={reopenClosed}

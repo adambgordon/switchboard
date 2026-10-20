@@ -13,8 +13,8 @@ import { useOverflowFade } from '../lib/useOverflowFade'
 import ConversationRow from './ConversationRow'
 import SidebarHead from './SidebarHead'
 import SidebarGroupHeader from './SidebarGroupHeader'
-import { isUnlinkedRow } from '../lib/rowIdentity'
-import { conversationMenu, folderMenu, type SidePlace } from '../lib/conversationMenu'
+import { conversationMenu, folderMenu, type MenuGroup, type SidePlace } from '../lib/conversationMenu'
+import { railMenuGroup, railMenuTarget } from '../lib/railSelection'
 import type { RailFilter } from '../lib/railFilter'
 import type { ConversationMenuAction, ConversationMenuEntry } from '@shared/types'
 import { Pin, PinOff, Info, NewWindow, Rename, SplitVertical, Stop, Play, Eye, EyeOff } from './icons'
@@ -43,9 +43,9 @@ interface Props {
   onStick?: (sessionId: string) => void
   /** The ⋮ menu's Open to the Side — show it in the other pane. */
   onOpenToSide?: (sessionId: string) => void
-  /** Where "to the side" would put the conversation (null when it cannot go), and whether this window
-   *  already holds a tab for it — what the menu needs to name its where-to commands. */
-  placementFor?: (sessionId: string) => { side: SidePlace | null; hasTabHere: boolean }
+  /** Where "to the side" would put these conversations (null when they cannot go), and whether this
+   *  window already holds a tab for each — what the menu needs to name its where-to commands. */
+  placementFor?: (sessionIds: readonly string[]) => { side: SidePlace | null; hasTabHere: boolean }
   /** The ⋮ menu's Open in New Window — a separate window showing just this conversation. */
   onOpenInNewWindow?: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
@@ -95,6 +95,8 @@ interface Props {
   onDropFolder: (root: string, higherRoot: string | null, lowerRoot: string | null) => void
   /** Bumped on each drag-reorder commit; folded into controlSig so that commit settles instantly. */
   reorderTick: number
+  /** A command chosen from a menu opened on the picked rows — run on the group it names. */
+  onGroupCommand?: (action: ConversationMenuAction, group: MenuGroup, sessionId: string) => void
 }
 
 /** The drag block holding the folders themselves, in Folders mode — the rail body. */
@@ -245,7 +247,8 @@ export default function Sidebar({
   onShowInfo,
   onDropRow,
   onDropFolder,
-  reorderTick
+  reorderTick,
+  onGroupCommand
 }: Props) {
   // Nothing to draw: no folder has a row, or All mode's one group is empty. A collapsed folder is not
   // empty — it has rows, just not on screen.
@@ -330,27 +333,32 @@ export default function Sidebar({
     left?: number
     right?: number
     entries: ConversationMenuEntry[]
+    /** The picked rows it was opened on, or null for a menu about this row alone. Snapshotted with the
+     *  entries, so a command runs on exactly what its label counted. */
+    group: MenuGroup | null
   } | null>(null)
   // The row's menu — the same list its tab's menu shows (conversationMenu), minus the tab's own Close.
-  const menuStateFor = (id: string): { entries: ConversationMenuEntry[] } | null => {
+  // Opened on a picked row, it is the group's menu instead, about every pick.
+  const menuStateFor = (id: string): { entries: ConversationMenuEntry[]; group: MenuGroup | null } | null => {
     const entry = entryById(id)
     if (!entry) return null
-    // A row that stands for no conversation keeps only what its terminal supports: Stop. One whose
-    // conversation is not indexed yet — a new one before its first message — can also move, but has
-    // nothing to pin, rename or show details of.
-    const movable = !isUnlinkedRow(entry.pty, entry.meta)
-    const place = placementFor?.(id) ?? { side: null, hasTabHere: false }
+    const group = picked && onGroupCommand ? railMenuGroup(picked, id, shown) : null
+    // What the where-to commands would place: the group's placeable rows, or this one if it can go.
+    const target = railMenuTarget(entry)
+    const placing = group ? group.move : target.movable ? [id] : []
+    const place = placing.length > 0 && placementFor ? placementFor(placing) : { side: null, hasTabHere: false }
     return {
+      group,
       entries: conversationMenu({
         surface: 'row',
-        group: null,
-        linked: movable && !entry.meta.provisional,
-        live: !!entry.pty,
-        pinned: entry.pinned,
-        unread: entry.liveState === 'awaiting' || entry.liveState === 'asking',
-        hidden: entry.hiddenBy,
-        side: movable && onOpenToSide ? place.side : null,
-        newWindow: movable && !!onOpenInNewWindow,
+        group,
+        linked: target.linked,
+        live: target.live,
+        pinned: target.pinned,
+        unread: target.unread,
+        hidden: target.hidden,
+        side: placing.length > 0 && onOpenToSide ? place.side : null,
+        newWindow: placing.length > 0 && !!onOpenInNewWindow,
         hasTabHere: place.hasTabHere,
         closeOthers: false,
         reopen: 0
@@ -413,7 +421,8 @@ export default function Sidebar({
       anchorBottom: e.clientY,
       gap: 0,
       left: e.clientX,
-      entries: folderMenu(group.folderHidden)
+      entries: folderMenu(group.folderHidden),
+      group: null
     })
   }
   // The ⋮ button (click): TOGGLE — close if this row's menu is already open, else open anchored under
@@ -523,9 +532,18 @@ export default function Sidebar({
     )
   }
 
-  const runMenuAction = (action: ConversationMenuAction, kind: 'row' | 'folder', id: string): void => {
+  const runMenuAction = (
+    action: ConversationMenuAction,
+    kind: 'row' | 'folder',
+    id: string,
+    group: MenuGroup | null
+  ): void => {
     if (kind === 'folder') {
       if (action === 'hideFolder' || action === 'unhideFolder') onSetFolderHidden(id, action === 'hideFolder')
+      return
+    }
+    if (group) {
+      onGroupCommand?.(action, group, id)
       return
     }
     if (action === 'resume') onResumeSession(id)
@@ -650,7 +668,7 @@ export default function Sidebar({
                 key={e.action}
                 className={`sb-ctxmenu-item${e.danger ? ' danger' : e.action === 'resume' ? ' live' : ''}`}
                 onClick={() => {
-                  runMenuAction(e.action, ctxMenu.kind, ctxMenu.id)
+                  runMenuAction(e.action, ctxMenu.kind, ctxMenu.id, ctxMenu.group)
                   closeMenu()
                 }}
               >

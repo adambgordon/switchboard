@@ -6,6 +6,8 @@ import { useStorageSync } from './useStorageSync'
 export interface RailHidden {
   hidden: UserHidden
   setConversationHidden: (id: string, hidden: boolean) => void
+  /** Hide or unhide several conversations in one write. */
+  setConversationsHidden: (ids: readonly string[], hidden: boolean) => void
   setFolderHidden: (root: string, hidden: boolean) => void
 }
 
@@ -40,6 +42,12 @@ export function useRailHidden(): RailHidden {
     if (next !== stored) writeKey(HIDDEN_ROWS_KEY, JSON.stringify([...next]))
     setRows(next)
   }, [])
+  const setConversationsHidden = useCallback((ids: readonly string[], value: boolean) => {
+    const stored = readRows()
+    const next = ids.reduce((set, id) => withHidden(set, id, value), stored)
+    if (next !== stored) writeKey(HIDDEN_ROWS_KEY, JSON.stringify([...next]))
+    setRows(next)
+  }, [])
   const setFolderHidden = useCallback((root: string, value: boolean) => {
     const stored = readFolders()
     const next = withHidden(stored, root, value)
@@ -48,5 +56,5 @@ export function useRailHidden(): RailHidden {
   }, [])
 
   const hidden = useMemo<UserHidden>(() => ({ rows, folders }), [rows, folders])
-  return { hidden, setConversationHidden, setFolderHidden }
+  return { hidden, setConversationHidden, setConversationsHidden, setFolderHidden }
 }

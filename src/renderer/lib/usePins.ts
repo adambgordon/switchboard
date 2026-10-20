@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { moveBetween } from './reorder'
+import { moveBetween, withPins } from './reorder'
 
 /**
  * Pinned conversations — a user-curated, MANUALLY ORDERED list of session IDs that head their
@@ -49,6 +49,9 @@ export interface Pins {
   /** Display order, top-first. The source of truth. */
   order: string[]
   toggle: (sessionId: string) => void
+  /** Pin or unpin several at once — a set, never a toggle. New pins land at the bottom in the order
+   *  given. See `withPins`. */
+  setMany: (sessionIds: readonly string[], pinned: boolean) => void
   /** Move a pin between two others it was dropped between — see `moveBetween`. */
   move: (sessionId: string, higherId: string | null, lowerId: string | null) => void
 }
@@ -92,6 +95,13 @@ export function usePins(): Pins {
     [mutate]
   )
 
+  const setMany = useCallback(
+    (sessionIds: readonly string[], value: boolean) => {
+      mutate((prev) => withPins(prev, sessionIds, value))
+    },
+    [mutate]
+  )
+
   const move = useCallback(
     (sessionId: string, higherId: string | null, lowerId: string | null) => {
       mutate((prev) => moveBetween(prev, sessionId, higherId, lowerId))
@@ -101,5 +111,5 @@ export function usePins(): Pins {
 
   const pinned = useMemo(() => new Set(order), [order])
 
-  return { pinned, order, toggle, move }
+  return { pinned, order, toggle, setMany, move }
 }

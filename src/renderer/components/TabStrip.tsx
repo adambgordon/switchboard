@@ -5,7 +5,7 @@ import type { TabLayout } from '../lib/tabLayoutPreference'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
 import { useTabReorder } from '../lib/useTabReorder'
 import type { LiveDotClass } from '../lib/rowIdentity'
-import { conversationMenu, menuGroup, type MenuTarget } from '../lib/conversationMenu'
+import { conversationMenu, menuGroup, type MenuGroup, type MenuTarget } from '../lib/conversationMenu'
 import { isChooserTab } from '../lib/chooserTab'
 import type { ConversationMenuAction } from '@shared/types'
 import { Close } from './icons'
@@ -95,6 +95,9 @@ interface Props {
   /** ⌥-click on a running tab, as on its rail row: mark it unread. */
   onMarkUnread: (sessionId: string) => void
   onCommand: (command: TabConversationCommand, sessionId: string) => void
+  /** A filing command or Stop chosen from a menu opened on the tab group — run on the group it names.
+   *  Its where-to commands and Close keep their own handlers, which already act on the group. */
+  onGroupCommand: (action: ConversationMenuAction, group: MenuGroup, sessionId: string) => void
   onCloseOthers: (paneIndex: number, index: number) => void
   /** How many tabs Reopen would bring back right now, or 0. A function, so the count is read when the
    *  menu opens rather than rerendering every strip on each close. */
@@ -306,6 +309,7 @@ export default function TabStrip({
   onStopAndClose,
   onMarkUnread,
   onCommand,
+  onGroupCommand,
   onCloseOthers,
   reopenCount,
   onReopenClosed,
@@ -397,6 +401,7 @@ export default function TabStrip({
       if (canSplitRight(tab.sessionId)) onSplitRight(tab.sessionId, paneIndex)
       else onMoveToOtherPane(tab.sessionId, paneIndex)
     } else if (choice === 'newWindow') onOpenInNewWindow(tab.sessionId)
+    else if (group) onGroupCommand(choice, group, tab.sessionId)
     else onCommand(choice, tab.sessionId)
   }
 
