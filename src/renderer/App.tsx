@@ -104,6 +104,7 @@ import {
 } from './lib/tabSelection'
 import {
   NO_PICKS,
+  escapeTakesPicks,
   extendPicks,
   pickSeed,
   prunePicks,
@@ -463,6 +464,28 @@ export default function App() {
   useEffect(() => {
     if (shouldClearSelectionOnWindowBlur(railPicksRef.current, focused)) setRailPicks(NO_PICKS)
   }, [focused])
+  // Escape from the terminal backs out of a selection rather than reaching the session (see
+  // escapeTakesPicks). Captured at the window, ahead of the terminal, which takes the key for itself.
+  useEffect(() => {
+    if (!hasRailPicks && !hasTabSelection) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      const target = e.target instanceof Element ? e.target : null
+      const body = document.body.classList
+      const at = {
+        inTerminal: !!target?.closest('.xterm'),
+        dragging: body.contains('sb-dragging-row') || body.contains('sb-dragging-tab'),
+        menuOpen: !!document.querySelector('.sb-ctxmenu:not(.closing)')
+      }
+      if (!escapeTakesPicks(at)) return
+      e.preventDefault()
+      e.stopPropagation()
+      setRailPicks(NO_PICKS)
+      setTabSelection(NO_SELECTION)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [hasRailPicks, hasTabSelection])
 
   // ---- the two selection gestures ----
   // ⌘ and ⇧ pick several out of a list — tabs here, rail rows below — because that is what every

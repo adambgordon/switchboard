@@ -205,6 +205,10 @@ function Fixture() {
     flushSync(() => setCat((prev) => ({ ...prev, groups: prev.groups.map((g) => (g.root === root ? { ...g, conversations: [...g.conversations, conv] } : g)) })))
     return conv.sessionId
   }
+  // A conversation gone from the catalog — rebound to another id, hidden elsewhere — mid-drag.
+  window.removeConversation = (id) => {
+    flushSync(() => setCat((prev) => ({ ...prev, groups: prev.groups.map((g) => ({ ...g, conversations: g.conversations.filter((c) => c.sessionId !== id) })) })))
+  }
   window.reset = () => {
     window.dropCalls = []
     window.selectCalls = []
@@ -285,7 +289,7 @@ function Fixture() {
         query={cfg.query} onQueryChange={(query) => setCfg((p) => ({ ...p, query }))} searchRef={searchRef}
         searchOpen={cfg.searchOpen} onSearchToggle={() => setCfg((p) => ({ ...p, searchOpen: !p.searchOpen, query: '' }))}
         searching={search !== null}
-        onToggleFolder={(root) => setCfg((p) => ({ ...p, collapsed: { ...p.collapsed, [root]: !p.collapsed[root] } }))}
+        onToggleFolder={(root) => search === null && setCfg((p) => ({ ...p, collapsed: { ...p.collapsed, [root]: !p.collapsed[root] } }))}
         revealed={revealed} onShowMore={(k) => setRevealed((r) => ({ ...r, [k]: (r[k] ?? 0) + 5 }))}
         onShowLess={(k) => setRevealed((r) => ({ ...r, [k]: 0 }))}
         onNewConversation={() => { window.headNewCalls++ }} agents={cfg.agents}

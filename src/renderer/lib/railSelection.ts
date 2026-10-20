@@ -118,3 +118,14 @@ export function railMenuGroup(
   const group = rows.filter((r) => picked.has(r.sessionId))
   return group.length < 2 ? null : menuGroup(group.map(railMenuTarget))
 }
+
+/**
+ * Whether an Escape pressed while picks exist — rail or tab — is taken to clear them before anything
+ * else sees it. Only from the terminal: everywhere else the app's own Escape order already reaches the
+ * picks, but the terminal takes the key for its session, and to a running agent an Escape means stop
+ * — not what someone backing out of a selection asked for. Not while a drag or a menu is up, which
+ * each have their own Escape to take first.
+ */
+export function escapeTakesPicks(at: { inTerminal: boolean; dragging: boolean; menuOpen: boolean }): boolean {
+  return at.inTerminal && !at.dragging && !at.menuOpen
+}

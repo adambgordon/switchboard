@@ -14,7 +14,7 @@ import {
   type Slot
 } from './blockReorder'
 import { dragScrollFeedback, dragScrollRequest, type EdgeMotion } from './edgeScroll'
-import { COLLAPSE_ID, collapseUnits } from './groupCollapse'
+import { afterMeasure, COLLAPSE_ID, collapseUnits } from './groupCollapse'
 import { FOLD_ID } from './folderFold'
 
 /**
@@ -131,6 +131,8 @@ interface Drag {
   /** The reshaping this drag applied, and the scroll it started from. */
   shape: DragReshape | null
   startScroll: number
+  /** Where the block itself sat, in the container's content coordinates, when the slots were measured. */
+  blockTop: number
   /** A group drag: the block's every key, the carried ones' indices in it (ascending, the grabbed
    *  one's among them), and the carried units other than the grabbed one, folded out of the layout
    *  for the drag (its `shape`). `els`, `keys` and `slots` above leave those out. Null for a single unit. */
@@ -280,8 +282,11 @@ function settle({ host, clone, shell }: Lifted, slotTop: number, real: HTMLEleme
   )
   // The real unit travels with its clone, from under it to its slot. Hidden, it shows nothing — except
   // what a reshape lets show while it settles, a dropped folder's rows, which then stay under their
-  // header instead of waiting in the slot for it to slide onto them.
-  real?.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }], { duration: SETTLE_MS, easing: SPRING })
+  // header instead of waiting in the slot for it to slide onto them. Started once the drop's render has
+  // measured, or the rail's glide would record the unit at its offset rather than its slot.
+  afterMeasure(() =>
+    real?.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }], { duration: SETTLE_MS, easing: SPRING })
+  )
   anim.onfinish = reveal
   return SETTLE_MS
 }
@@ -342,14 +347,23 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     const drag = dragRef.current
     const container = containerRef.current
     if (!drag || !container) return
-    // A group's other units are out of the layout, and out of what the drag measured.
-    const units = (drag.block.isConnected ? unitsOf(drag.block) : []).filter((u) => !drag.group?.others.includes(u))
-    const same = units.length === drag.els.length && units.every((u, i) => u === drag.els[i])
+    const all = drag.block.isConnected ? unitsOf(drag.block) : []
+    // A group's other units are out of the layout, and out of what the drag measured — but not out of
+    // what it carries: one leaving the block (rebound, hidden) ends the drag as any change in it does.
+    const units = all.filter((u) => !drag.group?.others.includes(u))
+    const intact = !drag.group || (all.length === drag.group.keys.length && all.every((u, i) => (u.dataset.key ?? '') === drag.group!.keys[i]))
+    const same = intact && units.length === drag.els.length && units.every((u, i) => u === drag.els[i])
     const resized = same && siblingsResized(units.map((u) => u.getBoundingClientRect().height), drag.slots, drag.from)
     const r = container.getBoundingClientRect()
     const top = contentY(drag.unit.getBoundingClientRect().top, r.top, container.scrollTop)
     const moved = !drag.shape && Math.abs(top - drag.slots[drag.from].top) > 0.5
-    if (!same || resized || moved) cancelRef.current()
+    // The block can move as a whole with nothing inside it changing — a row arriving in a folder above
+    // — and a reshaped drag does not watch its unit, so the block is watched instead. Not the folders'
+    // own block, which is the scroll container: its content coordinates do not move.
+    const blockMoved =
+      drag.block !== container &&
+      Math.abs(contentY(drag.block.getBoundingClientRect().top, r.top, container.scrollTop) - drag.blockTop) > 0.5
+    if (!same || resized || moved || blockMoved) cancelRef.current()
   })
 
   useEffect(() => {
@@ -503,6 +517,7 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
         const b = u.getBoundingClientRect()
         return { top: contentY(b.top, r.top, scroll), height: b.height }
       })
+      const blockTop = contentY(block.getBoundingClientRect().top, r.top, scroll)
       const rect = unit.getBoundingClientRect()
       // The pointer keeps its grip on the handle wherever the handle ended up: its offset within the handle
       // at the press, plus the handle's place within the (reshaped) unit.
@@ -525,6 +540,7 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
         grab,
         shape,
         startScroll,
+        blockTop,
         group
       }
       el.setPointerCapture(e.pointerId)

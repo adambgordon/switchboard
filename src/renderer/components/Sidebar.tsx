@@ -313,17 +313,22 @@ export default function Sidebar({
       block === FOLDERS_BLOCK || !picked || !onDropRows ? [key] : dragCarry(picked, key, keys)
   })
 
+  // Opening or closing a folder from its header, or all of them at once, eases its height rather than
+  // jumping (folderToggle). Each folder about to change is read just before the toggle. Declared BEFORE
+  // useRailFlip: a toggle reversed part-way stops the last one's animation, and the flip must measure
+  // the rows after that.
+  const captureFolders = useFolderToggleMotion(listRef)
+
   useRailFlip(listRef, orderSig, controlSig)
 
-  // Opening or closing a folder from its header, or all of them at once, eases its height rather than
-  // jumping (folderToggle). Each folder about to change is read just before the toggle.
-  const captureFolders = useFolderToggleMotion(listRef)
+  // Not while searching: a header click is inert then (App's toggleFolder), so no render would consume
+  // the capture, and the search's next change would play it instead.
   const toggleFolder = useCallback(
     (root: string) => {
-      captureFolders([root])
+      if (!searching) captureFolders([root])
       onToggleFolder(root)
     },
-    [captureFolders, onToggleFolder]
+    [captureFolders, onToggleFolder, searching]
   )
   const setAllCollapsed = useCallback(
     (collapsed: boolean) => {
@@ -497,7 +502,9 @@ export default function Sidebar({
   useEffect(() => {
     if (!ctxMenu) return
     // The Escape that closes the menu is consumed: App's own Escape would also clear the rail's
-    // search or close Find.
+    // search or close Find. Captured, because the keyboard can still be in the terminal — a ⌘- or
+    // ⇧-press on the ⋮ picks, and a pick leaves focus where it was — and the terminal keeps the keys it
+    // takes for its session, an Escape included, from ever bubbling this far.
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       e.stopPropagation()
@@ -511,11 +518,11 @@ export default function Sidebar({
     // listener on the rail body fires only for rail scrolls.
     const railBody = listRef.current
     document.addEventListener('click', closeMenu)
-    document.addEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKey, true)
     railBody?.addEventListener('scroll', closeMenu)
     return () => {
       document.removeEventListener('click', closeMenu)
-      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('keydown', onKey, true)
       railBody?.removeEventListener('scroll', closeMenu)
     }
   }, [ctxMenu])

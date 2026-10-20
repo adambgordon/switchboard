@@ -1,4 +1,4 @@
-import { memo, type MouseEvent } from 'react'
+import { memo, useRef, type MouseEvent } from 'react'
 import type { ConversationMeta, LiveState, PtyState } from '@shared/types'
 import { relTime, formatCount } from '../lib/format'
 import type { RailDensity } from '../lib/sidebarPrefs'
@@ -98,19 +98,24 @@ function ConversationRowImpl({
   // A ⌘- or ⇧-press is a pick, not a landing. Handled on the press, as the tab strip does, so it does
   // not wait on a click a drag or a re-render could swallow.
   const picks = (e: MouseEvent): boolean => !!onPick && !e.altKey && (e.metaKey || e.shiftKey)
+  // Whether the latest press picked. What follows it — its click, and a double-click it completes — is
+  // judged by the press, not by the keys still held at release: letting go of ⌘ a moment before the
+  // button would otherwise land on the row the press had just picked.
+  const pickPress = useRef(false)
   return (
     <div
       className={`sb-row ${density}${selected ? ' selected' : ''}${picked ? ' picked' : ''}${live ? ' live' : ''}${pinned ? ' pinned' : ''}${dimmed ? ' dimmed' : ''}${needsYou(liveState ?? null) ? ' attention' : ''}`}
       onPointerDown={(e) => {
+        pickPress.current = e.button === 0 && picks(e)
         // ⇧ before ⌘, so ⇧⌘ extends rather than toggling — as on a tab.
-        if (e.button === 0 && picks(e)) onPick?.(meta.sessionId, e.shiftKey ? 'extend' : 'toggle')
+        if (pickPress.current) onPick?.(meta.sessionId, e.shiftKey ? 'extend' : 'toggle')
       }}
       // The press only changes the selection, so it must not take focus from wherever the keyboard is —
       // a terminal mid-sentence, say. Canceled on the compatibility mousedown rather than on the
       // pointerdown, which would suppress that mousedown altogether, and with it the tooltip layer's
       // dismissal of the row's hover.
       onMouseDown={(e) => {
-        if (picks(e)) e.preventDefault()
+        if (pickPress.current) e.preventDefault()
       }}
       onClick={(e) => {
         if (e.altKey) {
@@ -121,7 +126,7 @@ function ConversationRowImpl({
         }
         // The press picked it. Landing on it as well would mark it read and move the selected row a
         // range is taken from.
-        if (picks(e)) return
+        if (pickPress.current) return
         live && onJump ? onJump(meta.sessionId) : onSelect(meta.sessionId)
       }}
       // Double-click keeps the tab. The two ordinary clicks that precede it (DOM order is
@@ -130,7 +135,7 @@ function ConversationRowImpl({
       onDoubleClick={(e) => {
         // ⌥ means mark unread here, and ⌘ / ⇧ pick, so none of them may also keep the tab — two
         // ⌘-presses toggled the row in and back out, and that is all the gesture should do.
-        if (e.altKey || picks(e) || !onStick) return
+        if (e.altKey || pickPress.current || !onStick) return
         onStick(meta.sessionId)
       }}
       onContextMenu={(e) => {

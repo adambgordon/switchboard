@@ -48,6 +48,9 @@ export function useFolderToggleMotion(containerRef: RefObject<HTMLElement>): (ro
     for (const [root, { from, ghost }] of pending) {
       const folder = findFolder(container, root)
       if (!folder) continue
+      // A toggle reversed mid-way still has the last one's animation driving the height; it goes before
+      // the new height is read, or that read is the animation's frame rather than the folder's own.
+      for (const a of folder.getAnimations()) if (a.id === FOLD_ID) a.cancel()
       const to = folder.getBoundingClientRect().height
       if (Math.abs(to - from) <= 0.5) continue
       plays.push(() => play(folder, from, to, ghost))
@@ -107,10 +110,13 @@ function play(folder: HTMLElement, from: number, to: number, ghost: HTMLElement 
     folder.style.position = 'relative'
     folder.appendChild(ghost)
   }
+  // Held from shrinking for the animation: a folder is an item of the rail body's flex column, and in
+  // an overflowing rail an item may shrink back to its content — a closed folder's, just its header —
+  // which swallows the closing height whole.
   const anim = folder.animate(
     [
-      { height: `${from}px`, clipPath: CLIP_BOTTOM },
-      { height: `${to}px`, clipPath: CLIP_BOTTOM }
+      { height: `${from}px`, clipPath: CLIP_BOTTOM, flexShrink: '0' },
+      { height: `${to}px`, clipPath: CLIP_BOTTOM, flexShrink: '0' }
     ],
     { duration: TOGGLE_MS, easing: EASE, id: FOLD_ID }
   )

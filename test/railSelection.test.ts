@@ -4,6 +4,7 @@ import type { SidebarRow } from '../src/renderer/lib/sidebarModel'
 import {
   NO_PICKS,
   dragCarry,
+  escapeTakesPicks,
   extendPicks,
   pickSeed,
   pickedTargets,
@@ -221,5 +222,25 @@ describe('railMenuGroup', () => {
 
   it('a single pick is an anchor, not a group', () => {
     expect(railMenuGroup(new Set(['a']), 'a', rows)).toBeNull()
+  })
+})
+
+describe('escapeTakesPicks', () => {
+  const terminal = { inTerminal: true, dragging: false, menuOpen: false }
+
+  it('takes an Escape pressed in the terminal, so it clears the picks instead of reaching the session', () => {
+    expect(escapeTakesPicks(terminal)).toBe(true)
+  })
+
+  it('leaves an Escape pressed anywhere else to the app\'s own Escape order', () => {
+    expect(escapeTakesPicks({ ...terminal, inTerminal: false })).toBe(false)
+  })
+
+  it('leaves it to a drag, whose Escape cancels the drag', () => {
+    expect(escapeTakesPicks({ ...terminal, dragging: true })).toBe(false)
+  })
+
+  it('leaves it to an open menu, whose Escape closes the menu', () => {
+    expect(escapeTakesPicks({ ...terminal, menuOpen: true })).toBe(false)
   })
 })
