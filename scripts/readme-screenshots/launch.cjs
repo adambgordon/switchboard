@@ -180,7 +180,7 @@ async function main() {
     app.kill()
     throw e
   }
-  console.log('Ready. Switch themes with the title bar’s sun/moon button; avoid clicking rows or tabs, which')
+  console.log('Ready. Switch themes with the title bar’s sun button; avoid clicking rows or tabs, which')
   console.log(`would mark them read. Quit the window or press Ctrl-C to stop; the made-up home and ${PROJECTS} are then removed.`)
 }
 

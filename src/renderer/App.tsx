@@ -1374,8 +1374,8 @@ export default function App() {
   const ptysBySessionRef = useRef(ptys.bySession)
   ptysBySessionRef.current = ptys.bySession
 
-  // A new chooser tab after the active one, in the focused pane. Persistent, so a preview open does not
-  // replace it — and with tabs off it sits beside the one preview tab, which Esc returns to.
+  // A new chooser tab at the end of the focused pane. Persistent, so a preview open does not replace
+  // it — and with tabs off it sits beside the one preview tab, which Esc returns to.
   const openChooserTab = useCallback(
     (preselect: string | null) => {
       beginVisit()

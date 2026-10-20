@@ -1,4 +1,4 @@
-import { Gear, Moon, PanelLeft, SplitVertical, Sun } from './icons'
+import { Gear, HalfSun, PanelLeft, SplitVertical } from './icons'
 import type { ResolvedTheme } from '../lib/theme'
 import AttentionBell, { type AttentionEntry } from './AttentionBell'
 
@@ -8,7 +8,7 @@ interface Props {
   onHome: () => void
   /** Open the Preferences modal (App page) — the title-bar gear / ⌘,. */
   onOpenSettings: () => void
-  /** The resolved theme — picks the toggle's icon (Moon in light → go dark; Sun in dark → go light). */
+  /** The resolved theme — picks the toggle's label (Switch to dark in light, Switch to light in dark). */
   resolvedTheme: ResolvedTheme
   /** Flip light ↔ dark as an explicit choice — the title-bar quick toggle. */
   onToggleTheme: () => void
@@ -87,7 +87,7 @@ export default function TitleBar({
         data-tip={resolvedTheme === 'dark' ? 'Switch to light' : 'Switch to dark'}
         aria-label={resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
       >
-        {resolvedTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        <HalfSun size={16} />
       </button>
       <button
         className="sb-panel-toggle"

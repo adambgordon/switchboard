@@ -36,10 +36,6 @@
      The chrome (--paper-sunken: rail, title bar, Preferences nav): rail rows, folder headers, the
      bell's rows, and the chrome's own icon buttons. */
   --sunken-hover: #e3e3e3;
-  /* A selected item on the chrome that isn't a rail row (the Preferences nav). Light goes white, so
-     selection and hover move in opposite directions. Dark keeps a gray well past the hover:
-     --paper-raised sits too near the hover there to tell apart unaided. */
-  --sunken-selected: var(--paper-raised);
   /* The pane (--paper-pane): the pane header's controls, the transcript's, the Preferences page. */
   --pane-hover: #ededed;
   /* Raised tiles (--paper-raised): menu items, a modal's own controls. */
@@ -212,7 +208,6 @@
   --rule-soft: #272727; /* softer = closer to the surface (nudged up to stay just above the lightened paper) */
   --rule-strong: #3f3f3f; /* stronger = more contrast */
   --sunken-hover: #252525; /* a step above the chrome — see the light note */
-  --sunken-selected: var(--paper-active);
   --pane-hover: #2e2e2e;
   --raised-hover: #373737;
   --tab-hover: #0c0c0c; /* dips below the strip, away from the active tab's lift: the lane up to it is too narrow for a hover */

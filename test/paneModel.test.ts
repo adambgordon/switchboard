@@ -133,13 +133,13 @@ describe('open — preview tabs', () => {
     expect(after.panes[0].activeIndex).toBe(1)
   })
 
-  it('inserts after the active tab when there is no preview tab to reuse', () => {
-    // Not at the end: an opened conversation belongs next to the one it was opened from. Active is
-    // deliberately 0 with tabs after it, so "append" (→ A,B,C,D) is a different array.
+  it('appends at the end when there is no preview tab to reuse', () => {
+    // Active is deliberately 0 with tabs after it, so "insert after the active tab" (→ A,D,B,C) is
+    // a different array.
     const before = layout([pane('p0', [t('A'), t('B'), t('C')], 0)])
     const after = step(before, { type: 'open', sessionId: 'D', mode: 'preview' })
-    expect(after.panes[0].tabs).toEqual([t('A'), t('D', true), t('B'), t('C')])
-    expect(after.panes[0].activeIndex).toBe(1)
+    expect(after.panes[0].tabs).toEqual([t('A'), t('B'), t('C'), t('D', true)])
+    expect(after.panes[0].activeIndex).toBe(3)
   })
 })
 
@@ -195,8 +195,8 @@ describe('open — persistent tabs', () => {
     // so the next ordinary click still has a slot to reuse rather than pushing another tab.
     const before = layout([pane('p0', [t('A'), t('P', true)], 0)])
     const after = step(before, { type: 'open', sessionId: 'D', mode: 'persistent' })
-    expect(after.panes[0].tabs).toEqual([t('A'), t('D'), t('P', true)])
-    expect(after.panes[0].activeIndex).toBe(1)
+    expect(after.panes[0].tabs).toEqual([t('A'), t('P', true), t('D')])
+    expect(after.panes[0].activeIndex).toBe(2)
   })
 
   it('a background open inserts without moving the selection or the pane focus', () => {
@@ -210,7 +210,7 @@ describe('open — persistent tabs', () => {
       pane: 0,
       focus: false
     })
-    expect(after.panes[0].tabs).toEqual([t('A'), t('D'), t('B')])
+    expect(after.panes[0].tabs).toEqual([t('A'), t('B'), t('D')])
     expect(after.panes[0].activeIndex).toBe(0)
     expect(after.focusIndex).toBe(1)
   })

@@ -29,27 +29,32 @@ export function tipPlace(cwd: string, root: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : cwd
 }
 
-/** What the row's own markers say, since those carry no label of their own: the row's tooltip takes
- *  over the whole row (see `data-tip-scrub`), so it names them in its last line instead. */
+/** What the hover says about the row beyond where it ran: the row's tooltip takes over the whole row
+ *  (see `data-tip-scrub`), so it names these in its last line. */
 export interface RowTipNotes {
   /** A Claude background session — the dashed ring around the logo. */
   background: boolean
-  /** Another window holds the conversation's tab — the window glyph. */
+  /** Another window holds the conversation's tab. The row draws nothing for it, so this note is the
+   *  only warning that a click raises a different window. */
   elsewhere: boolean
 }
 
+const joinTip = (parts: string[]): string => parts.filter((s) => s.length > 0).join(META_SEP)
+
 /**
- * The tooltip's third line after its age: the folder's label, the place within it, then what the row's
- * markers mean.
+ * The tooltip's third line after its age: the folder's label, the place within it, then the notes.
+ * Only the location is clamped, so a long path can never push a note out of the line.
  */
 export function rowTipMeta(label: string, cwd: string, root: string, notes: RowTipNotes): string {
-  const parts = [
-    label,
-    tipPlace(cwd, root),
+  const where = joinTip([label, tipPlace(cwd, root)])
+  const said = joinTip([
     notes.background ? 'Background session' : '',
     notes.elsewhere ? 'In another window' : ''
-  ]
-  return endClampTip(parts.filter((s) => s.length > 0).join(META_SEP), TIP_META_MAX)
+  ])
+  if (!said) return endClampTip(where, TIP_META_MAX)
+  if (!where) return said
+  const room = TIP_META_MAX - Array.from(said).length - Array.from(META_SEP).length
+  return `${endClampTip(where, room)}${META_SEP}${said}`
 }
 
 export const rowTipTitle = (title: string): string => endClampTip(title, TIP_TITLE_MAX)

@@ -375,10 +375,12 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 }
 
 /* ---- syntax highlighting (rehype-highlight / highlight.js token classes) ----
-   EXPERIMENT (github-hl-theme branch): the GitHub palette (github.css / github-dark.css) ported onto
-   OUR fence surfaces — we keep --paper-sunken background + --ink base text and swap only the token hues.
-   Light in :root, GitHub-Dark under [data-theme='dark']. NOTE: GitHub uses RED for keywords, which
-   collides with the app's danger-red (red = destructive/error) — a design decision, not just a swap. */
+   The GitHub palette (github.css / github-dark.css) ported onto OUR fence surfaces — we keep
+   --paper-sunken background + --ink base text and swap only the token hues. Light in :root,
+   GitHub-Dark under [data-theme='dark']. ```diff / ```patch use the same palette: hunk headers are
+   .hljs-meta, file headers .hljs-comment, and changed lines .hljs-addition / .hljs-deletion. NOTE:
+   GitHub uses RED for keywords, which collides with the app's danger-red (red = destructive/error) —
+   a design decision, not just a swap. */
 /* light — GitHub Light */
 .hljs-doctag,
 .hljs-keyword,
@@ -447,12 +449,12 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   font-weight: bold;
 }
 .hljs-addition {
-  color: #22863a;
-  background-color: #f0fff4;
+  color: #116329;
+  background-color: #ccf3d6;
 }
 .hljs-deletion {
-  color: #b31d28;
-  background-color: #ffeef0;
+  color: #a40e26;
+  background-color: #ffd7d5;
 }
 .hljs-link {
   text-decoration: underline;

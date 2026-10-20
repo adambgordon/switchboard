@@ -303,16 +303,17 @@ export const Gear = (p: IconProps) =>
     </>,
     p
   )
-export const Sun = (p: IconProps) =>
+// The theme toggle: a sun whose disc is split down the middle, its right half filled — light and dark
+// in one mark, the same in either theme.
+export const HalfSun = (p: IconProps) =>
   svg(
     <>
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+      <circle cx="12" cy="12" r="5.5" />
+      <path d="M12 6.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" />
+      <path d="M12 1v2.5M12 20.5V23M1 12h2.5M20.5 12H23M4.22 4.22l1.77 1.77M18.01 18.01l1.77 1.77M19.78 4.22l-1.77 1.77M5.99 18.01l-1.77 1.77" />
     </>,
     p
   )
-export const Moon = (p: IconProps) =>
-  svg(<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />, p)
 export const CheckCircle = (p: IconProps) =>
   svg(
     <>

@@ -116,11 +116,11 @@ describe('readers skip choosers', () => {
 })
 
 describe('the reducer actions a chooser reuses', () => {
-  it('opens after the active tab, sticky, beside a preview it must not replace', () => {
+  it('opens at the end, sticky, beside a preview it must not replace', () => {
     // Tabs off keeps one preview tab; the chooser goes beside it so dismissing returns to it.
     const l = layout([pane('p0', [t(A), t(B, true), t(C)], 0)])
     expect(paneReducer(l, { type: 'open', sessionId: X, mode: 'persistent' }).panes[0]).toEqual(
-      pane('p0', [t(A), t(X), t(B, true), t(C)], 1)
+      pane('p0', [t(A), t(B, true), t(C), t(X)], 3)
     )
   })
 
