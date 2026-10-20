@@ -286,7 +286,8 @@ module.exports = function installRailHelpers() {
     // The open row menu's items, in order, or null when no menu is open.
     menuLabels: () => {
       const menu = document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')
-      return menu ? [...menu.querySelectorAll('.sb-ctxmenu-item span')].map((s) => s.textContent) : null
+      // The label is the item's own text span; the read/unread glyph is a span too, but aria-hidden.
+      return menu ? [...menu.querySelectorAll('.sb-ctxmenu-item > span:not([aria-hidden])')].map((s) => s.textContent) : null
     },
     menuItem: (text) => {
       const menu = document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')
