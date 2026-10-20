@@ -319,8 +319,11 @@ input::placeholder {
   .sb-dot.asking {
     box-shadow: 0 0 0 1.5px var(--paper), 0 0 0 3px var(--dot);
   }
-  /* The gap is the surface behind the dot, and the selected rail row's inverts. */
+  /* The gap is the surface behind the dot: the selected rail row's inverts, and a picked row's is its own. */
   .sb-row.selected .sb-dot.asking {
     box-shadow: 0 0 0 1.5px var(--row-selected), 0 0 0 3px var(--dot);
+  }
+  .sb-row.picked:not(.selected) .sb-dot.asking {
+    box-shadow: 0 0 0 1.5px var(--row-picked), 0 0 0 3px var(--dot);
   }
 }

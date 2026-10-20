@@ -64,6 +64,14 @@ const REFERENCE_SURFACE: Record<ResolvedTheme, string> = { light: '#f4f4f4', dar
  */
 const SELECTED_SURFACE: Record<ResolvedTheme, string> = { light: '#2d2d2d', dark: '#d9d9d9' }
 
+/**
+ * A picked rail row's fill (`--row-picked`), a step past the rail's hover in each theme: darker than
+ * the light reference, lighter than the dark one, so it is less favorable to the dot than any resting
+ * surface and gets a solve of its own, in the theme's own direction. Literals for the same reason as
+ * above, and under the same obligation.
+ */
+const PICKED_SURFACE: Record<ResolvedTheme, string> = { light: '#d6d6d6', dark: '#333333' }
+
 /** WCAG 1.4.11 non-text contrast. The dot is a signal, never prose. */
 const MIN_CONTRAST = 3
 
@@ -215,6 +223,11 @@ export function clampDotColor(hex: string, theme: ResolvedTheme): string {
  */
 export function clampSelectedDotColor(hex: string, theme: ResolvedTheme): string {
   return clampAgainst(hex, SELECTED_SURFACE[theme], theme === 'light')
+}
+
+/** The same placement for a dot on a picked rail row, which moves the way the theme does. */
+export function clampPickedDotColor(hex: string, theme: ResolvedTheme): string {
+  return clampAgainst(hex, PICKED_SURFACE[theme], theme === 'dark')
 }
 
 function clampAgainst(hex: string, surface: string, lighten: boolean): string {

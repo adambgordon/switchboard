@@ -233,17 +233,19 @@
 }
 /* Lightweight inter-row dividers, Spacious only — Compact draws no lines at all, rows or folders. An
    inset hairline centered in the 3px gap between two adjacent rows, but only when both are at rest: the
-   selected row and a hovered row each carry a fill, so the divider yields to both. A NATIVE border on a
-   zero-height box, not a 1px background band: at fractional zoom a band
+   selected row, a picked row and a hovered row each carry a fill, so the divider yields to all three. A
+   NATIVE border on a zero-height box, not a 1px background band: at fractional zoom a band
    alternates between physical-pixel thicknesses from row to row, where a border snaps its weight. The
    + combinator re-evaluates on hover and selection, so it appears and disappears with zero reflow. */
 /* The pinned and unpinned blocks are siblings, not their rows, so the pair that straddles them takes
    the same rule through :has. */
-.sb-rail-body .sb-row.spacious:not(.selected):not(:hover) + .sb-row.spacious:not(.selected):not(:hover)::before,
 .sb-rail-body
-  .sb-block:has(> .sb-row.spacious:last-child:not(.selected):not(:hover))
+  .sb-row.spacious:not(.selected):not(.picked):not(:hover)
+  + .sb-row.spacious:not(.selected):not(.picked):not(:hover)::before,
+.sb-rail-body
+  .sb-block:has(> .sb-row.spacious:last-child:not(.selected):not(.picked):not(:hover))
   + .sb-block
-  > .sb-row.spacious:first-child:not(.selected):not(:hover)::before {
+  > .sb-row.spacious:first-child:not(.selected):not(.picked):not(:hover)::before {
   content: '';
   position: absolute;
   top: -2px;
