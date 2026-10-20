@@ -33,6 +33,10 @@ interface Props {
    *  one raises that window instead of opening here. */
   openElsewhere: Set<string>
   selectedSessionId: string | null
+  /** The rows picked into the rail's multi-selection (railSelection). Empty, or absent, when none is. */
+  picked?: ReadonlySet<string>
+  /** ⌘-click (toggle) or ⇧-click (extend) a row. Absent where the rail offers no selection. */
+  onPick?: (sessionId: string, how: 'toggle' | 'extend') => void
   onJump: (sessionId: string) => void
   onSelect: (sessionId: string) => void
   /** Double-click a row — keep its tab. Undefined while tabs are switched off. */
@@ -206,6 +210,8 @@ export default function Sidebar({
   loading,
   openElsewhere,
   selectedSessionId,
+  picked,
+  onPick,
   onJump,
   onSelect,
   onStick,
@@ -493,6 +499,9 @@ export default function Sidebar({
         meta={row.meta}
         density={density}
         selected={row.sessionId === selectedSessionId}
+        // A boolean, not the set: the row is memoized, and a new set on every pick would re-render
+        // every row in the rail rather than the ones whose pick changed.
+        picked={picked?.has(row.sessionId) ?? false}
         tipMeta={rowTipMeta(model.labels.get(root) ?? '', row.meta.cwd, root, {
         background: row.meta.agent === 'claude' && row.meta.sessionKind === 'bg',
         elsewhere: openElsewhere.has(row.sessionId)
@@ -504,6 +513,7 @@ export default function Sidebar({
         onSelect={onSelect}
         onJump={onJump}
         onStick={onStick}
+        onPick={onPick}
         // onOpenToSide / onOpenInNewWindow are deliberately NOT passed down: they are menu actions,
         // not click gestures. The rail still holds them for its own ⋮ and right-click menus below.
         onMarkUnread={onMarkUnread}

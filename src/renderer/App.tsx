@@ -100,6 +100,15 @@ import {
   toggleSelected,
   type TabSelection
 } from './lib/tabSelection'
+import {
+  NO_PICKS,
+  extendPicks,
+  pickSeed,
+  prunePicks,
+  retargetPicks,
+  togglePick,
+  type RailSelection
+} from './lib/railSelection'
 import { nextPtyHomes } from './lib/ptyHome'
 import { useMarkdownCopy } from './lib/useMarkdownCopy'
 import { chooserDirs, chooserPreselect, type ChooserFolder } from './lib/chooserDirs'
@@ -421,10 +430,42 @@ export default function App() {
     )
   }, [paneLayout])
 
-  // ---- the two selection gestures, on TABS only ----
-  // ⌘ and ⇧ are free here in a way they are not on a rail row: picking several out of a list is what
-  // every editor and file browser uses them for, so on a tab strip they read as the convention rather
-  // than as a borrowed browser trick.
+  // Rail rows picked as one (railSelection) — the rail's counterpart, under the same rules. App's
+  // rather than the rail's, which unmounts whenever it is collapsed. A rail selection and a tab
+  // selection never coexist: each gesture that starts one ends the other, so a group command always
+  // has one unambiguous group to act on.
+  const [railPicks, setRailPicks] = useState<RailSelection>(NO_PICKS)
+  const railPicksRef = useRef(railPicks)
+  railPicksRef.current = railPicks
+  const hasRailPicks = railPicks.ids.size > 0
+  useEffect(() => {
+    if (!hasRailPicks) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target instanceof Element ? event.target : null
+      // The rail's own menu acts on the picks; pressing its items must not drop them first.
+      if (target?.closest('.sb-ctxmenu')) return
+      const rowId = target?.closest<HTMLElement>('.sb-rail-body .sb-row')?.dataset.session ?? null
+      if (
+        shouldClearSelectionOnPointerDown(
+          railPicksRef.current,
+          rowId,
+          rowId !== null && (event.metaKey || event.shiftKey)
+        )
+      ) {
+        setRailPicks(NO_PICKS)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [hasRailPicks])
+  useEffect(() => {
+    if (shouldClearSelectionOnWindowBlur(railPicksRef.current, focused)) setRailPicks(NO_PICKS)
+  }, [focused])
+
+  // ---- the two selection gestures ----
+  // ⌘ and ⇧ pick several out of a list — tabs here, rail rows below — because that is what every
+  // editor and file browser uses them for, so they read as the convention rather than as a borrowed
+  // browser trick. They only ever select; placement stays on the menus, which name what they do.
   //
   // Declared HERE, beside the state, rather than beside the drag handlers where they are used — the
   // group-capable actions further down all call `targetsFor`, and a `const` defined after them is not
@@ -440,6 +481,7 @@ export default function App() {
   const toggleTabSelected = useCallback((pane: number, sessionId: string) => {
     if (isChooserTab(sessionId)) return
     const active = selectableActive(pane)
+    setRailPicks(NO_PICKS)
     setTabSelection((s) => toggleSelected(s, pane, active, sessionId))
   }, [])
   const extendTabSelection = useCallback((pane: number, sessionId: string) => {
@@ -448,6 +490,7 @@ export default function App() {
     const order = p?.tabs.map((t) => t.sessionId).filter((id) => !isChooserTab(id)) ?? []
     // The active tab is the fallback anchor, so a first ⇧-click takes the run from where the user is.
     const active = selectableActive(pane)
+    setRailPicks(NO_PICKS)
     setTabSelection((s) => extendSelection(s, pane, order, sessionId, active))
   }, [])
 
@@ -644,6 +687,8 @@ export default function App() {
         else if (act.tabs === 'retarget') panes.retargetTabs(oldId, newId)
         if (act.tabSelection !== 'none') {
           setTabSelection((selection) => retargetSelection(selection, oldId, newId))
+          // The rail's picks are session-keyed the same way, and follow the same decision.
+          setRailPicks((picks) => retargetPicks(picks, oldId, newId))
         }
         if (act.view === 'move') {
           setViewBySession((prev) => {
@@ -1191,6 +1236,22 @@ export default function App() {
   // Arrow-key order follows what's actually visible — the model the rail renders — so nav never lands
   // on a hidden row.
   const orderedIds = useMemo(() => visibleRows(sidebarModel).map((r) => r.sessionId), [sidebarModel])
+  const orderedIdsRef = useRef(orderedIds)
+  orderedIdsRef.current = orderedIds
+  // Picks follow what the rail shows — re-checked on every model change, so no path that takes a row
+  // off the rail can forget them. A collapsed rail shows nothing, and so keeps no picks: a selection
+  // that cannot be seen would still swallow the next Escape. Identity when nothing went.
+  useEffect(() => {
+    setRailPicks((s) => prunePicks(s, paneCollapsed ? [] : orderedIds))
+  }, [orderedIds, paneCollapsed])
+  // ⌘-click toggles a row, ⇧-click takes the run from the anchor — or the rail's selected row — to it,
+  // in the rail's order. Neither navigates; see railSelection.
+  const pickRow = useCallback((id: string, how: 'toggle' | 'extend') => {
+    const order = orderedIdsRef.current
+    const seed = pickSeed(selectedIdRef.current, order)
+    setTabSelection(NO_SELECTION)
+    setRailPicks((s) => (how === 'extend' ? extendPicks(s, order, id, seed) : togglePick(s, seed, id)))
+  }, [])
   // Each pane's chooser list, computed only while that pane shows a chooser: the list is otherwise
   // unused, and `groups` changes on every index pass of a live session.
   const preselect0 = view0.chooser ? choosers[view0.chooser]?.preselect ?? null : null
@@ -1571,9 +1632,20 @@ export default function App() {
     },
     [land, requestFocus, ptys.bySession, viewBySession, isUnlinkedId, markRead]
   )
-  const clickLive = useCallback((id: string) => openRemembered(id), [openRemembered])
-  const clickConversation = useCallback((id: string) => openRemembered(id), [openRemembered])
-  const switchTo = useCallback((id: string) => openRemembered(id), [openRemembered])
+  // A plain click on a row, and ⌥⌘↑/↓ through the rail, mean "just this one" — so they are also the
+  // way out of a rail selection, as activating a tab is out of a tab selection.
+  const clickLive = useCallback((id: string) => {
+    setRailPicks(NO_PICKS)
+    openRemembered(id)
+  }, [openRemembered])
+  const clickConversation = useCallback((id: string) => {
+    setRailPicks(NO_PICKS)
+    openRemembered(id)
+  }, [openRemembered])
+  const switchTo = useCallback((id: string) => {
+    setRailPicks(NO_PICKS)
+    openRemembered(id)
+  }, [openRemembered])
   // Double-click a row: keep it. The editor gesture for promoting a preview tab, and the reason it
   // needs no click-count dedupe is that the two ordinary clicks preceding it are idempotent here —
   // they open (or re-activate) the same conversation, and re-opening the current history stop is an
@@ -1718,6 +1790,7 @@ export default function App() {
       window.api.onTabDropHere(({ sessionIds, activeSessionId }) => {
         const pane = paneLayoutRef.current.focusIndex
         panes.openTabs(sessionIds, activeSessionId, pane)
+        if (sessionIds.length > 1) setRailPicks(NO_PICKS)
         setTabSelection(
           sessionIds.length > 1
             ? { pane, ids: new Set(sessionIds), anchor: activeSessionId }
@@ -2325,7 +2398,12 @@ export default function App() {
         e.preventDefault()
         goHistory(1)
       } else if (e.key === 'Escape') {
-        if (findOpen) closeFind()
+        // A multi-selection is the nearest thing an Escape can back out of, rail or tabs — whichever
+        // there is, since they never coexist. A menu, a drag and the Find field consume theirs first.
+        if (railPicksRef.current.ids.size > 0 || tabSelectionRef.current.ids.size > 0) {
+          setRailPicks(NO_PICKS)
+          setTabSelection(NO_SELECTION)
+        } else if (findOpen) closeFind()
         else if (query) setQuery('')
         else setSearchOpen(false)
       } else if (e.key === 'Enter' && !inInput && selectedId && inTranscript) {
@@ -2418,6 +2496,8 @@ export default function App() {
             onSetAllCollapsed={setAllCollapsed}
             loading={loading}
             selectedSessionId={selectedId}
+            picked={railPicks.ids}
+            onPick={pickRow}
             onJump={clickLive}
             onSelect={clickConversation}
             onStick={tabsEnabled ? stickConversation : undefined}

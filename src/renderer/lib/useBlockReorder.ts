@@ -415,6 +415,9 @@ export function useBlockReorder(containerRef: RefObject<HTMLElement>, opts: Bloc
     const onPointerDown = (e: PointerEvent): void => {
       escaped = false
       if (e.button !== 0 || !optsRef.current.enabled || dragRef.current) return
+      // ⌘ and ⇧ pick rows; they must not also arm a drag, or picking out several rows would drag
+      // whichever one the pointer wandered off first. The tab strip's rule (useTabReorder).
+      if (e.metaKey || e.shiftKey) return
       const t = e.target instanceof Element ? e.target : null
       if (!t || t.closest('[data-no-drag]')) return
       const handle = t.closest<HTMLElement>('[data-drag]')
