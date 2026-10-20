@@ -1,3 +1,5 @@
+// Many of these icons' paths are taken or adapted from Lucide (ISC) and Feather (MIT); their
+// license notices are in THIRD_PARTY_NOTICES.md at the repo root.
 interface IconProps {
   size?: number
   className?: string
