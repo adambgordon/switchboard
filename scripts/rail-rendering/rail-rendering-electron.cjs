@@ -1739,6 +1739,8 @@ async function groupDrag({ block, carried, grab, dy, failures, name, others = []
   if (!look.aligned) failures.push(`${name}: the stack's cards do not share the clone's box and corners: ${JSON.stringify(look)}`)
   for (const k of carried) if (!st0.hidden.includes(k)) failures.push(`${name}: carried ${k} is not hidden in place`)
   for (const k of others) if (st0.hidden.includes(k)) failures.push(`${name}: ${k}, picked in another block, was hidden`)
+  // The other carried rows fold away over the rail's motion duration; read the gap once they have.
+  await delay(260)
   await moveTo(c.x, c.y + dy, 4)
   await frames(3)
   // Where the gap shows: the widest space between two rows still drawn.
@@ -1756,8 +1758,12 @@ async function groupDrag({ block, carried, grab, dy, failures, name, others = []
   if (gap.size >= 2 * grabbed.height) failures.push(`${name}: the gap is ${gap.size}px for a ${grabbed.height}px row`)
   await screenshot(`${label()}-${name}-mid`)
   await release()
+  // The settling clone wears its row's own fill from the moment it lands, as the rest of the group does.
+  const settling = await js(`(() => { const c = document.querySelector('.sb-drag-clone'); return c ? getComputedStyle(c).backgroundColor : null })()`)
   await delay(350)
   const after = await waitClean()
+  const restingFill = await js(`getComputedStyle(document.querySelector('.sb-rail-body [data-key="${grab}"]')).backgroundColor`)
+  if (settling !== null && settling !== restingFill) failures.push(`${name}: the settling clone showed ${settling}, its row rests at ${restingFill}`)
   const calls = await js('window.dropCalls')
   const rows = (await js('window.order()')).blocks.find((x) => x.id === block).rows
   const at = rows.indexOf(carried[0])

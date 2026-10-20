@@ -74,8 +74,8 @@ module.exports = function installRailHelpers() {
             (getComputedStyle(c).position === 'fixed' || getComputedStyle(host).position === 'fixed')
         }),
         cloneRects: clones.map((c) => c.getBoundingClientRect().toJSON()),
-        // A group drag's other carried rows leave the layout altogether, so they count as hidden too.
-        hidden: all.filter((el) => el.style.visibility === 'hidden' || el.style.display === 'none' || (getComputedStyle(el).visibility === 'hidden' &&
+        // A group drag's other carried rows fold out of the layout (groupCollapse), so they count as hidden too.
+        hidden: all.filter((el) => el.style.visibility === 'hidden' || el.style.height === '0px' || (getComputedStyle(el).visibility === 'hidden' &&
           !el.parentElement.closest('[style*="visibility"]'))).map(keyOf),
         transformed: all.filter((el) => el.style.transform && el.style.transform !== 'none').map((el) => keyOf(el) + ':' + el.style.transform),
         scrollTop: body().scrollTop,
@@ -321,7 +321,7 @@ module.exports = function installRailHelpers() {
     },
     blockRect: (block) => body().querySelector(`.sb-block[data-block="${CSS.escape(block)}"]`).getBoundingClientRect().toJSON(),
     // The rows of a block as drawn right now, transforms included — where the gap of a drag shows.
-    drawn: (block) => unitsOf(block).filter((u) => getComputedStyle(u).visibility !== 'hidden' && getComputedStyle(u).display !== 'none')
+    drawn: (block) => unitsOf(block).filter((u) => getComputedStyle(u).visibility !== 'hidden' && u.style.height !== '0px')
       .map((u) => ({ key: keyOf(u), top: u.getBoundingClientRect().top, bottom: u.getBoundingClientRect().bottom })),
     selectedKey: () => {
       const row = body().querySelector('.sb-row.selected')
