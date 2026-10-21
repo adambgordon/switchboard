@@ -61,6 +61,11 @@
 .sb-nav-arrows .sb-panel-toggle:not(:disabled) {
   color: var(--ink);
 }
+/* A step with nowhere to go rests like the other title-bar buttons do, one level below full ink,
+   rather than fading further: the arrows' two states sit a level apart, as everything else's do. */
+.sb-nav-arrows .sb-panel-toggle:disabled {
+  opacity: 1;
+}
 .sb-titlebar-spacer {
   flex: 1;
 }
