@@ -651,10 +651,10 @@ body.sb-resizing .sb-pane {
   border-radius: var(--r-md);
   text-align: left;
   white-space: nowrap;
-  /* The rail's row-title size, so the modal's sidebar reads like the app's. */
+  /* The rail's row-title size and resting ink, so the modal's sidebar reads like the app's. */
   font-size: var(--text-base);
   font-weight: 500;
-  color: var(--ink-faint);
+  color: var(--ink-rest);
 }
 /* Hover and selection are the rail row's: hover fills without changing the ink, and the selected item
    takes the rail's inverted fill and inks, holding them under the pointer. */
