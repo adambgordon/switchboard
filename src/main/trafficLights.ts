@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import type { BrowserWindow } from 'electron'
 
 /**
  * Keep the native macOS traffic lights aligned with the (zoom-scaled) custom title bar.
@@ -24,6 +24,8 @@ const REST_NUDGE_UP = 2
 // renders TITLEBAR_H*f tall while the buttons stay BUTTON_D, so center them in the scaled bar.
 const TITLEBAR_H = 36
 const BUTTON_D = 12
+// Mirror app.css .sb-titlebar's resting padding-left: where the title bar's first control starts.
+const REST_INSET = 90
 
 /**
  * The traffic-light inset for a given page-zoom factor (1 = 100%, 1.2 = 120%, …). x scales the
@@ -36,6 +38,17 @@ export function trafficLightPositionFor(factor: number): { x: number; y: number 
     x: Math.round(REST_X * factor),
     y: Math.round((TITLEBAR_H * factor - BUTTON_D) / 2 - REST_NUDGE_UP)
   }
+}
+
+/**
+ * The title bar's left inset in CSS px for a page-zoom factor. At 100% and above it is the resting
+ * inset, which page zoom scales in step with the lights' x. Below 100% that inset would shrink faster
+ * than the lights move, because the buttons themselves stay full size, and the first control would
+ * slide under the green button; so there the inset keeps its 100% distance from the lights' left
+ * edge, in points.
+ */
+export function titlebarInsetFor(factor: number): number {
+  return Math.max(REST_INSET, (trafficLightPositionFor(factor).x + REST_INSET - REST_X) / factor)
 }
 
 // Last factor we positioned for, per window — skip redundant native calls (resize fires on window
@@ -51,11 +64,16 @@ export function setTrafficLightSyncSuppressed(win: BrowserWindow, value: boolean
   else suppressed.delete(win)
 }
 
-/** Reposition `win`'s traffic lights for its current zoom factor (no-op if unchanged or paused). */
-export function syncTrafficLights(win: BrowserWindow | null): void {
-  if (!win || win.isDestroyed() || suppressed.has(win)) return
+/**
+ * Reposition `win`'s traffic lights for its current zoom factor (skipped if unchanged) and return the
+ * title bar inset to match. Null while paused, so the inset holds still across the refresh nudge too.
+ */
+export function syncTrafficLights(win: BrowserWindow | null): number | null {
+  if (!win || win.isDestroyed() || suppressed.has(win)) return null
   const factor = win.webContents.getZoomFactor()
-  if (lastFactor.get(win) === factor) return
-  lastFactor.set(win, factor)
-  win.setWindowButtonPosition(trafficLightPositionFor(factor))
+  if (lastFactor.get(win) !== factor) {
+    lastFactor.set(win, factor)
+    win.setWindowButtonPosition(trafficLightPositionFor(factor))
+  }
+  return titlebarInsetFor(factor)
 }

@@ -428,7 +428,7 @@ export const IPC = {
   ptySnapshotStage: 'pty:snapshotStage', // push (ptyId, snapshot): destination stages before ownership flips
   ptySnapshotRestored: 'pty:snapshotRestored', // renderer -> main: destination replay completed; repaint foreground TUI
   windowSetBackgroundColor: 'window:setBackgroundColor',
-  windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
+  windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom; replies with the title bar inset
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
   windowIsFocused: 'window:isFocused', // renderer -> main: seed the focus flag on mount
   windowFocusChanged: 'window:focusChanged', // push (focused) — OS window focus/blur
@@ -734,8 +734,9 @@ export interface SwitchboardApi {
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void
   /** Ask main to re-align the native macOS traffic lights to the current page zoom — fired by the
-   *  renderer on every `resize` (which fires on every zoom change). Fire-and-forget. */
-  syncTrafficLights(): void
+   *  renderer on every `resize` (which fires on every zoom change). Resolves to the title bar's left
+   *  inset in CSS px for that zoom; null while syncing is paused. */
+  syncTrafficLights(): Promise<number | null>
   /** ⌘R refresh lifecycle pushes: `start` fires before the zoom wiggle (renderer covers the window with
    *  a white veil), `end` after the zoom is restored (renderer fades the veil out), so the relayout is
    *  hidden. Also used for the launch fade-in. Each returns an unsubscribe fn. */

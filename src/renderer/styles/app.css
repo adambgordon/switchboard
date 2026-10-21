@@ -39,7 +39,9 @@
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding-left: 90px; /* clear macOS traffic lights, with breathing room past them */
+  /* Clear the macOS traffic lights, with breathing room past them. Main supplies the value per zoom
+     (titlebarInsetFor in trafficLights.ts): 90px at 100% and above, wider when zoomed out. */
+  padding-left: var(--titlebar-inset, 90px);
   padding-right: var(--s4);
   border-bottom: 1px solid var(--rule);
   background: var(--paper-sunken); /* unify the title bar with the left pane/rail (chrome), not the field */

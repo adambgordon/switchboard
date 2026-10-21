@@ -787,9 +787,14 @@ export default function App() {
   // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
   // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of
   // center; every zoom fires a `resize`, so we ping main on resize to reposition them (main reads
-  // the authoritative zoom factor — see trafficLights.ts). Once on mount too, harmless at 100%.
+  // the authoritative zoom factor — see trafficLights.ts). Once on mount too, harmless at 100%. Main
+  // replies with the title bar inset for that zoom: zoomed out, the inset must not shrink under them.
   useEffect(() => {
-    const sync = (): void => window.api.syncTrafficLights()
+    const sync = (): void => {
+      void window.api.syncTrafficLights().then((inset) => {
+        if (inset !== null) document.documentElement.style.setProperty('--titlebar-inset', `${inset}px`)
+      })
+    }
     sync()
     window.addEventListener('resize', sync)
     return () => window.removeEventListener('resize', sync)

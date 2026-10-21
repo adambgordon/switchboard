@@ -1180,8 +1180,9 @@ export function registerIpc(): void {
   )
   // Re-align the native macOS traffic lights to the current page zoom (the renderer pings on every
   // resize). Native buttons can't scale, but repositioning keeps them centered + proportionally
-  // gapped to the title bar's first control — "zoom in place" (see trafficLights.ts).
-  ipcMain.on(IPC.windowSyncTrafficLights, (e) =>
+  // gapped to the title bar's first control — "zoom in place" (see trafficLights.ts). The reply is the
+  // title bar's left inset for that zoom, which keeps its first control clear of the buttons.
+  ipcMain.handle(IPC.windowSyncTrafficLights, (e) =>
     syncTrafficLights(BrowserWindow.fromWebContents(e.sender))
   )
   // Swap the macOS dock icon to match the user's "dark icon" preference. The renderer pushes the

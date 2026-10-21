@@ -480,10 +480,15 @@ describe('NavigationCoordinator availability', () => {
     expect(h.changes.at(-1)).toEqual({ back: false, forward: false })
   })
 
-  it('keeps Back on Welcome, which re-centers on the latest visit', () => {
-    const h = twoVisits()
+  it('enables Back on Welcome, which re-centers on the latest visit', () => {
+    // One visit has nowhere to go back to; leaving it for Welcome makes it a step back, so the change
+    // must be announced. Two visits would have Back on before and after, hiding a missed announcement.
+    const h = harness()
+    h.nav.focused(1)
+    h.nav.report(1, v('A'), true)
+    expect(h.nav.availability).toEqual({ back: false, forward: false })
     h.nav.report(1, null, true)
     expect(h.nav.state.away).toBe(true)
-    expect(h.nav.availability).toEqual({ back: true, forward: false })
+    expect(h.changes).toEqual([{ back: true, forward: false }])
   })
 })
