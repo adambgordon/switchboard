@@ -39,7 +39,7 @@
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding-left: 78px; /* clear macOS traffic lights, with breathing room past them */
+  padding-left: 90px; /* clear macOS traffic lights, with breathing room past them */
   padding-right: var(--s4);
   border-bottom: 1px solid var(--rule);
   background: var(--paper-sunken); /* unify the title bar with the left pane/rail (chrome), not the field */
@@ -47,6 +47,17 @@
   flex-shrink: 0;
   position: relative;
   z-index: 50;
+}
+/* Back / Forward read as one pair, so they sit closer together than the title bar's other controls. */
+.sb-nav-arrows {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* An available step rests at full ink, so it stands apart from a disabled one at a glance. Like the
+   filled bell, it then tells hover by the fill alone. */
+.sb-nav-arrows .sb-panel-toggle:not(:disabled) {
+  color: var(--ink);
 }
 .sb-titlebar-spacer {
   flex: 1;

@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Gear, HalfSun, PanelLeft, SplitVertical } from './icons'
+import { ArrowLeft, ArrowRight, Gear, HalfSun, PanelLeft, SplitVertical } from './icons'
 import type { ResolvedTheme } from '../lib/theme'
 import AttentionBell, { type AttentionEntry } from './AttentionBell'
 
@@ -53,18 +53,20 @@ export default function TitleBar({
 }: Props) {
   return (
     <header className="sb-titlebar" data-tip-group="">
-      <button className="sb-panel-toggle" onClick={onBack} disabled={!canGoBack} data-tip="Back (⌘[)" aria-label="Back">
-        <ChevronLeft size={16} />
-      </button>
-      <button
-        className="sb-panel-toggle"
-        onClick={onForward}
-        disabled={!canGoForward}
-        data-tip="Forward (⌘])"
-        aria-label="Forward"
-      >
-        <ChevronRight size={16} />
-      </button>
+      <div className="sb-nav-arrows">
+        <button className="sb-panel-toggle" onClick={onBack} disabled={!canGoBack} data-tip="Back (⌘[)" aria-label="Back">
+          <ArrowLeft size={18} strokeWidth={1.45} />
+        </button>
+        <button
+          className="sb-panel-toggle"
+          onClick={onForward}
+          disabled={!canGoForward}
+          data-tip="Forward (⌘])"
+          aria-label="Forward"
+        >
+          <ArrowRight size={18} strokeWidth={1.45} />
+        </button>
+      </div>
       <button
         className={`sb-panel-toggle${paneCollapsed ? '' : ' active'}`}
         onClick={onTogglePane}
