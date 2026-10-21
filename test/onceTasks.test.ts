@@ -24,15 +24,16 @@ describe('withOnceTask', () => {
 
 describe('unseenWhatsNew', () => {
   it('shows a profile that has seen nothing every release, newest first', () => {
-    expect(unseenWhatsNew([])).toEqual(['whatsNew:3', 'whatsNew:2', 'whatsNew:1'])
+    expect(unseenWhatsNew([])).toEqual(['whatsNew:4', 'whatsNew:3', 'whatsNew:2', 'whatsNew:1'])
   })
 
   it('shows only the releases not yet seen', () => {
-    expect(unseenWhatsNew(['folderSeed', 'whatsNew:1'])).toEqual(['whatsNew:3', 'whatsNew:2'])
-    expect(unseenWhatsNew(['whatsNew:2'])).toEqual(['whatsNew:3', 'whatsNew:1'])
+    expect(unseenWhatsNew(['folderSeed', 'whatsNew:1'])).toEqual(['whatsNew:4', 'whatsNew:3', 'whatsNew:2'])
+    expect(unseenWhatsNew(['whatsNew:2'])).toEqual(['whatsNew:4', 'whatsNew:3', 'whatsNew:1'])
+    expect(unseenWhatsNew(['whatsNew:1', 'whatsNew:2', 'whatsNew:3'])).toEqual(['whatsNew:4'])
   })
 
   it('shows nothing once every release is seen', () => {
-    expect(unseenWhatsNew(['whatsNew:2', 'whatsNew:3', 'folderSeed', 'whatsNew:1'])).toEqual([])
+    expect(unseenWhatsNew(['whatsNew:2', 'whatsNew:4', 'whatsNew:3', 'folderSeed', 'whatsNew:1'])).toEqual([])
   })
 })
