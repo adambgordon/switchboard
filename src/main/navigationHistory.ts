@@ -1,4 +1,4 @@
-import { sameVisit, type NavigationVisit } from '../shared/navigation'
+import { sameVisit, type NavigationAvailability, type NavigationVisit } from '../shared/navigation'
 
 export interface NavigationHistory {
   entries: NavigationVisit[]
@@ -49,5 +49,22 @@ export function historyReducer(state: NavigationHistory, action: HistoryAction):
         entries: state.entries.map((v, i) => i === state.cursor ? { ...v, sessionId: action.to } : v)
       }
     }
+  }
+}
+
+/**
+ * Whether a step each way would reach a stop that can be shown — the walk a step makes, which passes
+ * over unreachable stops, so a control is never enabled for a step that lands nowhere. From Welcome,
+ * Back re-centers on the cursor's own entry, so that entry counts; Forward waits for a visit.
+ */
+export function stepAvailability(
+  state: NavigationHistory,
+  unreachable: (sessionId: string) => boolean
+): NavigationAvailability {
+  const anyReachable = (from: number, to: number): boolean =>
+    state.entries.slice(from, to).some((visit) => !unreachable(visit.sessionId))
+  return {
+    back: state.cursor >= 0 && anyReachable(0, state.away ? state.cursor + 1 : state.cursor),
+    forward: !state.away && anyReachable(state.cursor + 1, state.entries.length)
   }
 }

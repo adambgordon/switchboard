@@ -1,4 +1,4 @@
-import type { NavigationCommand, NavigationVisit } from './navigation'
+import type { NavigationAvailability, NavigationCommand, NavigationVisit } from './navigation'
 
 /**
  * Shared contract between the Electron main process, the preload bridge, and the
@@ -414,6 +414,8 @@ export const IPC = {
   navigationInterrupt: 'navigation:interrupt', // renderer -> main: a local user action supersedes playback
   navigationComplete: 'navigation:complete', // renderer -> main: tagged activation committed
   navigationCanceled: 'navigation:canceled', // push (requestId): discard superseded activation
+  navigationStateGet: 'navigation:stateGet',
+  navigationStateChanged: 'navigation:stateChanged', // push (NavigationAvailability): Back / Forward enablement
   tabResume: 'tab:resumeHere', // push (sessionId): resume the tab in this window
   tabRelease: 'tab:release', // push (sessionId): close your tab for this conversation
   tabShouldRelease: 'tab:shouldRelease', // renderer -> main: confirm a queued release is still current
@@ -707,6 +709,8 @@ export interface SwitchboardApi {
   interruptNavigation(revision: number): void
   completeNavigation(requestId: number, visit: NavigationVisit | null): void
   onNavigationCanceled(cb: (requestId: number) => void): () => void
+  getNavigationState(): Promise<NavigationAvailability>
+  onNavigationState(cb: (state: NavigationAvailability) => void): () => void
   onTabResume(cb: (sessionId: string) => void): () => void
   /** Another window is taking this conversation — close our tab for it. */
   onTabRelease(cb: (sessionId: string) => void): () => void

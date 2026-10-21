@@ -1,11 +1,15 @@
-import { Gear, HalfSun, PanelLeft, SplitVertical } from './icons'
+import { ChevronLeft, ChevronRight, Gear, HalfSun, PanelLeft, SplitVertical } from './icons'
 import type { ResolvedTheme } from '../lib/theme'
 import AttentionBell, { type AttentionEntry } from './AttentionBell'
 
 interface Props {
   paneCollapsed: boolean
   onTogglePane: () => void
-  onHome: () => void
+  /** Whether Back / Forward would go anywhere — the history is app-wide, so every window agrees. */
+  canGoBack: boolean
+  canGoForward: boolean
+  onBack: () => void
+  onForward: () => void
   /** Open the Preferences modal (App page) — the title-bar gear / ⌘,. */
   onOpenSettings: () => void
   /** The resolved theme — picks the toggle's label (Switch to dark in light, Switch to light in dark). */
@@ -31,7 +35,10 @@ interface Props {
 export default function TitleBar({
   paneCollapsed,
   onTogglePane,
-  onHome,
+  canGoBack,
+  canGoForward,
+  onBack,
+  onForward,
   onOpenSettings,
   resolvedTheme,
   onToggleTheme,
@@ -46,9 +53,17 @@ export default function TitleBar({
 }: Props) {
   return (
     <header className="sb-titlebar" data-tip-group="">
-      <button className="sb-brand" onClick={onHome} data-tip="Back to welcome" aria-label="Back to welcome">
-        <span className="sb-brand-mark" />
-        <span className="sb-brand-name">Switchboard</span>
+      <button className="sb-panel-toggle" onClick={onBack} disabled={!canGoBack} data-tip="Back (⌘[)" aria-label="Back">
+        <ChevronLeft size={16} />
+      </button>
+      <button
+        className="sb-panel-toggle"
+        onClick={onForward}
+        disabled={!canGoForward}
+        data-tip="Forward (⌘])"
+        aria-label="Forward"
+      >
+        <ChevronRight size={16} />
       </button>
       <button
         className={`sb-panel-toggle${paneCollapsed ? '' : ' active'}`}

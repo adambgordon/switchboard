@@ -1,5 +1,11 @@
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { sameVisit, type NavigationCommand, type NavigationVisit } from '@shared/navigation'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import {
+  sameVisit,
+  type NavigationAvailability,
+  type NavigationCommand,
+  type NavigationVisit
+} from '@shared/navigation'
+import { startSnapshotSync } from './snapshotSync'
 
 interface ReportedVisit {
   visit: NavigationVisit | null
@@ -21,6 +27,12 @@ export function useAppNavigation(
   const chosenView = useRef<NavigationVisit | null>(null)
   const reported = useRef<ReportedVisit | null>(null)
   const [, render] = useState(0)
+  const [availability, setAvailability] = useState<NavigationAvailability>({ back: false, forward: false })
+
+  useEffect(
+    () => startSnapshotSync(window.api.onNavigationState, window.api.getNavigationState, setAvailability),
+    []
+  )
 
   useLayoutEffect(() => {
     const offActivate = window.api.onTabActivate((command) => {
@@ -98,5 +110,5 @@ export function useAppNavigation(
     window.api.reportNavigation(visit, record, intent.current)
   }, [])
 
-  return { beginVisit, go, rekey, report }
+  return { availability, beginVisit, go, rekey, report }
 }

@@ -26,6 +26,9 @@ function svg(path: React.ReactNode, { size = 16, className, strokeWidth = 1.6 }:
 }
 
 export const Chevron = (p: IconProps) => svg(<polyline points="6 9 12 15 18 9" />, p)
+// Back / Forward in the title bar.
+export const ChevronLeft = (p: IconProps) => svg(<polyline points="15 18 9 12 15 6" />, p)
+export const ChevronRight = (p: IconProps) => svg(<polyline points="9 18 15 12 9 6" />, p)
 // Up arrow (shaft + head) — the jump-to-top/bottom pills (rotate 180° for down).
 export const Arrow = (p: IconProps) =>
   svg(

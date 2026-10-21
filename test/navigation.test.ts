@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { NavigationCoordinator, type NavigationHost } from '../src/main/navigation'
-import type { NavigationCommand, NavigationVisit } from '../src/shared/navigation'
+import type { NavigationAvailability, NavigationCommand, NavigationVisit } from '../src/shared/navigation'
 
 const v = (sessionId: string, view: NavigationVisit['view'] = 'transcript'): NavigationVisit => ({ sessionId, view })
 const flush = async () => { await Promise.resolve(); await Promise.resolve() }
@@ -12,13 +12,15 @@ function harness(restore?: NavigationHost['restoreTerminal'], immediateFocus = t
   const cancels: Array<[number, number]> = []
   const focuses: number[] = []
   const restores: string[] = []
+  const changes: NavigationAvailability[] = []
   const nav = new NavigationCoordinator({
     ownerOf: (id) => owners.get(id),
     exists: (id) => live.has(id),
     activate: (windowId, command) => commands.push({ windowId, command: { ...command } }),
     cancel: (id, token) => { cancels.push([id, token]) },
     focus: (id) => { focuses.push(id); if (immediateFocus) nav.focused(id) },
-    restoreTerminal: restore ?? (async (_id, sessionId) => { restores.push(sessionId); return true })
+    restoreTerminal: restore ?? (async (_id, sessionId) => { restores.push(sessionId); return true }),
+    changed: (availability) => { changes.push({ ...availability }) }
   })
   const ack = (sent = commands.at(-1)!) => {
     nav.complete(sent.windowId, sent.command.requestId, v(sent.command.sessionId, sent.command.view ?? 'transcript'))
@@ -26,7 +28,7 @@ function harness(restore?: NavigationHost['restoreTerminal'], immediateFocus = t
   const seed = () => {
     nav.report(1, v('A'), true); nav.report(2, v('B', 'terminal'), true); nav.report(3, v('C'), true)
   }
-  return { nav, owners, live, commands, cancels, focuses, restores, ack, seed }
+  return { nav, owners, live, commands, cancels, focuses, restores, changes, ack, seed }
 }
 
 describe('NavigationCoordinator', () => {
@@ -428,5 +430,60 @@ describe('NavigationCoordinator', () => {
     expect(h.commands.at(-1)?.windowId).toBe(2)
     h.ack()
     expect(h.focuses).toEqual([2])
+  })
+})
+
+describe('NavigationCoordinator availability', () => {
+  // Two visits in one window: Back is available, Forward is not.
+  const twoVisits = () => {
+    const h = harness()
+    h.nav.focused(1)
+    h.nav.report(1, v('A'), true)
+    h.nav.report(1, v('B'), true)
+    return h
+  }
+
+  it('starts with nothing available and announces only real changes', () => {
+    const h = harness()
+    expect(h.nav.availability).toEqual({ back: false, forward: false })
+    h.nav.focused(1)
+    h.nav.report(1, v('A'), true)
+    // One stop: still nowhere to go, so nothing is announced.
+    expect(h.changes).toEqual([])
+    h.nav.report(1, v('B'), true)
+    expect(h.changes).toEqual([{ back: true, forward: false }])
+    h.nav.report(1, v('B'), true)
+    expect(h.changes).toHaveLength(1)
+    expect(h.nav.availability).toEqual({ back: true, forward: false })
+  })
+
+  it('announces a step', async () => {
+    const h = twoVisits()
+    h.nav.go(1, -1)
+    expect(h.changes.at(-1)).toEqual({ back: false, forward: true })
+    await flush(); h.ack()
+    h.nav.go(1, 1)
+    expect(h.changes.at(-1)).toEqual({ back: true, forward: false })
+  })
+
+  it('announces when hiding a conversation leaves nothing to go back to', () => {
+    const h = twoVisits()
+    h.nav.setHiddenSessions(new Set(['A']))
+    expect(h.changes.at(-1)).toEqual({ back: false, forward: false })
+    h.nav.setHiddenSessions(new Set())
+    expect(h.changes.at(-1)).toEqual({ back: true, forward: false })
+  })
+
+  it('announces when retiring a terminal leaves nothing to go back to', () => {
+    const h = twoVisits()
+    h.nav.retire('A')
+    expect(h.changes.at(-1)).toEqual({ back: false, forward: false })
+  })
+
+  it('keeps Back on Welcome, which re-centers on the latest visit', () => {
+    const h = twoVisits()
+    h.nav.report(1, null, true)
+    expect(h.nav.state.away).toBe(true)
+    expect(h.nav.availability).toEqual({ back: true, forward: false })
   })
 })

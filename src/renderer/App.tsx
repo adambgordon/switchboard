@@ -282,6 +282,7 @@ export default function App() {
 
   const navigationApplyRef = useRef<((command: NavigationCommand) => void) | null>(null)
   const {
+    availability: historyAvailability,
     beginVisit,
     go: goHistory,
     rekey: rekeyPendingNavigation,
@@ -2610,10 +2611,10 @@ export default function App() {
       <TitleBar
         paneCollapsed={paneCollapsed}
         onTogglePane={togglePane}
-        // The wordmark goes back to the welcome screen. With tabs open that is a pane showing nothing
-        // rather than a window with nothing in it — the tabs stay put, which is why `deselect` exists
-        // instead of this either closing them or becoming a control that silently does nothing.
-        onHome={() => { beginVisit(); panes.deselect() }}
+        canGoBack={historyAvailability.back}
+        canGoForward={historyAvailability.forward}
+        onBack={() => goHistory(-1)}
+        onForward={() => goHistory(1)}
         onOpenSettings={() => setSettingsPage('appearance')}
         resolvedTheme={themeResolved}
         onToggleTheme={toggleTheme}

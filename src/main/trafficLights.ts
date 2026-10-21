@@ -6,7 +6,7 @@ import { BrowserWindow } from 'electron'
  * The lights are OS chrome positioned in window points via `trafficLightPosition` /
  * `setWindowButtonPosition` — they do NOT move when the page zoom (⌘+/⌘−) scales the renderer.
  * So at anything other than 100% the lights fall out of vertical center and their gap to the
- * "Switchboard" wordmark drifts. We can't resize the native buttons (Slack's don't either), but we
+ * title bar's first control drifts. We can't resize the native buttons (Slack's don't either), but we
  * can reposition them per zoom so they stay centered + proportionally gapped — "zoom in place".
  *
  * The renderer pings `syncTrafficLights` on every `resize` (which fires on every zoom change),
@@ -27,7 +27,7 @@ const BUTTON_D = 12
 
 /**
  * The traffic-light inset for a given page-zoom factor (1 = 100%, 1.2 = 120%, …). x scales the
- * resting inset (the wordmark's left padding scales by the same factor, so the gap stays
+ * resting inset (the title bar's left padding scales by the same factor, so the gap stays
  * proportional); y centers the fixed-height buttons in the scaled bar, then lifts them by the
  * constant resting nudge. Reduces to {14,10} at factor 1 — the resting position.
  */

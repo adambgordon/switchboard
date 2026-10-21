@@ -30,8 +30,6 @@ export interface PaneLayoutApi {
   openTabs: (sessionIds: string[], activeSessionId: string, pane?: number) => void
   promoteTab: (sessionId: string, pane?: number) => void
   activateTab: (pane: number, index: number) => void
-  /** Show the welcome screen in the focused pane, leaving its tabs alone. */
-  deselect: () => void
   /** `recent` (most recent first) decides where an active tab's close lands — see recentTabs. */
   closeTab: (pane: number, index: number, recent?: readonly string[]) => void
   closeOtherTabs: (pane: number, index: number) => void
@@ -99,7 +97,6 @@ export function usePaneLayout(restored: PersistedTabLayout | null, hidden: Reado
     (pane: number, index: number) => dispatch({ type: 'activate', pane, index }),
     []
   )
-  const deselect = useCallback(() => dispatch({ type: 'deselect' }), [])
   const closeTab = useCallback(
     (pane: number, index: number, recent?: readonly string[]) =>
       dispatch({ type: 'close', pane, index, recent }),
@@ -174,7 +171,6 @@ export function usePaneLayout(restored: PersistedTabLayout | null, hidden: Reado
     openTabs,
     promoteTab,
     activateTab,
-    deselect,
     closeTab,
     closeOtherTabs,
     closeTabs,
