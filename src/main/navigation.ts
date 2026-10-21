@@ -1,6 +1,6 @@
 import type { TabOpenMode } from '../shared/types'
-import type { NavigationCommand, NavigationVisit } from '../shared/navigation'
-import { EMPTY_HISTORY, historyReducer, type NavigationHistory } from './navigationHistory'
+import type { NavigationAvailability, NavigationCommand, NavigationVisit } from '../shared/navigation'
+import { EMPTY_HISTORY, historyReducer, stepAvailability, type NavigationHistory } from './navigationHistory'
 
 export interface NavigationHost {
   ownerOf(sessionId: string): number | undefined
@@ -9,6 +9,8 @@ export interface NavigationHost {
   cancel(windowId: number, requestId: number): void
   focus(windowId: number): void
   restoreTerminal(windowId: number, sessionId: string, current: () => boolean): Promise<boolean>
+  /** Whether Back / Forward can go anywhere changed. Called only on a change. */
+  changed(availability: NavigationAvailability): void
 }
 
 interface PendingNavigation {
@@ -38,11 +40,30 @@ export class NavigationCoordinator {
    * the hidden set; the population is one id per new terminal that never bound.
    */
   private readonly retiredSessionIds = new Set<string>()
+  private published: NavigationAvailability = { back: false, forward: false }
 
   constructor(private readonly host: NavigationHost) {}
 
   get state(): NavigationHistory {
     return this.history
+  }
+
+  get availability(): NavigationAvailability {
+    return this.published
+  }
+
+  /** Every history write lands here, so availability can't miss one. */
+  private commit(next: NavigationHistory): void {
+    this.history = next
+    this.publish()
+  }
+
+  /** Availability depends on the history AND on which ids are unreachable; both changes call this. */
+  private publish(): void {
+    const next = stepAvailability(this.history, (sessionId) => this.unreachable(sessionId))
+    if (next.back === this.published.back && next.forward === this.published.forward) return
+    this.published = next
+    this.host.changed(next)
   }
 
   /** A stop on this id can no longer be shown, whatever the reason. */
@@ -60,6 +81,7 @@ export class NavigationCoordinator {
   setHiddenSessions(ids: ReadonlySet<string>): void {
     this.hiddenSessionIds = ids
     this.forget((sessionId) => ids.has(sessionId))
+    this.publish()
   }
 
   /**
@@ -70,10 +92,11 @@ export class NavigationCoordinator {
   retire(sessionId: string): void {
     this.retiredSessionIds.add(sessionId)
     this.forget((id) => id === sessionId)
+    this.publish()
   }
 
   private record(visit: NavigationVisit | null): void {
-    this.history = historyReducer(this.history, visit ? { type: 'visit', visit } : { type: 'home' })
+    this.commit(historyReducer(this.history, visit ? { type: 'visit', visit } : { type: 'home' }))
   }
 
   report(windowId: number, visit: NavigationVisit | null, record: boolean, revision = 0): void {
@@ -123,7 +146,7 @@ export class NavigationCoordinator {
       if (next === state) return
       const visit = next.entries[next.cursor]
       if (!this.unreachable(visit.sessionId)) {
-        this.history = next
+        this.commit(next)
         this.start(requester, visit.sessionId, 'preview', visit.view, 'replay')
         return
       }
@@ -220,7 +243,7 @@ export class NavigationCoordinator {
   }
 
   rekey(from: string, to: string): void {
-    this.history = historyReducer(this.history, { type: 'rekey', from, to })
+    this.commit(historyReducer(this.history, { type: 'rekey', from, to }))
     for (const [windowId, visit] of this.windows) {
       if (visit?.sessionId === from) this.windows.set(windowId, { ...visit, sessionId: to })
     }
@@ -238,7 +261,7 @@ export class NavigationCoordinator {
     if (visit?.sessionId !== from) return
     this.windows.set(windowId, { ...visit, sessionId: to })
     if (this.activeWindow === windowId) {
-      this.history = historyReducer(this.history, { type: 'retarget', from, to })
+      this.commit(historyReducer(this.history, { type: 'retarget', from, to }))
     }
   }
 }

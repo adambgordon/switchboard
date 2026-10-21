@@ -331,24 +331,7 @@ describe('activate', () => {
   })
 })
 
-describe('deselect — the welcome screen with tabs still open', () => {
-  it('clears the focused pane’s selection without touching its tabs', () => {
-    // Focus is on the RIGHT pane deliberately: with focus on pane 0 an implementation that always
-    // deselects pane 0 would pass, and that is the mistake worth excluding.
-    const before = layout([pane('p0', [t('A'), t('B')], 1), pane('p1', [t('C'), t('D')], 1)], 1)
-    const after = step(before, { type: 'deselect' })
-    expect(after.panes[1].tabs).toEqual([t('C'), t('D')])
-    expect(after.panes[1].activeIndex).toBe(-1)
-    // The other pane is untouched, including its selection.
-    expect(after.panes[0].activeIndex).toBe(1)
-    expect(activeTabId(after)).toBeNull()
-  })
-
-  it('is a no-op when nothing is selected already', () => {
-    const before = layout([pane('p0', [t('A')], -1)])
-    expect(paneReducer(before, { type: 'deselect' })).toBe(before)
-  })
-
+describe('a pane with tabs but none active (a restored layout)', () => {
   it('an open while deselected appends rather than jumping to the front of the strip', () => {
     const before = layout([pane('p0', [t('A'), t('B')], -1)])
     const after = step(before, { type: 'open', sessionId: 'D', mode: 'preview' })

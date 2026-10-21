@@ -37,10 +37,8 @@ export interface Pane {
   /**
    * Index into `tabs`, or -1 for "nothing active here".
    *
-   * -1 is required when the pane is empty, and also **allowed while tabs are open**: that is the
-   * welcome screen, reached by the Switchboard wordmark. Without that state the wordmark would become
-   * a control that silently does nothing the moment a tab exists, and a click that closed the user's
-   * tabs to get back to the welcome screen would be worse than either.
+   * -1 is required when the pane is empty, and also **tolerated while tabs are open**: a saved layout
+   * can carry it, and the welcome screen it shows is a better landing than a tab the user never chose.
    */
   activeIndex: number
 }
@@ -93,8 +91,6 @@ export type PaneAction =
       to: { pane: number; index: number }
     }
   | { type: 'activate'; pane: number; index: number }
-  /** Show the welcome screen in the focused pane without disturbing its tabs. */
-  | { type: 'deselect' }
   | { type: 'move'; from: { pane: number; index: number }; to: { pane: number; index: number } }
   /** Add the second pane and move the active tab into it. */
   | { type: 'splitActive'; paneId: string }
@@ -462,12 +458,6 @@ export function paneReducer(state: PaneLayout, action: PaneAction): PaneLayout {
         ...withPane(state, action.pane, { ...pane, activeIndex: action.index }),
         focusIndex: action.pane
       }
-    }
-
-    case 'deselect': {
-      const pane = state.panes[state.focusIndex]
-      if (!pane || pane.activeIndex === -1) return state
-      return withPane(state, state.focusIndex, { ...pane, activeIndex: -1 })
     }
 
     case 'close': {

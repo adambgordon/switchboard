@@ -185,7 +185,8 @@ const navigation = new NavigationCoordinator({
     return transferTerminal(pty.ptyId, windowId, () =>
       current() && mgr?.findBySession(sessionId)?.ptyId === pty.ptyId
     )
-  }
+  },
+  changed: (availability) => { broadcast(IPC.navigationStateChanged, availability) }
 })
 
 export function navigationWindowFocused(windowId: number): void {
@@ -1093,6 +1094,7 @@ export function registerIpc(): void {
   ipcMain.on(IPC.navigationComplete, (e, requestId: number, visit: NavigationVisit | null) => {
     navigation.complete(e.sender.id, requestId, visit)
   })
+  ipcMain.handle(IPC.navigationStateGet, () => navigation.availability)
   ipcMain.on(IPC.conversationResume, (e, sessionId: string) => {
     if (isHidden(sessionId)) return
     const owner = tabOwner.get(sessionId)
@@ -1178,8 +1180,9 @@ export function registerIpc(): void {
   )
   // Re-align the native macOS traffic lights to the current page zoom (the renderer pings on every
   // resize). Native buttons can't scale, but repositioning keeps them centered + proportionally
-  // gapped to the wordmark — "zoom in place" (see trafficLights.ts).
-  ipcMain.on(IPC.windowSyncTrafficLights, (e) =>
+  // gapped to the title bar's first control — "zoom in place" (see trafficLights.ts). The reply is the
+  // title bar's left inset for that zoom, which keeps its first control clear of the buttons.
+  ipcMain.handle(IPC.windowSyncTrafficLights, (e) =>
     syncTrafficLights(BrowserWindow.fromWebContents(e.sender))
   )
   // Swap the macOS dock icon to match the user's "dark icon" preference. The renderer pushes the

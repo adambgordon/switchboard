@@ -252,7 +252,7 @@
    (cobalt at 0.22 light, 0.30 dark — its own token, NOT the dot's --dot-halo, which is
    recolorable and tuned separately), scaled up for the
    hero. The halo is a 0-blur box-shadow, so it doesn't take layout width; margin-bottom
-   makes up the gap it eats into the flex column. Mirrors .sb-brand-mark in app.css. */
+   makes up the gap it eats into the flex column. */
 .sb-empty-mark {
   width: 20px;
   height: 20px;

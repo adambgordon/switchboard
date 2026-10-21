@@ -39,7 +39,9 @@
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding-left: 104px; /* clear macOS traffic lights, with breathing room past them */
+  /* Clear the macOS traffic lights, with breathing room past them. Main supplies the value per zoom
+     (titlebarInsetFor in trafficLights.ts): 90px at 100% and above, wider when zoomed out. */
+  padding-left: var(--titlebar-inset, 90px);
   padding-right: var(--s4);
   border-bottom: 1px solid var(--rule);
   background: var(--paper-sunken); /* unify the title bar with the left pane/rail (chrome), not the field */
@@ -48,31 +50,16 @@
   position: relative;
   z-index: 50;
 }
-.sb-brand {
+/* Back / Forward read as one pair, so they sit closer together than the title bar's other controls. */
+.sb-nav-arrows {
   display: flex;
   align-items: center;
-  gap: 9px;
-  -webkit-app-region: no-drag;
-  transition: opacity var(--dur-fast) var(--ease);
+  gap: 2px;
 }
-/* clickable lockup: returns to the welcome screen (deselect) — dim slightly on hover */
-.sb-brand:hover {
-  opacity: 0.7;
-}
-.sb-brand-mark {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--live);
-  box-shadow: 0 0 0 3px var(--live-glow);
-}
-.sb-brand-name {
-  font-family: var(--font-display);
-  font-size: 16.5px;
-  font-weight: 700;
-  line-height: 1;
+/* An available step rests at full ink, so it stands apart from a disabled one at a glance. Like the
+   filled bell, it then tells hover by the fill alone. */
+.sb-nav-arrows .sb-panel-toggle:not(:disabled) {
   color: var(--ink);
-  letter-spacing: -0.02em;
 }
 .sb-titlebar-spacer {
   flex: 1;
@@ -666,10 +653,10 @@ body.sb-resizing .sb-pane {
   border-radius: var(--r-md);
   text-align: left;
   white-space: nowrap;
-  /* The rail's row-title size, so the modal's sidebar reads like the app's. */
+  /* The rail's row-title size and resting ink, so the modal's sidebar reads like the app's. */
   font-size: var(--text-base);
   font-weight: 500;
-  color: var(--ink-faint);
+  color: var(--ink-rest);
 }
 /* Hover and selection are the rail row's: hover fills without changing the ink, and the selected item
    takes the rail's inverted fill and inks, holding them under the pointer. */
@@ -851,8 +838,10 @@ body.sb-resizing .sb-pane {
   flex-shrink: 0;
   color: var(--ink-faint);
 }
-/* shrink the inline ⌘N glyph from its full key-cap size so it sits in the sentence */
-.sb-setting-desc .sb-kbd {
+/* A key cap inside a sentence (a setting's description, a What's New slide) shrinks from its full size
+   so it sits in the line. */
+.sb-setting-desc .sb-kbd,
+.sb-whatsnew-desc .sb-kbd {
   min-width: 0;
   height: 18px;
   padding: 0 4px;

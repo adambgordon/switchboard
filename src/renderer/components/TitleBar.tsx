@@ -1,11 +1,15 @@
-import { Gear, HalfSun, PanelLeft, SplitVertical } from './icons'
+import { ArrowLeft, ArrowRight, Gear, HalfSun, PanelLeft, SplitVertical } from './icons'
 import type { ResolvedTheme } from '../lib/theme'
 import AttentionBell, { type AttentionEntry } from './AttentionBell'
 
 interface Props {
   paneCollapsed: boolean
   onTogglePane: () => void
-  onHome: () => void
+  /** Whether Back / Forward would go anywhere — the history is app-wide, so every window agrees. */
+  canGoBack: boolean
+  canGoForward: boolean
+  onBack: () => void
+  onForward: () => void
   /** Open the Preferences modal (App page) — the title-bar gear / ⌘,. */
   onOpenSettings: () => void
   /** The resolved theme — picks the toggle's label (Switch to dark in light, Switch to light in dark). */
@@ -31,7 +35,10 @@ interface Props {
 export default function TitleBar({
   paneCollapsed,
   onTogglePane,
-  onHome,
+  canGoBack,
+  canGoForward,
+  onBack,
+  onForward,
   onOpenSettings,
   resolvedTheme,
   onToggleTheme,
@@ -46,10 +53,24 @@ export default function TitleBar({
 }: Props) {
   return (
     <header className="sb-titlebar" data-tip-group="">
-      <button className="sb-brand" onClick={onHome} data-tip="Back to welcome" aria-label="Back to welcome">
-        <span className="sb-brand-mark" />
-        <span className="sb-brand-name">Switchboard</span>
-      </button>
+      {/* The 1.35 stroke is measured, not a round number. The GPU antialiases an arrowhead's 45° strokes
+          coarsely, so at fractional zoom they draw heavier or lighter than the shaft; near this weight,
+          1.35 keeps that within about 6% across the zoom steps, where 1.45 reached 14%. Re-measure if
+          the size changes. */}
+      <div className="sb-nav-arrows">
+        <button className="sb-panel-toggle" onClick={onBack} disabled={!canGoBack} data-tip="Back (⌘[)" aria-label="Back">
+          <ArrowLeft size={18} strokeWidth={1.35} />
+        </button>
+        <button
+          className="sb-panel-toggle"
+          onClick={onForward}
+          disabled={!canGoForward}
+          data-tip="Forward (⌘])"
+          aria-label="Forward"
+        >
+          <ArrowRight size={18} strokeWidth={1.35} />
+        </button>
+      </div>
       <button
         className={`sb-panel-toggle${paneCollapsed ? '' : ' active'}`}
         onClick={onTogglePane}

@@ -67,6 +67,8 @@ const api: SwitchboardApi = {
   interruptNavigation: (revision) => ipcRenderer.send(IPC.navigationInterrupt, revision),
   completeNavigation: (requestId, visit) => ipcRenderer.send(IPC.navigationComplete, requestId, visit),
   onNavigationCanceled: (cb) => subscribe(IPC.navigationCanceled, cb as never),
+  getNavigationState: () => ipcRenderer.invoke(IPC.navigationStateGet),
+  onNavigationState: (cb) => subscribe(IPC.navigationStateChanged, cb as never),
   onTabResume: (cb) => subscribe(IPC.tabResume, cb as never),
   onTabRelease: (cb) => subscribe(IPC.tabRelease, cb as never),
   shouldReleaseTab: (sessionId) => ipcRenderer.invoke(IPC.tabShouldRelease, sessionId),
@@ -80,7 +82,7 @@ const api: SwitchboardApi = {
   onPtySnapshotStage: (cb) => subscribe(IPC.ptySnapshotStage, cb as never),
   confirmPtySnapshotRestored: (ptyId) => ipcRenderer.send(IPC.ptySnapshotRestored, ptyId),
   setBackgroundColor: (color) => ipcRenderer.send(IPC.windowSetBackgroundColor, color),
-  syncTrafficLights: () => ipcRenderer.send(IPC.windowSyncTrafficLights),
+  syncTrafficLights: () => ipcRenderer.invoke(IPC.windowSyncTrafficLights),
   onRefreshStart: (cb) => subscribe(IPC.appRefreshStart, cb as never),
   onRefreshEnd: (cb) => subscribe(IPC.appRefreshEnd, cb as never),
   setDockIcon: (dark) => ipcRenderer.send(IPC.windowSetDockIcon, dark),
@@ -103,7 +105,7 @@ const api: SwitchboardApi = {
 contextBridge.exposeInMainWorld('api', api)
 contextBridge.exposeInMainWorld('platform', process.platform)
 // Dev-only: the label from SWITCHBOARD_DEV_LABEL so the
-// renderer can badge the wordmark — distinguishes parallel `npm run dev` windows. null in
+// renderer can badge the title bar — distinguishes parallel `npm run dev` windows. null in
 // normal/packaged runs. (Preload has process access; sandbox is off for the ESM preload.)
 contextBridge.exposeInMainWorld('devLabel', process.env.SWITCHBOARD_DEV_LABEL?.trim() || null)
 

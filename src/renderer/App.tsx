@@ -282,6 +282,7 @@ export default function App() {
 
   const navigationApplyRef = useRef<((command: NavigationCommand) => void) | null>(null)
   const {
+    availability: historyAvailability,
     beginVisit,
     go: goHistory,
     rekey: rekeyPendingNavigation,
@@ -786,9 +787,14 @@ export default function App() {
   // Keep the native macOS traffic lights aligned with the zoom-scaled title bar. A page zoom
   // (⌘+/⌘−, pinch) scales the whole renderer but not the OS-drawn buttons, so they'd drift out of
   // center; every zoom fires a `resize`, so we ping main on resize to reposition them (main reads
-  // the authoritative zoom factor — see trafficLights.ts). Once on mount too, harmless at 100%.
+  // the authoritative zoom factor — see trafficLights.ts). Once on mount too, harmless at 100%. Main
+  // replies with the title bar inset for that zoom: zoomed out, the inset must not shrink under them.
   useEffect(() => {
-    const sync = (): void => window.api.syncTrafficLights()
+    const sync = (): void => {
+      void window.api.syncTrafficLights().then((inset) => {
+        if (inset !== null) document.documentElement.style.setProperty('--titlebar-inset', `${inset}px`)
+      })
+    }
     sync()
     window.addEventListener('resize', sync)
     return () => window.removeEventListener('resize', sync)
@@ -2610,10 +2616,10 @@ export default function App() {
       <TitleBar
         paneCollapsed={paneCollapsed}
         onTogglePane={togglePane}
-        // The wordmark goes back to the welcome screen. With tabs open that is a pane showing nothing
-        // rather than a window with nothing in it — the tabs stay put, which is why `deselect` exists
-        // instead of this either closing them or becoming a control that silently does nothing.
-        onHome={() => { beginVisit(); panes.deselect() }}
+        canGoBack={historyAvailability.back}
+        canGoForward={historyAvailability.forward}
+        onBack={() => goHistory(-1)}
+        onForward={() => goHistory(1)}
         onOpenSettings={() => setSettingsPage('appearance')}
         resolvedTheme={themeResolved}
         onToggleTheme={toggleTheme}

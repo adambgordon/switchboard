@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY_HISTORY, historyReducer, type HistoryAction } from '../src/main/navigationHistory'
+import { EMPTY_HISTORY, historyReducer, stepAvailability, type HistoryAction } from '../src/main/navigationHistory'
 
 const run = (actions: HistoryAction[]) => actions.reduce(historyReducer, EMPTY_HISTORY)
 const visit = (sessionId: string, view: 'transcript' | 'terminal' = 'transcript'): HistoryAction =>
@@ -83,5 +83,51 @@ describe('app navigation history', () => {
     expect(historyReducer(state, { type: 'rekey', from: 'absent', to: 'B' })).toBe(state)
     expect(historyReducer(state, { type: 'rekey', from: 'A', to: 'A' })).toBe(state)
     expect(historyReducer(state, { type: 'retarget', from: 'A', to: 'A' })).toBe(state)
+  })
+})
+
+describe('stepAvailability', () => {
+  const none = () => false
+  const among = (...ids: string[]) => (sessionId: string) => ids.includes(sessionId)
+  const back: HistoryAction = { type: 'step', direction: -1 }
+  const home: HistoryAction = { type: 'home' }
+
+  it('offers nothing before the first visit', () => {
+    expect(stepAvailability(EMPTY_HISTORY, none)).toEqual({ back: false, forward: false })
+  })
+
+  it('follows the cursor through the log', () => {
+    const atEnd = run([visit('A'), visit('B'), visit('C')])
+    expect(stepAvailability(atEnd, none)).toEqual({ back: true, forward: false })
+    const middle = historyReducer(atEnd, back)
+    expect(stepAvailability(middle, none)).toEqual({ back: true, forward: true })
+    const start = historyReducer(middle, back)
+    expect(stepAvailability(start, none)).toEqual({ back: false, forward: true })
+  })
+
+  it('does not count the stop the cursor is on', () => {
+    // The cursor's own entry is reachable here, so counting it would wrongly enable Back.
+    const state = run([visit('A'), visit('B')])
+    expect(stepAvailability(state, among('A'))).toEqual({ back: false, forward: false })
+  })
+
+  it('looks past every unreachable stop, not just the nearest', () => {
+    const state = run([visit('A'), visit('B'), visit('C'), visit('D')])
+    expect(stepAvailability(state, among('C')).back).toBe(true)
+    expect(stepAvailability(state, among('B', 'C')).back).toBe(true)
+    expect(stepAvailability(state, among('A', 'B', 'C')).back).toBe(false)
+    const first = historyReducer(historyReducer(historyReducer(state, back), back), back)
+    expect(stepAvailability(first, among('B')).forward).toBe(true)
+    expect(stepAvailability(first, among('B', 'C', 'D')).forward).toBe(false)
+  })
+
+  it('from Welcome, Back can land on the cursor’s own stop and Forward waits', () => {
+    const away = run([visit('A'), visit('B'), visit('C'), back, home])
+    expect(away.cursor).toBe(1)
+    // C lies ahead of the cursor, but Forward from Welcome goes nowhere.
+    expect(stepAvailability(away, none)).toEqual({ back: true, forward: false })
+    // Only B is reachable at or before the cursor: Back re-centers on it.
+    expect(stepAvailability(away, among('A')).back).toBe(true)
+    expect(stepAvailability(away, among('A', 'B')).back).toBe(false)
   })
 })

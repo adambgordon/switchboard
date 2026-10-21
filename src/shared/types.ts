@@ -1,4 +1,4 @@
-import type { NavigationCommand, NavigationVisit } from './navigation'
+import type { NavigationAvailability, NavigationCommand, NavigationVisit } from './navigation'
 
 /**
  * Shared contract between the Electron main process, the preload bridge, and the
@@ -414,6 +414,8 @@ export const IPC = {
   navigationInterrupt: 'navigation:interrupt', // renderer -> main: a local user action supersedes playback
   navigationComplete: 'navigation:complete', // renderer -> main: tagged activation committed
   navigationCanceled: 'navigation:canceled', // push (requestId): discard superseded activation
+  navigationStateGet: 'navigation:stateGet',
+  navigationStateChanged: 'navigation:stateChanged', // push (NavigationAvailability): Back / Forward enablement
   tabResume: 'tab:resumeHere', // push (sessionId): resume the tab in this window
   tabRelease: 'tab:release', // push (sessionId): close your tab for this conversation
   tabShouldRelease: 'tab:shouldRelease', // renderer -> main: confirm a queued release is still current
@@ -426,7 +428,7 @@ export const IPC = {
   ptySnapshotStage: 'pty:snapshotStage', // push (ptyId, snapshot): destination stages before ownership flips
   ptySnapshotRestored: 'pty:snapshotRestored', // renderer -> main: destination replay completed; repaint foreground TUI
   windowSetBackgroundColor: 'window:setBackgroundColor',
-  windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom
+  windowSyncTrafficLights: 'window:syncTrafficLights', // renderer -> main: re-align traffic lights to the current zoom; replies with the title bar inset
   windowSetDockIcon: 'window:setDockIcon', // renderer -> main: swap the macOS dock icon (light / dark variant)
   windowIsFocused: 'window:isFocused', // renderer -> main: seed the focus flag on mount
   windowFocusChanged: 'window:focusChanged', // push (focused) — OS window focus/blur
@@ -707,6 +709,8 @@ export interface SwitchboardApi {
   interruptNavigation(revision: number): void
   completeNavigation(requestId: number, visit: NavigationVisit | null): void
   onNavigationCanceled(cb: (requestId: number) => void): () => void
+  getNavigationState(): Promise<NavigationAvailability>
+  onNavigationState(cb: (state: NavigationAvailability) => void): () => void
   onTabResume(cb: (sessionId: string) => void): () => void
   /** Another window is taking this conversation — close our tab for it. */
   onTabRelease(cb: (sessionId: string) => void): () => void
@@ -730,8 +734,9 @@ export interface SwitchboardApi {
    *  fills exposed regions with the right color instead of flashing the other theme. */
   setBackgroundColor(color: string): void
   /** Ask main to re-align the native macOS traffic lights to the current page zoom — fired by the
-   *  renderer on every `resize` (which fires on every zoom change). Fire-and-forget. */
-  syncTrafficLights(): void
+   *  renderer on every `resize` (which fires on every zoom change). Resolves to the title bar's left
+   *  inset in CSS px for that zoom; null while syncing is paused. */
+  syncTrafficLights(): Promise<number | null>
   /** ⌘R refresh lifecycle pushes: `start` fires before the zoom wiggle (renderer covers the window with
    *  a white veil), `end` after the zoom is restored (renderer fades the veil out), so the relayout is
    *  hidden. Also used for the launch fade-in. Each returns an unsubscribe fn. */

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { WhatsNewRelease } from '../lib/onceTasks'
-import { Bell, Close, EyeOff, Folder, ListFilter, PointerClick, Rows, SplitVertical } from './icons'
+import { ArrowLeft, ArrowRight, Bell, Close, EyeOff, Folder, ListFilter, PointerClick, Rows, SplitVertical } from './icons'
 
 interface Props {
   /** The releases to show, newest first; null while closed. */
@@ -25,6 +25,10 @@ const ICON = 26
  * What changed, one slide per feature: at launch the releases this profile has not seen (see
  * `WHATS_NEW_RELEASES`), and all of them when reopened from Preferences → Application. Drawn, not
  * screenshotted: a picture of the app would be a picture of someone's conversations.
+ *
+ * In slide copy, a keyboard shortcut or modifier-click is a key cap, one `<kbd className="sb-kbd">` per
+ * combo as on the Shortcuts page (⌘[, ⇧-click); a plain gesture in a sentence (right-click,
+ * double-click) stays prose.
  */
 export default function WhatsNewModal({ releases, ...rest }: Props) {
   // The deck mounts on each open, so it always starts on its first slide.
@@ -46,6 +50,25 @@ function Deck({
 
   const slidesOf = (release: WhatsNewRelease): Omit<Slide, 'release'>[] => {
     switch (release) {
+      case 'whatsNew:4':
+        return [
+          {
+            icon: (
+              <>
+                <ArrowLeft size={22} />
+                <ArrowRight size={22} />
+              </>
+            ),
+            title: 'Back and forward',
+            body: (
+              <>
+                The arrows in the top left step back and forward through your navigation history. The keyboard
+                shortcuts <kbd className="sb-kbd">⌘[</kbd> and <kbd className="sb-kbd">⌘]</kbd> remain
+                unchanged, performing identical behavior.
+              </>
+            )
+          }
+        ]
       case 'whatsNew:3':
         return [
           {
@@ -53,8 +76,9 @@ function Deck({
             title: 'Select multiple conversations',
             body: (
               <>
-                ⇧-click or ⌘-click conversations in the sidebar to select multiple conversations. Right-click
-                any of them to perform bulk actions like pin, hide, mark read or unread, or stop them all at
+                <kbd className="sb-kbd">⇧-click</kbd> or <kbd className="sb-kbd">⌘-click</kbd> conversations in
+                the sidebar to select multiple conversations. Right-click any of them to perform bulk actions
+                like pin, hide, mark read or unread, or stop them all at
                 once{tabsEnabled ? ', or to open them side by side or in a new window' : ''}. Drag a
                 selection to reorder them together.
               </>

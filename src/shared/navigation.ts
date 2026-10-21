@@ -18,6 +18,12 @@ export interface NavigationCommand {
   kind: 'visit' | 'replay'
 }
 
+/** Whether Back / Forward would land anywhere. App-wide, like the history it describes. */
+export interface NavigationAvailability {
+  back: boolean
+  forward: boolean
+}
+
 export function sameVisit(a: NavigationVisit | null, b: NavigationVisit | null): boolean {
   return a === b || (!!a && !!b && a.sessionId === b.sessionId && a.view === b.view)
 }
