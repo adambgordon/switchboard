@@ -583,10 +583,7 @@ export default function SettingsModal({
                     <button className="sb-setting-btn sb-setting-btn-start" onClick={onShowWhatsNew}>
                       Show what’s new
                     </button>
-                    <div className="sb-setting-desc">
-                      Hiding and filtering; tabs and split view, the compact and folder sidebar, and the
-                      bell.
-                    </div>
+                    <div className="sb-setting-desc">Opens the What’s new dialog again, with every release’s highlights.</div>
                   </div>
                 </div>
                 <div className="sb-modal-group">
@@ -671,8 +668,8 @@ export default function SettingsModal({
                     </div>
                     <div className="sb-setting-desc">
                       Preserves Markdown formatting inside broader selections. Exact component selections
-                      copy their content; copy buttons preserve complete formatting. Turn this off for plain text.
-                      ⇧⌘C copies a selection the other way.
+                      copy their content; copy buttons preserve complete formatting. Turn this off for plain text.{' '}
+                      <kbd className="sb-kbd">⇧⌘C</kbd> copies a selection the other way.
                     </div>
                   </div>
                 </div>

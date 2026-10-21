@@ -838,8 +838,10 @@ body.sb-resizing .sb-pane {
   flex-shrink: 0;
   color: var(--ink-faint);
 }
-/* shrink the inline ⌘N glyph from its full key-cap size so it sits in the sentence */
-.sb-setting-desc .sb-kbd {
+/* A key cap inside a sentence (a setting's description, a What's New slide) shrinks from its full size
+   so it sits in the line. */
+.sb-setting-desc .sb-kbd,
+.sb-whatsnew-desc .sb-kbd {
   min-width: 0;
   height: 18px;
   padding: 0 4px;
