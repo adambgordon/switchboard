@@ -53,9 +53,13 @@ export default function TitleBar({
 }: Props) {
   return (
     <header className="sb-titlebar" data-tip-group="">
+      {/* The 1.35 stroke is measured, not a round number. The GPU antialiases an arrowhead's 45° strokes
+          coarsely, so at fractional zoom they draw heavier or lighter than the shaft; near this weight,
+          1.35 keeps that within about 6% across the zoom steps, where 1.45 reached 14%. Re-measure if
+          the size changes. */}
       <div className="sb-nav-arrows">
         <button className="sb-panel-toggle" onClick={onBack} disabled={!canGoBack} data-tip="Back (⌘[)" aria-label="Back">
-          <ArrowLeft size={18} strokeWidth={1.45} />
+          <ArrowLeft size={18} strokeWidth={1.35} />
         </button>
         <button
           className="sb-panel-toggle"
@@ -64,7 +68,7 @@ export default function TitleBar({
           data-tip="Forward (⌘])"
           aria-label="Forward"
         >
-          <ArrowRight size={18} strokeWidth={1.45} />
+          <ArrowRight size={18} strokeWidth={1.35} />
         </button>
       </div>
       <button
