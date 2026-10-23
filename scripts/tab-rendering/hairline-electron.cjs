@@ -20,9 +20,10 @@ async function settle() {
 }
 
 // Runs in the page. Every line is located from its own computed style, whichever technique draws it
-// (a border, a filled box, or an inset shadow), so the check reads the same line before and after a
-// change of technique. `axis` is the direction the profile crosses the line; `at` is where along the
-// line it is taken; `from`/`to` bound the line's box across it, in CSS px.
+// (a border, a filled box, or an inset shadow), so the check does not depend on how a line is drawn
+// and reports a line drawn the wrong way rather than failing to find it. `axis` is the direction the
+// profile crosses the line; `at` is where along the line it is taken; `from`/`to` bound the line's
+// box across it, in CSS px.
 function linesInPage() {
   const rgb = value => value.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number)
   const border = (style, side) => {
