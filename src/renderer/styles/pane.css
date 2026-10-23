@@ -463,8 +463,8 @@ kbd {
   left: 10px;
   right: 10px;
   top: -5px;
-  height: 1px;
-  background: var(--rule);
+  height: 0;
+  border-top: 1px solid var(--rule);
 }
 .sb-chooser-other[data-highlight] {
   color: var(--ink);

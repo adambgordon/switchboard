@@ -247,40 +247,45 @@
 }
 
 /* ---- resizable pane dividers ---- */
-/* The divider IS a flush 1px rule: the element is 1px wide and carries the line as
-   its own background, so the rail (left) and main pane (right) — and their horizontal
-   hairlines — meet it with no gap. (A wider handle carrying a centered 1px line would
-   leave a strip of --paper on each side and break that connection.) The grab
-   target is a transparent overlay spilling onto both panes, taking no layout width. */
+/* The divider IS the line: a zero-width box carrying a native 1px border. A border's width is floored
+   to whole device pixels, so the box is exactly as wide as its line and rounds like every other
+   hairline it meets; a 1px filled box instead rounds each edge separately and paints a pixel more or
+   less depending on where it lands. The rail (left) and main pane (right) — and their horizontal
+   hairlines — meet it flush, with no gap. (A wider handle carrying a centered line would leave a strip
+   of --paper on each side and break that connection.) The grab target is a transparent overlay
+   spilling onto both panes, taking no layout width. */
 .sb-resize-handle {
-  flex: 0 0 1px;
+  flex: none;
+  width: 0;
   align-self: stretch;
   position: relative;
-  background: var(--rule);
+  border-left: 1px solid var(--rule);
   cursor: col-resize;
-  transition: background var(--dur-fast) var(--ease);
+  transition: border-color var(--dur-fast) var(--ease);
 }
+/* Positioned against the zero-width padding box, which starts at the border's right edge: the extra
+   pixel on the left spans the line itself. */
 .sb-resize-handle::before {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -3px;
+  left: -4px;
   right: -3px;
 }
-/* hover: darken, and thicken to ~2px via a centered overlay so the line stays flush */
+/* hover: darken, and thicken to ~2px via an overlay centered on the line so it stays flush. Another
+   border at a fixed offset, not a filled box or a translate, so it snaps like the line beneath it. */
 .sb-resize-handle:hover {
-  background: var(--ink-ghost);
+  border-left-color: var(--ink-ghost);
 }
 .sb-resize-handle:hover::after {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-50%);
-  background: var(--ink-ghost);
+  left: -1.5px;
+  width: 0;
+  border-left: 2px solid var(--ink-ghost);
 }
 body.sb-resizing,
 body.sb-resizing * {
@@ -1452,7 +1457,7 @@ body.sb-resizing .sb-pane {
 }
 /* hairline setting the destructive Stop session apart from the benign items above it */
 .sb-ctxmenu-sep {
-  height: 1px;
+  height: 0;
   margin: 4px 6px;
-  background: var(--rule);
+  border-top: 1px solid var(--rule);
 }
