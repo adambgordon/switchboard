@@ -266,8 +266,10 @@
   cursor: col-resize;
   transition: border-color var(--dur-fast) var(--ease);
 }
-/* 3px either side of the painted line's center. The offsets are uneven because they're measured from
-   the zero-width box, not the line; these values hit-test evenly on both sides at every zoom step. */
+/* About 3px either side of the painted line's center. The offsets are uneven because they're measured
+   from the zero-width box, not the line; these values hit-test evenly at 100% and above. Below 100%
+   the line is a different fraction of a CSS pixel at each step, so fixed offsets leave it up to half a
+   pixel off center there. */
 .sb-resize-handle::before {
   content: '';
   position: absolute;
