@@ -60,7 +60,11 @@ function linesInPage() {
     const tab = box('.sb-tab'), tabLine = style('.sb-tab', '::before')
     add('tab-drag-gap', 'x', (tab.top + tab.bottom) / 2, tab.left,
       border(tabLine, 'Left') || { color: rgb(tabLine.backgroundColor), thickness: parseFloat(tabLine.width) })
-    return { rail: Number(row.dataset.rail), lines }
+    // Which points across the divider grab it, measured from the line's center, in CSS px.
+    const lineCenter = handle.left + handle.width / 2, grabY = (body.top + body.bottom) / 2
+    const grab = [-4.5, -2.5, 0, 2.5, 4.5].map(dx =>
+      ({ dx, hit: !!document.elementFromPoint(lineCenter + dx, grabY)?.closest('.sb-resize-handle') }))
+    return { rail: Number(row.dataset.rail), lines, grab }
   })
   return { dpr: devicePixelRatio, width: innerWidth, rows, errors: window.auditErrors }
 }
@@ -89,7 +93,12 @@ async function capture(label) {
   const bitmap = pixelsOf(image), scale = geometry.dpr
   check(Math.abs(bitmap.width - geometry.width * scale) <= Math.ceil(scale), label + ': screenshot/DPR mismatch')
   check(geometry.errors.length === 0, label + ': renderer errors: ' + geometry.errors.join('; '))
-  const rows = geometry.rows.map(({ rail, lines }) => {
+  const rows = geometry.rows.map(({ rail, lines, grab }) => {
+    // The grab area is centered on the line, about 3px either side, and nothing stacked over it
+    // takes the pointer on either side.
+    for (const { dx, hit } of grab) {
+      check(hit === Math.abs(dx) < 3, `${label} rail ${rail}: ${hit ? 'grabs' : 'misses'} the divider ${dx}px from its center`)
+    }
     const measured = lines.map(line => ({ ...line, ...measure(bitmap, scale, line) }))
     const title = measured.find(line => line.name === 'title-bar')
     check(title.painted.length > 0, `${label} rail ${rail}: absent title-bar reference`)
@@ -109,7 +118,7 @@ async function capture(label) {
     const divider = measured.find(line => line.name === 'divider')
     const stray = divider.samples.filter(sample => ![divider.before, divider.after, divider.color].some(color => sameColor(sample.color, color)))
     check(stray.length === 0, `${label} rail ${rail}: divider leaves a sliver at device px ${stray.map(sample => sample.position).join(', ')}`)
-    return { rail, lines: measured.map(({ samples, ...line }) => ({ ...line, samples: samples.map(sample => [sample.position, sample.coverage]) })) }
+    return { rail, grab, lines: measured.map(({ samples, ...line }) => ({ ...line, samples: samples.map(sample => [sample.position, sample.coverage]) })) }
   })
   results.push({ label, zoom: win.webContents.getZoomFactor(), dpr: scale, rows })
   writeFileSync(join(output, label + '.png'), image.toPNG())
@@ -147,7 +156,7 @@ app.whenReady().then(async () => {
     }
     writeFileSync(join(output, 'results.json'), JSON.stringify({ results, failures }, null, 2))
     if (failures.length) console.error('Hairline renderer failures:\n' + [...new Set(failures)].join('\n'))
-    else console.log('PASS every hairline paints like the title-bar border across both themes, native zoom steps, and rail widths')
+    else console.log('PASS every hairline paints like the title-bar border, and the divider grabs around its center, across both themes, native zoom steps, and rail widths')
   } catch (error) {
     failures.push(error.message)
     console.error(error.stack)

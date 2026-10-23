@@ -253,25 +253,28 @@
    less depending on where it lands. The rail (left) and main pane (right) — and their horizontal
    hairlines — meet it flush, with no gap. (A wider handle carrying a centered line would leave a strip
    of --paper on each side and break that connection.) The grab target is a transparent overlay
-   spilling onto both panes, taking no layout width. */
+   spilling onto both panes, taking no layout width. The handle stacks above the panes: a pane is
+   positioned and follows the handle, so it would otherwise paint over, and swallow pointer events on,
+   the overlay's right half. The rail's menus, the title bar and modals stack higher still. */
 .sb-resize-handle {
   flex: none;
   width: 0;
   align-self: stretch;
   position: relative;
+  z-index: 1;
   border-left: 1px solid var(--rule);
   cursor: col-resize;
   transition: border-color var(--dur-fast) var(--ease);
 }
-/* Positioned against the zero-width padding box, which starts at the border's right edge: the extra
-   pixel on the left spans the line itself. */
+/* 3px either side of the painted line's center. The offsets are uneven because they're measured from
+   the zero-width box, not the line; these values hit-test evenly on both sides at every zoom step. */
 .sb-resize-handle::before {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -4px;
-  right: -3px;
+  left: -3px;
+  right: -2.5px;
 }
 /* hover: darken, and thicken to ~2px via an overlay centered on the line so it stays flush. Another
    border at a fixed offset, not a filled box or a translate, so it snaps like the line beneath it. */
