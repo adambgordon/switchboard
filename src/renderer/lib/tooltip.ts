@@ -206,9 +206,20 @@ export function tipMorph(from: TipRect | null, to: TipRect, reducedMotion: boole
 }
 
 /**
- * What the pointer moved onto: no tooltip host (`null`), or a host and the group it belongs to — the
- * nearest `data-tip-group` container, or null for a host in none. Groups compare by identity, so any
- * value that is the same for every host in a container will do.
+ * The group a host belongs to, from its nearest `data-tip-group` container and that attribute's value:
+ * null for a host in no container; the container itself when the value is empty; the NAME when there
+ * is one. A name joins containers that are separate in the DOM but read as one row — each pane's tab
+ * strip is its own element, and a sweep from one pane's tabs to the other's should re-fill the label
+ * like a sweep along one strip. Generic so it can be exercised without a DOM.
+ */
+export function tipGroupKey<T>(container: T | null, name: string | null): T | string | null {
+  if (container === null) return null
+  return name ? name : container
+}
+
+/**
+ * What the pointer moved onto: no tooltip host (`null`), or a host and the group it belongs to — its
+ * `tipGroupKey`, or null for a host in none. Groups compare by identity.
  */
 export type TipTarget = { group: unknown } | null
 

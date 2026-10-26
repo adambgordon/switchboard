@@ -5,6 +5,7 @@ import {
   placeTip,
   placeTipRight,
   tipBoxLeft,
+  tipGroupKey,
   tipMetaLine,
   tipMorph,
   tipOnEnter,
@@ -31,9 +32,9 @@ interface Tip {
   hostRight: number
   /** A scrub host (`data-tip-scrub`), stacked in a column: the label sits to its right. */
   scrub: boolean
-  /** The host's tooltip group (`data-tip-group`), or null: moving onto another host in it re-fills the
-   *  label at once. */
-  group: Element | null
+  /** The host's tooltip group (`data-tip-group`, see `tipGroupKey`), or null: moving onto another host
+   *  in it re-fills the label at once. */
+  group: TipGroup
   /** Host opted into a wrapping, max-width label (for paragraph-length copy) via `data-tip-wide`. */
   wide: boolean
   /** Host opted into the tighter padding variant via `data-tip-compact`. */
@@ -63,7 +64,20 @@ function hostOf(t: EventTarget | null): Element | null {
   return el?.closest('[data-tip-scrub]') ?? el?.closest('[data-tip]') ?? null
 }
 
-const groupOf = (host: Element): Element | null => host.closest('[data-tip-group]')
+/** A tooltip group: its container, or its name when the container has one (see `tipGroupKey`). */
+type TipGroup = Element | string | null
+
+const groupOf = (el: Element): TipGroup => {
+  const container = el.closest('[data-tip-group]')
+  return tipGroupKey(container, container?.getAttribute('data-tip-group') ?? null)
+}
+
+/** Whether the pointer, now over `t`, is still inside `group` — inside its container, or inside any
+ *  container sharing its name. */
+function insideGroup(t: EventTarget | null, group: TipGroup): boolean {
+  if (group === null || !(t instanceof Element)) return false
+  return typeof group === 'string' ? t.closest(`[data-tip-group="${CSS.escape(group)}"]`) !== null : group.contains(t)
+}
 
 const targetOf = (host: Element | null): TipTarget => (host === null ? null : { group: groupOf(host) })
 
@@ -101,7 +115,7 @@ export default function TooltipLayer() {
   const activeRef = useRef<Element | null>(null)
   const graceTimer = useRef<ReturnType<typeof setTimeout>>()
   // The group of the label on screen (possibly within its grace) — what makes its neighbors instant.
-  const shownGroupRef = useRef<Element | null>(null)
+  const shownGroupRef = useRef<TipGroup>(null)
   // The host whose label is on screen, so a modifier going down or up can re-word it in place.
   const shownHostRef = useRef<Element | null>(null)
 
@@ -201,8 +215,7 @@ export default function TooltipLayer() {
       const to = hostOf(e.relatedTarget)
       if (to === activeRef.current) return
       const group = shownGroupRef.current
-      const inGroup = group !== null && e.relatedTarget instanceof Node && group.contains(e.relatedTarget)
-      const next = tipOnLeave(group, targetOf(to), inGroup)
+      const next = tipOnLeave(group, targetOf(to), insideGroup(e.relatedTarget, group))
       if (next === 'hide') return hide()
       // Keep the label up: the host being entered re-fills it, or the grace ends it.
       activeRef.current = null

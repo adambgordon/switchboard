@@ -6,6 +6,7 @@ import {
   placeTip,
   placeTipRight,
   tipBoxLeft,
+  tipGroupKey,
   tipMetaLine,
   tipMorph,
   tipOnEnter,
@@ -261,6 +262,34 @@ describe('placeTipRight', () => {
 
   it('pulls left rather than running off the right edge', () => {
     expect(placeTipRight({ ...base, viewportWidth: 500 }).left).toBe(500 - 8 - 250)
+  })
+})
+
+describe('tipGroupKey', () => {
+  // Two containers that are separate in the DOM, as each pane's tab strip is.
+  const LEFT = { strip: 'left' }
+  const RIGHT = { strip: 'right' }
+
+  it('is null for a host in no container', () => {
+    expect(tipGroupKey(null, null)).toBeNull()
+  })
+
+  it('is the container itself when the container has no name, so two unnamed containers stay apart', () => {
+    expect(tipGroupKey(LEFT, '')).toBe(LEFT)
+    // getAttribute gives '' for a bare `data-tip-group=""`: that must not become a name every unnamed
+    // group shares.
+    expect(tipGroupKey(LEFT, '')).not.toBe(tipGroupKey(RIGHT, ''))
+  })
+
+  it('is the name when there is one, so containers sharing it are one group', () => {
+    expect(tipGroupKey(LEFT, 'tabs')).toBe('tabs')
+    expect(tipGroupKey(LEFT, 'tabs')).toBe(tipGroupKey(RIGHT, 'tabs'))
+    expect(tipOnEnter(tipGroupKey(LEFT, 'tabs'), { group: tipGroupKey(RIGHT, 'tabs') })).toBe('refill')
+  })
+
+  it('keeps differently named containers apart', () => {
+    expect(tipOnEnter(tipGroupKey(LEFT, 'tabs'), { group: tipGroupKey(RIGHT, 'rows') })).toBe('replace')
+    expect(tipOnEnter(tipGroupKey(LEFT, 'tabs'), { group: tipGroupKey(RIGHT, '') })).toBe('replace')
   })
 })
 

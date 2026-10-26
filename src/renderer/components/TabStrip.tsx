@@ -412,7 +412,9 @@ export default function TabStrip({
       <div
         className={`sb-tabstrip${layout === 'scroll' ? ' horizontal' : ''}`}
         data-layout={layout}
-        data-tip-group=""
+        // Named, so both panes' strips are one tooltip group: a sweep across the divider re-fills the label
+        // rather than starting the delay over.
+        data-tip-group="tabs"
         ref={stripRef}
         role="tablist"
         // Read by the drag hook when it hit-tests every strip in the window: a drop has to resolve to a
