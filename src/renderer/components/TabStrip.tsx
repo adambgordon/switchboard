@@ -185,7 +185,7 @@ function Tab({
       // A tab truncates aggressively, so the full title lives in the shared tooltip layer — never a
       // native `title`, which lags and resets on the slightest pointer move. `data-tip-sub` adds the
       // preview line beneath it and `data-tip-at` / `data-tip-meta` the when-and-where line, giving the
-      // hover the same content as a rail row.
+      // hover the same content as a rail row. The whole tab, × included, is the one host.
       data-tip={tab.title}
       {...(tab.subtitle ? { 'data-tip-sub': tab.subtitle } : {})}
       {...(tab.lastActiveAt !== null ? { 'data-tip-at': tab.lastActiveAt } : {})}
@@ -255,12 +255,11 @@ function Tab({
       </span>
       <button
         className="sb-tab-close"
-        // The tooltip is generic while the accessible name is specific: the tip appears under the
-        // pointer, where which tab is meant is already obvious, whereas a screen reader announces the
-        // button with no such context. On a running tab ⌥ turns it into stop-and-close: the tooltip's ⌥
-        // variant says so, and the × turns red (app.css, off the held-key attribute on the root).
-        data-tip="Close tab"
-        {...(tab.running ? { 'data-tip-alt': 'Stop session and close tab' } : {})}
+        // No tooltip of its own: the × is part of the tab's hover, so moving onto it keeps the tab's
+        // preview up rather than swapping it for a label. The accessible name stays specific, since a
+        // screen reader announces the button with no tab in view. On a running tab ⌥ turns it into
+        // stop-and-close, and the × turns red to say so (tabs.css, off the held-key attribute on the
+        // root).
         aria-label={`Close ${tab.title}`}
         onClick={(e) => {
           e.stopPropagation()
