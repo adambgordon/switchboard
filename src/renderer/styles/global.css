@@ -154,10 +154,11 @@ input::placeholder {
 
 /* ---- tooltips: one fixed-positioned label (rendered by TooltipLayer) for all `data-tip` hosts.
    Replaces native `title` (slow, resets on pointer move). Ink-on-paper — never an accent.
-   POSITION IS ENTIRELY JS's: TooltipLayer measures the label, picks a side, and writes `top`, `left`,
-   and the `transform` that anchors it to that side. These rules are only its look and its bounds —
-   there is deliberately no `.sb-tip-top` / `.sb-tip-bottom` here, because a transform in CSS and an
-   offset in JS were two places to hold one decision. */
+   POSITION IS ENTIRELY JS's: TooltipLayer measures the label, picks a side, and writes the `top` and
+   `left` of its corner. These rules are only its look and its bounds — there is deliberately no
+   `.sb-tip-top` / `.sb-tip-bottom` here, because a placement in CSS and one in JS would be two places
+   to hold one decision. The same goes for motion: a label re-filled from a neighbor morphs there by a
+   Web Animation, so there is no transition here either. */
 .sb-tip {
   position: fixed;
   z-index: 1100;
@@ -176,6 +177,9 @@ input::placeholder {
   /* Long unbroken tokens (a URL, a path) have no break opportunity of their own, and without this
      they are the one case that can still exceed the cap. */
   overflow-wrap: anywhere;
+  /* Clips only mid-morph, when the box is smaller than the text it is growing to fit; at rest the box
+     is sized by the text. The shadow is outside the box, so it is not clipped. */
+  overflow: clip;
   padding: 4px 8px;
   background: var(--ink);
   color: var(--paper);
@@ -205,14 +209,6 @@ input::placeholder {
   margin-top: 3px;
   font-weight: 400;
   opacity: 0.72;
-}
-/* Re-filled from a neighbor in its group (data-tip-group) — down the rail's rows, along a toolbar: the
-   label glides to the new host rather than jumping, so a sweep reads as one label following the
-   pointer. */
-.sb-tip-glide {
-  transition:
-    top 90ms var(--ease),
-    left 90ms var(--ease);
 }
 /* Three-line variant (data-tip-at / data-tip-meta): a quieter line still — when, and where. */
 .sb-tip-meta {

@@ -1,6 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { heldKeys, onHeldKeys } from '../lib/heldKeys'
-import { clampTipText, placeTip, placeTipRight, tipMetaLine, tipOnEnter, tipOnLeave, type TipTarget } from '../lib/tooltip'
+import {
+  clampTipText,
+  placeTip,
+  placeTipRight,
+  tipBoxLeft,
+  tipGroupKey,
+  tipHoldCut,
+  tipMetaLine,
+  tipMorph,
+  tipOnEnter,
+  tipOnLeave,
+  type TipRect,
+  type TipTarget
+} from '../lib/tooltip'
 import MetaText from './MetaText'
 
 interface Tip {
@@ -20,12 +33,9 @@ interface Tip {
   hostRight: number
   /** A scrub host (`data-tip-scrub`), stacked in a column: the label sits to its right. */
   scrub: boolean
-  /** The host's tooltip group (`data-tip-group`), or null: moving onto another host in it re-fills the
-   *  label at once. */
-  group: Element | null
-  /** Re-filled from a neighbor in its group rather than freshly shown — the label glides to its new
-   *  place instead of appearing there. */
-  glide: boolean
+  /** The host's tooltip group (`data-tip-group`, see `tipGroupKey`), or null: moving onto another host
+   *  in it re-fills the label at once. */
+  group: TipGroup
   /** Host opted into a wrapping, max-width label (for paragraph-length copy) via `data-tip-wide`. */
   wide: boolean
   /** Host opted into the tighter padding variant via `data-tip-compact`. */
@@ -36,8 +46,15 @@ const SHOW_DELAY = 700
 /** For hosts whose purpose is plain from their icon (`data-tip-slow`): the label is there for whoever
  *  lingers, and must not flash up under a pointer merely passing over — or resting on — them. */
 const SLOW_SHOW_DELAY = 1500
-/** How long a grouped label outlives its host while the pointer crosses a gap between hosts. */
+/** How long a grouped label outlives its host once the pointer has left the group onto no host. */
 const SCRUB_GRACE = 150
+/** How long it outlives its host while the pointer crosses a gap INSIDE the group — a folder header
+ *  between rail rows — so the next host can be reached at an unhurried pace. */
+const GROUP_HOLD = 400
+/** A label re-filled from a neighbor morphs from that neighbor's box to its own. Short enough that a
+ *  sweep down the rail still reads each row at once, and eased at both ends so the box neither lurches
+ *  off nor snaps into place. A sweep faster than this restarts the morph from wherever the box is. */
+const MORPH: KeyframeAnimationOptions = { duration: 150, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }
 const GAP = 7
 const EDGE = 8
 
@@ -48,7 +65,20 @@ function hostOf(t: EventTarget | null): Element | null {
   return el?.closest('[data-tip-scrub]') ?? el?.closest('[data-tip]') ?? null
 }
 
-const groupOf = (host: Element): Element | null => host.closest('[data-tip-group]')
+/** A tooltip group: its container, or its name when the container has one (see `tipGroupKey`). */
+type TipGroup = Element | string | null
+
+const groupOf = (el: Element): TipGroup => {
+  const container = el.closest('[data-tip-group]')
+  return tipGroupKey(container, container?.getAttribute('data-tip-group') ?? null)
+}
+
+/** Whether the pointer, now over `t`, is still inside `group` — inside its container, or inside any
+ *  container sharing its name. */
+function insideGroup(t: EventTarget | null, group: TipGroup): boolean {
+  if (group === null || !(t instanceof Element)) return false
+  return typeof group === 'string' ? t.closest(`[data-tip-group="${CSS.escape(group)}"]`) !== null : group.contains(t)
+}
 
 const targetOf = (host: Element | null): TipTarget => (host === null ? null : { group: groupOf(host) })
 
@@ -78,11 +108,17 @@ function tipText(el: Element): string | null {
 export default function TooltipLayer() {
   const [tip, setTip] = useState<Tip | null>(null)
   const elRef = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  // The box of the label a re-fill replaces, read as it stood on screen, before the new content renders.
+  const morphFromRef = useRef<TipRect | null>(null)
+  const morphRef = useRef<Animation | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const activeRef = useRef<Element | null>(null)
   const graceTimer = useRef<ReturnType<typeof setTimeout>>()
+  // When the running grace is a `hold` over a gap inside the group, when that hold ends; else null.
+  const holdEndsRef = useRef<number | null>(null)
   // The group of the label on screen (possibly within its grace) — what makes its neighbors instant.
-  const shownGroupRef = useRef<Element | null>(null)
+  const shownGroupRef = useRef<TipGroup>(null)
   // The host whose label is on screen, so a modifier going down or up can re-word it in place.
   const shownHostRef = useRef<Element | null>(null)
 
@@ -90,6 +126,7 @@ export default function TooltipLayer() {
     const clearGrace = (): void => {
       if (graceTimer.current) clearTimeout(graceTimer.current)
       graceTimer.current = undefined
+      holdEndsRef.current = null
     }
     const hide = (): void => {
       if (timer.current) clearTimeout(timer.current)
@@ -100,10 +137,14 @@ export default function TooltipLayer() {
       shownHostRef.current = null
       setTip(null)
     }
-    const reveal = (el: Element, glide: boolean): void => {
+    const reveal = (el: Element, refill: boolean): void => {
       const text = tipText(el)
       if (!text) return
       shownHostRef.current = el
+      // Read here, while the outgoing label is still rendered — mid-morph included, since a running
+      // animation is part of the rect.
+      const shown = refill ? elRef.current?.getBoundingClientRect() : undefined
+      morphFromRef.current = shown ? { left: shown.left, top: shown.top, width: shown.width, height: shown.height } : null
       const r = el.getBoundingClientRect()
       const sub = el.getAttribute('data-tip-sub')
       // Preferences copy is never truncated. The clamp exists for strings the app does not author and
@@ -146,7 +187,6 @@ export default function TooltipLayer() {
         hostRight: r.right,
         scrub: el.hasAttribute('data-tip-scrub'),
         group: groupOf(el),
-        glide,
         wide: el.hasAttribute('data-tip-wide'),
         compact: el.hasAttribute('data-tip-compact')
       })
@@ -174,15 +214,30 @@ export default function TooltipLayer() {
       }
     }
     const onOut = (e: MouseEvent): void => {
-      if (!activeRef.current) return
+      if (!activeRef.current) {
+        // Held over a gap inside the group, and now leaving the group from that gap onto no host: the
+        // label no longer describes anything near the pointer, so the hold is cut to the short grace. (A
+        // host the pointer reaches instead is handled by `onOver`.)
+        const ends = holdEndsRef.current
+        if (ends !== null && !hostOf(e.relatedTarget) && !insideGroup(e.relatedTarget, shownGroupRef.current)) {
+          clearGrace()
+          graceTimer.current = setTimeout(hide, tipHoldCut(ends, Date.now(), SCRUB_GRACE))
+        }
+        return
+      }
       // Ignore moves that stay within the active host (e.g. onto its child icon).
       const to = hostOf(e.relatedTarget)
       if (to === activeRef.current) return
-      const next = tipOnLeave(shownGroupRef.current, targetOf(to))
+      const group = shownGroupRef.current
+      const next = tipOnLeave(group, targetOf(to), insideGroup(e.relatedTarget, group))
       if (next === 'hide') return hide()
       // Keep the label up: the host being entered re-fills it, or the grace ends it.
       activeRef.current = null
       if (next === 'grace') graceTimer.current = setTimeout(hide, SCRUB_GRACE)
+      if (next === 'hold') {
+        graceTimer.current = setTimeout(hide, GROUP_HOLD)
+        holdEndsRef.current = Date.now() + GROUP_HOLD
+      }
     }
     // Pressing or releasing ⌥ / ⇧ over a control that means something else under it re-words its label
     // at once, where it stands.
@@ -210,76 +265,100 @@ export default function TooltipLayer() {
     }
   }, [])
 
-  // Place the label now that it can be measured — vertical side + clamp, then the horizontal clamp.
-  // Done imperatively in ONE layout effect (rather than by feeding a measurement back into state) so
-  // there is no second render between measuring and placing, and so nothing paints mis-positioned.
+  // Place the label now that it can be measured — vertical side + clamp, then the horizontal clamp —
+  // and, for a re-fill, morph it there from the label it replaces. Done imperatively in ONE layout
+  // effect (rather than by feeding a measurement back into state) so there is no second render between
+  // measuring and placing, and so nothing paints mis-positioned.
+  //
+  // The label is always placed by its top-left corner, with no anchoring transform: the morph compares
+  // where the old box was with where the new one goes, so both must be the same kind of coordinate.
   useLayoutEffect(() => {
     const el = elRef.current
-    if (!el || !tip) return
+    const body = bodyRef.current
+    if (!el || !body || !tip) return
     shownGroupRef.current = tip.group
+    const from = morphFromRef.current
+    morphFromRef.current = null
 
-    if (tip.scrub) {
-      const { left, top } = placeTipRight({
-        hostTop: tip.hostTop,
-        hostBottom: tip.hostBottom,
-        hostRight: tip.hostRight,
-        width: el.offsetWidth,
-        height: el.offsetHeight,
-        viewportWidth: window.innerWidth,
-        viewportHeight: window.innerHeight,
-        gap: GAP,
-        edge: EDGE
-      })
-      el.style.left = `${left}px`
-      el.style.top = `${top}px`
-      el.style.transform = 'none'
-      return
-    }
+    // A morph still running would skew every measurement below. Its progress is not lost: `from` was
+    // read with it applied.
+    morphRef.current?.cancel()
+    morphRef.current = null
+    body.style.width = ''
 
-    const { side, top } = placeTip({
-      hostTop: tip.hostTop,
-      hostBottom: tip.hostBottom,
-      height: el.offsetHeight,
-      viewport: window.innerHeight,
-      gap: GAP,
-      edge: EDGE
-    })
+    const width = el.offsetWidth
+    const height = el.offsetHeight
+    const { left, top } = tip.scrub
+      ? placeTipRight({
+          hostTop: tip.hostTop,
+          hostBottom: tip.hostBottom,
+          hostRight: tip.hostRight,
+          width,
+          height,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+          gap: GAP,
+          edge: EDGE
+        })
+      : {
+          left: tipBoxLeft(tip.x, width, window.innerWidth, EDGE),
+          top: placeTip({
+            hostTop: tip.hostTop,
+            hostBottom: tip.hostBottom,
+            height,
+            viewport: window.innerHeight,
+            gap: GAP,
+            edge: EDGE
+          }).top
+        }
+    el.style.left = `${left}px`
     el.style.top = `${top}px`
-    el.style.transform = side === 'bottom' ? 'translate(-50%, 0)' : 'translate(-50%, -100%)'
 
-    // Horizontal: centered on the host, shifted just enough to clear either edge. Worked out from the
-    // label's width rather than read back from its rect: a label gliding between neighbors is still
-    // mid-transition, and its rect would report where it is coming from.
-    const half = el.offsetWidth / 2
-    let shift = 0
-    if (tip.x - half < EDGE) shift = EDGE - (tip.x - half)
-    else if (tip.x + half > window.innerWidth - EDGE) shift = window.innerWidth - EDGE - (tip.x + half)
-    el.style.left = `${tip.x + shift}px`
+    // The offset sizes are rounded; the rect is what the box will settle on, so the morph ends there
+    // without a last-frame snap.
+    const to = el.getBoundingClientRect()
+    const m = tipMorph(from, to, window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    if (!m) return
+    // Hold the text at its final measure while the box around it changes size, so it is never re-wrapped
+    // mid-morph. The box clips it (`overflow: clip`) wherever the box is smaller.
+    body.style.width = `${body.getBoundingClientRect().width}px`
+    //
+    // The text is not faded in: a sweep re-fills the label once per host, and a fade restarting from
+    // nothing each time reads as the text flickering. It changes at once, and the box reveals it.
+    const morph = el.animate(
+      [
+        { transform: `translate(${m.dx}px, ${m.dy}px)`, width: `${m.width}px`, height: `${m.height}px` },
+        { transform: 'none', width: `${to.width}px`, height: `${to.height}px` }
+      ],
+      MORPH
+    )
+    morph.onfinish = () => {
+      body.style.width = ''
+    }
+    morphRef.current = morph
   }, [tip])
 
   if (!tip) return null
   return (
     <div
       ref={elRef}
-      className={`sb-tip${tip.wide ? ' sb-tip-wide' : ''}${tip.compact ? ' sb-tip-compact' : ''}${tip.glide ? ' sb-tip-glide' : ''}`}
+      className={`sb-tip${tip.wide ? ' sb-tip-wide' : ''}${tip.compact ? ' sb-tip-compact' : ''}`}
       // A first guess only, so the label never paints at the viewport origin; the layout effect above
-      // overwrites all three before paint.
-      style={
-        tip.scrub
-          ? { left: tip.hostRight + GAP, top: tip.hostTop, transform: 'none' }
-          : { left: tip.x, top: tip.hostBottom + GAP, transform: 'translate(-50%, 0)' }
-      }
+      // overwrites both before paint.
+      style={tip.scrub ? { left: tip.hostRight + GAP, top: tip.hostTop } : { left: tip.x, top: tip.hostBottom + GAP }}
       role="tooltip"
     >
-      {tip.sub || tip.meta ? (
-        <>
-          <div className="sb-tip-title">{tip.text}</div>
-          {tip.sub && <div className="sb-tip-sub">{tip.sub}</div>}
-          {tip.meta && <div className="sb-tip-meta"><MetaText text={tip.meta} /></div>}
-        </>
-      ) : (
-        tip.text
-      )}
+      <div ref={bodyRef}>
+        {tip.sub || tip.meta ? (
+          <>
+            <div className="sb-tip-title">{tip.text}</div>
+            {tip.sub && <div className="sb-tip-sub">{tip.sub}</div>}
+            {tip.meta && <div className="sb-tip-meta"><MetaText text={tip.meta} /></div>}
+          </>
+        ) : (
+          tip.text
+        )}
+      </div>
     </div>
   )
 }

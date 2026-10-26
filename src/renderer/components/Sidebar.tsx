@@ -485,16 +485,15 @@ export default function Sidebar({
   useLayoutEffect(() => {
     const el = menuRef.current
     if (!el || !ctxMenu) return
-    const height = el.offsetHeight
-    const { side, top } = placeTip({
+    const { top } = placeTip({
       hostTop: ctxMenu.anchorTop,
       hostBottom: ctxMenu.anchorBottom,
-      height,
+      height: el.offsetHeight,
       viewport: window.innerHeight,
       gap: ctxMenu.gap,
       edge: MENU_EDGE
     })
-    el.style.top = `${side === 'bottom' ? top : top - height}px`
+    el.style.top = `${top}px`
     if (ctxMenu.left !== undefined) {
       el.style.left = `${Math.max(MENU_EDGE, Math.min(ctxMenu.left, window.innerWidth - MENU_EDGE - el.offsetWidth))}px`
     }

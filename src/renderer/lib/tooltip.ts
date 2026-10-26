@@ -105,8 +105,7 @@ export interface TipBox {
 
 export interface TipPlacement {
   side: 'top' | 'bottom'
-  /** The `top` to set, in the coordinates of that side's transform — `translate(-50%, 0)` for
-   *  `bottom`, `translate(-50%, -100%)` for `top`. */
+  /** Viewport y of the label's top edge, whichever side it took. */
   top: number
 }
 
@@ -133,8 +132,19 @@ export function placeTip(box: TipBox): TipPlacement {
   // Clamp to the band the label can occupy. `Math.max(edge, …)` on the lower bound keeps a label
   // taller than the viewport from being pushed UP off the top by a negative ceiling.
   const ceiling = Math.max(edge, viewport - edge - height)
-  const clamped = Math.min(Math.max(visualTop, edge), ceiling)
-  return { side, top: side === 'bottom' ? clamped : clamped + height }
+  return { side, top: Math.min(Math.max(visualTop, edge), ceiling) }
+}
+
+/**
+ * The `left` of a label centered under or over its host, shifted just enough to clear either edge of
+ * the viewport. When the label is wider than the viewport the left edge wins, as the top edge does in
+ * `placeTip`, so the start of the text stays readable.
+ */
+export function tipBoxLeft(center: number, width: number, viewportWidth: number, edge: number): number {
+  const left = center - width / 2
+  if (left < edge) return edge
+  if (left + width > viewportWidth - edge) return viewportWidth - edge - width
+  return left
 }
 
 /** Where a label sits beside its host: `left` and `top` of its box, in viewport coordinates. */
@@ -164,10 +174,52 @@ export function placeTipRight(box: SideBox): { left: number; top: number } {
   return { left, top }
 }
 
+/** A label's box in viewport coordinates. */
+export interface TipRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** Where a morph starts, relative to the label's final box: an offset to translate it by, and the
+ *  size to start from. */
+export interface TipMorph {
+  dx: number
+  dy: number
+  width: number
+  height: number
+}
+
 /**
- * What the pointer moved onto: no tooltip host (`null`), or a host and the group it belongs to — the
- * nearest `data-tip-group` container, or null for a host in none. Groups compare by identity, so any
- * value that is the same for every host in a container will do.
+ * The first frame of a label re-filled from a neighbor in its group: the box starts where the previous
+ * label was, at its size, and morphs to its own. `from` is the previous box as it was on screen —
+ * possibly mid-morph — or null when no label was showing. Null means no morph: nothing to start from,
+ * motion turned off, or a change too small to see.
+ */
+export function tipMorph(from: TipRect | null, to: TipRect, reducedMotion: boolean): TipMorph | null {
+  if (from === null || reducedMotion) return null
+  const m = { dx: from.left - to.left, dy: from.top - to.top, width: from.width, height: from.height }
+  const still =
+    Math.abs(m.dx) < 0.5 && Math.abs(m.dy) < 0.5 && Math.abs(m.width - to.width) < 0.5 && Math.abs(m.height - to.height) < 0.5
+  return still ? null : m
+}
+
+/**
+ * The group a host belongs to, from its nearest `data-tip-group` container and that attribute's value:
+ * null for a host in no container; the container itself when the value is empty; the NAME when there
+ * is one. A name joins containers that are separate in the DOM but read as one row — each pane's tab
+ * strip is its own element, and a sweep from one pane's tabs to the other's should re-fill the label
+ * like a sweep along one strip. Generic so it can be exercised without a DOM.
+ */
+export function tipGroupKey<T>(container: T | null, name: string | null): T | string | null {
+  if (container === null) return null
+  return name ? name : container
+}
+
+/**
+ * What the pointer moved onto: no tooltip host (`null`), or a host and the group it belongs to — its
+ * `tipGroupKey`, or null for a host in none. Groups compare by identity.
  */
 export type TipTarget = { group: unknown } | null
 
@@ -175,17 +227,30 @@ export type TipTarget = { group: unknown } | null
  * Tooltip groups: once a label is on screen for a host in a group — the rail's rows, a toolbar's
  * buttons — moving onto another host in the SAME group re-fills the label at once instead of waiting
  * out the show delay, so a row of controls can be read by sweeping the pointer along it. `shown` is the
- * group of the label on screen, or null when none is (or it belongs to no group). What a pointer
- * leaving the active host does:
+ * group of the label on screen, or null when none is (or it belongs to no group). `inGroup` is whether
+ * the pointer is still inside that group's container. What a pointer leaving the active host does:
  * - onto another host in that group — `keep`: that host re-fills it;
- * - onto no host at all, like the gap between two buttons — `grace`: hold it briefly, since the pointer
- *   is most likely crossing to the next one, and hiding for one frame would read as a blink;
+ * - onto no host, still inside the group — a folder header between two rows, the space between two
+ *   tabs — `hold`: keep it up long enough to cross at an unhurried pace, since the pointer is most
+ *   likely on its way to the next host;
+ * - onto no host outside the group — `grace`: hold it only briefly, so leaving at an edge that borders
+ *   a neighbor does not read as a blink, while leaving the group for good drops a label that no longer
+ *   describes anything near the pointer;
  * - anything else, or from a label that belongs to no group — `hide`.
  */
-export function tipOnLeave(shown: unknown, to: TipTarget): 'keep' | 'grace' | 'hide' {
+export function tipOnLeave(shown: unknown, to: TipTarget, inGroup: boolean): 'keep' | 'hold' | 'grace' | 'hide' {
   if (shown === null) return 'hide'
-  if (to === null) return 'grace'
+  if (to === null) return inGroup ? 'hold' : 'grace'
   return to.group === shown ? 'keep' : 'hide'
+}
+
+/**
+ * How long a label held over a gap inside its group (`hold`) has left once the pointer goes on from
+ * that gap out of the group: the short `grace`, or what remains of the hold when that is shorter.
+ * Leaving the group must never make the label outlive the hold it was already given.
+ */
+export function tipHoldCut(holdEndsAt: number, now: number, grace: number): number {
+  return Math.max(0, Math.min(grace, holdEndsAt - now))
 }
 
 /**

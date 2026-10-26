@@ -5,11 +5,16 @@ import {
   MAX_TIP,
   placeTip,
   placeTipRight,
+  tipBoxLeft,
+  tipGroupKey,
+  tipHoldCut,
   tipMetaLine,
+  tipMorph,
   tipOnEnter,
   tipOnLeave,
   visibleTipLength,
-  type TipBox
+  type TipBox,
+  type TipRect
 } from '../src/renderer/lib/tooltip'
 
 describe('clampTipText', () => {
@@ -96,8 +101,8 @@ describe('placeTip', () => {
     // A fixed-height probe misjudges this: it sees plenty of room, and there is nowhere near enough.
     const p = placeTip(box(300, { hostTop: 700, hostBottom: 720 }))
     expect(p.side).toBe('top')
-    // `top` is in the -100% transform's frame, so it is the host's edge minus the gap.
-    expect(p.top).toBe(693)
+    // The label's own top edge: the host's top, less the gap, less the label.
+    expect(p.top).toBe(700 - 7 - 300)
   })
 
   it('decides on the MEASURED height, not on the host position alone', () => {
@@ -125,8 +130,59 @@ describe('placeTip', () => {
 
   it('respects the edge margin at the top when flipping above near the ceiling', () => {
     const p = placeTip(box(200, { hostTop: 40, hostBottom: 60, viewport: 260 }))
-    const visualTop = p.side === 'bottom' ? p.top : p.top - 200
-    expect(visualTop).toBeGreaterThanOrEqual(8)
+    expect(p.top).toBeGreaterThanOrEqual(8)
+  })
+})
+
+describe('tipBoxLeft', () => {
+  it('centers the label on the host', () => {
+    expect(tipBoxLeft(500, 120, 1200, 8)).toBe(440)
+  })
+
+  it('shifts right just enough to clear the left edge', () => {
+    expect(tipBoxLeft(30, 120, 1200, 8)).toBe(8)
+  })
+
+  it('shifts left just enough to clear the right edge', () => {
+    expect(tipBoxLeft(1180, 120, 1200, 8)).toBe(1200 - 8 - 120)
+  })
+
+  it('keeps the left edge when the label is wider than the viewport', () => {
+    expect(tipBoxLeft(150, 400, 300, 8)).toBe(8)
+  })
+})
+
+describe('tipMorph', () => {
+  const to: TipRect = { left: 300, top: 200, width: 180, height: 40 }
+
+  it('starts from the previous box: offset from the final one, at the previous size', () => {
+    // Every field differs, in both directions, so a swapped axis or a reversed offset is caught.
+    const from: TipRect = { left: 340, top: 150, width: 120, height: 64 }
+    expect(tipMorph(from, to, false)).toEqual({ dx: 40, dy: -50, width: 120, height: 64 })
+  })
+
+  it('morphs a change of size alone, with no move', () => {
+    expect(tipMorph({ ...to, width: 210 }, to, false)).toEqual({ dx: 0, dy: 0, width: 210, height: 40 })
+    expect(tipMorph({ ...to, height: 25 }, to, false)).toEqual({ dx: 0, dy: 0, width: 180, height: 25 })
+  })
+
+  it('does not morph a label shown fresh, with nothing to start from', () => {
+    expect(tipMorph(null, to, false)).toBeNull()
+  })
+
+  it('does not morph with motion turned off', () => {
+    expect(tipMorph({ left: 340, top: 150, width: 120, height: 64 }, to, true)).toBeNull()
+  })
+
+  it('does not morph a change too small to see', () => {
+    expect(tipMorph({ left: 300.3, top: 199.6, width: 180.4, height: 40.2 }, to, false)).toBeNull()
+  })
+
+  it('morphs once any one field moves by half a pixel', () => {
+    expect(tipMorph({ ...to, left: 300.5 }, to, false)).not.toBeNull()
+    expect(tipMorph({ ...to, top: 199.5 }, to, false)).not.toBeNull()
+    expect(tipMorph({ ...to, width: 180.5 }, to, false)).not.toBeNull()
+    expect(tipMorph({ ...to, height: 39.5 }, to, false)).not.toBeNull()
   })
 })
 
@@ -210,27 +266,80 @@ describe('placeTipRight', () => {
   })
 })
 
+describe('tipHoldCut', () => {
+  it('cuts a hold with plenty left to the short grace', () => {
+    // 300ms of a hold remaining, a 150ms grace: the grace wins.
+    expect(tipHoldCut(1000, 700, 150)).toBe(150)
+  })
+
+  it('never lengthens a hold that has less left than the grace', () => {
+    expect(tipHoldCut(1000, 920, 150)).toBe(80)
+  })
+
+  it('is zero, not negative, for a hold already over', () => {
+    expect(tipHoldCut(1000, 1040, 150)).toBe(0)
+  })
+})
+
+describe('tipGroupKey', () => {
+  // Two containers that are separate in the DOM, as each pane's tab strip is.
+  const LEFT = { strip: 'left' }
+  const RIGHT = { strip: 'right' }
+
+  it('is null for a host in no container', () => {
+    expect(tipGroupKey(null, null)).toBeNull()
+  })
+
+  it('is the container itself when the container has no name, so two unnamed containers stay apart', () => {
+    expect(tipGroupKey(LEFT, '')).toBe(LEFT)
+    // getAttribute gives '' for a bare `data-tip-group=""`: that must not become a name every unnamed
+    // group shares.
+    expect(tipGroupKey(LEFT, '')).not.toBe(tipGroupKey(RIGHT, ''))
+  })
+
+  it('is the name when there is one, so containers sharing it are one group', () => {
+    expect(tipGroupKey(LEFT, 'tabs')).toBe('tabs')
+    expect(tipGroupKey(LEFT, 'tabs')).toBe(tipGroupKey(RIGHT, 'tabs'))
+    expect(tipOnEnter(tipGroupKey(LEFT, 'tabs'), { group: tipGroupKey(RIGHT, 'tabs') })).toBe('refill')
+  })
+
+  it('keeps differently named containers apart', () => {
+    expect(tipOnEnter(tipGroupKey(LEFT, 'tabs'), { group: tipGroupKey(RIGHT, 'rows') })).toBe('replace')
+    expect(tipOnEnter(tipGroupKey(LEFT, 'tabs'), { group: tipGroupKey(RIGHT, '') })).toBe('replace')
+  })
+})
+
 describe('tooltip groups', () => {
   // Groups compare by identity: two distinct containers, as the rail's rows and a toolbar are.
   const ROWS = { name: 'rows' }
   const TOOLBAR = { name: 'toolbar' }
 
   it('keeps a grouped label up moving onto another host in its group', () => {
-    expect(tipOnLeave(ROWS, { group: ROWS })).toBe('keep')
+    expect(tipOnLeave(ROWS, { group: ROWS }, true)).toBe('keep')
   })
 
-  it('holds it through a gap between hosts rather than blinking', () => {
-    expect(tipOnLeave(ROWS, null)).toBe('grace')
+  it('holds it through a gap inside its group, like a folder header between two rows', () => {
+    expect(tipOnLeave(ROWS, null, true)).toBe('hold')
+  })
+
+  it('gives it only the short grace once the pointer has left the group onto nothing', () => {
+    expect(tipOnLeave(ROWS, null, false)).toBe('grace')
   })
 
   it('hides it moving onto a host in another group, or in none, whose own label takes its delay', () => {
-    expect(tipOnLeave(ROWS, { group: TOOLBAR })).toBe('hide')
-    expect(tipOnLeave(ROWS, { group: null })).toBe('hide')
+    // Even when that host sits inside the group's container, as a folder's new-conversation buttons sit
+    // inside the rail: being inside the container only matters for a gap.
+    for (const inGroup of [true, false]) {
+      expect(tipOnLeave(ROWS, { group: TOOLBAR }, inGroup)).toBe('hide')
+      expect(tipOnLeave(ROWS, { group: null }, inGroup)).toBe('hide')
+    }
   })
 
   it('hides immediately when no grouped label is on screen, whatever comes next', () => {
     // A label still waiting out its delay has nothing to hold: leaving cancels it.
-    for (const to of [null, { group: null }, { group: ROWS }]) expect(tipOnLeave(null, to)).toBe('hide')
+    for (const inGroup of [true, false]) {
+      for (const to of [null, { group: null }, { group: ROWS }]) expect(tipOnLeave(null, to, inGroup)).toBe('hide')
+    }
   })
 
   it('re-fills a grouped label at once on another host in its group', () => {
