@@ -93,7 +93,7 @@ export default function TooltipLayer() {
   const bodyRef = useRef<HTMLDivElement>(null)
   // The box of the label a re-fill replaces, read as it stood on screen, before the new content renders.
   const morphFromRef = useRef<TipRect | null>(null)
-  const morphRef = useRef<Animation[]>([])
+  const morphRef = useRef<Animation | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const activeRef = useRef<Element | null>(null)
   const graceTimer = useRef<ReturnType<typeof setTimeout>>()
@@ -246,8 +246,8 @@ export default function TooltipLayer() {
 
     // A morph still running would skew every measurement below. Its progress is not lost: `from` was
     // read with it applied.
-    for (const a of morphRef.current) a.cancel()
-    morphRef.current = []
+    morphRef.current?.cancel()
+    morphRef.current = null
     body.style.width = ''
 
     const width = el.offsetWidth
@@ -286,17 +286,20 @@ export default function TooltipLayer() {
     // Hold the text at its final measure while the box around it changes size, so it is never re-wrapped
     // mid-morph. The box clips it (`overflow: clip`) wherever the box is smaller.
     body.style.width = `${body.getBoundingClientRect().width}px`
-    const box = el.animate(
+    //
+    // The text is not faded in: a sweep re-fills the label once per host, and a fade restarting from
+    // nothing each time reads as the text flickering. It changes at once, and the box reveals it.
+    const morph = el.animate(
       [
         { transform: `translate(${m.dx}px, ${m.dy}px)`, width: `${m.width}px`, height: `${m.height}px` },
         { transform: 'none', width: `${to.width}px`, height: `${to.height}px` }
       ],
       MORPH
     )
-    box.onfinish = () => {
+    morph.onfinish = () => {
       body.style.width = ''
     }
-    morphRef.current = [box, body.animate([{ opacity: 0 }, { opacity: 1 }], MORPH)]
+    morphRef.current = morph
   }, [tip])
 
   if (!tip) return null
