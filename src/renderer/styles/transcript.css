@@ -1092,8 +1092,8 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 
 .transcript-foot-rule {
   width: 100%;
-  height: 1px;
-  background: var(--rule);
+  height: 0;
+  border-top: 1px solid var(--rule);
 }
 
 .transcript-foot-label {
