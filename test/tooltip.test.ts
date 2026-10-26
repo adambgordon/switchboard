@@ -270,21 +270,31 @@ describe('tooltip groups', () => {
   const TOOLBAR = { name: 'toolbar' }
 
   it('keeps a grouped label up moving onto another host in its group', () => {
-    expect(tipOnLeave(ROWS, { group: ROWS })).toBe('keep')
+    expect(tipOnLeave(ROWS, { group: ROWS }, true)).toBe('keep')
   })
 
-  it('holds it through a gap between hosts rather than blinking', () => {
-    expect(tipOnLeave(ROWS, null)).toBe('grace')
+  it('holds it through a gap inside its group, like a folder header between two rows', () => {
+    expect(tipOnLeave(ROWS, null, true)).toBe('hold')
+  })
+
+  it('gives it only the short grace once the pointer has left the group onto nothing', () => {
+    expect(tipOnLeave(ROWS, null, false)).toBe('grace')
   })
 
   it('hides it moving onto a host in another group, or in none, whose own label takes its delay', () => {
-    expect(tipOnLeave(ROWS, { group: TOOLBAR })).toBe('hide')
-    expect(tipOnLeave(ROWS, { group: null })).toBe('hide')
+    // Even when that host sits inside the group's container, as a folder's new-conversation buttons sit
+    // inside the rail: being inside the container only matters for a gap.
+    for (const inGroup of [true, false]) {
+      expect(tipOnLeave(ROWS, { group: TOOLBAR }, inGroup)).toBe('hide')
+      expect(tipOnLeave(ROWS, { group: null }, inGroup)).toBe('hide')
+    }
   })
 
   it('hides immediately when no grouped label is on screen, whatever comes next', () => {
     // A label still waiting out its delay has nothing to hold: leaving cancels it.
-    for (const to of [null, { group: null }, { group: ROWS }]) expect(tipOnLeave(null, to)).toBe('hide')
+    for (const inGroup of [true, false]) {
+      for (const to of [null, { group: null }, { group: ROWS }]) expect(tipOnLeave(null, to, inGroup)).toBe('hide')
+    }
   })
 
   it('re-fills a grouped label at once on another host in its group', () => {

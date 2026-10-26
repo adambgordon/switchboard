@@ -44,8 +44,11 @@ const SHOW_DELAY = 700
 /** For hosts whose purpose is plain from their icon (`data-tip-slow`): the label is there for whoever
  *  lingers, and must not flash up under a pointer merely passing over — or resting on — them. */
 const SLOW_SHOW_DELAY = 1500
-/** How long a grouped label outlives its host while the pointer crosses a gap between hosts. */
+/** How long a grouped label outlives its host once the pointer has left the group onto no host. */
 const SCRUB_GRACE = 150
+/** How long it outlives its host while the pointer crosses a gap INSIDE the group — a folder header
+ *  between rail rows — so the next host can be reached at an unhurried pace. */
+const GROUP_HOLD = 400
 /** A label re-filled from a neighbor morphs from that neighbor's box to its own. Short enough that a
  *  sweep down the rail still reads each row at once, and eased at both ends so the box neither lurches
  *  off nor snaps into place. A sweep faster than this restarts the morph from wherever the box is. */
@@ -197,11 +200,13 @@ export default function TooltipLayer() {
       // Ignore moves that stay within the active host (e.g. onto its child icon).
       const to = hostOf(e.relatedTarget)
       if (to === activeRef.current) return
-      const next = tipOnLeave(shownGroupRef.current, targetOf(to))
+      const group = shownGroupRef.current
+      const inGroup = group !== null && e.relatedTarget instanceof Node && group.contains(e.relatedTarget)
+      const next = tipOnLeave(group, targetOf(to), inGroup)
       if (next === 'hide') return hide()
       // Keep the label up: the host being entered re-fills it, or the grace ends it.
       activeRef.current = null
-      if (next === 'grace') graceTimer.current = setTimeout(hide, SCRUB_GRACE)
+      if (next !== 'keep') graceTimer.current = setTimeout(hide, next === 'hold' ? GROUP_HOLD : SCRUB_GRACE)
     }
     // Pressing or releasing ⌥ / ⇧ over a control that means something else under it re-words its label
     // at once, where it stands.

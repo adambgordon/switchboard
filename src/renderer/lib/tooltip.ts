@@ -216,16 +216,20 @@ export type TipTarget = { group: unknown } | null
  * Tooltip groups: once a label is on screen for a host in a group — the rail's rows, a toolbar's
  * buttons — moving onto another host in the SAME group re-fills the label at once instead of waiting
  * out the show delay, so a row of controls can be read by sweeping the pointer along it. `shown` is the
- * group of the label on screen, or null when none is (or it belongs to no group). What a pointer
- * leaving the active host does:
+ * group of the label on screen, or null when none is (or it belongs to no group). `inGroup` is whether
+ * the pointer is still inside that group's container. What a pointer leaving the active host does:
  * - onto another host in that group — `keep`: that host re-fills it;
- * - onto no host at all, like the gap between two buttons — `grace`: hold it briefly, since the pointer
- *   is most likely crossing to the next one, and hiding for one frame would read as a blink;
+ * - onto no host, still inside the group — a folder header between two rows, the space between two
+ *   tabs — `hold`: keep it up long enough to cross at an unhurried pace, since the pointer is most
+ *   likely on its way to the next host;
+ * - onto no host outside the group — `grace`: hold it only briefly, so leaving at an edge that borders
+ *   a neighbor does not read as a blink, while leaving the group for good drops a label that no longer
+ *   describes anything near the pointer;
  * - anything else, or from a label that belongs to no group — `hide`.
  */
-export function tipOnLeave(shown: unknown, to: TipTarget): 'keep' | 'grace' | 'hide' {
+export function tipOnLeave(shown: unknown, to: TipTarget, inGroup: boolean): 'keep' | 'hold' | 'grace' | 'hide' {
   if (shown === null) return 'hide'
-  if (to === null) return 'grace'
+  if (to === null) return inGroup ? 'hold' : 'grace'
   return to.group === shown ? 'keep' : 'hide'
 }
 
