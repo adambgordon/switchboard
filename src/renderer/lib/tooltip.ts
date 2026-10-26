@@ -245,6 +245,15 @@ export function tipOnLeave(shown: unknown, to: TipTarget, inGroup: boolean): 'ke
 }
 
 /**
+ * How long a label held over a gap inside its group (`hold`) has left once the pointer goes on from
+ * that gap out of the group: the short `grace`, or what remains of the hold when that is shorter.
+ * Leaving the group must never make the label outlive the hold it was already given.
+ */
+export function tipHoldCut(holdEndsAt: number, now: number, grace: number): number {
+  return Math.max(0, Math.min(grace, holdEndsAt - now))
+}
+
+/**
  * What entering a host does:
  * - `refill` — a grouped label is on screen and this host is in its group: re-fill it at once;
  * - `replace` — a grouped label is on screen (within its grace) but this host is not in its group:

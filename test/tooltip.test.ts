@@ -7,6 +7,7 @@ import {
   placeTipRight,
   tipBoxLeft,
   tipGroupKey,
+  tipHoldCut,
   tipMetaLine,
   tipMorph,
   tipOnEnter,
@@ -262,6 +263,21 @@ describe('placeTipRight', () => {
 
   it('pulls left rather than running off the right edge', () => {
     expect(placeTipRight({ ...base, viewportWidth: 500 }).left).toBe(500 - 8 - 250)
+  })
+})
+
+describe('tipHoldCut', () => {
+  it('cuts a hold with plenty left to the short grace', () => {
+    // 300ms of a hold remaining, a 150ms grace: the grace wins.
+    expect(tipHoldCut(1000, 700, 150)).toBe(150)
+  })
+
+  it('never lengthens a hold that has less left than the grace', () => {
+    expect(tipHoldCut(1000, 920, 150)).toBe(80)
+  })
+
+  it('is zero, not negative, for a hold already over', () => {
+    expect(tipHoldCut(1000, 1040, 150)).toBe(0)
   })
 })
 

@@ -6,6 +6,7 @@ import {
   placeTipRight,
   tipBoxLeft,
   tipGroupKey,
+  tipHoldCut,
   tipMetaLine,
   tipMorph,
   tipOnEnter,
@@ -114,6 +115,8 @@ export default function TooltipLayer() {
   const timer = useRef<ReturnType<typeof setTimeout>>()
   const activeRef = useRef<Element | null>(null)
   const graceTimer = useRef<ReturnType<typeof setTimeout>>()
+  // When the running grace is a `hold` over a gap inside the group, when that hold ends; else null.
+  const holdEndsRef = useRef<number | null>(null)
   // The group of the label on screen (possibly within its grace) — what makes its neighbors instant.
   const shownGroupRef = useRef<TipGroup>(null)
   // The host whose label is on screen, so a modifier going down or up can re-word it in place.
@@ -123,6 +126,7 @@ export default function TooltipLayer() {
     const clearGrace = (): void => {
       if (graceTimer.current) clearTimeout(graceTimer.current)
       graceTimer.current = undefined
+      holdEndsRef.current = null
     }
     const hide = (): void => {
       if (timer.current) clearTimeout(timer.current)
@@ -210,7 +214,17 @@ export default function TooltipLayer() {
       }
     }
     const onOut = (e: MouseEvent): void => {
-      if (!activeRef.current) return
+      if (!activeRef.current) {
+        // Held over a gap inside the group, and now leaving the group from that gap onto no host: the
+        // label no longer describes anything near the pointer, so the hold is cut to the short grace. (A
+        // host the pointer reaches instead is handled by `onOver`.)
+        const ends = holdEndsRef.current
+        if (ends !== null && !hostOf(e.relatedTarget) && !insideGroup(e.relatedTarget, shownGroupRef.current)) {
+          clearGrace()
+          graceTimer.current = setTimeout(hide, tipHoldCut(ends, Date.now(), SCRUB_GRACE))
+        }
+        return
+      }
       // Ignore moves that stay within the active host (e.g. onto its child icon).
       const to = hostOf(e.relatedTarget)
       if (to === activeRef.current) return
@@ -219,7 +233,11 @@ export default function TooltipLayer() {
       if (next === 'hide') return hide()
       // Keep the label up: the host being entered re-fills it, or the grace ends it.
       activeRef.current = null
-      if (next !== 'keep') graceTimer.current = setTimeout(hide, next === 'hold' ? GROUP_HOLD : SCRUB_GRACE)
+      if (next === 'grace') graceTimer.current = setTimeout(hide, SCRUB_GRACE)
+      if (next === 'hold') {
+        graceTimer.current = setTimeout(hide, GROUP_HOLD)
+        holdEndsRef.current = Date.now() + GROUP_HOLD
+      }
     }
     // Pressing or releasing ⌥ / ⇧ over a control that means something else under it re-words its label
     // at once, where it stands.

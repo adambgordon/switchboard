@@ -2136,6 +2136,119 @@ CHECKS['23-folder-toggle'] = async () => {
   record('23-folder-toggle', failures, details)
 }
 
+// A row's ⋮ menu near the foot of the rail opens against its button — above it, when below would leave
+// the window — and whole. The side and the top come from the tooltips' placement rule (placeTip), so a
+// change to what that rule returns shows up here as a menu that has drifted off its button.
+CHECKS['24-menu-place'] = async () => {
+  const failures = []
+  const details = {}
+  await reset({ mode: 'folders' })
+  // The lowest row shown whole, by the body and by the window.
+  const key = await js(`(() => {
+    const b = document.querySelector('.sb-rail-body').getBoundingClientRect()
+    const floor = Math.min(b.bottom, window.innerHeight)
+    const whole = [...document.querySelectorAll('.sb-rail-body .sb-row')].filter((r) => {
+      const x = r.getBoundingClientRect()
+      return x.top >= b.top && x.bottom <= floor
+    })
+    const r = whole[whole.length - 1]
+    return r ? (r.dataset.key ?? r.dataset.session ?? null) : null
+  })()`)
+  if (!key) failures.push('harness: no row shown whole in the rail body')
+  else {
+    const row = await call('rowRect', key)
+    await hover(row.left + 60, row.top + row.height / 2)
+    await delay(60)
+    const btn = await call('menuButton', key)
+    if (!btn) failures.push(`no ⋮ button on ${key}`)
+    else {
+      await press(btn.rect.left + btn.rect.width / 2, btn.rect.top + btn.rect.height / 2)
+      await release()
+      await settle(60)
+      const menu = await js(`document.querySelector('.sb-ctxmenu:not(.sb-filter-menu):not(.closing)')?.getBoundingClientRect().toJSON() ?? null`)
+      const viewport = await js('window.innerHeight')
+      if (!menu) failures.push(`no menu opened on ${key}`)
+      else {
+        const above = btn.rect.top - menu.bottom
+        const below = menu.top - btn.rect.bottom
+        Object.assign(details, { key, button: [btn.rect.top, btn.rect.bottom], menu: [menu.top, menu.bottom], viewport })
+        if (menu.top < 0 || menu.bottom > viewport) failures.push(`the menu (${menu.top.toFixed(1)}–${menu.bottom.toFixed(1)}) leaves the ${viewport}px window`)
+        if (!(above >= 0 && above <= 8) && !(below >= 0 && below <= 8)) {
+          failures.push(`the menu (${menu.top.toFixed(1)}–${menu.bottom.toFixed(1)}) sits against neither side of its button (${btn.rect.top.toFixed(1)}–${btn.rect.bottom.toFixed(1)})`)
+        }
+        await escapeKey()
+      }
+    }
+  }
+  await park()
+  record('24-menu-place', failures, details)
+}
+
+// A row's label is held across a folder header — a gap inside the rail's tooltip group — long enough
+// to reach the next row at an unhurried pace. Leaving the rail from that header still drops it within
+// the short grace: the hold must not outlast the group it was given for.
+CHECKS['25-tip-hold'] = async () => {
+  const failures = []
+  const details = {}
+  await reset({ mode: 'folders', tips: true })
+  // Bring the second folder's header to the middle of the body, under the first folder's last rows.
+  const groups = (await js('window.order()')).groups
+  if (groups.length > 1) {
+    await call('reveal', 'folders', groups[1], 200)
+    await settle(60)
+  }
+  // The last row of a folder whose next folder's header is on screen, and that header.
+  const geo = await js(`(() => {
+    const b = document.querySelector('.sb-rail-body').getBoundingClientRect()
+    const floor = Math.min(b.bottom, window.innerHeight)
+    const groups = [...document.querySelectorAll('.sb-rail-body > section.sb-group')]
+    for (let i = 1; i < groups.length; i++) {
+      const head = groups[i].querySelector(':scope > .sb-group-head').getBoundingClientRect()
+      const rows = [...groups[i - 1].querySelectorAll('.sb-row')]
+      const row = rows[rows.length - 1]
+      if (!row || head.top < b.top || head.bottom > floor) continue
+      const r = row.getBoundingClientRect()
+      if (r.top < b.top) continue
+      return { row: r.toJSON(), head: head.toJSON(), tip: row.getAttribute('data-tip'), left: b.left }
+    }
+    return null
+  })()`)
+  if (!geo) failures.push('harness: no folder header on screen below a row')
+  else {
+    const x = geo.row.left + 60
+    const rowY = geo.row.top + geo.row.height / 2
+    const headY = geo.head.top + geo.head.height / 2
+    const outX = geo.left - 14
+    const showing = async () => {
+      const t = await call('tip')
+      return !!t && (t.title ?? t.text) === geo.tip
+    }
+    await hover(x, rowY)
+    const first = await waitTip((t) => (t.title ?? t.text) === geo.tip)
+    if (!first || (first.title ?? first.text) !== geo.tip) failures.push('the row never showed its label')
+    else {
+      // Onto the header, and wait: past the short grace, inside the hold.
+      await send('mouseMoved', x, headY)
+      await delay(260)
+      details.held = await showing()
+      if (!details.held) failures.push('the row\'s label did not survive 260ms on the folder header below it')
+      // Back onto the row (a re-fill, at once), onto the header again, then straight out of the rail.
+      await send('mouseMoved', x, rowY)
+      await delay(40)
+      await send('mouseMoved', x, headY)
+      await send('mouseMoved', outX, headY)
+      await delay(60)
+      details.graced = await showing()
+      if (!details.graced) failures.push('leaving the rail from the header hid the label at once, without the short grace')
+      await delay(200)
+      details.dropped = !(await showing())
+      if (!details.dropped) failures.push('the row\'s label was still up 260ms after the pointer left the rail from the header')
+    }
+  }
+  await park()
+  record('25-tip-hold', failures, details)
+}
+
 async function runCheck(name) {
   const number = name.split('-')[0]
   if (ONLY.size && !ONLY.has(number) && !ONLY.has(name) && !ONLY.has(name.slice(number.length + 1))) return
