@@ -105,8 +105,7 @@ export interface TipBox {
 
 export interface TipPlacement {
   side: 'top' | 'bottom'
-  /** The `top` to set, in the coordinates of that side's transform — `translate(-50%, 0)` for
-   *  `bottom`, `translate(-50%, -100%)` for `top`. */
+  /** Viewport y of the label's top edge, whichever side it took. */
   top: number
 }
 
@@ -133,8 +132,19 @@ export function placeTip(box: TipBox): TipPlacement {
   // Clamp to the band the label can occupy. `Math.max(edge, …)` on the lower bound keeps a label
   // taller than the viewport from being pushed UP off the top by a negative ceiling.
   const ceiling = Math.max(edge, viewport - edge - height)
-  const clamped = Math.min(Math.max(visualTop, edge), ceiling)
-  return { side, top: side === 'bottom' ? clamped : clamped + height }
+  return { side, top: Math.min(Math.max(visualTop, edge), ceiling) }
+}
+
+/**
+ * The `left` of a label centered under or over its host, shifted just enough to clear either edge of
+ * the viewport. When the label is wider than the viewport the left edge wins, as the top edge does in
+ * `placeTip`, so the start of the text stays readable.
+ */
+export function tipBoxLeft(center: number, width: number, viewportWidth: number, edge: number): number {
+  const left = center - width / 2
+  if (left < edge) return edge
+  if (left + width > viewportWidth - edge) return viewportWidth - edge - width
+  return left
 }
 
 /** Where a label sits beside its host: `left` and `top` of its box, in viewport coordinates. */
@@ -162,6 +172,37 @@ export function placeTipRight(box: SideBox): { left: number; top: number } {
   const top = Math.min(Math.max(centered, edge), Math.max(edge, viewportHeight - edge - height))
   const left = Math.max(edge, Math.min(hostRight + gap, viewportWidth - edge - width))
   return { left, top }
+}
+
+/** A label's box in viewport coordinates. */
+export interface TipRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** Where a morph starts, relative to the label's final box: an offset to translate it by, and the
+ *  size to start from. */
+export interface TipMorph {
+  dx: number
+  dy: number
+  width: number
+  height: number
+}
+
+/**
+ * The first frame of a label re-filled from a neighbor in its group: the box starts where the previous
+ * label was, at its size, and morphs to its own. `from` is the previous box as it was on screen —
+ * possibly mid-morph — or null when no label was showing. Null means no morph: nothing to start from,
+ * motion turned off, or a change too small to see.
+ */
+export function tipMorph(from: TipRect | null, to: TipRect, reducedMotion: boolean): TipMorph | null {
+  if (from === null || reducedMotion) return null
+  const m = { dx: from.left - to.left, dy: from.top - to.top, width: from.width, height: from.height }
+  const still =
+    Math.abs(m.dx) < 0.5 && Math.abs(m.dy) < 0.5 && Math.abs(m.width - to.width) < 0.5 && Math.abs(m.height - to.height) < 0.5
+  return still ? null : m
 }
 
 /**

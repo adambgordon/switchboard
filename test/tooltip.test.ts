@@ -5,11 +5,14 @@ import {
   MAX_TIP,
   placeTip,
   placeTipRight,
+  tipBoxLeft,
   tipMetaLine,
+  tipMorph,
   tipOnEnter,
   tipOnLeave,
   visibleTipLength,
-  type TipBox
+  type TipBox,
+  type TipRect
 } from '../src/renderer/lib/tooltip'
 
 describe('clampTipText', () => {
@@ -96,8 +99,8 @@ describe('placeTip', () => {
     // A fixed-height probe misjudges this: it sees plenty of room, and there is nowhere near enough.
     const p = placeTip(box(300, { hostTop: 700, hostBottom: 720 }))
     expect(p.side).toBe('top')
-    // `top` is in the -100% transform's frame, so it is the host's edge minus the gap.
-    expect(p.top).toBe(693)
+    // The label's own top edge: the host's top, less the gap, less the label.
+    expect(p.top).toBe(700 - 7 - 300)
   })
 
   it('decides on the MEASURED height, not on the host position alone', () => {
@@ -125,8 +128,59 @@ describe('placeTip', () => {
 
   it('respects the edge margin at the top when flipping above near the ceiling', () => {
     const p = placeTip(box(200, { hostTop: 40, hostBottom: 60, viewport: 260 }))
-    const visualTop = p.side === 'bottom' ? p.top : p.top - 200
-    expect(visualTop).toBeGreaterThanOrEqual(8)
+    expect(p.top).toBeGreaterThanOrEqual(8)
+  })
+})
+
+describe('tipBoxLeft', () => {
+  it('centers the label on the host', () => {
+    expect(tipBoxLeft(500, 120, 1200, 8)).toBe(440)
+  })
+
+  it('shifts right just enough to clear the left edge', () => {
+    expect(tipBoxLeft(30, 120, 1200, 8)).toBe(8)
+  })
+
+  it('shifts left just enough to clear the right edge', () => {
+    expect(tipBoxLeft(1180, 120, 1200, 8)).toBe(1200 - 8 - 120)
+  })
+
+  it('keeps the left edge when the label is wider than the viewport', () => {
+    expect(tipBoxLeft(150, 400, 300, 8)).toBe(8)
+  })
+})
+
+describe('tipMorph', () => {
+  const to: TipRect = { left: 300, top: 200, width: 180, height: 40 }
+
+  it('starts from the previous box: offset from the final one, at the previous size', () => {
+    // Every field differs, in both directions, so a swapped axis or a reversed offset is caught.
+    const from: TipRect = { left: 340, top: 150, width: 120, height: 64 }
+    expect(tipMorph(from, to, false)).toEqual({ dx: 40, dy: -50, width: 120, height: 64 })
+  })
+
+  it('morphs a change of size alone, with no move', () => {
+    expect(tipMorph({ ...to, width: 210 }, to, false)).toEqual({ dx: 0, dy: 0, width: 210, height: 40 })
+    expect(tipMorph({ ...to, height: 25 }, to, false)).toEqual({ dx: 0, dy: 0, width: 180, height: 25 })
+  })
+
+  it('does not morph a label shown fresh, with nothing to start from', () => {
+    expect(tipMorph(null, to, false)).toBeNull()
+  })
+
+  it('does not morph with motion turned off', () => {
+    expect(tipMorph({ left: 340, top: 150, width: 120, height: 64 }, to, true)).toBeNull()
+  })
+
+  it('does not morph a change too small to see', () => {
+    expect(tipMorph({ left: 300.3, top: 199.6, width: 180.4, height: 40.2 }, to, false)).toBeNull()
+  })
+
+  it('morphs once any one field moves by half a pixel', () => {
+    expect(tipMorph({ ...to, left: 300.5 }, to, false)).not.toBeNull()
+    expect(tipMorph({ ...to, top: 199.5 }, to, false)).not.toBeNull()
+    expect(tipMorph({ ...to, width: 180.5 }, to, false)).not.toBeNull()
+    expect(tipMorph({ ...to, height: 39.5 }, to, false)).not.toBeNull()
   })
 })
 
