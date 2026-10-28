@@ -15,6 +15,7 @@ import TabStrip, { type TabConversationCommand, type TabDescriptor } from './Tab
 import TranscriptView, { type TranscriptScrollState } from './TranscriptView'
 import { Play } from './icons'
 import { useSyncedAnimation } from '../lib/useSyncedAnimation'
+import { isEngagingKey } from '../lib/engageKey'
 import type { TabLayout } from '../lib/tabLayoutPreference'
 import type { MenuGroup } from '../lib/conversationMenu'
 
@@ -293,8 +294,10 @@ export default function MainPane(props: Props) {
   // Engagement in the conversation body — a left-click, or typing into the terminal — marks the
   // open conversation read. The keydown listener runs in the *capture* phase: xterm stops keydown
   // propagation while focused, so a bubble-phase listener would never see typing — capture fires
-  // on the way down, before xterm swallows it. Shortcut chords (⇧⌘U etc.) are skipped so marking it
-  // unread doesn't immediately self-clear. (Scrolling isn't engagement; navigation is handled upstream.)
+  // on the way down, before xterm swallows it. It covers the Formatted view too, whose focus sits on
+  // the transcript's scroller inside this body. Shortcut chords (⇧⌘U etc.) and a modifier pressed
+  // alone — the lead-in to a ⌥- or ⇧-click — are skipped (`isEngagingKey`), so neither clears an
+  // unread mark. (Scrolling isn't engagement; navigation is handled upstream.)
   const bodyRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = bodyRef.current
@@ -303,7 +306,7 @@ export default function MainPane(props: Props) {
       if (e.button === 0) onEngage(selectedId)
     }
     const onKey = (e: KeyboardEvent): void => {
-      if (!e.metaKey && !e.ctrlKey) onEngage(selectedId)
+      if (isEngagingKey(e)) onEngage(selectedId)
     }
     // ⌥-click in the Formatted view marks unread, the twin of the terminal's. Captured here, above the
     // transcript, so it stops before the engage listener above (which would mark it read again on the
