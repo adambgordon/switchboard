@@ -32,8 +32,11 @@ import {
   dropNeighborsMany,
   freezeFoldersByNewest,
   folderRankSpace,
+  liveFirstToggleWrites,
   rankSpace,
   resumeWrites,
+  stopFold,
+  unpinRanks,
   unpinWrites,
   synthMeta,
   visibleRows,
@@ -179,6 +182,8 @@ export default function App() {
     setMode: setSidebarMode,
     density: railDensity,
     setDensity: setRailDensity,
+    liveFirst,
+    setLiveFirst,
     collapsed: folderCollapse,
     setFolderCollapsed,
     setFoldersCollapsed
@@ -1036,13 +1041,22 @@ export default function App() {
   sidebarModelRef.current = sidebarModel
   // Persist what the build held — only the entries the store lacks, folded into a fresh read, so a hold
   // never overwrites a position written meanwhile (by a drag, or another window's identical hold).
+  // Then, under "Move stopped conversations down", move each row whose terminal went away since the
+  // last model shown. The holds are folded in first, so the move reads a row held in this build at its
+  // held rank. Every window sees the same stop and folds the same write into a fresh read, so
+  // the second finds it done. A loading render leaves no last model, and loading never returns once the
+  // first index lands (`useSessions`), so the first load is never compared with anything. `stopFold`
+  // returns null unless a row stopped, so `mutateRows` runs only then (see `stopFold` for why that matters).
   useLayoutEffect(() => {
+    const shown = shownModelRef.current
     shownModelRef.current = loading ? null : sidebar.model
     const holds = (held: RankOverrides, from: RankOverrides) => (stored: RankOverrides) =>
       Object.entries(held).reduce((s, [id, rank]) => (Object.hasOwn(from, id) ? s : holdRank(s, id, rank)), stored)
     if (sidebar.rowRanks !== rowRanks) mutateRows(holds(sidebar.rowRanks, rowRanks))
     if (sidebar.folderRanks !== folderRanks) mutateFolders(holds(sidebar.folderRanks, folderRanks))
-  }, [sidebar, loading, rowRanks, folderRanks, mutateRows, mutateFolders])
+    const fold = stopFold(liveFirst, shown, sidebar.model, sidebarMode)
+    if (fold) mutateRows(fold)
+  }, [sidebar, loading, rowRanks, folderRanks, mutateRows, mutateFolders, liveFirst, sidebarMode])
 
   // Once per profile, ever: the first time this rail runs, freeze the folders newest-first. Waits for a
   // load with indexed conversations — the index arrives whole, and a failed one arrives empty, which
@@ -2028,18 +2042,23 @@ export default function App() {
   // Pin/unpin, gated so a provisional row (no persisted identity yet) can't enter the persisted pin
   // store under a placeholder id that would orphan once it binds to its real id. An unpinned row lands
   // at the top of the unpinned rows; its rank is written in the same handler as the unpin, so the two
-  // render together and the row never shows back where it ranked before.
+  // render together and the row never shows back where it ranked before. Under "Move stopped
+  // conversations down" a stopped one then moves down past the live rows below it, in the same write.
   const togglePinGated = useCallback(
     (id: string) => {
       if (isProvisional(id)) return
       if (!pinned.has(id)) keepTab(id)
       else {
-        const writes = sidebarModelRef.current ? unpinWrites(sidebarModelRef.current, id, Date.now()) : {}
-        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+        const model = sidebarModelRef.current
+        const now = Date.now()
+        const writes = model ? unpinWrites(model, id, now) : {}
+        if (model && Object.keys(writes).length > 0) {
+          mutateRows((stored) => unpinRanks(stored, writes, model, sidebarMode, [id], liveFirst))
+        }
       }
       togglePin(id)
     },
-    [isProvisional, togglePin, pinned, keepTab, mutateRows]
+    [isProvisional, togglePin, pinned, keepTab, mutateRows, liveFirst, sidebarMode]
   )
 
   // Option+click marks a live row unread. Gated for the same reason pins are: `useSeen` persists to
@@ -2301,15 +2320,32 @@ export default function App() {
       if (pin) for (const id of targets) keepTab(id)
       else {
         // One write for the whole group, in display order: one lift per row, each read from the same
-        // model, would land them all on one rank and fall back to id order.
+        // model, would land them all on one rank and fall back to id order. Under "Move stopped
+        // conversations down" its stopped rows then move down past the live rows, keeping their order.
         const model = sidebarModelRef.current
         const lifted = model ? targets.filter((id) => model.rows.get(id)?.pinned) : []
-        const writes = model && lifted.length > 0 ? liftWrites(rankSpace(model), lifted, Date.now()) : {}
-        if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+        const now = Date.now()
+        const writes = model && lifted.length > 0 ? liftWrites(rankSpace(model), lifted, now) : {}
+        if (model && Object.keys(writes).length > 0) {
+          mutateRows((stored) => unpinRanks(stored, writes, model, sidebarMode, lifted, liveFirst))
+        }
       }
       setPins(targets, pin)
     },
-    [isProvisional, keepTab, mutateRows, setPins]
+    [isProvisional, keepTab, mutateRows, setPins, liveFirst, sidebarMode]
+  )
+
+  // Turning on "Move stopped conversations down" lifts the live rows above the rest, in one write like
+  // a group Unpin (`liveFirstToggleWrites` decides when). Only here: another window follows the stored
+  // setting without writing again — the ranks it reads are already the lifted ones.
+  const setLiveFirstLifting = useCallback(
+    (on: boolean) => {
+      const model = sidebarModelRef.current
+      const writes = model ? liveFirstToggleWrites(model, liveFirst, on, Date.now()) : {}
+      if (Object.keys(writes).length > 0) mutateRows((stored) => ({ ...stored, ...writes }))
+      setLiveFirst(on)
+    },
+    [liveFirst, setLiveFirst, mutateRows]
   )
   const setHiddenMany = useCallback(
     (ids: readonly string[], hidden: boolean) => {
@@ -2871,6 +2907,8 @@ export default function App() {
         onSetDarkIcon={darkIcon.set}
         railDensity={railDensity}
         onSetRailDensity={setRailDensity}
+        liveFirst={liveFirst}
+        onSetLiveFirst={setLiveFirstLifting}
         defaultAgentChoice={defaultAgentChoice}
         defaultAgentDisabled={defaultAgentDisabled}
         onSetDefaultAgentChoice={setDefaultAgentChoice}

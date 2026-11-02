@@ -2,7 +2,7 @@
  * The rail's persisted preferences, as pure parse and fold functions. The hook binding them to
  * localStorage is separate, so this module stays importable under the node tsconfig.
  *
- * All three are APP-WIDE: every window reads and writes the same keys and follows the others' writes.
+ * All of them are APP-WIDE: every window reads and writes the same keys and follows the others' writes.
  * They are deliberately not part of the per-window layout, which a detached window never persists.
  * Each parse takes its fallback as a parameter so a test can prove the default is honored rather than
  * a constant the parser happens to share with it.
@@ -14,9 +14,11 @@ export type RailDensity = 'compact' | 'spacious'
 export const SIDEBAR_MODE_KEY = 'switchboard.sidebarMode'
 export const RAIL_DENSITY_KEY = 'switchboard.railDensity'
 export const FOLDER_COLLAPSE_KEY = 'switchboard.folderCollapse'
+export const LIVE_FIRST_KEY = 'switchboard.liveFirst'
 
 export const DEFAULT_SIDEBAR_MODE: SidebarMode = 'folders'
 export const DEFAULT_RAIL_DENSITY: RailDensity = 'compact'
+export const DEFAULT_LIVE_FIRST = false
 
 export function parseSidebarMode(raw: string | null, fallback: SidebarMode = DEFAULT_SIDEBAR_MODE): SidebarMode {
   return raw === 'all' || raw === 'folders' ? raw : fallback
@@ -24,6 +26,11 @@ export function parseSidebarMode(raw: string | null, fallback: SidebarMode = DEF
 
 export function parseRailDensity(raw: string | null, fallback: RailDensity = DEFAULT_RAIL_DENSITY): RailDensity {
   return raw === 'compact' || raw === 'spacious' ? raw : fallback
+}
+
+/** Whether a row moves down when it stops (Preferences → Beta Features), stored as `true` / `false`. */
+export function parseLiveFirst(raw: string | null, fallback: boolean = DEFAULT_LIVE_FIRST): boolean {
+  return raw === 'true' ? true : raw === 'false' ? false : fallback
 }
 
 /**

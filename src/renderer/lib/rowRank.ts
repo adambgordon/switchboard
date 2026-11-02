@@ -3,11 +3,13 @@
  *
  * Every row has a rank and the rail sorts descending. A row nobody has touched ranks at its SEED — a
  * fixed number derived from the row itself (its conversation's start, see `sidebarModel`) — and
- * stores nothing. Only five events write, each only the rows it moves: a drag writes the dropped
+ * stores nothing. Only these events write, each only the rows it moves: a drag writes the dropped
  * row's new rank (or a dropped group's), a Resume lifts its row above everything, an Unpin lifts its
  * rows the same way, a placeholder terminal binding to its real conversation hands its rank to the
- * real id, and a new conversation's first index keeps the rank its terminal's stand-in row had.
- * Nothing derived from the catalog is ever written, so rendering
+ * real id, and a new conversation's first index keeps the rank its terminal's stand-in row had. Under
+ * "Move stopped conversations down" two more do: turning it on lifts the live rows above the rest, and
+ * while it is on a row that stops — or is unpinned while stopped — moves down past the live rows
+ * directly below it, as a drop would. Nothing derived from the catalog is ever written, so rendering
  * against a partial or empty catalog (startup, a second window) cannot lose a position.
  *
  * Ranks are ms timestamps, so a rank space is global: the same numbers order the All list and every

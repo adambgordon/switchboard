@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { ConversationGroup, ConversationMeta, LiveState, PtyState } from '../src/shared/types'
-import { absorbBind, absorbBindFolder, dropWrites, holdRank, spreadWrites } from '../src/renderer/lib/rowRank'
+import {
+  absorbBind,
+  absorbBindFolder,
+  dropWrites,
+  holdRank,
+  liftWrites,
+  spreadWrites,
+  type RankOverrides
+} from '../src/renderer/lib/rowRank'
 import {
   buildSidebar,
   conversationSeed,
@@ -12,7 +20,13 @@ import {
   buildSidebarHeld,
   dropNeighbors,
   dropNeighborsMany,
+  liftLiveWrites,
+  liveFirstToggleWrites,
   resumeWrites,
+  sinkStopped,
+  stopFold,
+  stoppedRows,
+  unpinRanks,
   unpinWrites,
   visibleRows,
   enteredFolders,
@@ -22,6 +36,7 @@ import {
   type SidebarModel
 } from '../src/renderer/lib/sidebarModel'
 import { NO_FILTER, NOTHING_HIDDEN } from '../src/renderer/lib/railFilter'
+import type { SidebarMode } from '../src/renderer/lib/sidebarPrefs'
 
 const T = 1_780_000_000_000
 
@@ -577,7 +592,7 @@ describe('an initial bind', () => {
     expect(keys(before)).toEqual(['/w/b', '/w/a'])
     // What App reads off the last rendered model when the bind lands.
     const place = before.rows.get('ph')!
-    expect(place).toEqual({ rank: T, seed: T, root: '/w/a', pinned: false })
+    expect(place).toEqual({ rank: T, seed: T, root: '/w/a', pinned: false, live: true })
     const rowRanks = absorbBind({}, place.rank, 'ph', 'real')
     const folderRanks = absorbBindFolder({}, place.root, before.folders.get(place.root)!, place.seed)
     expect(folderRanks).toEqual({ '/w/a': T })
@@ -654,13 +669,13 @@ describe('row places', () => {
 
   it('holds every row that is not delegated, through search and caps', () => {
     expect(Object.fromEntries(model.rows)).toEqual({
-      c1: { rank: T - 1, seed: T - 1, root: '/w/c', pinned: false },
-      c2: { rank: T - 2, seed: T - 2, root: '/w/c', pinned: false },
-      c3: { rank: T + 50, seed: T - 3, root: '/w/c', pinned: false },
-      b1: { rank: T - 10, seed: T - 10, root: '/w/b', pinned: false },
-      pin: { rank: -0, seed: T - 11, root: '/w/b', pinned: true },
-      a1: { rank: T - 20, seed: T - 20, root: '/w/a', pinned: false },
-      fresh: { rank: T + 7, seed: T + 7, root: '/w/new', pinned: false }
+      c1: { rank: T - 1, seed: T - 1, root: '/w/c', pinned: false, live: false },
+      c2: { rank: T - 2, seed: T - 2, root: '/w/c', pinned: false, live: false },
+      c3: { rank: T + 50, seed: T - 3, root: '/w/c', pinned: false, live: false },
+      b1: { rank: T - 10, seed: T - 10, root: '/w/b', pinned: false, live: false },
+      pin: { rank: -0, seed: T - 11, root: '/w/b', pinned: true, live: false },
+      a1: { rank: T - 20, seed: T - 20, root: '/w/a', pinned: false, live: false },
+      fresh: { rank: T + 7, seed: T + 7, root: '/w/new', pinned: false, live: true }
     })
   })
 
@@ -752,6 +767,59 @@ describe('a drop beside a row shown past the cap', () => {
     expect(dropNeighbors(model, block, 'c1', null, 'c0')).toEqual([null, 'c0'])
     expect(dropNeighbors(model, block, 'c5', 'c0', 'c1')).toEqual(['c0', 'c1'])
   })
+
+  it('leaves the last capped row where it is when dropped below a row past the cap', () => {
+    // A cap of 4 shows c0–c3, then live c6 and on-screen c7 past it. c3 sits just above c4, with
+    // another folder's n0 between c2 and it: landing below c2, the capped row above it, would lift c3
+    // over n0 in All mode for a drag that moved it down.
+    const eight = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => conv(`c${i}`, T - i * 1000))
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/r', eight), group('/w/n', [conv('n0', T - 3500)])],
+        ptys: [pty('c6')],
+        active: new Set(['c7']),
+        rowRanks: { c3: T - 3900 },
+        limits: { ...LIMITS, folderCap: 4 }
+      })
+    )
+    const block = model.groups.find((g) => g.key === '/w/r')!.blocks[0]
+    expect(block.rows.map((r) => r.sessionId)).toEqual(['c0', 'c1', 'c2', 'c3', 'c6', 'c7'])
+    expect(block.capped).toBe(4)
+    expect(dropNeighbors(model, block, 'c3', 'c7', null)).toEqual([null, null])
+    expect(dropNeighborsMany(model, block, ['c3'], 'c7', null)).toEqual([null, null])
+    expect(dropWrites(rankSpace(model), 'c3', null, null, T)).toEqual({})
+    // The fixture's point: the landing below c2 outranks n0, which c3 does not.
+    const rank = (id: string): number => model.rows.get(id)!.rank
+    expect(dropWrites(rankSpace(model), 'c3', 'c2', 'c4', T).c3).toBeGreaterThan(rank('n0'))
+    expect(rank('c3')).toBeLessThan(rank('n0'))
+    // Only the clamp is caught: a move among the capped rows, or of a row above the last, still lands,
+    // and so does a group, which staying put would leave scattered.
+    expect(dropNeighbors(model, block, 'c3', 'c0', 'c1')).toEqual(['c0', 'c1'])
+    expect(dropNeighbors(model, block, 'c1', 'c7', null)).toEqual(['c3', 'c4'])
+    expect(dropNeighborsMany(model, block, ['c3', 'c6'], 'c7', null)).toEqual(['c2', 'c4'])
+  })
+
+  it('leaves a block’s only capped row where it is when dropped below a row past the cap', () => {
+    // One pin and a cap of 2 leave one unpinned row in order, c0, then live c4 past it. With no capped
+    // row above c0 to land under, the landing would be the folder's top, which a later clock lifts over
+    // another folder's newer n0 in All mode, for a drag that moved c0 down.
+    const five = [0, 1, 2, 3, 4].map((i) => conv(`c${i}`, T - i * 1000))
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/r', [conv('p0', T - 5000), ...five]), group('/w/n', [conv('n0', T + 500)])],
+        pinned: ['p0'],
+        ptys: [pty('c4')]
+      })
+    )
+    const block = model.groups.find((g) => g.key === '/w/r')!.blocks.find((b) => b.kind === 'unpinned')!
+    expect(block.rows.map((r) => r.sessionId)).toEqual(['c0', 'c4'])
+    expect(block.capped).toBe(1)
+    expect(dropNeighbors(model, block, 'c0', 'c4', null)).toEqual([null, null])
+    // The fixture's point: the folder's top, written at a later clock, outranks n0, which c0 does not.
+    const rank = (id: string): number => model.rows.get(id)!.rank
+    expect(dropWrites(rankSpace(model), 'c0', null, 'c1', T + 10000).c0).toBeGreaterThan(rank('n0'))
+    expect(rank('c0')).toBeLessThan(rank('n0'))
+  })
 })
 
 describe('a group dropped beside a row shown past the cap', () => {
@@ -840,6 +908,442 @@ describe('an Unpin', () => {
   it('writes nothing for a row that is not pinned, or a row the model does not hold', () => {
     expect(unpinWrites(model, 'newer', T)).toEqual({})
     expect(unpinWrites(model, 'nobody', T)).toEqual({})
+  })
+})
+
+describe('turning on moving stopped conversations down', () => {
+  // Live b1 outranks live a1, in another folder, with a stopped row between them; ids and the order the
+  // model lists rows in both put a1 first, so only rank order puts b1 on top. b2 carries an override
+  // past the clock, which the lift must clear. b1's terminal shows no dot and still counts as live.
+  // Live p is pinned.
+  const groups = [
+    group('/w/a', [conv('a0', T), conv('a1', T - 1500), conv('a2', T - 1200), conv('p', T - 3000)]),
+    group('/w/b', [conv('b0', T - 500), conv('b1', T - 1000), conv('b2', T - 2500)])
+  ]
+  const rowRanks = { b2: T + 500 }
+  const base = {
+    groups,
+    rowRanks,
+    pinned: ['p'],
+    liveState: states({ b1: null }),
+    limits: { ...LIMITS, folderCap: 9, allCap: 9 }
+  }
+  const ptys = [pty('a1'), pty('b1'), pty('p')]
+  const model = buildSidebar(input({ ...base, ptys }))
+  const allOrder = (over: Partial<SidebarInput>): string[] =>
+    visibleRows(buildSidebar(input({ ...base, ptys, ...over, mode: 'all' }))).map((r) => r.sessionId)
+
+  it('lifts every live unpinned row above every unpinned row, in the order they had', () => {
+    expect(allOrder({})).toEqual(['p', 'b2', 'a0', 'b0', 'b1', 'a2', 'a1'])
+    const writes = liftLiveWrites(model, T)
+    expect(writes).toEqual({ b1: T + 502, a1: T + 501 })
+    const lifted = { ...rowRanks, ...writes }
+    expect(allOrder({ rowRanks: lifted })).toEqual(['p', 'b1', 'a1', 'b2', 'a0', 'b0', 'a2'])
+    expect(shape(buildSidebar(input({ ...base, ptys, rowRanks: lifted })))).toEqual([
+      { key: '/w/b', collapsed: false, withheld: 0, blocks: [['un:/w/b', 'b1', 'b2', 'b0']] },
+      { key: '/w/a', collapsed: false, withheld: 0, blocks: [['pin:/w/a', 'p'], ['un:/w/a', 'a1', 'a0', 'a2']] }
+    ])
+  })
+
+  it('writes nothing when no unpinned row is live', () => {
+    expect(liftLiveWrites(buildSidebar(input({ ...base, ptys: [pty('p')] })), T)).toEqual({})
+    expect(liftLiveWrites(buildSidebar(input(base)), T)).toEqual({})
+  })
+
+  it('lifts only when the setting turns on, never when it stays on, stays off or turns off', () => {
+    expect(liveFirstToggleWrites(model, false, true, T)).toEqual({ b1: T + 502, a1: T + 501 })
+    expect(liveFirstToggleWrites(model, true, true, T)).toEqual({})
+    expect(liveFirstToggleWrites(model, false, false, T)).toEqual({})
+    expect(liveFirstToggleWrites(model, true, false, T)).toEqual({})
+  })
+})
+
+describe('rows that stop', () => {
+  // Before: a, b, c and pinned d are live, e never was, and a placeholder terminal runs. After: a's and
+  // d's terminals are gone, c's conversation is gone with its terminal, and the placeholder has bound
+  // to its real conversation.
+  const convs = [conv('a', T), conv('b', T - 1000), conv('c', T - 2000), conv('d', T - 3000), conv('e', T - 4000)]
+  const before = buildSidebar(
+    input({
+      groups: [group('/w/r', convs)],
+      ptys: [pty('a'), pty('b'), pty('c'), pty('d'), pty('ph', { projectRoot: '/w/r', provisional: true })],
+      pinned: ['d']
+    })
+  )
+  const after = buildSidebar(
+    input({
+      groups: [group('/w/r', [...convs.filter((m) => m.sessionId !== 'c'), conv('real', T + 5)])],
+      ptys: [pty('b'), pty('real', { projectRoot: '/w/r' })],
+      pinned: ['d']
+    })
+  )
+
+  it('reports a row that lost its terminal, and none still live, gone, pinned or never live', () => {
+    expect(before.rows.get('ph')?.live).toBe(true)
+    expect(stoppedRows(true, before, after)).toEqual(['a'])
+  })
+
+  it('reports nothing without a model to compare with', () => {
+    expect(stoppedRows(true, null, after)).toEqual([])
+  })
+
+  it('reports nothing with the setting off, so a stop moves nothing', () => {
+    expect(stoppedRows(false, before, after)).toEqual([])
+  })
+
+  it('gives no fold unless a row stopped, so the store is left alone', () => {
+    expect(stopFold(false, before, after, 'folders')).toBeNull()
+    expect(stopFold(true, null, after, 'folders')).toBeNull()
+    expect(stopFold(true, after, after, 'folders')).toBeNull()
+  })
+
+  it('gives the fold that moves the rows that stopped, read from the new model', () => {
+    // Stopped `a` sits above live `b`, with stopped `e` below: it moves between them.
+    const fold = stopFold(true, before, after, 'folders')
+    expect(fold).not.toBeNull()
+    const stored = { elsewhere: T + 7 }
+    expect(fold!(stored)).toEqual({ elsewhere: T + 7, a: T - 2500 })
+    expect(fold!(stored)).toEqual(sinkStopped(stored, after, 'folders', ['a']))
+  })
+})
+
+/** /w/a: a1, which has just stopped, over live a2. /w/b: stopped b1, ranked above a2 in All, then live
+ *  b2 and stopped b3. a1's folder run ends at a2, directly above another folder's live b2 in All. */
+const FOLDER_RUN_ABOVE_LIVE = [
+  group('/w/a', [conv('a1', T), conv('a2', T - 2000)]),
+  group('/w/b', [conv('b1', T - 1000), conv('b2', T - 3000), conv('b3', T - 4000)])
+]
+
+describe('moving a stopped row down', () => {
+  // /w/r, top first: r0, which has just stopped, then live r1 and r2, stopped r3 and live r4. Pinned pl
+  // is live, with a seed between r2 and r3. /w/o's stopped o0 ranks between r1 and r2, so the live run
+  // below r0 ends at r1 in All and at r2 in its folder; past r3 sits live r4, which a row sent below
+  // every live row would land under. In its own folder o0 has stopped o1 below it, and in All live r2.
+  // /w/o's o1 has just stopped too, above live o2 and o3, the last rows anywhere.
+  const groups = [
+    group('/w/r', [
+      conv('r0', T),
+      conv('r1', T - 1000),
+      conv('r2', T - 2000),
+      conv('pl', T - 2700),
+      conv('r3', T - 3000),
+      conv('r4', T - 4000)
+    ]),
+    group('/w/o', [conv('o0', T - 1500), conv('o1', T - 5000), conv('o2', T - 6000), conv('o3', T - 7000)])
+  ]
+  const build = (rowRanks: RankOverrides = {}, over: Partial<SidebarInput> = {}): SidebarModel =>
+    buildSidebar(
+      input({
+        groups,
+        ptys: ['r1', 'r2', 'pl', 'r4', 'o2', 'o3'].map((id) => pty(id)),
+        pinned: ['pl'],
+        rowRanks,
+        limits: { ...LIMITS, folderCap: 9, allCap: 20 },
+        ...over
+      })
+    )
+  const model = build()
+  const inFolder = (m: SidebarModel, key: string): string[] =>
+    m.groups.find((g) => g.key === key)!.blocks.flatMap((b) => b.rows.map((r) => r.sessionId))
+  const inAll = (rowRanks: RankOverrides): string[] =>
+    visibleRows(build(rowRanks, { mode: 'all' })).map((r) => r.sessionId)
+
+  it('moves past its folder’s live rows in Folders mode when they run lower than All’s, never past a stopped row there', () => {
+    const moved = sinkStopped({}, model, 'folders', ['r0'])
+    expect(moved).toEqual({ r0: T - 2500 })
+    expect(inFolder(build(moved), '/w/r')).toEqual(['pl', 'r1', 'r2', 'r0', 'r3', 'r4'])
+  })
+
+  it('moves past the live rows directly below it across every folder in All mode', () => {
+    const moved = sinkStopped({}, model, 'all', ['r0'])
+    expect(moved).toEqual({ r0: T - 1250 })
+    expect(inAll(moved)).toEqual(['pl', 'r1', 'r0', 'o0', 'r2', 'r3', 'r4', 'o1', 'o2', 'o3'])
+  })
+
+  it('lands at the bottom when the live rows run to the end', () => {
+    expect(sinkStopped({}, model, 'folders', ['o1'])).toEqual({ o1: T - 7001 })
+    expect(sinkStopped({}, model, 'all', ['o1'])).toEqual({ o1: T - 7001 })
+  })
+
+  it('in Folders mode, moves past the live rows directly below it in All when its folder has none', () => {
+    const moved = sinkStopped({}, model, 'folders', ['o0'])
+    expect(moved).toEqual({ o0: T - 2500 })
+    expect(inAll(moved)).toEqual(['pl', 'r0', 'r1', 'r2', 'o0', 'r3', 'r4', 'o1', 'o2', 'o3'])
+    expect(inFolder(build(moved), '/w/o')).toEqual(['o0', 'o1', 'o2', 'o3'])
+  })
+
+  it('leaves a row that is live or not listed', () => {
+    const stored = {}
+    expect(sinkStopped(stored, model, 'folders', ['r1', 'nobody'])).toBe(stored)
+  })
+
+  it('writes a move once, however many windows fold it in, reading ranks from the store', () => {
+    const once = sinkStopped({}, model, 'folders', ['r0'])
+    expect(sinkStopped(once, build(once), 'folders', ['r0'])).toBe(once)
+    // A window whose model still ranks r0 where it was, folding into a store another window has
+    // already written the move to.
+    expect(model.rows.get('r0')!.rank).toBe(T)
+    expect(sinkStopped(once, model, 'folders', ['r0'])).toBe(once)
+    // Every move, in either mode — including one whose folder's run ends above another folder's live
+    // row in All — leaves a second fold nothing to do.
+    const other = (rowRanks: RankOverrides = {}): SidebarModel =>
+      buildSidebar(input({ groups: FOLDER_RUN_ABOVE_LIVE, ptys: [pty('a2'), pty('b2')], rowRanks, limits: { ...LIMITS, folderCap: 9 } }))
+    const moves: [(rowRanks?: RankOverrides) => SidebarModel, string, SidebarMode][] = [
+      [build, 'r0', 'all'],
+      [build, 'o0', 'folders'],
+      [build, 'o0', 'all'],
+      [build, 'o1', 'folders'],
+      [build, 'o1', 'all'],
+      [other, 'a1', 'folders']
+    ]
+    for (const [make, id, mode] of moves) {
+      const moved = sinkStopped({}, make(), mode, [id])
+      expect(Object.keys(moved)).toEqual([id])
+      expect(sinkStopped(moved, make(moved), mode, [id])).toBe(moved)
+    }
+  })
+
+  it('keeps several rows that stop at once in their order', () => {
+    // s0 and s1 stop together above live s2 and s3, with stopped s4 below. Taken top first, s0 would
+    // find s1 still under it and stay.
+    const five = (rowRanks: RankOverrides = {}): SidebarModel =>
+      buildSidebar(
+        input({
+          groups: [group('/w/s', [0, 1, 2, 3, 4].map((i) => conv(`s${i}`, T - i * 1000)))],
+          ptys: [pty('s2'), pty('s3')],
+          rowRanks,
+          limits: { ...LIMITS, folderCap: 9 }
+        })
+      )
+    const moved = { s0: T - 3250, s1: T - 3500 }
+    expect(sinkStopped({}, five(), 'folders', ['s0', 's1'])).toEqual(moved)
+    expect(sinkStopped({}, five(), 'folders', ['s1', 's0'])).toEqual(moved)
+    expect(inFolder(five(moved), '/w/s')).toEqual(['s2', 's3', 's0', 's1', 's4'])
+  })
+
+  it('stops at a stopped row the rail leaves out, as at any other, so every window writes alike', () => {
+    // Top first: stopped A, stopped B — hidden by the user, so the filter keeps it off the rail — live
+    // C and stopped D. Read from the rows on screen, C would sit directly below A and A would move;
+    // another window, filtered to show hidden rows, would see B there and leave it.
+    const model = buildSidebar(
+      input({
+        groups: [group('/w/h', [conv('A', T), conv('B', T - 1000), conv('C', T - 2000), conv('D', T - 3000)])],
+        ptys: [pty('C')],
+        userHidden: { rows: new Set(['B']), folders: new Set() },
+        limits: { ...LIMITS, folderCap: 9 }
+      })
+    )
+    expect(visibleRows(model).map((r) => r.sessionId)).toEqual(['A', 'C', 'D'])
+    expect(model.rows.has('B')).toBe(true)
+    const stored = {}
+    expect(sinkStopped(stored, model, 'folders', ['A'])).toBe(stored)
+  })
+})
+
+describe('moving a stopped row down in Folders mode, in both views', () => {
+  const ids = (m: SidebarModel): string[] => visibleRows(m).map((r) => r.sessionId)
+  const inFolder = (m: SidebarModel, key: string): string[] =>
+    m.groups.find((g) => g.key === key)!.blocks.flatMap((b) => b.rows.map((r) => r.sessionId))
+  const builder =
+    (groups: ConversationGroup[], live: string[]) =>
+    (rowRanks: RankOverrides = {}, over: Partial<SidebarInput> = {}): SidebarModel =>
+      buildSidebar(
+        input({
+          groups,
+          ptys: live.map((id) => pty(id)),
+          rowRanks,
+          limits: { ...LIMITS, folderCap: 9, allCap: 9 },
+          ...over
+        })
+      )
+
+  it('moves a row whose folder has no live row below it past the live rows below it in All', () => {
+    // /w/a: live a1 over stopped a2; /w/b: b1 over stopped b2. Turning the setting on lifted the live
+    // rows, so All reads b1, a1, a2, b2. Then b1 stops: nothing live follows it in its folder, a1 does
+    // in All.
+    const groups = [
+      group('/w/a', [conv('a1', T - 1000), conv('a2', T - 1500)]),
+      group('/w/b', [conv('b1', T - 500), conv('b2', T - 2000)])
+    ]
+    const lifted = liftLiveWrites(builder(groups, ['a1', 'b1'])(), T)
+    expect(lifted).toEqual({ b1: T + 1, a1: T })
+    const build = builder(groups, ['a1'])
+    const moved = sinkStopped(lifted, build(lifted), 'folders', ['b1'])
+    expect(moved).toEqual({ b1: T - 750, a1: T })
+    expect(ids(build(moved, { mode: 'all' }))).toEqual(['a1', 'b1', 'a2', 'b2'])
+    expect(inFolder(build(moved), '/w/b')).toEqual(['b1', 'b2'])
+    // Stopped a2 has nothing below it in its folder and stopped b2 below it in All: it stays.
+    expect(sinkStopped(moved, build(moved), 'folders', ['a2'])).toBe(moved)
+  })
+
+  it('lands below All’s live run when it ends lower than the folder’s, the folder’s order intact', () => {
+    // /w/a: a1 has just stopped, over live a2 and stopped a3. /w/b's live b1 and b2 sit above a2 and
+    // above a3 in All. The folder's run ends at a2, All's at b2, below it.
+    const groups = [
+      group('/w/a', [conv('a1', T), conv('a2', T - 2000), conv('a3', T - 4000)]),
+      group('/w/b', [conv('b1', T - 1000), conv('b2', T - 3000), conv('b3', T - 5000)])
+    ]
+    const build = builder(groups, ['a2', 'b1', 'b2'])
+    const moved = sinkStopped({}, build(), 'folders', ['a1'])
+    expect(moved).toEqual({ a1: T - 3500 })
+    expect(ids(build(moved, { mode: 'all' }))).toEqual(['b1', 'a2', 'b2', 'a1', 'a3', 'b3'])
+    expect(inFolder(build(moved), '/w/a')).toEqual(['a2', 'a1', 'a3'])
+  })
+
+  it('lands below the folder’s live run when it ends lower than All’s, directly below its last row in All too', () => {
+    // /w/r: r0 has just stopped, over live r1 and r2 and stopped r3. /w/o's stopped o0 sits between r1
+    // and r2 in All, and stopped o1 between r2 and r3. All's run ends at r1, the folder's at r2: r0
+    // lands between r2 and o1, not midway down to r3, which would put it under o1.
+    const groups = [
+      group('/w/r', [conv('r0', T), conv('r1', T - 1000), conv('r2', T - 2000), conv('r3', T - 4400)]),
+      group('/w/o', [conv('o0', T - 1500), conv('o1', T - 3000)])
+    ]
+    const build = builder(groups, ['r1', 'r2'])
+    const moved = sinkStopped({}, build(), 'folders', ['r0'])
+    expect(moved).toEqual({ r0: T - 2500 })
+    expect(inFolder(build(moved), '/w/r')).toEqual(['r1', 'r2', 'r0', 'r3'])
+    expect(ids(build(moved, { mode: 'all' }))).toEqual(['r1', 'o0', 'r2', 'r0', 'o1', 'r3'])
+    // All mode reads All's run alone, so r0 never passes o0 there.
+    expect(sinkStopped({}, build(), 'all', ['r0'])).toEqual({ r0: T - 1250 })
+  })
+
+  it('goes on past the live rows below its folder’s run in All, so a second window finds nothing to move', () => {
+    // a1's folder run ends at a2, and live b2 follows a2 in All. Landing directly below a2 would leave
+    // a1 above b2, and the next window to fold the stop would move it on: where it ended up would depend
+    // on how many windows are open.
+    const build = builder(FOLDER_RUN_ABOVE_LIVE, ['a2', 'b2'])
+    const first = sinkStopped({}, build(), 'folders', ['a1'])
+    expect(first).toEqual({ a1: T - 3500 })
+    expect(ids(build(first, { mode: 'all' }))).toEqual(['b1', 'a2', 'b2', 'a1', 'b3'])
+    expect(inFolder(build(first), '/w/a')).toEqual(['a2', 'a1'])
+    expect(sinkStopped(first, build(first), 'folders', ['a1'])).toBe(first)
+    // Past every live row there, not just the first.
+    const more = builder(
+      [FOLDER_RUN_ABOVE_LIVE[0], group('/w/b', [conv('b1', T - 1000), conv('b2', T - 3000), conv('b4', T - 3500), conv('b3', T - 4000)])],
+      ['a2', 'b2', 'b4']
+    )
+    const past = sinkStopped({}, more(), 'folders', ['a1'])
+    expect(past).toEqual({ a1: T - 3750 })
+    expect(sinkStopped(past, more(past), 'folders', ['a1'])).toBe(past)
+  })
+})
+
+describe('an Unpin while stopped conversations move down', () => {
+  // Pinned, in order: stopped p1, live q1, stopped p2, live q2. Unpinned: live u1 and u2, then stopped
+  // u3. The model still has the rows pinned, as App's is when it runs an Unpin. The store carries p1's
+  // override from before it was pinned, which the lift must replace, and an entry for a row elsewhere,
+  // which must survive.
+  const groups = [
+    group('/w/u', [
+      conv('u1', T),
+      conv('u2', T - 1000),
+      conv('u3', T - 2000),
+      conv('p1', T - 9000),
+      conv('q1', T - 9100),
+      conv('p2', T - 9200),
+      conv('q2', T - 9300)
+    ])
+  ]
+  const pins = ['p1', 'q1', 'p2', 'q2']
+  const build = (pinned: string[], rowRanks: RankOverrides = {}): SidebarModel =>
+    buildSidebar(
+      input({
+        groups,
+        ptys: ['q1', 'q2', 'u1', 'u2'].map((id) => pty(id)),
+        pinned,
+        rowRanks,
+        limits: { ...LIMITS, folderCap: 9 }
+      })
+    )
+  const model = build(pins)
+  const order = (pinned: string[], rowRanks: RankOverrides): string[] =>
+    build(pinned, rowRanks).groups[0].blocks.flatMap((b) => b.rows.map((r) => r.sessionId))
+
+  const stored = { p1: T - 9500, elsewhere: T + 7 }
+
+  it('moves a stopped row down past the live rows it was lifted above', () => {
+    const writes = unpinWrites(model, 'p1', T)
+    expect(writes).toEqual({ p1: T + 1 })
+    const moved = unpinRanks(stored, writes, model, 'folders', ['p1'], true)
+    expect(moved).toEqual({ p1: T - 1500, elsewhere: T + 7 })
+    expect(order(['q1', 'p2', 'q2'], moved)).toEqual(['q1', 'p2', 'q2', 'u1', 'u2', 'p1', 'u3'])
+  })
+
+  it('leaves a live row at the top', () => {
+    const lifted = unpinRanks(stored, unpinWrites(model, 'q1', T), model, 'folders', ['q1'], true)
+    expect(lifted).toEqual({ p1: T - 9500, q1: T + 1, elsewhere: T + 7 })
+    expect(order(['p1', 'p2', 'q2'], lifted)).toEqual(['p1', 'p2', 'q2', 'q1', 'u1', 'u2', 'u3'])
+  })
+
+  it('keeps a group’s live rows on top and its stopped rows below them, each in their order', () => {
+    const writes = liftWrites(rankSpace(model), pins, T)
+    expect(writes).toEqual({ p1: T + 4, q1: T + 3, p2: T + 2, q2: T + 1 })
+    const moved = unpinRanks(stored, writes, model, 'folders', pins, true)
+    expect(moved).toEqual({ p1: T - 1250, q1: T + 3, p2: T - 1500, q2: T + 1, elsewhere: T + 7 })
+    expect(order([], moved)).toEqual(['q1', 'q2', 'u1', 'u2', 'p1', 'p2', 'u3'])
+  })
+
+  it('only lifts with the setting off, one row or a group', () => {
+    const one = unpinRanks(stored, unpinWrites(model, 'p1', T), model, 'folders', ['p1'], false)
+    expect(one).toEqual({ p1: T + 1, elsewhere: T + 7 })
+    expect(order(['q1', 'p2', 'q2'], one)).toEqual(['q1', 'p2', 'q2', 'p1', 'u1', 'u2', 'u3'])
+    const all = unpinRanks(stored, liftWrites(rankSpace(model), pins, T), model, 'folders', pins, false)
+    expect(all).toEqual({ p1: T + 4, q1: T + 3, p2: T + 2, q2: T + 1, elsewhere: T + 7 })
+  })
+
+  it('moves a stopped row from a folder with no live rows below the live rows in All', () => {
+    // Folders mode. /w/p's pinned p and unpinned p2 are both stopped; /w/l has live l1 and l2 over
+    // stopped l3. The lift puts p above every row; nothing live follows it in its own folder.
+    const twoFolders = [
+      group('/w/p', [conv('p', T - 9000), conv('p2', T - 3000)]),
+      group('/w/l', [conv('l1', T), conv('l2', T - 1000), conv('l3', T - 2000)])
+    ]
+    const buildTwo = (pinned: string[], rowRanks: RankOverrides = {}, over: Partial<SidebarInput> = {}): SidebarModel =>
+      buildSidebar(
+        input({
+          groups: twoFolders,
+          ptys: [pty('l1'), pty('l2')],
+          pinned,
+          rowRanks,
+          limits: { ...LIMITS, folderCap: 9, allCap: 9 },
+          ...over
+        })
+      )
+    const pinnedModel = buildTwo(['p'])
+    const writes = unpinWrites(pinnedModel, 'p', T)
+    expect(writes).toEqual({ p: T + 1 })
+    const moved = unpinRanks({}, writes, pinnedModel, 'folders', ['p'], true)
+    expect(moved).toEqual({ p: T - 1500 })
+    expect(visibleRows(buildTwo([], moved, { mode: 'all' })).map((r) => r.sessionId)).toEqual(['l1', 'l2', 'p', 'l3', 'p2'])
+    expect(buildTwo([], moved).groups.find((g) => g.key === '/w/p')!.blocks[0].rows.map((r) => r.sessionId)).toEqual([
+      'p',
+      'p2'
+    ])
+  })
+
+  it('orders a group’s stopped rows by the ranks the lift gave them, not by their seeds or pin order', () => {
+    // Pinned p then q, both stopped, with p started after q; live l1 and l2 over stopped s. The group
+    // lifts in the order q, p — as a tab group's does, in tab order — so the lift puts q above p. Taken
+    // by seed or by pin order, q would move first, find p still below it, and stay put.
+    const pinGroups = [
+      group('/w/u', [conv('l1', T), conv('l2', T - 1000), conv('s', T - 2000), conv('q', T - 9000), conv('p', T - 8000)])
+    ]
+    const buildPins = (pinned: string[], rowRanks: RankOverrides = {}): SidebarModel =>
+      buildSidebar(
+        input({ groups: pinGroups, ptys: [pty('l1'), pty('l2')], pinned, rowRanks, limits: { ...LIMITS, folderCap: 9 } })
+      )
+    const pinnedModel = buildPins(['p', 'q'])
+    const writes = liftWrites(rankSpace(pinnedModel), ['q', 'p'], T)
+    expect(writes).toEqual({ q: T + 2, p: T + 1 })
+    const moved = unpinRanks({}, writes, pinnedModel, 'folders', ['q', 'p'], true)
+    expect(moved).toEqual({ q: T - 1250, p: T - 1500 })
+    expect(buildPins([], moved).groups[0].blocks.flatMap((b) => b.rows.map((r) => r.sessionId))).toEqual([
+      'l1',
+      'l2',
+      'q',
+      'p',
+      's'
+    ])
   })
 })
 

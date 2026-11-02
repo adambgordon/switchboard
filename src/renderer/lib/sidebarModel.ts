@@ -3,7 +3,9 @@ import {
   absorbBindFolder,
   bumpRank,
   compareRanked,
+  dropWrites,
   holdRank,
+  liftWrites,
   rankOf,
   topRank,
   type RankOverrides,
@@ -77,6 +79,9 @@ export interface RowPlace {
   seed: number
   root: string
   pinned: boolean
+  /** It has a running terminal, whatever its dot shows — the Live filter's test. What moving stopped
+   *  conversations down reads (`liftLiveWrites`, `stoppedRows`, `sinkStopped`). */
+  live: boolean
 }
 
 export interface SidebarModel {
@@ -395,7 +400,7 @@ export function buildSidebar(input: SidebarInput): SidebarModel {
   let filteredOut = 0
   for (const p of placed) {
     const id = p.row.sessionId
-    rows.set(id, { rank: p.row.rank, seed: p.seed, root: p.root, pinned: p.row.pinned })
+    rows.set(id, { rank: p.row.rank, seed: p.seed, root: p.root, pinned: p.row.pinned, live: p.row.pty !== null })
     if (p.row.outside && !input.active.has(id) && (!input.search || input.search.has(id))) filteredOut++
   }
   return { groups, rows, folders, labels, needsYou: order, filteredOut, autoCollapsed: auto }
@@ -423,7 +428,11 @@ export function folderRankSpace(model: SidebarModel): Ranked[] {
  * adjacent on screen can straddle hidden ones, and a midpoint between them would hide a capped row
  * dropped there. A capped row lands directly below the row above it in the block's full order instead;
  * below a row that is itself past the cap, it lands below the last capped row, the lowest place that
- * still shows it. A row past the cap shows wherever it lands, so its drop is taken as it is.
+ * still shows it. A row that already IS the last capped row stays put there: both neighbors null, which
+ * `dropWrites` turns into no write. Landing below the capped row above it would rewrite its rank, and
+ * rows the filter or the user's hide leaves out, and other folders' rows, all in the same rank space,
+ * can sit between the two — a drag that moved it down would lift it over them. A row past the cap
+ * shows wherever it lands, so its drop is taken as it is.
  */
 export function dropNeighbors(
   model: SidebarModel,
@@ -453,13 +462,18 @@ export function dropNeighborsMany(
   if (higherId === null || pastCap) return [higherId, lowerId]
   // The capped rows other than the dragged ones, top first.
   const capped = block.rows.slice(0, block.capped).filter((r) => !dragged.has(r.sessionId))
+  const clamped = !capped.some((r) => r.sessionId === higherId)
+  // A lone row that is already the block's last capped row has nowhere lower to land: it stays put. A
+  // group still lands together, which staying put would leave scattered.
+  const last = block.rows[block.capped - 1]?.sessionId
+  if (clamped && draggedIds.length === 1 && last === draggedIds[0]) return [null, null]
   const root = block.id.slice('un:'.length)
   const full: Ranked[] = []
   for (const [id, p] of model.rows) {
     if (!dragged.has(id) && !p.pinned && (root === '*' || p.root === root)) full.push({ id, rank: p.rank })
   }
   const order = full.sort(compareRanked).map((e) => e.id)
-  const higher = capped.some((r) => r.sessionId === higherId) ? higherId : capped[capped.length - 1]?.sessionId
+  const higher = clamped ? capped[capped.length - 1]?.sessionId : higherId
   if (higher === undefined) return [null, order[0] ?? null]
   return [higher, order[order.indexOf(higher) + 1] ?? null]
 }
@@ -490,6 +504,152 @@ export function unpinWrites(model: SidebarModel, id: string, now: number): Recor
   const place = model.rows.get(id)
   if (!place || !place.pinned) return {}
   return { [id]: bumpRank(topRank(rankSpace(model)), now) }
+}
+
+/**
+ * Turning on the setting that moves stopped conversations down: every live unpinned row lifts above
+ * every unpinned row, keeping the order it had among them — one write for them all, as a group Unpin
+ * is (`liftWrites`). Ranks are global, so the live rows top each folder and All mode at once, and
+ * folder order is untouched. Pinned rows keep their pin order whether they are live or not.
+ */
+export function liftLiveWrites(model: SidebarModel, now: number): Record<string, number> {
+  const live: Ranked[] = []
+  for (const [id, p] of model.rows) if (p.live && !p.pinned) live.push({ id, rank: p.rank })
+  return liftWrites(rankSpace(model), live.sort(compareRanked).map((e) => e.id), now)
+}
+
+/**
+ * The writes for that setting changing from `was` to `next`: the live rows' lift (`liftLiveWrites`)
+ * when it turns on, and nothing otherwise. Choosing On while it is on must not lift again — that would
+ * undo every drag made since — and turning it off leaves the order as it is.
+ */
+export function liveFirstToggleWrites(
+  model: SidebarModel,
+  was: boolean,
+  next: boolean,
+  now: number
+): Record<string, number> {
+  return next && !was ? liftLiveWrites(model, now) : {}
+}
+
+/**
+ * The rows moving stopped conversations down moves (`sinkStopped`): those whose terminal went away
+ * between two models — a stop, an exit, or the live-session cap reclaiming one — that `after` still
+ * lists, unpinned. A placeholder that bound to its real conversation is not listed in `after`, so it is not
+ * one. None while the setting is off — a stop then moves nothing — or without a `before` to compare
+ * with.
+ */
+export function stoppedRows(liveFirst: boolean, before: SidebarModel | null, after: SidebarModel): string[] {
+  if (!liveFirst || !before) return []
+  const out: string[] = []
+  for (const [id, was] of before.rows) {
+    const place = after.rows.get(id)
+    if (was.live && place && !place.live && !place.pinned) out.push(id)
+  }
+  return out
+}
+
+/**
+ * Moving stopped conversations down: each row of `ids` that is not live moves down past the live rows
+ * directly below it, written as a drop into the global space (`dropWrites`). A row with no live row
+ * directly below it stays where it is. Several move lowest first, so each lands above the ones below
+ * it and they keep their order.
+ *
+ * In All mode the row moves past the run of live rows directly below it among every unpinned row, to
+ * just above the first that is not live, or to the bottom. In Folders mode it first moves past the run
+ * of live rows directly below it in its folder's unpinned rows, then, as in All mode, on past the live
+ * rows directly below that among every unpinned row. Either way it lands directly above a row that is
+ * not live in All, or at the bottom. That second step is All's own run whenever All's ends lower than
+ * the folder's: every row between the row and the end of All's run is live.
+ *
+ * Three properties follow:
+ * - It never passes a stopped row in the list being viewed. In All mode it passes only live rows. In
+ *   Folders mode, past its folder's run, it passes only rows that are live, so it stops above its
+ *   folder's next stopped row.
+ * - A list that had its live rows on top keeps them there, in both views. With All's live rows on top,
+ *   the row lands below every live row; in its folder it passes only that folder's live rows.
+ * - It is idempotent. Once moved, the row has a row that is not live (or nothing) directly below it in
+ *   All and in its folder, so folding the same stop again — as each other window does — returns
+ *   `stored` itself.
+ *
+ * In All, a row can still pass another folder's stopped row, when that row sits among its folder's
+ * live rows in All — which takes a stopped row already above a live one in All, as a drag or a
+ * conversation started elsewhere can leave.
+ *
+ * `stored` is the STORED map, re-read at the time of the write, and every rank is read from it rather
+ * than from the model: every window sees the same stop and folds the same write, so a window that
+ * finds the row already below the run returns `stored` itself. The rows of `ids` join the space even
+ * while the model has them pinned — an Unpin runs before its rows leave the pins, and their rank is
+ * then the lift already folded into `stored`.
+ *
+ * No clock is read: a move down always has a live row above where it lands, and only a drop with no
+ * row above it reads the time. So every window folding the same stop writes the same ranks.
+ */
+export function sinkStopped(
+  stored: RankOverrides,
+  model: SidebarModel,
+  mode: SidebarMode,
+  ids: readonly string[]
+): RankOverrides {
+  const moving = new Set(ids)
+  const rows = [...model.rows].filter(([id, p]) => !p.pinned || moving.has(id))
+  const space = (s: RankOverrides): Ranked[] => rows.map(([id, p]) => ({ id, rank: rankOf(id, p.seed, s) }))
+  const place = (id: string): RowPlace => model.rows.get(id)!
+  const lowestFirst = space(stored)
+    .filter((e) => moving.has(e.id) && !place(e.id).live)
+    .sort((a, b) => compareRanked(b, a))
+  let s = stored
+  for (const { id } of lowestFirst) {
+    const all = space(s).sort(compareRanked)
+    let j = all.findIndex((e) => e.id === id)
+    if (mode === 'folders') {
+      // Past the folder's own live run first. By reference: the folder's list holds `all`'s entries.
+      const root = place(id).root
+      const folder = all.filter((e) => place(e.id).root === root)
+      let i = folder.indexOf(all[j])
+      while (i + 1 < folder.length && place(folder[i + 1].id).live) i++
+      j = all.indexOf(folder[i])
+    }
+    // Then on past the live rows directly below that in All.
+    while (j + 1 < all.length && place(all[j + 1].id).live) j++
+    if (all[j].id !== id) s = { ...s, ...dropWrites(all, id, all[j].id, all[j + 1]?.id ?? null, 0) }
+  }
+  return s
+}
+
+/**
+ * The stored row ranks after an Unpin: its lift (`unpinWrites`, or a group's `liftWrites`) folded into
+ * `stored`, then — while moving stopped conversations down is on — the stopped rows of `ids` moved down
+ * past the live rows they were lifted above (`sinkStopped`), keeping their order. With it off, the lift
+ * alone. `ids` are the rows the lift wrote, still pinned in `model`.
+ */
+export function unpinRanks(
+  stored: RankOverrides,
+  writes: RankOverrides,
+  model: SidebarModel,
+  mode: SidebarMode,
+  ids: readonly string[],
+  liveFirst: boolean
+): RankOverrides {
+  const lifted = { ...stored, ...writes }
+  return liveFirst ? sinkStopped(lifted, model, mode, ids) : lifted
+}
+
+/**
+ * The fold that moves the rows that stopped between the last model shown and this one (`stoppedRows`,
+ * `sinkStopped`), or null when none did — which covers the setting being off and there being no model
+ * to compare with. Null rather than a fold that changes nothing, because the caller must not call
+ * `mutateRows` at all then: it adopts a fresh read even when it writes nothing, which rebuilds the rail
+ * and runs the caller's effect again, without end.
+ */
+export function stopFold(
+  liveFirst: boolean,
+  before: SidebarModel | null,
+  after: SidebarModel,
+  mode: SidebarMode
+): ((stored: RankOverrides) => RankOverrides) | null {
+  const ids = stoppedRows(liveFirst, before, after)
+  return ids.length === 0 ? null : (stored) => sinkStopped(stored, after, mode, ids)
 }
 
 /**
