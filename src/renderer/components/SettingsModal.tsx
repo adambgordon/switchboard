@@ -248,6 +248,11 @@ interface Props {
   /** Conversation-list row density (Appearance). */
   railDensity: RailDensity
   onSetRailDensity: (density: RailDensity) => void
+  /** Whether a conversation moves down when it stops (Beta Features). */
+  liveFirst: boolean
+  /** Set it (an On / Off segmented control, like Tabs and split view). Turning it on also moves the
+   *  live conversations above the rest. */
+  onSetLiveFirst: (value: boolean) => void
   /** Whether the macOS dock icon uses the dark variant (independent of the theme). */
   darkIcon: boolean
   /** Toggle the dark dock icon (a Light / Dark segmented control). */
@@ -297,7 +302,8 @@ interface Props {
  * over the shared
  * scrim+card. Appearance holds theme, dock icon, sidebar density and the tabs / split / windows setting
  * with its tab layout; Application holds Updates (first), What's new, the live-session cap, and the
- * new-conversation default agent; Beta Features holds the liveness dot color;
+ * new-conversation default agent; Beta Features holds moving stopped conversations down and the
+ * liveness dot color;
  * Shortcuts / FAQ are reference. Open it to a specific page via
  * `page` (⌘, / title-bar gear → appearance; ⌘? / footer ? → shortcuts). Esc / scrim / ✕ close — Esc is
  * handled by App's global key handler, which also makes the rest of the keyboard inert while open.
@@ -311,6 +317,8 @@ export default function SettingsModal({
   onSetThemeMode,
   railDensity,
   onSetRailDensity,
+  liveFirst,
+  onSetLiveFirst,
   darkIcon,
   onSetDarkIcon,
   defaultAgentChoice,
@@ -723,6 +731,33 @@ export default function SettingsModal({
                     <Warning size={16} />
                     <span>Beta features are experimental and subject to change.</span>
                   </div>
+                  <div className="sb-setting-title">Move stopped conversations down</div>
+                  <div className="sb-seg" role="radiogroup" aria-label="Move stopped conversations down">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={liveFirst}
+                      className={`sb-seg-btn${liveFirst ? ' active' : ''}`}
+                      onClick={() => onSetLiveFirst(true)}
+                    >
+                      On
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={!liveFirst}
+                      className={`sb-seg-btn${!liveFirst ? ' active' : ''}`}
+                      onClick={() => onSetLiveFirst(false)}
+                    >
+                      Off
+                    </button>
+                  </div>
+                  <div className="sb-setting-desc">
+                    Turning this on moves live conversations above the rest. While it&apos;s on, a conversation
+                    moves down when it stops.
+                  </div>
+                </div>
+                <div className="sb-setting">
                   <div className="sb-setting-title">Liveness dot color</div>
                   <div className="sb-dotcolor-control">
                     <input

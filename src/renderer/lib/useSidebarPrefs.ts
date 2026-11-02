@@ -1,9 +1,11 @@
 import { useCallback, useState } from 'react'
 import {
   FOLDER_COLLAPSE_KEY,
+  LIVE_FIRST_KEY,
   RAIL_DENSITY_KEY,
   SIDEBAR_MODE_KEY,
   parseFolderCollapse,
+  parseLiveFirst,
   parseRailDensity,
   parseSidebarMode,
   withFolderCollapse,
@@ -23,6 +25,11 @@ export interface SidebarPrefs {
   setMode: (mode: SidebarMode) => void
   density: RailDensity
   setDensity: (density: RailDensity) => void
+  /** Whether a row moves down when it stops. The setting orders nothing itself: App writes ranks under
+   *  it — the live rows' lift when it is turned on (`liftLiveWrites`), and a row's move down when it
+   *  stops or is unpinned while stopped (`sinkStopped`). */
+  liveFirst: boolean
+  setLiveFirst: (liveFirst: boolean) => void
   /** Stored per-folder collapse, keyed by project root. */
   collapsed: Readonly<Record<string, boolean>>
   setFolderCollapsed: (root: string, collapsed: boolean) => void
@@ -48,14 +55,17 @@ function writeKey(key: string, value: string): void {
 
 const readMode = (): SidebarMode => parseSidebarMode(readKey(SIDEBAR_MODE_KEY))
 const readDensity = (): RailDensity => parseRailDensity(readKey(RAIL_DENSITY_KEY))
+const readLiveFirst = (): boolean => parseLiveFirst(readKey(LIVE_FIRST_KEY))
 const readCollapse = (): Record<string, boolean> => parseFolderCollapse(readKey(FOLDER_COLLAPSE_KEY))
 
 export function useSidebarPrefs(): SidebarPrefs {
   const [mode, setModeState] = useState<SidebarMode>(readMode)
   const [density, setDensityState] = useState<RailDensity>(readDensity)
+  const [liveFirst, setLiveFirstState] = useState<boolean>(readLiveFirst)
   const [collapsed, setCollapsedState] = useState<Readonly<Record<string, boolean>>>(readCollapse)
   useStorageSync(SIDEBAR_MODE_KEY, readMode, setModeState)
   useStorageSync(RAIL_DENSITY_KEY, readDensity, setDensityState)
+  useStorageSync(LIVE_FIRST_KEY, readLiveFirst, setLiveFirstState)
   useStorageSync<Readonly<Record<string, boolean>>>(FOLDER_COLLAPSE_KEY, readCollapse, setCollapsedState)
 
   const setMode = useCallback((next: SidebarMode) => {
@@ -65,6 +75,10 @@ export function useSidebarPrefs(): SidebarPrefs {
   const setDensity = useCallback((next: RailDensity) => {
     setDensityState(next)
     writeKey(RAIL_DENSITY_KEY, next)
+  }, [])
+  const setLiveFirst = useCallback((next: boolean) => {
+    setLiveFirstState(next)
+    writeKey(LIVE_FIRST_KEY, String(next))
   }, [])
   // Folded into a fresh read: the map is one value every window shares.
   const mutateCollapse = useCallback((fn: (stored: Record<string, boolean>) => Record<string, boolean>) => {
@@ -82,5 +96,5 @@ export function useSidebarPrefs(): SidebarPrefs {
     [mutateCollapse]
   )
 
-  return { mode, setMode, density, setDensity, collapsed, setFolderCollapsed, setFoldersCollapsed }
+  return { mode, setMode, density, setDensity, liveFirst, setLiveFirst, collapsed, setFolderCollapsed, setFoldersCollapsed }
 }

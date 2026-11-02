@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_LIVE_FIRST,
   DEFAULT_RAIL_DENSITY,
   DEFAULT_SIDEBAR_MODE,
   parseFolderCollapse,
+  parseLiveFirst,
   parseRailDensity,
   parseSidebarMode,
   withFolderCollapse,
@@ -33,6 +35,29 @@ describe('parseRailDensity', () => {
     const other = DEFAULT_RAIL_DENSITY === 'compact' ? 'spacious' : 'compact'
     for (const raw of [null, '', 'dense', 'Compact']) expect(parseRailDensity(raw, other)).toBe(other)
     expect(parseRailDensity(null)).toBe(DEFAULT_RAIL_DENSITY)
+  })
+})
+
+describe('parseLiveFirst', () => {
+  it('reads both stored values, whichever fallback is given', () => {
+    for (const fallback of [true, false]) {
+      expect(parseLiveFirst('true', fallback)).toBe(true)
+      expect(parseLiveFirst('false', fallback)).toBe(false)
+    }
+  })
+
+  it('falls back to the fallback it is given, at both values', () => {
+    // Both fallbacks, so reading garbage as either fixed value fails one of them.
+    for (const fallback of [true, false]) {
+      for (const raw of [null, '', 'on', 'off', 'True', '1', '0', ' true', '{"enabled":true}']) {
+        expect(parseLiveFirst(raw, fallback)).toBe(fallback)
+      }
+    }
+    expect(parseLiveFirst(null)).toBe(DEFAULT_LIVE_FIRST)
+  })
+
+  it('is off by default', () => {
+    expect(DEFAULT_LIVE_FIRST).toBe(false)
   })
 })
 

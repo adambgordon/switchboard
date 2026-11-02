@@ -10,7 +10,9 @@ import { useStorageSync } from './useStorageSync'
  * shared across windows, so writing this window's stale copy back would undo another window's drag.
  * Re-read, fold in the change, write back — `usePins`' discipline, and exact here because a change
  * touches one key. Nothing is written on mount or on a catalog change; only the events `rowRank` lists
- * (a drop, a Resume, an Unpin, a bind, a first-index hold) call these.
+ * (a drop, a Resume, an Unpin, a bind, a first-index hold, and under "Move stopped conversations down"
+ * the live rows' lift when it is turned on and a row's move down when it stops or is unpinned) call
+ * these.
  */
 export interface RowRank {
   rows: RankOverrides
