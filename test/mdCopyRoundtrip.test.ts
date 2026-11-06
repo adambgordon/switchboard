@@ -752,3 +752,47 @@ describe('literal escaping fuzz', () => {
     }
   })
 })
+
+describe('the HTML a table cell writes', () => {
+  const cell = (...children: CopyNode[]): CopyNode => ({ kind: 'cell', children })
+  const row = (...cells: CopyNode[]): CopyNode => ({ kind: 'row', children: cells })
+  const item = (...children: CopyNode[]): CopyNode => ({ kind: 'item', children })
+  const list = (start: number | null, ...items: CopyNode[]): CopyNode => ({ kind: 'list', start, children: items })
+  const table = (...rows: CopyNode[]): CopyNode => ({ kind: 'table', align: [null], children: rows })
+
+  it('copies a whole table back to its own source', () => {
+    const source = '| F | W |\n| --- | --- |\n| A | **New:** <ul><li>one</li><li>two **b** `x`</li></ul> tail |\n' +
+      '| B | line1<br>line2 |\n| C | <ol><li>a<ul><li>b</li></ul></li></ol> |'
+    expect(complete(markdownCopyNodes(source))).toBe(source)
+  })
+
+  const strong = (text: string): CopyNode => ({ kind: 'strong', children: [copyText(text)] })
+  // The shape the rendered cell reads back as, from the selection walk. Content runs on past each list, and a
+  // list also sits at a cell's edges, so every line boundary is exercised.
+  const rendered = table(
+    row(cell(copyText('H'))),
+    row(cell(strong('New:'), copyText(' '), list(null, item(copyText('one')), item(copyText('a*b*c'))),
+      copyText(' tail '), strong('end'))),
+    row(cell(list(1, item(copyText('a'))))),
+    row(cell(copyText(' '), list(null, item(copyText('p'))), copyText(' '))),
+    row(cell(copyText('line1'), { kind: 'break' }, copyText('line2')))
+  )
+
+  it('writes a rendered cell list and break as HTML in a Markdown table', () => {
+    expect(complete([rendered])).toBe('| H |\n| --- |\n| **New:** <ul><li>one</li><li>a\\*b\\*c</li></ul> tail **end** |\n' +
+      '| <ol><li>a</li></ol> |\n|  <ul><li>p</li></ul>  |\n| line1<br>line2 |')
+  })
+
+  it('sets a rendered cell list on its own lines in text, with no blank edge line', () => {
+    expect(complete([rendered], 'plain')).toBe('H\n"New:\n- one\n- a*b*c\ntail end"\n1. a\n- p\n"line1\nline2"')
+    // A lone cell, as the table button's plain copy reads each one.
+    expect(complete([cell(copyText('x '), list(null, item(copyText('y'))))], 'plain')).toBe('x\n- y')
+  })
+
+  it('copies a partial selection of a cell list as list lines, not HTML', () => {
+    const one = copyText('one'), two = copyText('two')
+    const nodes = [table(row(cell(copyText('H'))), row(cell(copyText('x '), list(null, item(one), item(two)))))]
+    const selection: CopySelection = new Map([[one, { from: 0, to: 3 }], [two, { from: 0, to: 3 }]])
+    expect(serializeCopy(nodes, { mode: 'markdown', intent: 'selection', selection })).toBe('- one\n- two')
+  })
+})

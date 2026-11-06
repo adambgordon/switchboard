@@ -251,3 +251,16 @@ describe('conversationText', () => {
     )
   })
 })
+
+describe('plain copy of the HTML a table cell writes', () => {
+  it('sets a cell list on its own lines and a cell break as a newline', () => {
+    const source = '| F | W |\n| --- | --- |\n| A | **New:** <ul><li>one</li><li>two `x`</li></ul> tail |\n' +
+      '| B | line1<br>line2 |\n| C | <ol><li>a<ul><li>b</li></ul></li></ol> |'
+    expect(markdownToPlainText(source)).toBe('F\tW\nA\t"New:\n- one\n- two x\ntail"\nB\t"line1\nline2"\nC\t"1. a\n   - b"')
+  })
+
+  it('keeps malformed cell HTML and prose HTML as written', () => {
+    expect(markdownToPlainText('| A |\n| --- |\n| <ul><li>a</li> stray </ul> |')).toBe('A\n<ul><li>a</li> stray </ul>')
+    expect(markdownToPlainText('a <br> b <ul><li>c</li></ul>')).toBe('a <br> b <ul><li>c</li></ul>')
+  })
+})

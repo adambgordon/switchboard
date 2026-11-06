@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { normalizeMath } from './mathDelimiters'
 import { copyText, type Alignment, type CopyNode } from './mdCopy'
+import { parseCellHtml, type CellPart, type CellReader } from './cellHtml'
 
 interface MdNode {
   type: string
@@ -19,6 +20,10 @@ interface MdNode {
   identifier?: string
   lang?: string | null
   align?: Alignment[]
+}
+const cellReader: CellReader<MdNode> = {
+  html: node => node.type === 'html' ? node.value ?? '' : null,
+  text: node => node.type === 'text' ? node.value ?? '' : null
 }
 const plain = unified().use(remarkParse).use(remarkGfm)
 const mathDouble = unified().use(remarkParse).use(remarkGfm).use(remarkMath, { singleDollarTextMath: false })
@@ -40,6 +45,11 @@ export function markdownCopyNodes(source: string): CopyNode[] {
   }
   findDefinitions(tree)
   const convertChildren = (node: MdNode): CopyNode[] => (node.children ?? []).flatMap(convert)
+  const convertCellParts = (parts: CellPart<MdNode>[]): CopyNode[] => parts.flatMap((part): CopyNode[] =>
+    part.kind === 'node' ? convert(part.node)
+      : part.kind === 'break' ? [{ kind: 'break' }]
+        : [{ kind: 'list', start: part.ordered ? 1 : null,
+            children: part.items.map(item => ({ kind: 'item', children: convertCellParts(item) })) }])
   const convert = (node: MdNode): CopyNode[] => {
     switch (node.type) {
       case 'definition': case 'footnoteDefinition': return []
@@ -64,7 +74,10 @@ export function markdownCopyNodes(source: string): CopyNode[] {
       }
       case 'table': return [{ kind: 'table', align: node.align ?? [], children: convertChildren(node) }]
       case 'tableRow': return [{ kind: 'row', children: convertChildren(node) }]
-      case 'tableCell': return [{ kind: 'cell', children: convertChildren(node) }]
+      case 'tableCell': {
+        const parts = parseCellHtml(node.children ?? [], cellReader)
+        return [{ kind: 'cell', children: parts ? convertCellParts(parts) : convertChildren(node) }]
+      }
       case 'break': return [{ kind: 'break' }]
       case 'thematicBreak': return [{ kind: 'rule' }]
       case 'footnoteReference': {
