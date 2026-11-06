@@ -156,14 +156,19 @@ export function rowsToText(rows: string[][]): string {
 type CellMode = 'html' | 'lines'
 const LINE: InlineToken = { kind: 'break', marked: false }
 
-function cellListHtml(list: CopyNode & { kind: 'list' }, ctx: Context): string {
+/** The list's tags stay atoms; its items stay inline tokens, so the cell escapes as one passage — a literal delimiter
+ *  in one item can pair with one in the next once both are inline content of the same cell. */
+function cellListTokens(list: CopyNode & { kind: 'list' }, ctx: Context): InlineToken[] {
   const tag = list.start === null ? 'ul' : 'ol'
+  const tokens: InlineToken[] = [{ kind: 'atom', value: `<${tag}>` }]
   // Only a whole table is written as Markdown, so every item is selected.
-  const items = list.children.map(item => {
-    const tokens = planInline(inlineRuns('children' in item ? item.children : [item], ctx, 0, 'html'))
-    return `<li>${emitInline(tokens, true, { blockStart: false })}</li>`
-  })
-  return `<${tag}>${items.join('')}</${tag}>`
+  for (const item of list.children) {
+    tokens.push({ kind: 'atom', value: '<li>' },
+      ...planInline(inlineRuns('children' in item ? item.children : [item], ctx, 0, 'html')),
+      { kind: 'atom', value: '</li>' })
+  }
+  tokens.push({ kind: 'atom', value: `</${tag}>` })
+  return tokens
 }
 
 /** Eligibility belongs to the original selection, before equivalent style runs are grouped. */
@@ -230,7 +235,7 @@ function inlineRuns(nodes: CopyNode[], ctx: Context, inherited = 0, cell?: CellM
           break
         case 'break': tokens = [cell === 'html' ? { kind: 'atom', value: '<br>' } : { kind: 'break', marked }]; break
         case 'list':
-          if (cell === 'html') { tokens = [{ kind: 'atom', value: cellListHtml(node, ctx) }]; break }
+          if (cell === 'html') { tokens = cellListTokens(node, ctx); break }
           if (cell === 'lines') { pushListLines(render(node, ctx)); continue }
           tokens = [{ kind: 'atom', value: render(node, ctx) }]
           break

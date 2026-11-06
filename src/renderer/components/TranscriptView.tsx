@@ -313,14 +313,21 @@ export default function TranscriptView({
       const column = contentRef.current?.getBoundingClientRect() ?? view
       const x = column.left + column.width / 2
       let block: Element | null = null
+      let inside = false
       for (let dy = 1; !block && dy <= ANCHOR_REACH_PX; dy += 8) {
         const hit = document.elementFromPoint(x, view.top + dy)
-        if (hit && el.contains(hit)) block = hit.closest(ANCHOR_BLOCKS)
+        if (hit && el.contains(hit)) {
+          inside = true
+          block = hit.closest(ANCHOR_BLOCKS)
+        }
       }
       if (!block) {
         const hit = document.elementFromPoint(x, view.top + 1)
         block = hit && el.contains(hit) ? hit.closest('article') : null
       }
+      // Nothing of the transcript under any probe: it is covered or not hit-testable (a pane divider drag turns off
+      // the panes' pointer events), which says nothing about where the reader is. Keep the position already held.
+      if (!inside) return
       if (!block || !el.contains(block)) {
         anchorRef.current = null
         return
@@ -651,13 +658,21 @@ export default function TranscriptView({
   // "Expand" affordance settling in via its own ResizeObserver, font/markdown reflow — that don't
   // flow through the grow/compensation path. A ResizeObserver fires after layout but BEFORE paint, so
   // re-pinning here corrects the change in the same frame, no flash. Only while pinned (near bottom);
-  // scrolled-up history reading is the compensation effect's job and must not be yanked down.
+  // scrolled-up history reading is the compensation effect's job and must not be yanked down — there, a
+  // resize only refreshes the reading anchor.
   useEffect(() => {
     const content = contentRef.current
     const el = scrollElRef.current
     if (!content || !el) return
     const ro = new ResizeObserver(() => {
-      if (!nearBottomRef.current) return
+      if (!nearBottomRef.current) {
+        // Content resized without a width change: a tool run opened or a result expanded, which changes the anchored
+        // block's height while the reader stays put. Re-record, or the next width change would apply the old block's
+        // fraction to the new one. A width change resizes the content too, but this observer is created before the
+        // width observer below and observers are notified in creation order, so here that width is still unhandled.
+        if (el.clientWidth === observedWidthRef.current) scheduleAnchor()
+        return
+      }
       if (el.scrollHeight - el.scrollTop - el.clientHeight < 1) return
       el.scrollTop = el.scrollHeight
       lastTopRef.current = el.scrollTop
@@ -665,14 +680,16 @@ export default function TranscriptView({
     })
     ro.observe(content)
     return () => ro.disconnect()
-  }, [transcript, rememberPosition])
+  }, [transcript, rememberPosition, scheduleAnchor])
 
   // Hold the reading position through a width change (window, split, rail or zoom), which rewraps the text
   // above it. Fires after layout and before paint, so the corrected position is the first one drawn.
   useEffect(() => {
     const el = scrollElRef.current
     if (!el) return
-    observedWidthRef.current = el.clientWidth
+    // Kept across restarts: a live conversation's update restarts this effect, and one landing in the same frame as
+    // a width change would otherwise reset the baseline and lose that change's restore.
+    observedWidthRef.current ??= el.clientWidth
     const ro = new ResizeObserver(() => {
       if (el.clientWidth === observedWidthRef.current) return
       observedWidthRef.current = el.clientWidth

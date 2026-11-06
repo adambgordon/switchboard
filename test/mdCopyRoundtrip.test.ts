@@ -766,6 +766,14 @@ describe('the HTML a table cell writes', () => {
     expect(complete(markdownCopyNodes(source))).toBe(source)
   })
 
+  it('escapes a cell list as one passage, so delimiters in different items cannot pair', () => {
+    // Each item alone holds one unpaired asterisk; across the items they would make one emphasis span.
+    const source = '| F |\n| --- |\n| <ul><li>\\*a</li><li>b\\*</li></ul> |'
+    const copied = complete(markdownCopyNodes(source))
+    expect(copied).toBe(source)
+    expect(types(parse(copied))).not.toContain('emphasis')
+  })
+
   const strong = (text: string): CopyNode => ({ kind: 'strong', children: [copyText(text)] })
   // The shape the rendered cell reads back as, from the selection walk. Content runs on past each list, and a
   // list also sits at a cell's edges, so every line boundary is exercised.
