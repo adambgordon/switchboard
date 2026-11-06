@@ -262,6 +262,23 @@ async function run() {
     await expectRange(prefix + 'table/cell-fragments', ['td', 1], ['td', 4, 1], 'harlie\tDelt')
     await call('mountCopy', { source: '| A | B | C |\n| --- | --- | --- |\n| x | | z |', theme, agent })
     await expectContents(prefix + 'table/empty-cell', 'tbody', 'x\t\tz')
+    // A cell's lines and lists, written as inline HTML, render; malformed cell HTML stays literal.
+    const cellTable = '| A | B |\n| --- | --- |\n| x | **New:** <ul><li>one</li><li>two `c`</li></ul> tail |\n| y | l1<br>l2 |\n' +
+      '| z | <ul><li>a</li> stray </ul> |'
+    await call('mountCopy', { source: 'Before\n\n' + cellTable, theme, agent })
+    check(prefix + 'cell-html/rendered', await js(`[document.querySelectorAll('td .md-ul > .md-li').length,
+      document.querySelectorAll('td br').length, document.querySelectorAll('td')[5].textContent].join('|')`),
+    '2|1|<ul><li>a</li> stray </ul>')
+    // The literal cell's tags are shown as text, so they are escaped to paste as text.
+    await expectContents(prefix + 'cell-html/markdown-table', '.md', 'Before\n\n' +
+      cellTable.replace('<ul><li>a</li> stray </ul>', '\\<ul>\\<li>a\\</li> stray \\</ul>'))
+    await expectRange(prefix + 'cell-html/inside-item', ['td .md-li', 0], ['td .md-li', 3], 'one')
+    const cellLines = 'A\tB\nx\t"New:\n- one\n- two c\ntail"\ny\t"l1\nl2"\nz\t<ul><li>a</li> stray </ul>'
+    check(prefix + 'cell-html/button-markdown', await call('copyButton', 'Copy table'), cellTable)
+    await call('copyMode', 'plain')
+    await expectContents(prefix + 'cell-html/plain-table', 'table', cellLines)
+    check(prefix + 'cell-html/button-plain', await call('copyButton', 'Copy table'), cellLines)
+    check(prefix + 'cell-html/turn-plain', await call('copyButton', 'Copy turn'), 'Before\n\n' + cellLines)
     await call('mountCopy', { source: 'L ![image label](https://example.org/image.png) R', theme, agent })
     await expectRange(prefix + 'image-partial', ['[data-copy-label]', 6], ['[data-copy-label]', 11], 'label')
     await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](https://example.org/image.png) R')
