@@ -45,14 +45,17 @@ window.mountCopy = ({ source = '', blocks, messages, agent = 'claude', theme = '
 }
 window.copyMode = mode => { markdown = mode === 'markdown'; render() }
 window.copyWidth = size => { width = size; render() }
-// A window drag: a new width every frame, set from an animation callback, so it lands before the transcript's
-// own callbacks for that frame and before its resize observer, as a native resize does.
-window.copyDrag = (from, to, step) => new Promise(resolve => {
-  let size = from
+// A window drag: a new width most frames, set from an animation callback, so it lands before the transcript's
+// own callbacks for that frame and before its resize observer, as a native resize does. Every `idle`th frame
+// keeps its width, as frames of a real drag do when no resize event arrives in time.
+window.copyDrag = (from, to, step, idle = 3) => new Promise(resolve => {
+  let size = from, count = 0
   const frame = () => {
-    size += Math.sign(to - from) * step
-    if ((to - size) * Math.sign(to - from) < 0) size = to
-    window.copyWidth(size)
+    if (++count % idle) {
+      size += Math.sign(to - from) * step
+      if ((to - size) * Math.sign(to - from) < 0) size = to
+      window.copyWidth(size)
+    }
     if (size === to) resolve()
     else requestAnimationFrame(frame)
   }

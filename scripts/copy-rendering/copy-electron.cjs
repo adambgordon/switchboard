@@ -344,6 +344,21 @@ async function run() {
       const runAfter = await runPoint()
       check(prefix + 'resize-anchor/tool-run/drag-' + pace, Math.abs(runAfter - runBefore) < 0.1 ? 'held' : JSON.stringify({ runBefore, runAfter }), 'held')
     }
+    // ⌘+ / ⌘− change the column's width in CSS pixels, so they rewrap it the same way. The pane fills the window
+    // here, as in the app; a fixed CSS width would not change with zoom.
+    await call('mountCopy', { messages: mixed, theme, agent, size: '100%' })
+    await settle()
+    await js(`(() => { const s = document.querySelector('.transcript-scroll'), v = s.getBoundingClientRect(), r = ${run}.getBoundingClientRect()
+      s.scrollTop += r.top - v.top + r.height * 0.4 })()`)
+    await settle()
+    const zoomBefore = await runPoint()
+    for (const zoom of [1, -1, 0]) {
+      win.webContents.setZoomLevel(zoom)
+      await js('new Promise(resolve => setTimeout(resolve, 100))')
+      await settle()
+      const zoomed = await runPoint()
+      check(prefix + 'resize-anchor/tool-run/zoom-' + zoom, Math.abs(zoomed - zoomBefore) < 0.1 ? 'held' : JSON.stringify({ zoomBefore, zoomed }), 'held')
+    }
     await call('mountCopy', { source: 'L ![image label](https://example.org/image.png) R', theme, agent })
     await expectRange(prefix + 'image-partial', ['[data-copy-label]', 6], ['[data-copy-label]', 11], 'label')
     await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](https://example.org/image.png) R')

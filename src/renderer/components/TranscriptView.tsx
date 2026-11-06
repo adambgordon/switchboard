@@ -154,9 +154,13 @@ export default function TranscriptView({
   // observer below. `anchorWriteRef` is the scrollTop that observer last wrote: the scroll event that write
   // causes must not re-record. Re-recording after each restore carries that restore's error into the next, so
   // a long drag creeps; the anchor stays the one the reader set until they scroll again.
+  // `observedWidthRef` is the width that observer last handled. A zoom step rescales scrollTop and fires a
+  // scroll event of the browser's own, and animation callbacks run before resize observers, so a recording can
+  // see a width the observer has not restored for yet; it is skipped then, or it would record the drifted position.
   const anchorRef = useRef<({ el: Element } & AnchorPoint) | null>(null)
   const anchorRafRef = useRef<number | null>(null)
   const anchorWriteRef = useRef<number | null>(null)
+  const observedWidthRef = useRef<number | null>(null)
 
   // Jump-to-edge affordance — reactive flags for whether the scroll sits near the top / bottom, driving
   // the floating buttons (shown only when scrolled away from that edge). nearBottomRef below stays the
@@ -304,6 +308,7 @@ export default function TranscriptView({
         anchorRef.current = null
         return
       }
+      if (el.clientWidth !== observedWidthRef.current) return
       const view = el.getBoundingClientRect()
       const column = contentRef.current?.getBoundingClientRect() ?? view
       const x = column.left + column.width / 2
@@ -667,10 +672,10 @@ export default function TranscriptView({
   useEffect(() => {
     const el = scrollElRef.current
     if (!el) return
-    let width = el.clientWidth
+    observedWidthRef.current = el.clientWidth
     const ro = new ResizeObserver(() => {
-      if (el.clientWidth === width) return
-      width = el.clientWidth
+      if (el.clientWidth === observedWidthRef.current) return
+      observedWidthRef.current = el.clientWidth
       const anchor = anchorRef.current
       if (!anchor || nearBottomRef.current || refreshScrollRef.current || !anchor.el.isConnected) return
       const rect = anchor.el.getBoundingClientRect()
