@@ -10,6 +10,7 @@ import { copySelection } from '../lib/mdCopyDom'
 import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
 import { attachAutoHideWithin } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
+import { anchorPoint, anchoredScrollTop, type AnchorPoint } from '../lib/scrollAnchor'
 
 const NOOP = (): void => {}
 
@@ -94,6 +95,11 @@ const GROW_TRIGGER_PX = 1500
 // Most loads land well inside this, and a skeleton shown for a frame or two reads as a flicker; the
 // pane stays blank until a load has visibly taken a while.
 const SKELETON_DELAY_MS = 150
+// The blocks a reading position is anchored to across a width change. Each rewraps as a unit, so a point inside
+// one stays meaningful. An edge in the gap between blocks anchors to the next block within ANCHOR_REACH_PX
+// below it, and only then to the whole message, which rewraps too much to hold a position precisely.
+const ANCHOR_BLOCKS = 'p, li, pre, tr, h1, h2, h3, h4, h5, h6, blockquote, .tool-run, .message-meta, .block-chip'
+const ANCHOR_REACH_PX = 64
 
 function LoadingState(): ReactNode {
   const [shown, setShown] = useState(false)
@@ -143,6 +149,11 @@ export default function TranscriptView({
   // The refresh zoom temporarily changes the viewport's CSS-pixel geometry. Preserve the logical
   // reading position while those browser-generated scroll events pass through.
   const refreshScrollRef = useRef<{ scrollTop: number; pinned: boolean } | null>(null)
+  // The reading position held through a width change, which rewraps everything above it. Browser scroll
+  // anchoring is off (see transcript.css), so it is recorded after each scroll and restored by the width
+  // observer below.
+  const anchorRef = useRef<({ el: Element } & AnchorPoint) | null>(null)
+  const anchorRafRef = useRef<number | null>(null)
 
   // Jump-to-edge affordance — reactive flags for whether the scroll sits near the top / bottom, driving
   // the floating buttons (shown only when scrolled away from that edge). nearBottomRef below stays the
@@ -279,6 +290,38 @@ export default function TranscriptView({
     }
   }, [transcript?.sessionId])
 
+  // At most once a frame: the hit test reads layout, which a scroll leaves clean.
+  const scheduleAnchor = useCallback((): void => {
+    if (anchorRafRef.current != null) return
+    anchorRafRef.current = requestAnimationFrame(() => {
+      anchorRafRef.current = null
+      const el = scrollElRef.current
+      // Pinned and top-of-transcript positions already survive a width change.
+      if (!el || nearBottomRef.current || el.scrollTop <= 0) {
+        anchorRef.current = null
+        return
+      }
+      const view = el.getBoundingClientRect()
+      const column = contentRef.current?.getBoundingClientRect() ?? view
+      const x = column.left + column.width / 2
+      let block: Element | null = null
+      for (let dy = 1; !block && dy <= ANCHOR_REACH_PX; dy += 8) {
+        const hit = document.elementFromPoint(x, view.top + dy)
+        if (hit && el.contains(hit)) block = hit.closest(ANCHOR_BLOCKS)
+      }
+      if (!block) {
+        const hit = document.elementFromPoint(x, view.top + 1)
+        block = hit && el.contains(hit) ? hit.closest('article') : null
+      }
+      if (!block || !el.contains(block)) {
+        anchorRef.current = null
+        return
+      }
+      const rect = block.getBoundingClientRect()
+      anchorRef.current = { el: block, ...anchorPoint(rect.top, rect.height, view.top) }
+    })
+  }, [])
+
   const handleScroll = useCallback((): void => {
     const el = scrollElRef.current
     if (!el) return
@@ -287,6 +330,7 @@ export default function TranscriptView({
     const prev = lastTopRef.current
     lastTopRef.current = top
     if (refreshScrollRef.current) return
+    scheduleAnchor()
     if (nearBottomRef.current) {
       // Pinned to the bottom. A gap to the bottom can open for two very different reasons:
       //  • the user scrolled UP — scrollTop DECREASES — which releases the pin; vs
@@ -321,7 +365,7 @@ export default function TranscriptView({
     }
     measureEdges(el)
     rememberPosition(el)
-  }, [measureEdges, rememberPosition])
+  }, [measureEdges, rememberPosition, scheduleAnchor])
 
   // Native Copy and ⌘C both dispatch this event. Both formats use the same semantic selection.
   const handleCopy = useCallback((e: ClipboardEvent): void => {
@@ -612,6 +656,33 @@ export default function TranscriptView({
     ro.observe(content)
     return () => ro.disconnect()
   }, [transcript, rememberPosition])
+
+  // Hold the reading position through a width change (window, split, rail or zoom), which rewraps the text
+  // above it. Fires after layout and before paint, so the corrected position is the first one drawn.
+  useEffect(() => {
+    const el = scrollElRef.current
+    if (!el) return
+    let width = el.clientWidth
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      const anchor = anchorRef.current
+      if (!anchor || nearBottomRef.current || refreshScrollRef.current || !anchor.el.isConnected) return
+      const rect = anchor.el.getBoundingClientRect()
+      const next = anchoredScrollTop(el.scrollTop, rect.top, rect.height, el.getBoundingClientRect().top, anchor)
+      if (Math.abs(next - el.scrollTop) < 0.5) return
+      el.scrollTop = next
+      lastTopRef.current = el.scrollTop
+      measureEdges(el)
+      rememberPosition(el)
+    })
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      if (anchorRafRef.current != null) cancelAnimationFrame(anchorRafRef.current)
+      anchorRafRef.current = null
+    }
+  }, [transcript, measureEdges, rememberPosition])
 
   if (loading && !transcript) {
     return (

@@ -279,6 +279,45 @@ async function run() {
     await expectContents(prefix + 'cell-html/plain-table', 'table', cellLines)
     check(prefix + 'cell-html/button-plain', await call('copyButton', 'Copy table'), cellLines)
     check(prefix + 'cell-html/turn-plain', await call('copyButton', 'Copy turn'), 'Before\n\n' + cellLines)
+    // A width change rewraps the text above a mid-transcript reading position; the same passage stays at the top.
+    const words = 'reflowing transcript prose that wraps differently at every width '.repeat(6)
+    await call('mountCopy', { source: Array.from({ length: 60 }, (_, i) => 'P' + String(i).padStart(2, '0') + ' ' + words).join('\n\n'),
+      theme, agent, size: 760 })
+    await settle()
+    // Where paragraph `label` sits against the top edge, found by geometry rather than the transcript's own hit
+    // test: inside it, as a fraction of its height; above it, as a pixel gap.
+    const place = label => js(`(() => {
+      const view = document.querySelector('.transcript-scroll').getBoundingClientRect()
+      const rect = [...document.querySelectorAll('.md-p')].find(p => p.textContent.startsWith(${JSON.stringify(label)})).getBoundingClientRect()
+      return rect.top > view.top ? { gap: rect.top - view.top } : { fraction: (view.top - rect.top) / rect.height, height: rect.height }
+    })()`)
+    const near = (now, then) => then.gap !== undefined ? Math.abs(now.gap - then.gap) <= 1
+      : now.fraction !== undefined && Math.abs(now.fraction - then.fraction) * now.height <= 1.5
+    for (const [name, label, edge] of [['inside', 'P30', 'rect.top - view.top + rect.height * 0.4'], ['gap', 'P20', 'rect.top - view.top - 6']]) {
+      await call('copyWidth', 760)
+      await js(`(() => {
+        const scroll = document.querySelector('.transcript-scroll'), view = scroll.getBoundingClientRect()
+        const rect = [...document.querySelectorAll('.md-p')].find(p => p.textContent.startsWith(${JSON.stringify(label)})).getBoundingClientRect()
+        scroll.scrollTop += ${edge}
+      })()`)
+      await settle()
+      const before = await place(label)
+      for (const size of [480, 620, 760]) {
+        await call('copyWidth', size)
+        await settle()
+        const after = await place(label)
+        check(prefix + 'resize-anchor/' + name + '/' + size, near(after, before) ? 'held' : JSON.stringify({ before, after }), 'held')
+      }
+      // A drag resizes a frame at a time; the position must not creep over many small steps.
+      for (let step = 1; step < 80; step++) {
+        await call('copyWidth', 760 - Math.min(step, 80 - step) * 7)
+        await settle()
+      }
+      await call('copyWidth', 760)
+      await settle()
+      const dragged = await place(label)
+      check(prefix + 'resize-anchor/' + name + '/drag', near(dragged, before) ? 'held' : JSON.stringify({ before, dragged }), 'held')
+    }
     await call('mountCopy', { source: 'L ![image label](https://example.org/image.png) R', theme, agent })
     await expectRange(prefix + 'image-partial', ['[data-copy-label]', 6], ['[data-copy-label]', 11], 'label')
     await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](https://example.org/image.png) R')

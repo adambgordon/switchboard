@@ -16,7 +16,8 @@
   /* Manual scroll compensation owns position during scroll-up window-growth (TranscriptView), so
      disable the browser's scroll anchoring — otherwise both adjust on a prepend and the view
      double-shifts. (Native anchoring also can't help here anyway: it's suppressed once we set scrollTop
-     programmatically, which the pin/compensation does every grow.) */
+     programmatically, which the pin/compensation does every grow.) A width change, which rewraps the text
+     above the reading position, is anchored manually too. */
   overflow-anchor: none;
   background: var(--paper-pane);
   /* reading text must be selectable even though body disables selection */
