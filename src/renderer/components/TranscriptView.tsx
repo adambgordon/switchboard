@@ -10,6 +10,7 @@ import { copySelection } from '../lib/mdCopyDom'
 import { buildTranscript, type TranscriptItem } from '../lib/messageGroups'
 import { attachAutoHideWithin } from '../lib/useAutoHideScrollbar'
 import { useTranscriptSearch } from '../lib/useTranscriptSearch'
+import { anchorPoint, anchoredScrollTop, type AnchorPoint } from '../lib/scrollAnchor'
 
 const NOOP = (): void => {}
 
@@ -94,6 +95,11 @@ const GROW_TRIGGER_PX = 1500
 // Most loads land well inside this, and a skeleton shown for a frame or two reads as a flicker; the
 // pane stays blank until a load has visibly taken a while.
 const SKELETON_DELAY_MS = 150
+// The blocks a reading position is anchored to across a width change. Each rewraps as a unit, so a point inside
+// one stays meaningful. An edge in the gap between blocks anchors to the next block within ANCHOR_REACH_PX
+// below it, and only then to the whole message, which rewraps too much to hold a position precisely.
+const ANCHOR_BLOCKS = 'p, li, pre, tr, h1, h2, h3, h4, h5, h6, blockquote, .tool-run, .message-meta, .block-chip'
+const ANCHOR_REACH_PX = 64
 
 function LoadingState(): ReactNode {
   const [shown, setShown] = useState(false)
@@ -143,6 +149,18 @@ export default function TranscriptView({
   // The refresh zoom temporarily changes the viewport's CSS-pixel geometry. Preserve the logical
   // reading position while those browser-generated scroll events pass through.
   const refreshScrollRef = useRef<{ scrollTop: number; pinned: boolean } | null>(null)
+  // The reading position held through a width change, which rewraps everything above it. Browser scroll
+  // anchoring is off (see transcript.css), so it is recorded after each scroll and restored by the width
+  // observer below. `anchorWriteRef` is the scrollTop that observer last wrote: the scroll event that write
+  // causes must not re-record. Re-recording after each restore carries that restore's error into the next, so
+  // a long drag creeps; the anchor stays the one the reader set until they scroll again.
+  // `observedWidthRef` is the width that observer last handled. A zoom step rescales scrollTop and fires a
+  // scroll event of the browser's own, and animation callbacks run before resize observers, so a recording can
+  // see a width the observer has not restored for yet; it is skipped then, or it would record the drifted position.
+  const anchorRef = useRef<({ el: Element } & AnchorPoint) | null>(null)
+  const anchorRafRef = useRef<number | null>(null)
+  const anchorWriteRef = useRef<number | null>(null)
+  const observedWidthRef = useRef<number | null>(null)
 
   // Jump-to-edge affordance — reactive flags for whether the scroll sits near the top / bottom, driving
   // the floating buttons (shown only when scrolled away from that edge). nearBottomRef below stays the
@@ -279,6 +297,46 @@ export default function TranscriptView({
     }
   }, [transcript?.sessionId])
 
+  // At most once a frame: the hit test reads layout, which a scroll leaves clean.
+  const scheduleAnchor = useCallback((): void => {
+    if (anchorRafRef.current != null) return
+    anchorRafRef.current = requestAnimationFrame(() => {
+      anchorRafRef.current = null
+      const el = scrollElRef.current
+      // Pinned and top-of-transcript positions already survive a width change.
+      if (!el || nearBottomRef.current || el.scrollTop <= 0) {
+        anchorRef.current = null
+        return
+      }
+      if (el.clientWidth !== observedWidthRef.current) return
+      const view = el.getBoundingClientRect()
+      const column = contentRef.current?.getBoundingClientRect() ?? view
+      const x = column.left + column.width / 2
+      let block: Element | null = null
+      let inside = false
+      for (let dy = 1; !block && dy <= ANCHOR_REACH_PX; dy += 8) {
+        const hit = document.elementFromPoint(x, view.top + dy)
+        if (hit && el.contains(hit)) {
+          inside = true
+          block = hit.closest(ANCHOR_BLOCKS)
+        }
+      }
+      if (!block) {
+        const hit = document.elementFromPoint(x, view.top + 1)
+        block = hit && el.contains(hit) ? hit.closest('article') : null
+      }
+      // Nothing of the transcript under any probe: it is covered or not hit-testable (a pane divider drag turns off
+      // the panes' pointer events), which says nothing about where the reader is. Keep the position already held.
+      if (!inside) return
+      if (!block || !el.contains(block)) {
+        anchorRef.current = null
+        return
+      }
+      const rect = block.getBoundingClientRect()
+      anchorRef.current = { el: block, ...anchorPoint(rect.top, rect.height, view.top) }
+    })
+  }, [])
+
   const handleScroll = useCallback((): void => {
     const el = scrollElRef.current
     if (!el) return
@@ -287,6 +345,9 @@ export default function TranscriptView({
     const prev = lastTopRef.current
     lastTopRef.current = top
     if (refreshScrollRef.current) return
+    const restored = anchorWriteRef.current
+    anchorWriteRef.current = null
+    if (restored === null || Math.abs(top - restored) >= 1) scheduleAnchor()
     if (nearBottomRef.current) {
       // Pinned to the bottom. A gap to the bottom can open for two very different reasons:
       //  • the user scrolled UP — scrollTop DECREASES — which releases the pin; vs
@@ -321,7 +382,7 @@ export default function TranscriptView({
     }
     measureEdges(el)
     rememberPosition(el)
-  }, [measureEdges, rememberPosition])
+  }, [measureEdges, rememberPosition, scheduleAnchor])
 
   // Native Copy and ⌘C both dispatch this event. Both formats use the same semantic selection.
   const handleCopy = useCallback((e: ClipboardEvent): void => {
@@ -597,13 +658,21 @@ export default function TranscriptView({
   // "Expand" affordance settling in via its own ResizeObserver, font/markdown reflow — that don't
   // flow through the grow/compensation path. A ResizeObserver fires after layout but BEFORE paint, so
   // re-pinning here corrects the change in the same frame, no flash. Only while pinned (near bottom);
-  // scrolled-up history reading is the compensation effect's job and must not be yanked down.
+  // scrolled-up history reading is the compensation effect's job and must not be yanked down — there, a
+  // resize only refreshes the reading anchor.
   useEffect(() => {
     const content = contentRef.current
     const el = scrollElRef.current
     if (!content || !el) return
     const ro = new ResizeObserver(() => {
-      if (!nearBottomRef.current) return
+      if (!nearBottomRef.current) {
+        // Content resized without a width change: a tool run opened or a result expanded, which changes the anchored
+        // block's height while the reader stays put. Re-record, or the next width change would apply the old block's
+        // fraction to the new one. A width change resizes the content too, but this observer is created before the
+        // width observer below and observers are notified in creation order, so here that width is still unhandled.
+        if (el.clientWidth === observedWidthRef.current) scheduleAnchor()
+        return
+      }
       if (el.scrollHeight - el.scrollTop - el.clientHeight < 1) return
       el.scrollTop = el.scrollHeight
       lastTopRef.current = el.scrollTop
@@ -611,7 +680,37 @@ export default function TranscriptView({
     })
     ro.observe(content)
     return () => ro.disconnect()
-  }, [transcript, rememberPosition])
+  }, [transcript, rememberPosition, scheduleAnchor])
+
+  // Hold the reading position through a width change (window, split, rail or zoom), which rewraps the text
+  // above it. Fires after layout and before paint, so the corrected position is the first one drawn.
+  useEffect(() => {
+    const el = scrollElRef.current
+    if (!el) return
+    // Kept across restarts: a live conversation's update restarts this effect, and one landing in the same frame as
+    // a width change would otherwise reset the baseline and lose that change's restore.
+    observedWidthRef.current ??= el.clientWidth
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === observedWidthRef.current) return
+      observedWidthRef.current = el.clientWidth
+      const anchor = anchorRef.current
+      if (!anchor || nearBottomRef.current || refreshScrollRef.current || !anchor.el.isConnected) return
+      const rect = anchor.el.getBoundingClientRect()
+      const next = anchoredScrollTop(el.scrollTop, rect.top, rect.height, el.getBoundingClientRect().top, anchor)
+      if (Math.abs(next - el.scrollTop) < 0.5) return
+      el.scrollTop = next
+      anchorWriteRef.current = el.scrollTop
+      lastTopRef.current = el.scrollTop
+      measureEdges(el)
+      rememberPosition(el)
+    })
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      if (anchorRafRef.current != null) cancelAnimationFrame(anchorRafRef.current)
+      anchorRafRef.current = null
+    }
+  }, [transcript, measureEdges, rememberPosition])
 
   if (loading && !transcript) {
     return (

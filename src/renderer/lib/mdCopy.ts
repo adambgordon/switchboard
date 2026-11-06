@@ -149,9 +149,57 @@ export function rowsToText(rows: string[][]): string {
   return rows.map(row => row.map(field).join('\t')).join('\n')
 }
 
+/**
+ * A table cell's lines and lists exist only as inline HTML in the source (see cellHtml.ts). A cell pasted as a
+ * Markdown table writes them back as that HTML; a cell pasted as text sets each list on its own lines.
+ */
+type CellMode = 'html' | 'lines'
+const LINE: InlineToken = { kind: 'break', marked: false }
+
+/** The list's tags stay atoms; its items stay inline tokens, so the cell escapes as one passage — a literal delimiter
+ *  in one item can pair with one in the next once both are inline content of the same cell. */
+function cellListTokens(list: CopyNode & { kind: 'list' }, ctx: Context): InlineToken[] {
+  const tag = list.start === null ? 'ul' : 'ol'
+  const tokens: InlineToken[] = [{ kind: 'atom', value: `<${tag}>` }]
+  // Only a whole table is written as Markdown, so every item is selected.
+  for (const item of list.children) {
+    tokens.push({ kind: 'atom', value: '<li>' },
+      ...planInline(inlineRuns('children' in item ? item.children : [item], ctx, 0, 'html')),
+      { kind: 'atom', value: '</li>' })
+  }
+  tokens.push({ kind: 'atom', value: `</${tag}>` })
+  return tokens
+}
+
 /** Eligibility belongs to the original selection, before equivalent style runs are grouped. */
-function inlineRuns(nodes: CopyNode[], ctx: Context, inherited = 0): InlineRun[] {
+function inlineRuns(nodes: CopyNode[], ctx: Context, inherited = 0, cell?: CellMode): InlineRun[] {
   const runs: InlineRun[] = []
+  // Set after a list in a cell pasted as text: the next content starts its own line.
+  let afterList = false
+  const push = (run: InlineRun): void => {
+    if (afterList) {
+      const head = run.tokens[0]
+      if (head.kind === 'text') {
+        head.value = head.value.trimStart()
+        if (!head.value) run.tokens.shift()
+      }
+      if (!run.tokens.length) return
+      run.tokens.unshift(LINE)
+      afterList = false
+    }
+    runs.push(run)
+  }
+  const pushListLines = (value: string): void => {
+    const last = runs[runs.length - 1]
+    const tail = last?.tokens[last.tokens.length - 1]
+    if (tail?.kind === 'text') {
+      tail.value = tail.value.trimEnd()
+      if (!tail.value) last.tokens.pop()
+      if (!last.tokens.length) runs.pop()
+    }
+    push({ styles: 0, tokens: runs.length ? [LINE, { kind: 'atom', value }] : [{ kind: 'atom', value }] })
+    afterList = true
+  }
   const visit = (children: CopyNode[], styles: number): void => {
     for (const node of children) {
       const extent = ctx.extents.get(node)!
@@ -166,7 +214,7 @@ function inlineRuns(nodes: CopyNode[], ctx: Context, inherited = 0): InlineRun[]
       switch (node.kind) {
         case 'text': tokens = extent.selected ? [{ kind: 'text', value: extent.selected }] : []; break
         case 'link': {
-          const label = planInline(inlineRuns(node.children, ctx, styles), styles)
+          const label = planInline(inlineRuns(node.children, ctx, styles, cell), styles)
           tokens = marked ? [{ kind: 'atom', value: '[' }, ...label,
             { kind: 'atom', value: `](${escapeDestination(node.url)}${linkTitle(node.title)})` }] : label
           break
@@ -185,18 +233,25 @@ function inlineRuns(nodes: CopyNode[], ctx: Context, inherited = 0): InlineRun[]
           tokens = [{ kind: marked ? node.display ? 'atom' : 'math' : 'text', value: marked
             ? node.display ? `$$\n${extent.selected}\n$$` : `$${extent.selected}$` : extent.selected }]
           break
-        case 'break': tokens = [{ kind: 'break', marked }]; break
+        case 'break': tokens = [cell === 'html' ? { kind: 'atom', value: '<br>' } : { kind: 'break', marked }]; break
+        case 'list':
+          if (cell === 'html') { tokens = cellListTokens(node, ctx); break }
+          if (cell === 'lines') { pushListLines(render(node, ctx)); continue }
+          tokens = [{ kind: 'atom', value: render(node, ctx) }]
+          break
         default: tokens = [{ kind: 'atom', value: render(node, ctx) }]
       }
       tokens = tokens.filter(token => token.kind === 'break' || token.value !== '')
-      if (tokens.length) runs.push({ styles, tokens })
+      if (tokens.length) push({ styles, tokens })
     }
   }
   visit(nodes, inherited)
   return runs
 }
-function renderInline(nodes: CopyNode[], ctx: Context, escaped = false, context: InlineContext = {}): string {
-  const tokens = planInline(inlineRuns(nodes, ctx))
+function renderInline(
+  nodes: CopyNode[], ctx: Context, escaped = false, context: InlineContext = {}, cell?: CellMode
+): string {
+  const tokens = planInline(inlineRuns(nodes, ctx, 0, cell))
   return emitInline(tokens, ctx.options.mode === 'markdown' && (escaped || hasInlineMarkup(tokens)), context)
 }
 /** Separate copy units retain a paragraph boundary even when their payload is inline. */
@@ -256,7 +311,7 @@ function renderTable(node: CopyNode & { kind: 'table' }, ctx: Context): string {
   const markdown = ctx.options.mode === 'markdown' && retained(node, ctx)
   const plans = node.children.filter(row => ctx.extents.get(row)!.active).map(row =>
     'children' in row ? row.children.filter(cell => ctx.extents.get(cell)!.active)
-      .map(cell => planInline(inlineRuns('children' in cell ? cell.children : [cell], ctx))) : []
+      .map(cell => planInline(inlineRuns('children' in cell ? cell.children : [cell], ctx, 0, markdown ? 'html' : 'lines'))) : []
   ).filter(row => row.length > 0)
   const protect = ctx.options.mode === 'markdown' && (markdown || plans.some(row => row.some(hasInlineMarkup)))
   // Table cells parse separately and inline-only.
@@ -275,8 +330,9 @@ function render(node: CopyNode, ctx: Context, escaped = false): string {
   const marked = markdown && retained(node, ctx)
   switch (node.kind) {
     case 'text': return renderInline([node], ctx, escaped)
-    case 'inline': case 'paragraph': case 'cell': case 'row':
+    case 'inline': case 'paragraph': case 'row':
       return renderInline(node.children, ctx, escaped)
+    case 'cell': return renderInline(node.children, ctx, escaped, {}, 'lines')
     case 'flow': return renderFlow(node.children, ctx, escaped)
     case 'strong': case 'em': case 'strike': return renderInline([node], ctx, escaped)
     case 'heading': {

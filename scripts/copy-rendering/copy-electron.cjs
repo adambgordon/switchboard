@@ -262,6 +262,166 @@ async function run() {
     await expectRange(prefix + 'table/cell-fragments', ['td', 1], ['td', 4, 1], 'harlie\tDelt')
     await call('mountCopy', { source: '| A | B | C |\n| --- | --- | --- |\n| x | | z |', theme, agent })
     await expectContents(prefix + 'table/empty-cell', 'tbody', 'x\t\tz')
+    // A cell's lines and lists, written as inline HTML, render; malformed cell HTML stays literal.
+    const cellTable = '| A | B |\n| --- | --- |\n| x | **New:** <ul><li>one</li><li>two `c`</li></ul> tail |\n| y | l1<br>l2 |\n' +
+      '| z | <ul><li>a</li> stray </ul> |'
+    await call('mountCopy', { source: 'Before\n\n' + cellTable, theme, agent })
+    check(prefix + 'cell-html/rendered', await js(`[document.querySelectorAll('td .md-ul > .md-li').length,
+      document.querySelectorAll('td br').length, document.querySelectorAll('td')[5].textContent].join('|')`),
+    '2|1|<ul><li>a</li> stray </ul>')
+    // The literal cell's tags are shown as text, so they are escaped to paste as text.
+    await expectContents(prefix + 'cell-html/markdown-table', '.md', 'Before\n\n' +
+      cellTable.replace('<ul><li>a</li> stray </ul>', '\\<ul>\\<li>a\\</li> stray \\</ul>'))
+    await expectRange(prefix + 'cell-html/inside-item', ['td .md-li', 0], ['td .md-li', 3], 'one')
+    const cellLines = 'A\tB\nx\t"New:\n- one\n- two c\ntail"\ny\t"l1\nl2"\nz\t<ul><li>a</li> stray </ul>'
+    check(prefix + 'cell-html/button-markdown', await call('copyButton', 'Copy table'), cellTable)
+    await call('copyMode', 'plain')
+    await expectContents(prefix + 'cell-html/plain-table', 'table', cellLines)
+    check(prefix + 'cell-html/button-plain', await call('copyButton', 'Copy table'), cellLines)
+    check(prefix + 'cell-html/turn-plain', await call('copyButton', 'Copy turn'), 'Before\n\n' + cellLines)
+    // A width change rewraps the text above a mid-transcript reading position; the same passage stays at the top.
+    const words = 'reflowing transcript prose that wraps differently at every width '.repeat(6)
+    await call('mountCopy', { source: Array.from({ length: 60 }, (_, i) => 'P' + String(i).padStart(2, '0') + ' ' + words).join('\n\n'),
+      theme, agent, size: 760 })
+    await settle()
+    // Where paragraph `label` sits against the top edge, found by geometry rather than the transcript's own hit
+    // test: inside it, as a fraction of its height; above it, as a pixel gap.
+    const place = label => js(`(() => {
+      const view = document.querySelector('.transcript-scroll').getBoundingClientRect()
+      const rect = [...document.querySelectorAll('.md-p')].find(p => p.textContent.startsWith(${JSON.stringify(label)})).getBoundingClientRect()
+      return rect.top > view.top ? { gap: rect.top - view.top } : { fraction: (view.top - rect.top) / rect.height, height: rect.height }
+    })()`)
+    const near = (now, then) => then.gap !== undefined ? Math.abs(now.gap - then.gap) <= 1
+      : now.fraction !== undefined && Math.abs(now.fraction - then.fraction) * now.height <= 1.5
+    for (const [name, label, edge] of [['inside', 'P30', 'rect.top - view.top + rect.height * 0.4'], ['gap', 'P20', 'rect.top - view.top - 6']]) {
+      await call('copyWidth', 760)
+      await js(`(() => {
+        const scroll = document.querySelector('.transcript-scroll'), view = scroll.getBoundingClientRect()
+        const rect = [...document.querySelectorAll('.md-p')].find(p => p.textContent.startsWith(${JSON.stringify(label)})).getBoundingClientRect()
+        scroll.scrollTop += ${edge}
+      })()`)
+      await settle()
+      const before = await place(label)
+      for (const size of [480, 620, 760]) {
+        await call('copyWidth', size)
+        await settle()
+        const after = await place(label)
+        check(prefix + 'resize-anchor/' + name + '/' + size, near(after, before) ? 'held' : JSON.stringify({ before, after }), 'held')
+      }
+      // A drag sets a new width every frame. A slow one is many frames, where any per-frame rounding would add up;
+      // a fast one changes the width in nearly every frame the transcript records its position in.
+      for (const [pace, step] of [['slow', 2], ['fast', 10]]) {
+        for (const [from, to] of [[760, 480], [480, 760]]) {
+          await call('copyDrag', from, to, step)
+          await settle()
+          const dragged = await place(label)
+          check(prefix + 'resize-anchor/' + name + '/drag-' + pace + '/' + to, near(dragged, before) ? 'held' : JSON.stringify({ before, dragged }), 'held')
+        }
+      }
+    }
+    // The edge on a short block, a collapsed tool run between prose and lists: re-recording the position after
+    // each of the drag's own restores lets the error of each carry into the next.
+    const mixed = []
+    for (let i = 0; i < 40; i++) {
+      mixed.push(message('u' + i, [text('Q' + i + ' ' + words)], 'user', 'human'),
+        message('a' + i, [text('A' + i + ' ' + words), { kind: 'tool_use', id: 't' + i, name: 'Read', input: { file: 'f' + i } }]),
+        message('r' + i, [{ kind: 'tool_result', toolUseId: 't' + i, text: 'ok', isError: false }], 'user', 'tool_result'),
+        message('b' + i, [text('B' + i + ' ' + words + '\n\n- one ' + words + '\n- two ' + words)]))
+    }
+    await call('mountCopy', { messages: mixed, theme, agent, size: 760 })
+    await settle()
+    const run = `document.querySelectorAll('details.tool-run')[20]`
+    await js(`(() => { const s = document.querySelector('.transcript-scroll'), v = s.getBoundingClientRect(), r = ${run}.getBoundingClientRect()
+      s.scrollTop += r.top - v.top + r.height * 0.4 })()`)
+    await settle()
+    const runPoint = () => js(`(() => { const v = document.querySelector('.transcript-scroll').getBoundingClientRect(), r = ${run}.getBoundingClientRect()
+      return (v.top - r.top) / r.height })()`)
+    const runBefore = await runPoint()
+    for (const [pace, step] of [['slow', 2], ['fast', 10]]) {
+      await call('copyDrag', 760, 480, step)
+      await call('copyDrag', 480, 760, step)
+      await settle()
+      const runAfter = await runPoint()
+      check(prefix + 'resize-anchor/tool-run/drag-' + pace, Math.abs(runAfter - runBefore) < 0.1 ? 'held' : JSON.stringify({ runBefore, runAfter }), 'held')
+    }
+    // ⌘+ / ⌘− change the column's width in CSS pixels, so they rewrap it the same way. The pane fills the window
+    // here, as in the app; a fixed CSS width would not change with zoom.
+    await call('mountCopy', { messages: mixed, theme, agent, size: '100%' })
+    await settle()
+    await js(`(() => { const s = document.querySelector('.transcript-scroll'), v = s.getBoundingClientRect(), r = ${run}.getBoundingClientRect()
+      s.scrollTop += r.top - v.top + r.height * 0.4 })()`)
+    await settle()
+    const zoomBefore = await runPoint()
+    for (const zoom of [1, -1, 0]) {
+      win.webContents.setZoomLevel(zoom)
+      await js('new Promise(resolve => setTimeout(resolve, 100))')
+      await settle()
+      const zoomed = await runPoint()
+      check(prefix + 'resize-anchor/tool-run/zoom-' + zoom, Math.abs(zoomed - zoomBefore) < 0.1 ? 'held' : JSON.stringify({ zoomBefore, zoomed }), 'held')
+    }
+    // Opening the run at the edge grows it downward without a scroll; a width change after that holds its summary line.
+    await call('mountCopy', { messages: mixed, theme, agent, size: 760 })
+    await settle()
+    await js(`(() => { const s = document.querySelector('.transcript-scroll'), v = s.getBoundingClientRect(), r = ${run}.getBoundingClientRect()
+      s.scrollTop += r.top - v.top + r.height * 0.4 })()`)
+    await settle()
+    const summaryAt = () => js(`(() => { const v = document.querySelector('.transcript-scroll').getBoundingClientRect()
+      return v.top - ${run}.querySelector('summary').getBoundingClientRect().top })()`)
+    const summaryBefore = await summaryAt()
+    await js(`${run}.querySelector('summary').click()`)
+    await settle()
+    await call('copyWidth', 600)
+    await settle()
+    const summaryAfter = await summaryAt()
+    check(prefix + 'resize-anchor/tool-run/opened', Math.abs(summaryAfter - summaryBefore) <= 1.5 ? 'held' : JSON.stringify({ summaryBefore, summaryAfter }), 'held')
+    // A live conversation updates while the window is resized: an update landing in the same frame as a width change
+    // must not cost that change its restore.
+    await call('mountCopy', { messages: mixed, theme, agent, size: 760 })
+    await settle()
+    await js(`(() => { const s = document.querySelector('.transcript-scroll'), v = s.getBoundingClientRect(), r = ${run}.getBoundingClientRect()
+      s.scrollTop += r.top - v.top + r.height * 0.4 })()`)
+    await settle()
+    const liveBefore = await runPoint()
+    await js(`new Promise(resolve => requestAnimationFrame(() => {
+      window.copyWidth(520)
+      window.copyAppend(${JSON.stringify(message('late', [text('late reply')]))})
+      resolve()
+    }))`)
+    await settle()
+    const liveAfter = await runPoint()
+    check(prefix + 'resize-anchor/tool-run/live-update', Math.abs(liveAfter - liveBefore) < 0.1 ? 'held' : JSON.stringify({ liveBefore, liveAfter }), 'held')
+    // A pane divider drag turns off the panes' pointer events, so a recording made then (a live update) finds no block
+    // at the edge; it must keep the reading position it has rather than drop it.
+    const coveredBefore = await runPoint()
+    await js(`document.head.insertAdjacentHTML('beforeend', '<style id="covered">.transcript-wrap { pointer-events: none }</style>')`)
+    await call('copyAppend', message('later', [text('later reply')]))
+    await settle()
+    await js(`document.getElementById('covered').remove()`)
+    await call('copyWidth', 640)
+    await settle()
+    const coveredAfter = await runPoint()
+    check(prefix + 'resize-anchor/tool-run/covered-update', Math.abs(coveredAfter - coveredBefore) < 0.1 ? 'held' : JSON.stringify({ coveredBefore, coveredAfter }), 'held')
+    // Reopening a conversation returns to its own remembered position. Positional message ids repeat across
+    // conversations, so their blocks can be reused nodes, and a short conversation in between has no scrollbar: the
+    // reopened one's scrollbar is a width change, which must not restore another conversation's reading position.
+    const positional = (label, count) => Array.from({ length: count }, (_, i) =>
+      message('c' + i, [text(label + i + ' ' + words)], i % 2 ? 'assistant' : 'user', i % 2 ? undefined : 'human'))
+    const reopenId = prefix + 'reopen'
+    await call('mountCopy', { messages: positional('C', 60), theme, agent, size: 760, sessionId: reopenId })
+    await settle()
+    await js(`(() => { const s = document.querySelector('.transcript-scroll'); s.scrollTop = (s.scrollHeight - s.clientHeight) * 0.3 })()`)
+    await settle()
+    const remembered = await js(`document.querySelector('.transcript-scroll').scrollTop`)
+    await call('mountCopy', { messages: positional('A', 60), theme, agent, size: 760 })
+    await settle()
+    await js(`(() => { const s = document.querySelector('.transcript-scroll'); s.scrollTop = (s.scrollHeight - s.clientHeight) * 0.6 })()`)
+    await settle()
+    await call('mountCopy', { messages: positional('B', 1), theme, agent, size: 760 })
+    await settle()
+    await call('mountCopy', { messages: positional('C', 60), theme, agent, size: 760, sessionId: reopenId })
+    await settle()
+    const reopened = await js(`document.querySelector('.transcript-scroll').scrollTop`)
+    check(prefix + 'resize-anchor/reopen', Math.abs(reopened - remembered) <= 1 ? 'held' : JSON.stringify({ remembered, reopened }), 'held')
     await call('mountCopy', { source: 'L ![image label](https://example.org/image.png) R', theme, agent })
     await expectRange(prefix + 'image-partial', ['[data-copy-label]', 6], ['[data-copy-label]', 11], 'label')
     await expectContents(prefix + 'image-surrounded', '.md', 'L ![image label](https://example.org/image.png) R')

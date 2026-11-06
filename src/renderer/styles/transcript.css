@@ -16,7 +16,8 @@
   /* Manual scroll compensation owns position during scroll-up window-growth (TranscriptView), so
      disable the browser's scroll anchoring — otherwise both adjust on a prepend and the view
      double-shifts. (Native anchoring also can't help here anyway: it's suppressed once we set scrollTop
-     programmatically, which the pin/compensation does every grow.) */
+     programmatically, which the pin/compensation does every grow.) A width change, which rewraps the text
+     above the reading position, is anchored manually too. */
   overflow-anchor: none;
   background: var(--paper-pane);
   /* reading text must be selectable even though body disables selection */
@@ -720,6 +721,12 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
 
 .md-td {
   color: var(--ink);
+}
+
+/* A cell's list sets at the cell's own line spacing, with no gap at its edges. */
+:is(.md-th, .md-td) .md-li,
+:is(.md-th, .md-td) .md-ol > .md-li + .md-li {
+  margin: 0;
 }
 
 .md-hr {

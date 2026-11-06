@@ -32,12 +32,13 @@ const render = () => flushSync(() => root.render(
       scrollStateRef={scrollStateRef} markdownCopy={markdown} />
   </div>
 ))
-window.mountCopy = ({ source = '', blocks, messages, agent = 'claude', theme = 'light', mode = 'markdown', size = 760 }) => {
+window.mountCopy = ({ source = '', blocks, messages, agent = 'claude', theme = 'light', mode = 'markdown', size = 760, sessionId }) => {
   window.getSelection().removeAllRanges()
   document.documentElement.dataset.theme = theme
   markdown = mode === 'markdown'
   width = size
-  transcript = { sessionId: 'copy-fixture-' + serial++, agent, messages: messages ?? [{
+  // A given `sessionId` reopens that conversation, with its remembered reading position.
+  transcript = { sessionId: sessionId ?? 'copy-fixture-' + serial++, agent, messages: messages ?? [{
     uuid: 'm', role: 'assistant', timestamp: null, isSidechain: false,
     blocks: blocks ?? [{ kind: 'text', text: source }]
   }] }
@@ -45,6 +46,24 @@ window.mountCopy = ({ source = '', blocks, messages, agent = 'claude', theme = '
 }
 window.copyMode = mode => { markdown = mode === 'markdown'; render() }
 window.copyWidth = size => { width = size; render() }
+// A live conversation's update: the same transcript with a message appended.
+window.copyAppend = message => { transcript = { ...transcript, messages: [...transcript.messages, message] }; render() }
+// A window drag: a new width most frames, set from an animation callback, so it lands before the transcript's
+// own callbacks for that frame and before its resize observer, as a native resize does. Every `idle`th frame
+// keeps its width, as frames of a real drag do when no resize event arrives in time.
+window.copyDrag = (from, to, step, idle = 3) => new Promise(resolve => {
+  let size = from, count = 0
+  const frame = () => {
+    if (++count % idle) {
+      size += Math.sign(to - from) * step
+      if ((to - size) * Math.sign(to - from) < 0) size = to
+      window.copyWidth(size)
+    }
+    if (size === to) resolve()
+    else requestAnimationFrame(frame)
+  }
+  requestAnimationFrame(frame)
+})
 function element(selector, index = 0) {
   const found = document.querySelectorAll(selector)[index]
   if (!found) throw new Error('Missing fixture element: ' + selector + ' [' + index + ']')

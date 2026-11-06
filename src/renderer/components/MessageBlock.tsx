@@ -27,6 +27,7 @@ import { rowsToMarkdownTable, rowsToPlainText, turnText } from '../lib/clipboard
 import { isInlineCode, tableRows } from '../lib/mdCopyDom'
 import { langLabelFromClassName } from '../lib/codeLang'
 import { normalizeMath } from '../lib/mathDelimiters'
+import { parseCellHtml, type CellPart, type CellReader } from '../lib/cellHtml'
 import { MathDisplay, MathInline } from './MathBlock'
 import CopyButton from './CopyButton'
 import AgentLogo from './AgentLogo'
@@ -50,8 +51,39 @@ const HLJS_LANGUAGES = { python, javascript, typescript, json, java, bash, go, r
 interface HastNode {
   type: string
   tagName?: string
+  value?: string
   properties?: Record<string, unknown>
   children?: HastNode[]
+}
+
+const cellReader: CellReader<HastNode> = {
+  html: node => node.type === 'raw' ? node.value ?? '' : null,
+  text: node => node.type === 'text' ? node.value ?? '' : null
+}
+const hastElement = (tagName: string, children: HastNode[] = []): HastNode =>
+  ({ type: 'element', tagName, properties: {}, children })
+const cellHast = (parts: CellPart<HastNode>[]): HastNode[] => parts.map(part =>
+  part.kind === 'node' ? part.node
+    : part.kind === 'break' ? hastElement('br')
+      : hastElement(part.ordered ? 'ol' : 'ul', part.items.map(item => hastElement('li', cellHast(item)))))
+
+/** Render the line breaks and lists a table cell writes as inline HTML (see lib/cellHtml.ts). Raw HTML anywhere
+ *  else, and any cell this does not rewrite, stays literal text. */
+function rehypeTableCellHtml() {
+  return (tree: HastNode): void => {
+    const visit = (node: HastNode): void => {
+      for (const child of node.children ?? []) {
+        if (child.type !== 'element') continue
+        if (child.tagName === 'td' || child.tagName === 'th') {
+          const parts = parseCellHtml(child.children ?? [], cellReader)
+          if (parts) child.children = cellHast(parts)
+          continue
+        }
+        visit(child)
+      }
+    }
+    visit(tree)
+  }
 }
 
 /** Preserve the original language identifier through the code-block wrapper. */
@@ -75,6 +107,7 @@ function rehypeCopyMetadata() {
 
 // Annotated so the literal is read as a plugin tuple (PluggableList), not a nested array.
 const rehypePlugins: ComponentPropsWithoutRef<typeof ReactMarkdown>['rehypePlugins'] = [
+  rehypeTableCellHtml,
   [rehypeHighlight, { languages: HLJS_LANGUAGES }],
   rehypeCopyMetadata
 ]
