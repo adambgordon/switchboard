@@ -722,6 +722,12 @@ body.sb-selecting-transcript .sb-pane:not(.sb-selection-owner) .transcript-scrol
   color: var(--ink);
 }
 
+/* A cell's list sets at the cell's own line spacing, with no gap at its edges. */
+:is(.md-th, .md-td) .md-li,
+:is(.md-th, .md-td) .md-ol > .md-li + .md-li {
+  margin: 0;
+}
+
 .md-hr {
   border: none;
   border-top: 1px solid var(--rule);
