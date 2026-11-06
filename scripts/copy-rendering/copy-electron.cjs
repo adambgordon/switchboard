@@ -308,15 +308,41 @@ async function run() {
         const after = await place(label)
         check(prefix + 'resize-anchor/' + name + '/' + size, near(after, before) ? 'held' : JSON.stringify({ before, after }), 'held')
       }
-      // A drag resizes a frame at a time; the position must not creep over many small steps.
-      for (let step = 1; step < 80; step++) {
-        await call('copyWidth', 760 - Math.min(step, 80 - step) * 7)
-        await settle()
+      // A drag sets a new width every frame. A slow one is many frames, where any per-frame rounding would add up;
+      // a fast one changes the width in nearly every frame the transcript records its position in.
+      for (const [pace, step] of [['slow', 2], ['fast', 10]]) {
+        for (const [from, to] of [[760, 480], [480, 760]]) {
+          await call('copyDrag', from, to, step)
+          await settle()
+          const dragged = await place(label)
+          check(prefix + 'resize-anchor/' + name + '/drag-' + pace + '/' + to, near(dragged, before) ? 'held' : JSON.stringify({ before, dragged }), 'held')
+        }
       }
-      await call('copyWidth', 760)
+    }
+    // The edge on a short block, a collapsed tool run between prose and lists: re-recording the position after
+    // each of the drag's own restores lets the error of each carry into the next.
+    const mixed = []
+    for (let i = 0; i < 40; i++) {
+      mixed.push(message('u' + i, [text('Q' + i + ' ' + words)], 'user', 'human'),
+        message('a' + i, [text('A' + i + ' ' + words), { kind: 'tool_use', id: 't' + i, name: 'Read', input: { file: 'f' + i } }]),
+        message('r' + i, [{ kind: 'tool_result', toolUseId: 't' + i, text: 'ok', isError: false }], 'user', 'tool_result'),
+        message('b' + i, [text('B' + i + ' ' + words + '\n\n- one ' + words + '\n- two ' + words)]))
+    }
+    await call('mountCopy', { messages: mixed, theme, agent, size: 760 })
+    await settle()
+    const run = `document.querySelectorAll('details.tool-run')[20]`
+    await js(`(() => { const s = document.querySelector('.transcript-scroll'), v = s.getBoundingClientRect(), r = ${run}.getBoundingClientRect()
+      s.scrollTop += r.top - v.top + r.height * 0.4 })()`)
+    await settle()
+    const runPoint = () => js(`(() => { const v = document.querySelector('.transcript-scroll').getBoundingClientRect(), r = ${run}.getBoundingClientRect()
+      return (v.top - r.top) / r.height })()`)
+    const runBefore = await runPoint()
+    for (const [pace, step] of [['slow', 2], ['fast', 10]]) {
+      await call('copyDrag', 760, 480, step)
+      await call('copyDrag', 480, 760, step)
       await settle()
-      const dragged = await place(label)
-      check(prefix + 'resize-anchor/' + name + '/drag', near(dragged, before) ? 'held' : JSON.stringify({ before, dragged }), 'held')
+      const runAfter = await runPoint()
+      check(prefix + 'resize-anchor/tool-run/drag-' + pace, Math.abs(runAfter - runBefore) < 0.1 ? 'held' : JSON.stringify({ runBefore, runAfter }), 'held')
     }
     await call('mountCopy', { source: 'L ![image label](https://example.org/image.png) R', theme, agent })
     await expectRange(prefix + 'image-partial', ['[data-copy-label]', 6], ['[data-copy-label]', 11], 'label')

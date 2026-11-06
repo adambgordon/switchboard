@@ -45,6 +45,19 @@ window.mountCopy = ({ source = '', blocks, messages, agent = 'claude', theme = '
 }
 window.copyMode = mode => { markdown = mode === 'markdown'; render() }
 window.copyWidth = size => { width = size; render() }
+// A window drag: a new width every frame, set from an animation callback, so it lands before the transcript's
+// own callbacks for that frame and before its resize observer, as a native resize does.
+window.copyDrag = (from, to, step) => new Promise(resolve => {
+  let size = from
+  const frame = () => {
+    size += Math.sign(to - from) * step
+    if ((to - size) * Math.sign(to - from) < 0) size = to
+    window.copyWidth(size)
+    if (size === to) resolve()
+    else requestAnimationFrame(frame)
+  }
+  requestAnimationFrame(frame)
+})
 function element(selector, index = 0) {
   const found = document.querySelectorAll(selector)[index]
   if (!found) throw new Error('Missing fixture element: ' + selector + ' [' + index + ']')

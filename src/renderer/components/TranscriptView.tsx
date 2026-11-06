@@ -151,9 +151,12 @@ export default function TranscriptView({
   const refreshScrollRef = useRef<{ scrollTop: number; pinned: boolean } | null>(null)
   // The reading position held through a width change, which rewraps everything above it. Browser scroll
   // anchoring is off (see transcript.css), so it is recorded after each scroll and restored by the width
-  // observer below.
+  // observer below. `anchorWriteRef` is the scrollTop that observer last wrote: the scroll event that write
+  // causes must not re-record. Re-recording after each restore carries that restore's error into the next, so
+  // a long drag creeps; the anchor stays the one the reader set until they scroll again.
   const anchorRef = useRef<({ el: Element } & AnchorPoint) | null>(null)
   const anchorRafRef = useRef<number | null>(null)
+  const anchorWriteRef = useRef<number | null>(null)
 
   // Jump-to-edge affordance — reactive flags for whether the scroll sits near the top / bottom, driving
   // the floating buttons (shown only when scrolled away from that edge). nearBottomRef below stays the
@@ -330,7 +333,9 @@ export default function TranscriptView({
     const prev = lastTopRef.current
     lastTopRef.current = top
     if (refreshScrollRef.current) return
-    scheduleAnchor()
+    const restored = anchorWriteRef.current
+    anchorWriteRef.current = null
+    if (restored === null || Math.abs(top - restored) >= 1) scheduleAnchor()
     if (nearBottomRef.current) {
       // Pinned to the bottom. A gap to the bottom can open for two very different reasons:
       //  • the user scrolled UP — scrollTop DECREASES — which releases the pin; vs
@@ -672,6 +677,7 @@ export default function TranscriptView({
       const next = anchoredScrollTop(el.scrollTop, rect.top, rect.height, el.getBoundingClientRect().top, anchor)
       if (Math.abs(next - el.scrollTop) < 0.5) return
       el.scrollTop = next
+      anchorWriteRef.current = el.scrollTop
       lastTopRef.current = el.scrollTop
       measureEdges(el)
       rememberPosition(el)
